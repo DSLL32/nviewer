@@ -79,6 +79,11 @@ function addContainer(
   const count = dv.getUint32(4);
   const ctx = {
     buf, ucode: 'f3dex' as const, textures, textureKeys, keyPrefix,
+    // Double-sided faces are modelled as reversed-winding twins, so the game culls back faces.
+    cullBackByDefault: true,
+    // The world is mirrored in X: signs read backwards and the Palace of Fine Arts ends up
+    // west of the Golden Gate Bridge otherwise.
+    mirrorX: true,
     resolve: (addr: number) => (addr >>> 24 === segment && (addr & 0xffffff) < buf.length ? addr & 0xffffff : -1),
   };
   for (let i = 0; i < count; i++) {
@@ -137,6 +142,8 @@ export function loadRush1Level(rom: Rush1Rom, index: number): Level {
     const name = cstr(place, o, 16);
     const m = Array.from({ length: 12 }, (_, k) => pdv.getFloat32(o + 16 + k * 4));
     if (parent[i] >= 0) for (let k = 0; k < 3; k++) m[9 + k] += pdv.getFloat32(entry(parent[i]) + 52 + k * 4);
+    // Mirror in X like the geometry: M' = S M S with S = diag(-1, 1, 1).
+    for (const k of [1, 2, 3, 6, 9]) m[k] = -m[k];
     const mesh = byName.get(name) ?? -1;
     instances.push({ name, mesh, matrix: placementMatrix(m) });
     if (mesh >= 0 && mesh < levelMeshCount) {

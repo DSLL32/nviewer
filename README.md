@@ -50,6 +50,9 @@ Textures are uploaded with the RDP tile commands, not read in place.
 - The block load swaps odd rows as well when its dxt row counter is non-zero. So textures loaded with
   dxt = 0 are stored pre-swapped in the ROM, and decoding them as plain rows gives an interlaced
   look. `texture.ts` emulates both steps.
+- Texture coordinates are relative to the tile's upper-left corner from `G_SETTILESIZE`: the RDP
+  samples texel (s − uls, t − ult). Rush 1 often sets a non-zero corner. Ignoring it shows the
+  mirrored copy of mirror-wrapped textures (e.g. the START banner) or smears clamped ones.
 
 ### San Francisco Rush 2049
 
@@ -106,6 +109,9 @@ Textures are uploaded with the RDP tile commands, not read in place.
   - +0x10 and +0x18: texture and palette name tables.
   - From 0x20: 52-byte object records, with the display list at +12.
   - Display lists are F3DEX 1.21.
+- **Handedness.** The world is mirrored relative to Rush 2049; the viewer negates X. Without it, signs
+  read backwards and the Palace of Fine Arts lies west of the Golden Gate Bridge. In both games
+  back-face culling is on, and double-sided faces are stored as reversed-winding twins.
 - **Placement.** The level name sits at +8, followed by 100-byte instances from 0x18 (name, matrix,
   translation, flags, bounds). Instances form a tree:
   - +68 (i16) is the next sibling and +70 (i16) the first child, as entry indices.
