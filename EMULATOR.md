@@ -11,12 +11,11 @@ your own instance next to others, see [Running several at once](#running-several
 ## Start
 
 It keeps running until the emulator exits, so start it in the background: use your shell tool's
-background mode if it has one (such as Claude Code's `run_in_background`), or a plain `&`. Either
-way, send its output to a log. Warnings end up there, and the output can't fill up a pipe nobody
-reads:
+background mode if it has one (such as Claude Code's `run_in_background`), or a plain `&`:
 
-    mkdir -p ~/mupen64plus/run
-    ~/mupen64plus/headless.sh '/path/to/game.z64' > ~/mupen64plus/run/emulator.log 2>&1 &
+    ~/mupen64plus/headless.sh '/path/to/game.z64' &
+
+Its output goes to `~/mupen64plus/run/emulator.log`, which is recreated at each start.
 
 It's ready once `~/mupen64plus/run/shots/*-latest.png` exists, usually within a few seconds. If new
 screenshots stop appearing (`ls -lt ~/mupen64plus/run/shots`), the game isn't running, so check the
@@ -74,15 +73,62 @@ whenever a new scene needs shaders compiled.
     pkill -x -F ~/mupen64plus/run/pid mupen64plus
 
 This stops only the emulator belonging to that run directory. Don't use `pkill mupen64plus` or
-`kill $(pgrep mupen64plus)`: those stop every agent's emulator.
+`kill $(pgrep mupen64plus)`: those stop every agent's emulator. An emulator paused in the debugger
+ignores `pkill`; stop it with `~/mupen64plus/headless-debug.sh quit` instead.
+
+## Debugging
+
+`--debug` swaps in a core built with mupen64plus's debugger, which runs somewhat slower:
+
+    ~/mupen64plus/headless.sh --debug '/path/to/game.z64' &
+
+The emulator starts paused at its first instruction. While it's paused, no screenshots are taken
+and no input is read, so `headless-send.sh` just waits. Send debugger commands with:
+
+    ~/mupen64plus/headless-debug.sh 'bp add 0x04800004 4 4' 'run'
+
+This waits until the console has handled every command, then prints what the console wrote. The
+whole session is in `~/mupen64plus/run/debug.log`. When a breakpoint pauses the emulator, a
+`PC at 0x...` line appears there, and `bp trig` shows what triggered it.
+
+| Command | Effect |
+|---|---|
+| `run`, `pause`, `step [N]` | resume, pause, or execute N instructions (only while paused) |
+| `regs`, `pc`, `asm [ADDR [COUNT]]` | registers, the PC, or disassembly (at the PC by default) |
+| `mem ADDR`, `write ADDR VALUE`, `dumpmem ADDR LEN FILE` | read, write, or dump memory (hex) |
+| `translate ADDR` | convert a virtual address to a physical one |
+| `bp add ADDR [SIZE [FLAGS]]` | break on ADDR up to ADDR+SIZE; FLAGS: 2 read, 4 write, 8 execute (default: all) |
+| `bp list`, `bp rm ADDR`, `bp trig` | list breakpoints, remove one, or show what triggered the last break |
+
+- **Addresses:** execution breakpoints use virtual addresses (like the PC, `0x80...`). Read/write
+  breakpoints use physical ones (RDRAM is `0x00000000`–`0x007FFFFF`).
+- **What memory breakpoints see:** only the game's CPU. DMA copies and the RSP write memory
+  directly, so they don't trigger them.
+- **Catching a DMA:** break on the register write that starts it:
+
+  | DMA | Register writes that start it |
+  |---|---|
+  | PI (cartridge) | `0x04600008`, `0x0460000C` |
+  | SI (controllers) | `0x04800004`, `0x04800010` |
+  | SP (RSP memory) | `0x04040008`, `0x0404000C` |
+  | AI (audio) | `0x04500004` |
+
+- **Dumping memory:** `dumpmem 0x80000000 0x800000 /absolute/path/rdram.bin` writes RDRAM in the
+  N64's big-endian byte order.
+  - Use `0x80...` addresses. Lower ones count as TLB-mapped, and an unmapped one silently dumps from
+    physical address 0.
+  - Hex lengths need the `0x` prefix.
+  - Use an absolute filename: relative ones land in the directory `headless.sh` was started from.
+    Filenames are limited to 63 characters, with no spaces.
+- **More formats:** `mem` and `write` accept more; see
+  `~/mupen64plus/mupen64plus-ui-console/src/debugger.c`.
 
 ## Running several at once
 
 Give each emulator its own run directory, and set `M64P_RUN_DIR` on every command for it. Shell
 variables usually don't survive between separate tool calls, so repeat it each time:
 
-    mkdir -p ~/mupen64plus/run-rush
-    M64P_RUN_DIR=~/mupen64plus/run-rush ~/mupen64plus/headless.sh '/path/to/game.z64' > ~/mupen64plus/run-rush/emulator.log 2>&1 &
+    M64P_RUN_DIR=~/mupen64plus/run-rush ~/mupen64plus/headless.sh '/path/to/game.z64' &
     M64P_RUN_DIR=~/mupen64plus/run-rush ~/mupen64plus/headless-send.sh 'press START' 'wait 60'
     pkill -x -F ~/mupen64plus/run-rush/pid mupen64plus
 
