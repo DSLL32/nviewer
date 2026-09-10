@@ -1,5 +1,5 @@
 // Messages between the UI thread and the parser worker.
-import type { Level } from './rom/level';
+import type { Game, Level, LevelInfo } from './rom';
 
 export type WorkerRequest =
   | { type: 'open'; id: number; name: string; bytes: ArrayBuffer }
@@ -8,7 +8,10 @@ export type WorkerRequest =
   | { type: 'level'; id: number; index: number };
 
 export interface RomSummary {
-  name: string;
+  gameId: Game['id'];
+  title: string;
+  levels: LevelInfo[];
+  name: string; // file name
   size: number;
   persisted: boolean;
   ms: number;

@@ -3,16 +3,16 @@
 // usage: npx tsx tools/levelstats.ts rom.z64 [sheetDir]
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
-import { RushRom } from '../src/rom/rom';
-import { LEVELS, loadLevel, type Level } from '../src/rom/level';
+import { openRom, type Level } from '../src/rom';
 
 const [romPath, sheetDir] = process.argv.slice(2);
-const rom = new RushRom(new Uint8Array(readFileSync(romPath)));
+const game = openRom(new Uint8Array(readFileSync(romPath)));
+console.log(game.title);
 if (sheetDir) mkdirSync(sheetDir, { recursive: true });
 
-for (const info of LEVELS) {
+for (const info of game.levels) {
   const t0 = performance.now();
-  const level = loadLevel(rom, info.index);
+  const level = game.loadLevel(info.index);
   const ms = (performance.now() - t0).toFixed(0);
   let tris = 0, batches = 0;
   const modes = new Map<string, number>();

@@ -1,7 +1,7 @@
 // Initial camera placement for a level: an elevated overview for open levels, or a spot inside
 // enclosed arenas (detected by casting vertical rays through the static geometry, then choosing the
 // position/heading with the longest clear horizontal line of sight).
-import type { Level } from '../rom/level';
+import type { Level } from '../rom';
 import type { Bounds } from './camera';
 import type { Vec3 } from './math';
 

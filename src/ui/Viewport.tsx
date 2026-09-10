@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Level } from '../rom/level';
+import type { Level } from '../rom';
 import { FlyCamera } from '../render/camera';
 import { FlyControls, type ControlAction } from '../render/controls';
 import { LevelRenderer } from '../render/renderer';

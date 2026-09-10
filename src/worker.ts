@@ -1,33 +1,42 @@
-// Parser worker: validates/opens the ROM, keeps it in memory and IndexedDB, and parses levels on request.
-import type { WorkerRequest, WorkerResponse } from './protocol';
-import { loadLevel, type Level } from './rom/level';
-import { RushRom } from './rom/rom';
+// Parser worker: detects/opens the ROM, keeps it in memory and IndexedDB, and parses levels on request.
+import type { RomSummary, WorkerRequest, WorkerResponse } from './protocol';
+import { openRom, type Game, type Level } from './rom';
 import { clearCachedRom, loadCachedRom, saveCachedRom } from './romCache';
 
-let rom: RushRom | null = null;
+interface OpenGame {
+  game: Game;
+  bytes: ArrayBuffer; // the file as received; the game may keep views into it
+}
+
+let current: OpenGame | null = null;
 
 const post = (msg: WorkerResponse, transfer: Transferable[] = []) => self.postMessage(msg, { transfer });
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-function openRom(bytes: ArrayBuffer): { rom: RushRom; ms: number } {
+function open(bytes: ArrayBuffer): { opened: OpenGame; ms: number } {
   const t0 = performance.now();
-  const opened = new RushRom(new Uint8Array(bytes));
-  return { rom: opened, ms: performance.now() - t0 };
+  const game = openRom(new Uint8Array(bytes));
+  return { opened: { game, bytes }, ms: performance.now() - t0 };
+}
+
+function summary(g: Game, name: string, size: number, persisted: boolean, ms: number): RomSummary {
+  return { gameId: g.id, title: g.title, levels: g.levels.map((l) => ({ ...l })), name, size, persisted, ms };
 }
 
 self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
   const req = e.data;
   switch (req.type) {
     case 'open': {
-      let opened;
+      let result;
       try {
-        opened = openRom(req.bytes);
+        result = open(req.bytes);
       } catch (err) {
+        // Keep whatever game was open before.
         post({ type: 'rom', id: req.id, ok: false, error: errorText(err) });
         return;
       }
-      rom = opened.rom;
+      current = result.opened;
       let persisted = true;
       try {
         await saveCachedRom({ name: req.name, bytes: req.bytes });
@@ -35,7 +44,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
         console.warn('Could not cache ROM in IndexedDB:', err);
         persisted = false;
       }
-      post({ type: 'rom', id: req.id, ok: true, rom: { name: req.name, size: req.bytes.byteLength, persisted, ms: opened.ms } });
+      post({ type: 'rom', id: req.id, ok: true, rom: summary(result.opened.game, req.name, req.bytes.byteLength, persisted, result.ms) });
       return;
     }
     case 'restore': {
@@ -51,9 +60,9 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
         return;
       }
       try {
-        const opened = openRom(cached.bytes);
-        rom = opened.rom;
-        post({ type: 'rom', id: req.id, ok: true, rom: { name: cached.name, size: cached.bytes.byteLength, persisted: true, ms: opened.ms } });
+        const result = open(cached.bytes);
+        current = result.opened;
+        post({ type: 'rom', id: req.id, ok: true, rom: summary(result.opened.game, cached.name, cached.bytes.byteLength, true, result.ms) });
       } catch (err) {
         // A cached file that no longer opens is useless; drop it.
         await clearCachedRom().catch(() => {});
@@ -62,19 +71,24 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
       return;
     }
     case 'close':
-      rom = null;
+      current = null;
       post({ type: 'closed', id: req.id });
       return;
     case 'level': {
-      if (!rom) {
+      if (!current) {
         post({ type: 'level', id: req.id, ok: false, error: 'No ROM loaded' });
+        return;
+      }
+      const { game, bytes } = current;
+      if (!game.levels.some((l) => l.index === req.index)) {
+        post({ type: 'level', id: req.id, ok: false, error: `${game.title} has no level ${req.index}` });
         return;
       }
       try {
         const t0 = performance.now();
-        const level = loadLevel(rom, req.index);
+        const level = game.loadLevel(req.index);
         const ms = performance.now() - t0;
-        post({ type: 'level', id: req.id, ok: true, level, ms }, collectTransferables(level, rom));
+        post({ type: 'level', id: req.id, ok: true, level, ms }, collectTransferables(level, bytes));
       } catch (err) {
         post({ type: 'level', id: req.id, ok: false, error: errorText(err) });
       }
@@ -85,10 +99,11 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
 
 /**
  * Find typed arrays in the level that exclusively own their buffer, so they can be moved instead of copied.
- * Views into shared buffers (e.g. ROM bytes or cached files) are left to structured cloning.
+ * Views into larger buffers (ROM bytes, decompressed files the game caches) are left to structured cloning,
+ * and the received file buffer is never transferred. Games build level arrays freshly per load (checked for
+ * both supported games), so whole-buffer views are not shared with parser state.
  */
-function collectTransferables(level: Level, owner: RushRom): Transferable[] {
-  const protectedBuffers = new Set<ArrayBufferLike>([owner.bytes.buffer, owner.main.buffer]);
+function collectTransferables(level: Level, romBytes: ArrayBuffer): Transferable[] {
   const out = new Set<ArrayBuffer>();
   const seen = new Set<object>();
   const visit = (v: unknown, depth: number) => {
@@ -96,7 +111,7 @@ function collectTransferables(level: Level, owner: RushRom): Transferable[] {
     seen.add(v);
     if (ArrayBuffer.isView(v)) {
       const buf = v.buffer;
-      if (buf instanceof ArrayBuffer && !protectedBuffers.has(buf) && v.byteOffset === 0 && v.byteLength === buf.byteLength) {
+      if (buf instanceof ArrayBuffer && buf !== romBytes && v.byteOffset === 0 && v.byteLength === buf.byteLength) {
         out.add(buf);
       }
       return;

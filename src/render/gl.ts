@@ -1,5 +1,5 @@
 // Small WebGL2 helpers: program compilation and texture upload.
-import type { Texture, WrapMode } from '../rom/level';
+import type { Texture, WrapMode } from '../rom';
 
 export function createProgram(gl: WebGL2RenderingContext, vsSource: string, fsSource: string): WebGLProgram {
   const compile = (type: number, source: string) => {

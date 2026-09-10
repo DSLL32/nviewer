@@ -1,6 +1,6 @@
 // Promise wrapper around the parser worker.
 import type { WorkerRequest, WorkerResponse, RomSummary } from '../protocol';
-import type { Level } from '../rom/level';
+import type { Level } from '../rom';
 
 type Pending = { resolve: (r: WorkerResponse) => void; reject: (e: Error) => void };
 type DistributiveOmit<T, K extends keyof T> = T extends unknown ? Omit<T, K> : never;

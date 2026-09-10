@@ -1,5 +1,5 @@
 // WebGL2 level renderer: uploads a parsed Level once, then draws sky, opaque/cutout and blended passes.
-import type { Batch, Level, Mesh } from '../rom/level';
+import type { Batch, Level, Mesh } from '../rom';
 import type { FlyCamera } from './camera';
 import { applyTextureFilter, createProgram, uploadTexture, type TextureFilter } from './gl';
 import { mat4, type Mat4 } from './math';

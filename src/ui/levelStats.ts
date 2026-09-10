@@ -1,4 +1,4 @@
-import type { Level } from '../rom/level';
+import type { Level } from '../rom';
 
 export interface LevelStats {
   triangles: number; // as drawn: placed instances + sky

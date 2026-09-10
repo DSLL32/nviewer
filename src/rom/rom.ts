@@ -74,7 +74,7 @@ export class RushRom {
 }
 
 // Accept .z64 (big-endian), .v64 (byte-swapped) and .n64 (little-endian) dumps.
-function normalizeByteOrder(src: Uint8Array): Uint8Array {
+export function normalizeByteOrder(src: Uint8Array): Uint8Array {
   const magic = (src[0] << 24 | src[1] << 16 | src[2] << 8 | src[3]) >>> 0;
   if (magic === 0x80371240) return src;
   const out = new Uint8Array(src.length);

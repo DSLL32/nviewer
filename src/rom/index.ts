@@ -1,0 +1,23 @@
+// Entry point: detect which supported game a ROM is and open it.
+import { LEVELS, loadLevel } from './level';
+import { normalizeByteOrder, RushRom } from './rom';
+import { openRush1 } from './rush1';
+import type { Game } from './types';
+
+export type * from './types';
+
+export function openRom(bytes: Uint8Array): Game {
+  const rom = normalizeByteOrder(bytes);
+  const code = String.fromCharCode(...rom.subarray(0x3b, 0x3f));
+  switch (code) {
+    case 'NRUE': {
+      const r = new RushRom(rom);
+      return { id: 'rush2049', title: 'San Francisco Rush 2049', levels: LEVELS, loadLevel: (i) => loadLevel(r, i) };
+    }
+    case 'NSFE':
+      return openRush1(rom);
+    default:
+      throw new Error(`Unsupported ROM (game code "${code.replace(/[^\x20-\x7e]/g, '?')}"). ` +
+        'Supported: San Francisco Rush 2049 (U), San Francisco Rush: Extreme Racing (U).');
+  }
+}

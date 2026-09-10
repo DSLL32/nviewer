@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { LEVELS, type Level } from '../rom/level';
+import type { RomSummary } from '../protocol';
+import type { Level, LevelInfo } from '../rom';
 import { clearCachedRom } from '../romCache';
 import { Landing } from './Landing';
 import { computeStats, type LevelStats } from './levelStats';
@@ -8,22 +9,35 @@ import { useFileDrop } from './useFileDrop';
 import { Viewport } from './Viewport';
 import { ParserClient } from './workerClient';
 
+interface GameInfo {
+  id: string;
+  title: string;
+  levels: LevelInfo[];
+}
+
 type RomState =
   | { status: 'checking' }
   | { status: 'empty' }
-  | { status: 'ready'; name: string };
+  | { status: 'ready'; name: string; game: GameInfo };
 
-const LAST_LEVEL_KEY = 'nviewer.lastLevel';
 const MAX_ROM_BYTES = 128 * 1024 * 1024;
 
-function readLastLevel(): number {
+// The remembered level is stored per game, so switching ROMs never restores an index the other game lacks.
+const lastLevelKey = (gameId: string) => `nviewer.lastLevel.${gameId}`;
+
+function readLastLevel(game: GameInfo): number {
+  const fallback = game.levels[0]?.index ?? 0;
   try {
-    const v = Number(localStorage.getItem(LAST_LEVEL_KEY));
-    return Number.isInteger(v) && v >= 0 && v < LEVELS.length ? v : 0;
+    const raw = localStorage.getItem(lastLevelKey(game.id));
+    const v = raw === null ? NaN : Number(raw);
+    return game.levels.some((l) => l.index === v) ? v : fallback;
   } catch {
-    return 0;
+    return fallback;
   }
 }
+
+const gameOf = (s: RomSummary): GameInfo => ({ id: s.gameId, title: s.title, levels: s.levels });
+const levelName = (game: GameInfo | null, index: number) => game?.levels.find((l) => l.index === index)?.name ?? `Level ${index}`;
 
 export function App() {
   const clientRef = useRef<ParserClient | null>(null);
@@ -37,6 +51,11 @@ export function App() {
   const [stats, setStats] = useState<Record<number, LevelStats>>({});
   const fileInput = useRef<HTMLInputElement>(null);
 
+  const gameRef = useRef<GameInfo | null>(null);
+  const selectedRef = useRef<number | null>(null);
+  // Bumped whenever the open ROM changes; level results from an older ROM are discarded.
+  const generation = useRef(0);
+
   // Level requests are coalesced: while one parse runs, only the most recent selection is queued.
   const wanted = useRef<number | null>(null);
   const busy = useRef(false);
@@ -48,17 +67,18 @@ export function App() {
     try {
       while (wanted.current !== null) {
         const index = wanted.current;
+        const gen = generation.current;
         setLoading(index);
         try {
           const { level: loaded, ms } = await client.loadLevel(index);
-          if (wanted.current !== index) continue;
+          if (wanted.current !== index || generation.current !== gen) continue;
           setLevel(loaded);
           setLevelError(null);
           setStats((s) => ({ ...s, [index]: computeStats(loaded, ms) }));
         } catch (e) {
-          if (wanted.current !== index) continue;
+          if (wanted.current !== index || generation.current !== gen) continue;
           setLevel(null);
-          setLevelError(`Could not load ${LEVELS[index].name}: ${e instanceof Error ? e.message : String(e)}`);
+          setLevelError(`Could not load ${levelName(gameRef.current, index)}: ${e instanceof Error ? e.message : String(e)}`);
         }
         wanted.current = null;
       }
@@ -70,9 +90,12 @@ export function App() {
 
   const selectLevel = useCallback(
     (index: number) => {
+      const game = gameRef.current;
+      if (!game || !game.levels.some((l) => l.index === index)) return;
       setSelected(index);
+      selectedRef.current = index;
       try {
-        localStorage.setItem(LAST_LEVEL_KEY, String(index));
+        localStorage.setItem(lastLevelKey(game.id), String(index));
       } catch {
         /* storage unavailable */
       }
@@ -80,6 +103,23 @@ export function App() {
       void pumpLevels();
     },
     [pumpLevels],
+  );
+
+  /** Switch the UI to a newly opened (or restored) ROM. */
+  const activateRom = useCallback(
+    (summary: RomSummary) => {
+      const previous = gameRef.current;
+      const game = gameOf(summary);
+      generation.current++;
+      gameRef.current = game;
+      setRom({ status: 'ready', name: summary.name, game });
+      setStats({});
+      setLevel(null);
+      setLevelError(null);
+      const keep = previous?.id === game.id && selectedRef.current !== null && game.levels.some((l) => l.index === selectedRef.current);
+      selectLevel(keep ? selectedRef.current! : readLastLevel(game));
+    },
+    [selectLevel],
   );
 
   useEffect(() => {
@@ -90,12 +130,8 @@ export function App() {
       .restore()
       .then((summary) => {
         if (cancelled) return;
-        if (summary) {
-          setRom({ status: 'ready', name: summary.name });
-          selectLevel(readLastLevel());
-        } else {
-          setRom({ status: 'empty' });
-        }
+        if (summary) activateRom(summary);
+        else setRom({ status: 'empty' });
       })
       .catch((e) => {
         if (cancelled) return;
@@ -107,7 +143,7 @@ export function App() {
       client.dispose();
       clientRef.current = null;
     };
-  }, [selectLevel]);
+  }, [activateRom]);
 
   const openFile = useCallback(
     async (file: File) => {
@@ -121,24 +157,23 @@ export function App() {
       setRomBusy(`Opening ${file.name}…`);
       try {
         const bytes = await file.arrayBuffer();
-        const summary = await client.open(file.name, bytes);
-        setRom({ status: 'ready', name: summary.name });
-        setStats({});
-        setLevel(null);
-        selectLevel(selected ?? readLastLevel());
+        activateRom(await client.open(file.name, bytes));
       } catch (e) {
         setRomError(`Could not open "${file.name}": ${e instanceof Error ? e.message : String(e)}`);
       } finally {
         setRomBusy(null);
       }
     },
-    [selectLevel, selected],
+    [activateRom],
   );
 
   const dragging = useFileDrop(openFile);
 
   const forgetRom = useCallback(async () => {
     wanted.current = null;
+    generation.current++;
+    gameRef.current = null;
+    selectedRef.current = null;
     await clearCachedRom().catch(() => {});
     await clientRef.current?.close().catch(() => {});
     setLevel(null);
@@ -150,6 +185,7 @@ export function App() {
   }, []);
 
   const pickFile = () => fileInput.current?.click();
+  const game = rom.status === 'ready' ? rom.game : null;
 
   return (
     <>
@@ -165,9 +201,11 @@ export function App() {
           if (file) void openFile(file);
         }}
       />
-      {rom.status === 'ready' ? (
+      {rom.status === 'ready' && game ? (
         <div className="app">
           <Sidebar
+            gameTitle={game.title}
+            levels={game.levels}
             selected={selected}
             loading={loading}
             stats={stats}
@@ -178,7 +216,7 @@ export function App() {
           />
           <Viewport
             level={level}
-            loadingName={romBusy ?? (loading !== null ? LEVELS[loading].name : null)}
+            loadingName={romBusy ?? (loading !== null ? levelName(game, loading) : null)}
             error={levelError}
           />
           {romError && (
