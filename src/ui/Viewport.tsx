@@ -33,6 +33,7 @@ export function Viewport({ level, loadingName, error }: ViewportProps) {
   const [locked, setLocked] = useState(false);
   const [nearest, setNearest] = useState(false);
   const [showScripted, setShowScripted] = useState(true);
+  const [fogOn, setFogOn] = useState(readFogSetting);
   const [helpOpen, setHelpOpen] = useState(true);
   const actionRef = useRef<(a: ControlAction) => void>(() => {});
   const startViewRef = useRef<{ level: Level; view: StartView } | null>(null);
@@ -131,8 +132,17 @@ export function Viewport({ level, loadingName, error }: ViewportProps) {
 
   useEffect(() => engineRef.current?.renderer.setNearestFiltering(nearest), [nearest]);
   useEffect(() => engineRef.current?.renderer.setShowAnimated(showScripted), [showScripted]);
+  useEffect(() => {
+    engineRef.current?.renderer.setFogEnabled(fogOn);
+    try {
+      localStorage.setItem(FOG_KEY, fogOn ? '1' : '0');
+    } catch {
+      /* storage unavailable */
+    }
+  }, [fogOn]);
 
   const hasScripted = level?.instances.some((i) => i.animated && i.mesh >= 0) ?? false;
+  const hasFog = !!level?.fog;
 
   return (
     <main className="viewport">
@@ -186,11 +196,31 @@ export function Viewport({ level, loadingName, error }: ViewportProps) {
               <input type="checkbox" checked={showScripted} onChange={(e) => setShowScripted(e.target.checked)} />
               Show scripted objects
             </label>
+            <label className={`check${hasFog ? '' : ' muted'}`} title={hasFog ? "The game's own distance fog" : 'No fog in this game'}>
+              <input
+                id="fog-toggle"
+                type="checkbox"
+                checked={fogOn}
+                disabled={!hasFog}
+                onChange={(e) => setFogOn(e.target.checked)}
+              />
+              Authentic fog{!hasFog && level ? <span className="small muted"> (no fog in this game)</span> : null}
+            </label>
           </>
         )}
       </div>
     </main>
   );
+}
+
+const FOG_KEY = 'nviewer.authenticFog';
+
+function readFogSetting(): boolean {
+  try {
+    return localStorage.getItem(FOG_KEY) === '1';
+  } catch {
+    return false;
+  }
 }
 
 function applyView(engine: Engine, view: StartView) {

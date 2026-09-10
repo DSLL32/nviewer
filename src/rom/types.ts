@@ -44,8 +44,22 @@ export interface Instance {
   animated?: boolean; // scripted object, shown at the start of its motion path
 }
 
+// N64 RSP fog as the game sets it (gSPFogFactor / G_SETFOGCOLOR). Per vertex the RSP
+// computes fog = clamp((zndc * multiplier + offset) / 255, 0, 1), where zndc is the
+// perspective depth in [-1, 1] of the game's projection with the given near/far planes:
+// zndc = (far + near) / (far - near) - 2 * far * near / ((far - near) * d) for view depth d.
+// The fragment colour is mixed towards `color` by fog.
+export interface Fog {
+  color: [number, number, number]; // 0..255
+  multiplier: number;
+  offset: number;
+  near: number; // world units
+  far: number; // world units
+}
+
 export interface Level {
   info: LevelInfo;
+  fog?: Fog; // absent when the game shows no fog
   id: string;
   textures: Texture[];
   meshes: Mesh[];

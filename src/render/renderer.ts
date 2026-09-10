@@ -1,5 +1,5 @@
 // WebGL2 level renderer: uploads a parsed Level once, then draws sky, opaque/cutout and blended passes.
-import type { Batch, Level, Mesh } from '../rom';
+import type { Batch, Fog, Level, Mesh } from '../rom';
 import type { FlyCamera } from './camera';
 import { applyTextureFilter, createProgram, uploadTexture, type TextureFilter } from './gl';
 import { mat4, type Mat4 } from './math';
@@ -9,13 +9,17 @@ layout(location = 0) in vec3 aPosition;
 layout(location = 1) in vec2 aUv;
 layout(location = 2) in vec4 aColor;
 uniform mat4 uViewProj;
+uniform mat4 uView;
 uniform mat4 uModel;
 out vec2 vUv;
 out vec4 vColor;
+out highp float vDepth; // positive view-space depth (along the view axis), world units
 void main() {
   vUv = aUv;
   vColor = aColor;
-  gl_Position = uViewProj * (uModel * vec4(aPosition, 1.0));
+  vec4 world = uModel * vec4(aPosition, 1.0);
+  vDepth = -(uView * world).z;
+  gl_Position = uViewProj * world;
 }`;
 
 const FS = `#version 300 es
@@ -23,14 +27,29 @@ precision highp float;
 uniform sampler2D uTexture;
 uniform bool uTextured;
 uniform int uMode; // 0 opaque, 1 cutout, 2 blend
+// N64 RSP fog (gSPFogPosition): zndc from the game's fog projection near/far, then (zndc * mul + offset) / 255.
+uniform bool uFog;
+uniform vec3 uFogColor;
+uniform highp float uFogNear;
+uniform highp float uFogFar;
+uniform highp float uFogMul;
+uniform highp float uFogOffset;
 in vec2 vUv;
 in vec4 vColor;
+in highp float vDepth;
 out vec4 outColor;
 void main() {
   vec4 c = vColor;
   if (uTextured) c *= texture(uTexture, vUv);
   if (uMode == 1 && c.a < 0.5) discard;
   if (uMode == 0) c.a = 1.0;
+  if (uFog) {
+    highp float d = max(vDepth, 1e-3);
+    highp float range = uFogFar - uFogNear;
+    highp float zndc = (uFogFar + uFogNear) / range - 2.0 * uFogFar * uFogNear / (range * d);
+    highp float f = clamp((zndc * uFogMul + uFogOffset) / 255.0, 0.0, 1.0);
+    c.rgb = mix(c.rgb, uFogColor, f);
+  }
   outColor = c;
 }`;
 
@@ -83,6 +102,8 @@ export class LevelRenderer {
   dirty = true;
   lastFrame: FrameStats = { drawCalls: 0 };
   private showAnimated = true;
+  private fog: Fog | null = null;
+  private fogEnabled = false;
   private skyGroundY = 0;
 
   private readonly program: WebGLProgram;
@@ -90,10 +111,18 @@ export class LevelRenderer {
   private readonly uModel: WebGLUniformLocation | null;
   private readonly uTextured: WebGLUniformLocation | null;
   private readonly uMode: WebGLUniformLocation | null;
+  private readonly uView: WebGLUniformLocation | null;
+  private readonly uFog: WebGLUniformLocation | null;
+  private readonly uFogColor: WebGLUniformLocation | null;
+  private readonly uFogNear: WebGLUniformLocation | null;
+  private readonly uFogFar: WebGLUniformLocation | null;
+  private readonly uFogMul: WebGLUniformLocation | null;
+  private readonly uFogOffset: WebGLUniformLocation | null;
   private readonly anisoExt: EXT_texture_filter_anisotropic | null;
   private readonly filter: TextureFilter;
   private scene: Scene | null = null;
   private readonly viewProj = mat4.create();
+  private readonly view = mat4.create();
   private readonly skyModel = mat4.create();
 
   // Cached GL state to avoid redundant calls.
@@ -110,6 +139,13 @@ export class LevelRenderer {
     this.uModel = gl.getUniformLocation(this.program, 'uModel');
     this.uTextured = gl.getUniformLocation(this.program, 'uTextured');
     this.uMode = gl.getUniformLocation(this.program, 'uMode');
+    this.uView = gl.getUniformLocation(this.program, 'uView');
+    this.uFog = gl.getUniformLocation(this.program, 'uFog');
+    this.uFogColor = gl.getUniformLocation(this.program, 'uFogColor');
+    this.uFogNear = gl.getUniformLocation(this.program, 'uFogNear');
+    this.uFogFar = gl.getUniformLocation(this.program, 'uFogFar');
+    this.uFogMul = gl.getUniformLocation(this.program, 'uFogMul');
+    this.uFogOffset = gl.getUniformLocation(this.program, 'uFogOffset');
     gl.useProgram(this.program);
     gl.uniform1i(gl.getUniformLocation(this.program, 'uTexture'), 0);
     this.anisoExt = gl.getExtension('EXT_texture_filter_anisotropic');
@@ -124,6 +160,13 @@ export class LevelRenderer {
     if (this.filter.nearest === nearest) return;
     this.filter.nearest = nearest;
     for (const t of this.scene?.textures ?? []) applyTextureFilter(this.gl, t, this.filter, this.anisoExt);
+    this.dirty = true;
+  }
+
+  /** Toggle the game's own distance fog (only has an effect when the level defines fog). */
+  setFogEnabled(enabled: boolean) {
+    if (this.fogEnabled === enabled) return;
+    this.fogEnabled = enabled;
     this.dirty = true;
   }
 
@@ -146,6 +189,7 @@ export class LevelRenderer {
   setLevel(level: Level | null) {
     this.freeScene();
     this.dirty = true;
+    this.fog = level?.fog ?? null;
     if (!level) return;
     const gl = this.gl;
     const textures = level.textures.map((t) => uploadTexture(gl, t, this.filter, this.anisoExt));
@@ -205,7 +249,8 @@ export class LevelRenderer {
     this.dirty = false;
     let drawCalls = 0;
     gl.viewport(0, 0, canvas.width, canvas.height);
-    const cc = this.scene?.clearColor ?? [0.08, 0.09, 0.11];
+    const fog = this.fogEnabled && this.scene ? this.fog : null;
+    const cc = fog ? [fog.color[0] / 255, fog.color[1] / 255, fog.color[2] / 255] : (this.scene?.clearColor ?? [0.08, 0.09, 0.11]);
     gl.clearColor(cc[0], cc[1], cc[2], 1);
     this.setDepthWrite(true);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
@@ -218,6 +263,15 @@ export class LevelRenderer {
     gl.useProgram(this.program);
     camera.viewProjection(this.viewProj, canvas.width / Math.max(1, canvas.height));
     gl.uniformMatrix4fv(this.uViewProj, false, this.viewProj);
+    gl.uniformMatrix4fv(this.uView, false, camera.viewMatrix(this.view));
+    gl.uniform1i(this.uFog, 0);
+    if (fog) {
+      gl.uniform3f(this.uFogColor, fog.color[0] / 255, fog.color[1] / 255, fog.color[2] / 255);
+      gl.uniform1f(this.uFogNear, fog.near);
+      gl.uniform1f(this.uFogFar, fog.far);
+      gl.uniform1f(this.uFogMul, fog.multiplier);
+      gl.uniform1f(this.uFogOffset, fog.offset);
+    }
     gl.activeTexture(gl.TEXTURE0);
 
     let boundModel: Mat4 | null = null;
@@ -257,6 +311,9 @@ export class LevelRenderer {
       for (const b of mesh.solid) draw(b, this.skyModel, false, false);
       for (const b of mesh.blended) draw(b, this.skyModel, false, false);
     }
+
+    // Everything after the (unfogged) sky gets the game's fog when enabled.
+    if (fog) gl.uniform1i(this.uFog, 1);
 
     // Opaque and cutout geometry.
     const showAnimated = this.showAnimated;

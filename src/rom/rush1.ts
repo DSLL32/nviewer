@@ -19,7 +19,7 @@
 import { runDisplayList } from './displaylist';
 import { lzssRingDecode } from './lzss';
 import { normalizeByteOrder } from './rom';
-import type { Game, Instance, Level, LevelInfo, Mesh, Texture } from './types';
+import type { Fog, Game, Instance, Level, LevelInfo, Mesh, Texture } from './types';
 import { cstr, emptyBounds, mirrorPlacementX, placementMatrix, pruneUnused, view } from './util';
 
 const MAIN_ROM = 0x7a7930;
@@ -34,6 +34,13 @@ const SHARED_OBJECTS = 5; // A[5]
 const SHARED_TEXTURES = 29; // A[29]
 const TRACK_SEGMENT = 5;
 const SHARED_SEGMENT = 6;
+
+// Race fog, read from the frame display list in RAM during races on tracks 1 and 2
+// (identical): G_SETFOGCOLOR 0x9696BEFF and gSPFogFactor(32000, -31744), i.e. fog
+// position 996..1000. The projection is guPerspective with near 40 and far 32040 in
+// vertex units (16 per world unit), so fog starts about 480 world units away and is
+// complete at about 1980, just before the far plane.
+const RACE_FOG: Fog = { color: [150, 150, 190], multiplier: 32000, offset: -31744, near: 40 / 16, far: 32040 / 16 };
 
 export const RUSH1_LEVELS: LevelInfo[] = [1, 2, 3, 4, 5, 6, 7].map((n, index) => ({
   index,
@@ -149,7 +156,7 @@ export function loadRush1Level(rom: Rush1Rom, index: number): Level {
   }
 
   const pruned = pruneUnused(meshes, textures, instances, levelMeshCount);
-  return { info, id: cstr(place, 8, 16), instances, bounds, ...pruned };
+  return { info, id: cstr(place, 8, 16), instances, bounds, fog: RACE_FOG, ...pruned };
 }
 
 export function openRush1(bytes: Uint8Array): Game {
