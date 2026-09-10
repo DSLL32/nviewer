@@ -60,6 +60,14 @@ filtering · H help · Esc releases the mouse.
     - `WOBJ`: 104-byte instances (name, 3×3 matrix in row-vector convention, translation, ids,
       bounds).
     - `GTLD`/`GDAT`: not used by the viewer.
+- **Texture memory.** Textures are uploaded with the RDP tile commands, not read in place.
+  - `G_LOADBLOCK` copies texels into a 4 KB texture memory. `G_SETTILE` gives the tile's row
+    length in bytes (`((w0 >> 9) & 0x1ff) * 8`) and its start offset (`(w0 & 0x1ff) * 8`).
+  - Texture memory is organised in 64-bit words. Odd texel rows are fetched with the two halves
+    of each word swapped (byte address xor 4; xor 8 for 32-bit texels).
+  - The block load swaps odd rows as well when its dxt row counter is non-zero. So textures
+    loaded with dxt = 0 are stored pre-swapped in the ROM, and decoding them as plain rows gives
+    an interlaced look. `texture.ts` emulates both steps.
 - Objects placed by name but stored elsewhere: per-track props in file 82+n (race tracks), coins in
   68, battle weapon icons in 76. Stored names carry suffixes such as `G1` and are truncated to 15
   characters.

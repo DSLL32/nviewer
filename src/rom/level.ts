@@ -9,7 +9,7 @@
 // Placement file: same trailer layout. WHDR holds the level id, WOBJ the placed
 // instances (104 bytes: name, 3x3 matrix, translation, ..., bounds).
 import type { RushRom } from './rom';
-import { decodeTexture, ImFmt, ImSiz, Tlut, type TextureDesc } from './texture';
+import { decodeTexture, ImFmt, ImSiz, loadBlock, Tlut, TMEM_SIZE, type TextureDesc } from './texture';
 
 export type LevelKind = 'race' | 'battle' | 'stunt' | 'obstacle';
 
@@ -41,6 +41,7 @@ export interface Texture {
   rgba: Uint8Array;
   wrapS: WrapMode;
   wrapT: WrapMode;
+  format: string; // e.g. "CI4/RGBA16", for diagnostics
 }
 
 export interface Batch {
@@ -289,7 +290,10 @@ const G_ZBUFFER = 0x1;
 const RM_Z_CMP = 0x10, RM_Z_UPD = 0x20, RM_CVG_X_ALPHA = 0x1000, RM_FORCE_BL = 0x4000;
 const RM_ZMODE_MASK = 0xc00, RM_ZMODE_XLU = 0x800;
 
-interface Tile { fmt: number; siz: number; width: number; height: number; cms: number; cmt: number; shiftS: number; shiftT: number }
+interface Tile {
+  fmt: number; siz: number; width: number; height: number; cms: number; cmt: number; shiftS: number; shiftT: number;
+  line: number; tmem: number; // bytes per texel row, offset into texture memory
+}
 
 interface State {
   vtx: { x: number; y: number; z: number; s: number; t: number; c: number }[];
@@ -302,8 +306,11 @@ interface State {
   scaleS: number;
   scaleT: number;
   timg: number;
+  timgSiz: number;
   image: number;
   palette: number;
+  mem: Uint8Array; // RDP texture memory
+  loadKey: string; // identifies the last block load into texture memory
   tiles: Tile[];
 }
 
@@ -318,8 +325,9 @@ function runDisplayList(
     vtx: [], geometryMode: G_ZBUFFER, renderMode: RM_Z_CMP | RM_Z_UPD, alphaCompare: 0, textLut: 0,
     // Many objects set up a texture without a G_TEXTURE command of their own: the
     // game leaves texturing enabled between objects.
-    combineUsesTexel: true, textureOn: true, scaleS: 1, scaleT: 1, timg: 0, image: -1, palette: -1,
-    tiles: Array.from({ length: 8 }, () => ({ fmt: 0, siz: 0, width: 0, height: 0, cms: 0, cmt: 0, shiftS: 0, shiftT: 0 })),
+    combineUsesTexel: true, textureOn: true, scaleS: 1, scaleT: 1, timg: 0, timgSiz: 0, image: -1, palette: -1,
+    mem: new Uint8Array(TMEM_SIZE), loadKey: '',
+    tiles: Array.from({ length: 8 }, () => ({ fmt: 0, siz: 0, width: 0, height: 0, cms: 0, cmt: 0, shiftS: 0, shiftT: 0, line: 0, tmem: 0 })),
   };
   const builders = new Map<string, BatchBuilder>();
 
@@ -328,15 +336,21 @@ function runDisplayList(
     const t = st.tiles[0];
     if (t.width === 0 || t.height === 0) return -1;
     const wrap = (cm: number): WrapMode => (cm & 2 ? 'clamp' : cm & 1 ? 'mirror' : 'repeat');
+    const ci = t.fmt === ImFmt.CI && st.palette >= 0;
     const desc: TextureDesc = {
       fmt: t.fmt as ImFmt, siz: t.siz as ImSiz, width: t.width, height: t.height,
-      image: st.image, palette: t.fmt === ImFmt.CI ? st.palette : -1, tlut: st.textLut as Tlut,
+      mem: st.mem, tmem: t.tmem, line: t.siz === ImSiz.B32 ? t.line * 2 : t.line,
+      palette: ci ? buf.subarray(st.palette, st.palette + 512) : null, tlut: st.textLut as Tlut,
     };
-    const key = `${keyPrefix}${desc.image}/${desc.palette}/${desc.fmt}/${desc.siz}/${desc.width}x${desc.height}/${desc.tlut}/${t.cms}/${t.cmt}`;
+    const key = `${keyPrefix}${st.loadKey}/${t.tmem}/${desc.line}/${ci ? st.palette : -1}/${desc.fmt}/${desc.siz}/${desc.width}x${desc.height}/${desc.tlut}/${t.cms}/${t.cmt}`;
     let idx = textureKeys.get(key);
     if (idx === undefined) {
       idx = textures.length;
-      textures.push({ width: t.width, height: t.height, rgba: decodeTexture(buf, desc), wrapS: wrap(t.cms), wrapT: wrap(t.cmt) });
+      const fmtName = ['RGBA', 'YUV', 'CI', 'IA', 'I'][desc.fmt] + [4, 8, 16, 32][desc.siz];
+      textures.push({
+        width: t.width, height: t.height, rgba: decodeTexture(desc), wrapS: wrap(t.cms), wrapT: wrap(t.cmt),
+        format: desc.fmt === ImFmt.CI ? `${fmtName}/${desc.tlut === Tlut.Ia16 ? 'IA16' : 'RGBA16'}` : fmtName,
+      });
       textureKeys.set(key, idx);
     }
     return idx;
@@ -432,9 +446,16 @@ function runDisplayList(
       }
       case Op.SETTIMG:
         st.timg = imag + w1;
+        st.timgSiz = (w0 >>> 19) & 3;
         break;
-      case Op.LOADBLOCK:
+      case Op.LOADBLOCK: {
+        const tile = st.tiles[(w1 >>> 24) & 7];
+        const bytes = ((((w1 >>> 12) & 0xfff) - ((w0 >>> 12) & 0xfff) + 1) << st.timgSiz) >> 1;
+        const dxt = w1 & 0xfff;
+        loadBlock(st.mem, buf, st.timg, bytes, tile.tmem, dxt, tile.siz as ImSiz);
         st.image = st.timg;
+        st.loadKey = `${st.timg}/${bytes}/${tile.tmem}/${dxt}/${tile.siz}`;
+      }
         break;
       case Op.LOADTLUT:
         st.palette = st.timg;
@@ -443,6 +464,8 @@ function runDisplayList(
         const t = st.tiles[(w1 >>> 24) & 7];
         t.fmt = (w0 >>> 21) & 7;
         t.siz = (w0 >>> 19) & 3;
+        t.line = ((w0 >>> 9) & 0x1ff) * 8;
+        t.tmem = (w0 & 0x1ff) * 8;
         t.cmt = (w1 >>> 18) & 3;
         t.shiftT = (w1 >>> 10) & 0xf;
         t.cms = (w1 >>> 8) & 3;
