@@ -138,6 +138,14 @@ Textures are uploaded with the RDP tile commands, not read in place.
     (fading to 0 at the horizon), polygons 0x800C7F98.
   - Texture: SKY01 or SKYFOUR from A[5], picked at random per race. Drawn blended, without depth
     or fog.
+- **Music.** libultra MIDI sequence player at 22050 Hz. `src/rom/music/rush1.ts` renders songs offline.
+  - **Instrument bank:** ALBankFile at ROM 0x5D9350, with VADPCM sample data (.tbl) at 0x5DF380.
+  - **Songs:** ALSeqFile at 0x6F80A0 holds 16 LZSS-compressed, format-0 MIDI sequences.
+  - **Race music:** the options pick from the 9 sequence numbers in the table at 0x800D2910; the
+    names come from SETUP > AUDIO > Music Track.
+  - **Per-song gain:** the f32 table at 0x800C3EF4.
+  - **Accuracy:** renders line up with the game's own audio output. Not modelled: reverb (its send
+    level is 0 for music) and a tempo drift of about 0.04%.
 - **Placement.** The level name sits at +8, followed by 100-byte instances from 0x18 (name, matrix,
   translation, flags, bounds). Instances form a tree:
   - +68 (i16) is the next sibling and +70 (i16) the first child, as entry indices.

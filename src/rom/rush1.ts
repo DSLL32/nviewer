@@ -18,6 +18,7 @@
 // bounds. Children are positioned relative to their parent.
 import { runDisplayList } from './displaylist';
 import { lzssRingDecode } from './lzss';
+import { decodeRush1Music, listRush1Music } from './music/rush1';
 import { normalizeByteOrder } from './rom';
 import { decodeTexture, ImFmt, ImSiz, loadBlock, Tlut, TMEM_SIZE } from './texture';
 import type { Fog, Game, Instance, Level, LevelInfo, Mesh, Sky, Texture } from './types';
@@ -247,5 +248,7 @@ export function openRush1(bytes: Uint8Array): Game {
     title: 'San Francisco Rush: Extreme Racing',
     levels: RUSH1_LEVELS,
     loadLevel: (index) => loadRush1Level(rom, index),
+    music: listRush1Music(rom),
+    decodeMusic: (index) => decodeRush1Music(rom, index),
   };
 }
