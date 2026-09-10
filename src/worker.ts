@@ -1,27 +1,30 @@
-// Parser worker: detects/opens the ROM, keeps it in memory and IndexedDB, and parses levels on request.
+// Parser worker: opens ROMs (several games at once, keyed by game id), keeps them in memory and IndexedDB,
+// and parses levels on request.
 import type { RomSummary, WorkerRequest, WorkerResponse } from './protocol';
 import { openRom, type Game, type Level } from './rom';
-import { clearCachedRom, loadCachedRom, saveCachedRom } from './romCache';
+import { cacheKeyForGame, deleteCachedRom, isLegacyCacheKey, loadCachedRoms, saveCachedRom } from './romCache';
 
 interface OpenGame {
   game: Game;
   bytes: ArrayBuffer; // the file as received; the game may keep views into it
+  name: string;
 }
 
-let current: OpenGame | null = null;
+const games = new Map<string, OpenGame>();
 
 const post = (msg: WorkerResponse, transfer: Transferable[] = []) => self.postMessage(msg, { transfer });
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-function open(bytes: ArrayBuffer): { opened: OpenGame; ms: number } {
+function open(bytes: ArrayBuffer): { game: Game; ms: number } {
   const t0 = performance.now();
   const game = openRom(new Uint8Array(bytes));
-  return { opened: { game, bytes }, ms: performance.now() - t0 };
+  return { game, ms: performance.now() - t0 };
 }
 
-function summary(g: Game, name: string, size: number, persisted: boolean, ms: number): RomSummary {
-  return { gameId: g.id, title: g.title, levels: g.levels.map((l) => ({ ...l })), name, size, persisted, ms };
+function summary(g: OpenGame, persisted: boolean, ms: number): RomSummary {
+  const { game } = g;
+  return { gameId: game.id, title: game.title, levels: game.levels.map((l) => ({ ...l })), name: g.name, size: g.bytes.byteLength, persisted, ms };
 }
 
 self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
@@ -32,54 +35,70 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
       try {
         result = open(req.bytes);
       } catch (err) {
-        // Keep whatever game was open before.
+        // Games opened before stay available.
         post({ type: 'rom', id: req.id, ok: false, error: errorText(err) });
         return;
       }
-      current = result.opened;
+      // A ROM of a game that is already open replaces it.
+      const entry: OpenGame = { game: result.game, bytes: req.bytes, name: req.name };
+      games.set(result.game.id, entry);
       let persisted = true;
       try {
-        await saveCachedRom({ name: req.name, bytes: req.bytes });
+        await saveCachedRom(result.game.id, req.name, req.bytes);
       } catch (err) {
         console.warn('Could not cache ROM in IndexedDB:', err);
         persisted = false;
       }
-      post({ type: 'rom', id: req.id, ok: true, rom: summary(result.opened.game, req.name, req.bytes.byteLength, persisted, result.ms) });
+      post({ type: 'rom', id: req.id, ok: true, rom: summary(entry, persisted, result.ms) });
       return;
     }
     case 'restore': {
-      let cached;
+      let cached: Awaited<ReturnType<typeof loadCachedRoms>> = [];
       try {
-        cached = await loadCachedRom();
+        cached = await loadCachedRoms();
       } catch (err) {
         console.warn('Could not read ROM cache:', err);
-        cached = null;
       }
-      if (!cached) {
-        post({ type: 'rom', id: req.id, ok: false, error: null });
-        return;
+      // Per-game entries first, so a legacy single-ROM entry never overrides them.
+      cached.sort((a, b) => Number(isLegacyCacheKey(a.key)) - Number(isLegacyCacheKey(b.key)));
+      const roms: RomSummary[] = [];
+      const errors: string[] = [];
+      for (const c of cached) {
+        let result;
+        try {
+          result = open(c.bytes);
+        } catch (err) {
+          // A cached file that no longer opens is useless; drop it.
+          await deleteCachedRom(c.key).catch(() => {});
+          errors.push(`Cached ROM "${c.name}" could not be opened: ${errorText(err)}`);
+          continue;
+        }
+        const id = result.game.id;
+        if (isLegacyCacheKey(c.key) || c.key !== cacheKeyForGame(id)) {
+          // Migrate to the per-game key unless that game was already restored from its own entry.
+          if (!games.has(id)) await saveCachedRom(id, c.name, c.bytes).catch(() => {});
+          await deleteCachedRom(c.key).catch(() => {});
+        }
+        if (games.has(id)) continue;
+        const entry: OpenGame = { game: result.game, bytes: c.bytes, name: c.name };
+        games.set(id, entry);
+        roms.push(summary(entry, true, result.ms));
       }
-      try {
-        const result = open(cached.bytes);
-        current = result.opened;
-        post({ type: 'rom', id: req.id, ok: true, rom: summary(result.opened.game, cached.name, cached.bytes.byteLength, true, result.ms) });
-      } catch (err) {
-        // A cached file that no longer opens is useless; drop it.
-        await clearCachedRom().catch(() => {});
-        post({ type: 'rom', id: req.id, ok: false, error: `Cached ROM could not be opened: ${errorText(err)}` });
-      }
+      post({ type: 'restored', id: req.id, roms, errors });
       return;
     }
-    case 'close':
-      current = null;
-      post({ type: 'closed', id: req.id });
+    case 'remove':
+      games.delete(req.gameId);
+      await deleteCachedRom(cacheKeyForGame(req.gameId)).catch(() => {});
+      post({ type: 'removed', id: req.id });
       return;
     case 'level': {
-      if (!current) {
-        post({ type: 'level', id: req.id, ok: false, error: 'No ROM loaded' });
+      const entry = games.get(req.gameId);
+      if (!entry) {
+        post({ type: 'level', id: req.id, ok: false, error: 'This ROM is not loaded' });
         return;
       }
-      const { game, bytes } = current;
+      const { game, bytes } = entry;
       if (!game.levels.some((l) => l.index === req.index)) {
         post({ type: 'level', id: req.id, ok: false, error: `${game.title} has no level ${req.index}` });
         return;

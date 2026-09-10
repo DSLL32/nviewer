@@ -1,5 +1,5 @@
 // Promise wrapper around the parser worker.
-import type { WorkerRequest, WorkerResponse, RomSummary } from '../protocol';
+import type { RomSummary, WorkerRequest, WorkerResponse } from '../protocol';
 import type { Level } from '../rom';
 
 type Pending = { resolve: (r: WorkerResponse) => void; reject: (e: Error) => void };
@@ -33,29 +33,31 @@ export class ParserClient {
     });
   }
 
-  /** Validate and open a ROM; the buffer is transferred to the worker. Throws with a readable message. */
+  /**
+   * Validate and open a ROM; the buffer is transferred to the worker. A ROM of an already open game replaces it.
+   * Throws with a readable message.
+   */
   async open(name: string, bytes: ArrayBuffer): Promise<RomSummary> {
     const r = await this.request({ type: 'open', name, bytes }, [bytes]);
     if (r.type !== 'rom') throw new Error('Unexpected worker response');
-    if (!r.ok) throw new Error(r.error ?? 'Could not open ROM');
+    if (!r.ok) throw new Error(r.error);
     return r.rom;
   }
 
-  /** Re-open the ROM cached in IndexedDB. Resolves null when nothing is cached. */
-  async restore(): Promise<RomSummary | null> {
+  /** Re-open every ROM cached in IndexedDB. */
+  async restore(): Promise<{ roms: RomSummary[]; errors: string[] }> {
     const r = await this.request({ type: 'restore' });
-    if (r.type !== 'rom') throw new Error('Unexpected worker response');
-    if (r.ok) return r.rom;
-    if (r.error === null) return null;
-    throw new Error(r.error);
+    if (r.type !== 'restored') throw new Error('Unexpected worker response');
+    return { roms: r.roms, errors: r.errors };
   }
 
-  async close(): Promise<void> {
-    await this.request({ type: 'close' });
+  /** Close a game and drop its cached ROM. */
+  async remove(gameId: string): Promise<void> {
+    await this.request({ type: 'remove', gameId });
   }
 
-  async loadLevel(index: number): Promise<{ level: Level; ms: number }> {
-    const r = await this.request({ type: 'level', index });
+  async loadLevel(gameId: string, index: number): Promise<{ level: Level; ms: number }> {
+    const r = await this.request({ type: 'level', gameId, index });
     if (r.type !== 'level') throw new Error('Unexpected worker response');
     if (!r.ok) throw new Error(r.error);
     return { level: r.level, ms: r.ms };

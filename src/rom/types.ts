@@ -60,9 +60,18 @@ export interface Fog {
   far: number; // world units
 }
 
+// A sky mesh in Level.meshes, drawn around the camera (camera translation ignored),
+// before the level, without depth or fog. Positions are relative to the camera.
+export interface Sky {
+  name: string;
+  mesh: number;
+}
+
 export interface Level {
   info: LevelInfo;
   fog?: Fog; // absent when the game shows no fog
+  // Skies the game chooses between (at random, for Rush 1), if it builds them itself.
+  skies?: Sky[];
   id: string;
   textures: Texture[];
   meshes: Mesh[];
@@ -72,10 +81,27 @@ export interface Level {
   bounds: { min: [number, number, number]; max: [number, number, number] };
 }
 
+// A piece of the game's soundtrack.
+export interface MusicTrack {
+  index: number;
+  name: string; // as the game names it (e.g. in an audio/jukebox menu), else "Track N"
+}
+
+// Decoded PCM, -1..1 per channel.
+export interface DecodedMusic {
+  sampleRate: number;
+  channels: Float32Array[];
+  // Loop region in samples, if the game loops the piece.
+  loopStart?: number;
+  loopEnd?: number;
+}
+
 // A loaded ROM of one supported game.
 export interface Game {
   id: 'rush2049' | 'rush1';
   title: string;
   levels: LevelInfo[];
   loadLevel(index: number): Level;
+  music?: MusicTrack[];
+  decodeMusic?(index: number): DecodedMusic;
 }

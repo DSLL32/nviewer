@@ -35,6 +35,7 @@ export function Viewport({ level, loadingName, error }: ViewportProps) {
   const [showScripted, setShowScripted] = useState(true);
   const [fogOn, setFogOn] = useState(readFogSetting);
   const [cullOn, setCullOn] = useState(() => readFlag(CULL_KEY));
+  const [skyPref, setSkyPref] = useState<string>(() => readString(SKY_KEY) ?? '');
   const [helpOpen, setHelpOpen] = useState(true);
   const actionRef = useRef<(a: ControlAction) => void>(() => {});
   const startViewRef = useRef<{ level: Level; view: StartView } | null>(null);
@@ -146,6 +147,14 @@ export function Viewport({ level, loadingName, error }: ViewportProps) {
     writeFlag(CULL_KEY, cullOn);
   }, [cullOn]);
 
+  // Sky choice for levels with Level.skies: a remembered name, "none", or the first sky by default.
+  const skies = level?.skies ?? [];
+  const activeSky = skies.length === 0 || skyPref === SKY_NONE ? null : (skies.find((sk) => sk.name === skyPref) ?? skies[0]).name;
+  useEffect(() => engineRef.current?.renderer.setSky(activeSky), [activeSky, level]);
+  useEffect(() => {
+    if (skyPref) writeString(SKY_KEY, skyPref);
+  }, [skyPref]);
+
   const hasScripted = level?.instances.some((i) => i.animated && i.mesh >= 0) ?? false;
   const hasFog = !!level?.fog;
 
@@ -211,6 +220,17 @@ export function Viewport({ level, loadingName, error }: ViewportProps) {
               />
               Authentic fog{!hasFog && level ? <span className="small muted"> (no fog in this game)</span> : null}
             </label>
+            {skies.length > 0 && (
+              <label className="check select-row" title="The game picks one of these at random per race">
+                Sky
+                <select id="sky-select" value={activeSky ?? SKY_NONE} onChange={(e) => setSkyPref(e.target.value)}>
+                  {skies.map((sk) => (
+                    <option key={sk.name} value={sk.name}>{sk.name}</option>
+                  ))}
+                  <option value={SKY_NONE}>None</option>
+                </select>
+              </label>
+            )}
             <label className="check" title="Hide the back sides of single-sided polygons, as the game does">
               <input id="cull-toggle" type="checkbox" checked={cullOn} onChange={(e) => setCullOn(e.target.checked)} />
               Back-face culling
@@ -225,6 +245,25 @@ export function Viewport({ level, loadingName, error }: ViewportProps) {
 const FOG_KEY = 'nviewer.authenticFog';
 // New key: an "on" stored by the earlier culling implementation must not carry over (now off by default).
 const CULL_KEY = 'nviewer.backfaceCulling.v2';
+
+const SKY_KEY = 'nviewer.sky';
+const SKY_NONE = '__none__';
+
+function readString(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeString(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* storage unavailable */
+  }
+}
 
 function readFlag(key: string): boolean {
   try {

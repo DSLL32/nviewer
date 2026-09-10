@@ -121,6 +121,12 @@ Textures are uploaded with the RDP tile commands, not read in place.
   - +0x10 and +0x18: texture and palette name tables.
   - From 0x20: 52-byte object records, with the display list at +12.
   - Display lists are F3DEX 1.21.
+- **Sky.** Game code (0x800A7494) builds it at race start rather than loading it from level data.
+  - A dome around the camera: a centre plus three rings of 8 vertices.
+  - Tables in main code: positions 0x800C7D88, texture coordinates 0x800C7EB4, alpha 0x800C7F7C
+    (fading to 0 at the horizon), polygons 0x800C7F98.
+  - Texture: SKY01 or SKYFOUR from A[5], picked at random per race. Drawn blended, without depth
+    or fog.
 - **Placement.** The level name sits at +8, followed by 100-byte instances from 0x18 (name, matrix,
   translation, flags, bounds). Instances form a tree:
   - +68 (i16) is the next sibling and +70 (i16) the first child, as entry indices.

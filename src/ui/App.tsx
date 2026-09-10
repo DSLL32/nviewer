@@ -1,63 +1,98 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { RomSummary } from '../protocol';
-import type { Level, LevelInfo } from '../rom';
-import { clearCachedRom } from '../romCache';
+import type { Level } from '../rom';
 import { Landing } from './Landing';
 import { computeStats, type LevelStats } from './levelStats';
-import { Sidebar } from './Sidebar';
+import { Sidebar, sameLevelRef, type LevelRef, type SidebarGame } from './Sidebar';
 import { useFileDrop } from './useFileDrop';
 import { Viewport } from './Viewport';
 import { ParserClient } from './workerClient';
 
-interface GameInfo {
-  id: string;
-  title: string;
-  levels: LevelInfo[];
-}
-
-type RomState =
-  | { status: 'checking' }
-  | { status: 'empty' }
-  | { status: 'ready'; name: string; game: GameInfo };
-
 const MAX_ROM_BYTES = 128 * 1024 * 1024;
 
-// The remembered level is stored per game, so switching ROMs never restores an index the other game lacks.
+// The remembered level is stored per game, so a game never restores an index it lacks.
 const lastLevelKey = (gameId: string) => `nviewer.lastLevel.${gameId}`;
+const LAST_SELECTION_KEY = 'nviewer.lastSelection';
+const COLLAPSED_KEY = 'nviewer.collapsedGames';
 
-function readLastLevel(game: GameInfo): number {
-  const fallback = game.levels[0]?.index ?? 0;
+function readStorage(key: string): string | null {
   try {
-    const raw = localStorage.getItem(lastLevelKey(game.id));
-    const v = raw === null ? NaN : Number(raw);
-    return game.levels.some((l) => l.index === v) ? v : fallback;
+    return localStorage.getItem(key);
   } catch {
-    return fallback;
+    return null;
   }
 }
 
-const gameOf = (s: RomSummary): GameInfo => ({ id: s.gameId, title: s.title, levels: s.levels });
-const levelName = (game: GameInfo | null, index: number) => game?.levels.find((l) => l.index === index)?.name ?? `Level ${index}`;
+function writeStorage(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+function readLastLevel(game: SidebarGame): number {
+  const fallback = game.levels[0]?.index ?? 0;
+  const raw = readStorage(lastLevelKey(game.id));
+  const v = raw === null ? NaN : Number(raw);
+  return game.levels.some((l) => l.index === v) ? v : fallback;
+}
+
+function readLastSelection(): LevelRef | null {
+  try {
+    const v = JSON.parse(readStorage(LAST_SELECTION_KEY) ?? 'null') as Partial<LevelRef> | null;
+    return v && typeof v.gameId === 'string' && typeof v.index === 'number' ? { gameId: v.gameId, index: v.index } : null;
+  } catch {
+    return null;
+  }
+}
+
+function readCollapsed(): Record<string, boolean> {
+  try {
+    const v = JSON.parse(readStorage(COLLAPSED_KEY) ?? '{}') as unknown;
+    return v && typeof v === 'object' ? (v as Record<string, boolean>) : {};
+  } catch {
+    return {};
+  }
+}
+
+const gameOf = (s: RomSummary): SidebarGame => ({ id: s.gameId, title: s.title, fileName: s.name, levels: s.levels });
+
+const levelName = (games: SidebarGame[], ref: LevelRef) => {
+  const game = games.find((g) => g.id === ref.gameId);
+  return game?.levels.find((l) => l.index === ref.index)?.name ?? `Level ${ref.index}`;
+};
 
 export function App() {
   const clientRef = useRef<ParserClient | null>(null);
-  const [rom, setRom] = useState<RomState>({ status: 'checking' });
+  const [checking, setChecking] = useState(true);
+  const [games, setGames] = useState<SidebarGame[]>([]);
   const [romBusy, setRomBusy] = useState<string | null>(null);
   const [romError, setRomError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<number | null>(null);
-  const [loading, setLoading] = useState<number | null>(null);
+  const [selected, setSelected] = useState<LevelRef | null>(null);
+  const [loading, setLoading] = useState<LevelRef | null>(null);
   const [level, setLevel] = useState<Level | null>(null);
   const [levelError, setLevelError] = useState<string | null>(null);
-  const [stats, setStats] = useState<Record<number, LevelStats>>({});
+  const [stats, setStats] = useState<Record<string, Record<number, LevelStats>>>({});
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(readCollapsed);
   const fileInput = useRef<HTMLInputElement>(null);
 
-  const gameRef = useRef<GameInfo | null>(null);
-  const selectedRef = useRef<number | null>(null);
-  // Bumped whenever the open ROM changes; level results from an older ROM are discarded.
-  const generation = useRef(0);
+  const gamesRef = useRef<SidebarGame[]>([]);
+  const selectedRef = useRef<LevelRef | null>(null);
+  // Bumped per game whenever its ROM is replaced or removed; level results from an older ROM are discarded.
+  const generations = useRef(new Map<string, number>());
+  const generationOf = (gameId: string) => generations.current.get(gameId) ?? 0;
+  const bumpGeneration = (gameId: string) => generations.current.set(gameId, generationOf(gameId) + 1);
+
+  // Sections are kept in a stable order (by title) regardless of load or restore order.
+  const updateGames = useCallback((next: SidebarGame[]) => {
+    const sorted = [...next].sort((x, y) => x.title.localeCompare(y.title));
+    gamesRef.current = sorted;
+    setGames(sorted);
+  }, []);
 
   // Level requests are coalesced: while one parse runs, only the most recent selection is queued.
-  const wanted = useRef<number | null>(null);
+  const wanted = useRef<LevelRef | null>(null);
   const busy = useRef(false);
 
   const pumpLevels = useCallback(async () => {
@@ -66,19 +101,19 @@ export function App() {
     busy.current = true;
     try {
       while (wanted.current !== null) {
-        const index = wanted.current;
-        const gen = generation.current;
-        setLoading(index);
+        const ref = wanted.current;
+        const gen = generationOf(ref.gameId);
+        setLoading(ref);
         try {
-          const { level: loaded, ms } = await client.loadLevel(index);
-          if (wanted.current !== index || generation.current !== gen) continue;
+          const { level: loaded, ms } = await client.loadLevel(ref.gameId, ref.index);
+          if (!sameLevelRef(wanted.current, ref) || generationOf(ref.gameId) !== gen) continue;
           setLevel(loaded);
           setLevelError(null);
-          setStats((s) => ({ ...s, [index]: computeStats(loaded, ms) }));
+          setStats((s) => ({ ...s, [ref.gameId]: { ...(s[ref.gameId] ?? {}), [ref.index]: computeStats(loaded, ms) } }));
         } catch (e) {
-          if (wanted.current !== index || generation.current !== gen) continue;
+          if (!sameLevelRef(wanted.current, ref) || generationOf(ref.gameId) !== gen) continue;
           setLevel(null);
-          setLevelError(`Could not load ${levelName(gameRef.current, index)}: ${e instanceof Error ? e.message : String(e)}`);
+          setLevelError(`Could not load ${levelName(gamesRef.current, ref)}: ${e instanceof Error ? e.message : String(e)}`);
         }
         wanted.current = null;
       }
@@ -89,37 +124,44 @@ export function App() {
   }, []);
 
   const selectLevel = useCallback(
-    (index: number) => {
-      const game = gameRef.current;
-      if (!game || !game.levels.some((l) => l.index === index)) return;
-      setSelected(index);
-      selectedRef.current = index;
-      try {
-        localStorage.setItem(lastLevelKey(game.id), String(index));
-      } catch {
-        /* storage unavailable */
-      }
-      wanted.current = index;
+    (ref: LevelRef) => {
+      const game = gamesRef.current.find((g) => g.id === ref.gameId);
+      if (!game || !game.levels.some((l) => l.index === ref.index)) return;
+      setSelected(ref);
+      selectedRef.current = ref;
+      writeStorage(lastLevelKey(game.id), String(ref.index));
+      writeStorage(LAST_SELECTION_KEY, JSON.stringify(ref));
+      wanted.current = ref;
       void pumpLevels();
     },
     [pumpLevels],
   );
 
-  /** Switch the UI to a newly opened (or restored) ROM. */
-  const activateRom = useCallback(
+  /** Add a newly opened ROM, or replace the ROM of a game that is already loaded. */
+  const addGame = useCallback(
     (summary: RomSummary) => {
-      const previous = gameRef.current;
-      const game = gameOf(summary);
-      generation.current++;
-      gameRef.current = game;
-      setRom({ status: 'ready', name: summary.name, game });
-      setStats({});
-      setLevel(null);
-      setLevelError(null);
-      const keep = previous?.id === game.id && selectedRef.current !== null && game.levels.some((l) => l.index === selectedRef.current);
-      selectLevel(keep ? selectedRef.current! : readLastLevel(game));
+      const info = gameOf(summary);
+      bumpGeneration(info.id);
+      const current = gamesRef.current;
+      const replaced = current.some((g) => g.id === info.id);
+      updateGames(replaced ? current.map((g) => (g.id === info.id ? info : g)) : [...current, info]);
+      setStats((s) => {
+        const next = { ...s };
+        delete next[info.id];
+        return next;
+      });
+      setCollapsed((c) => (c[info.id] ? { ...c, [info.id]: false } : c));
+      const sel = selectedRef.current;
+      if (!sel) {
+        selectLevel({ gameId: info.id, index: readLastLevel(info) });
+      } else if (sel.gameId === info.id) {
+        // The shown level belonged to the replaced ROM: load it again from the new one.
+        setLevel(null);
+        const index = info.levels.some((l) => l.index === sel.index) ? sel.index : readLastLevel(info);
+        selectLevel({ gameId: info.id, index });
+      }
     },
-    [selectLevel],
+    [selectLevel, updateGames],
   );
 
   useEffect(() => {
@@ -128,22 +170,31 @@ export function App() {
     let cancelled = false;
     client
       .restore()
-      .then((summary) => {
+      .then(({ roms, errors }) => {
         if (cancelled) return;
-        if (summary) activateRom(summary);
-        else setRom({ status: 'empty' });
+        const restored = roms.map(gameOf);
+        updateGames(restored);
+        if (restored.length > 0) {
+          const last = readLastSelection();
+          const lastGame = last && restored.find((g) => g.id === last.gameId && g.levels.some((l) => l.index === last.index));
+          selectLevel(lastGame && last ? last : { gameId: restored[0].id, index: readLastLevel(restored[0]) });
+        }
+        if (errors.length) setRomError(errors.join(' '));
+        setChecking(false);
       })
       .catch((e) => {
         if (cancelled) return;
-        setRom({ status: 'empty' });
         setRomError(e instanceof Error ? e.message : String(e));
+        setChecking(false);
       });
     return () => {
       cancelled = true;
       client.dispose();
       clientRef.current = null;
     };
-  }, [activateRom]);
+  }, [selectLevel, updateGames]);
+
+  useEffect(() => writeStorage(COLLAPSED_KEY, JSON.stringify(collapsed)), [collapsed]);
 
   const openFile = useCallback(
     async (file: File) => {
@@ -157,35 +208,44 @@ export function App() {
       setRomBusy(`Opening ${file.name}…`);
       try {
         const bytes = await file.arrayBuffer();
-        activateRom(await client.open(file.name, bytes));
+        addGame(await client.open(file.name, bytes));
       } catch (e) {
         setRomError(`Could not open "${file.name}": ${e instanceof Error ? e.message : String(e)}`);
       } finally {
         setRomBusy(null);
       }
     },
-    [activateRom],
+    [addGame],
   );
 
   const dragging = useFileDrop(openFile);
 
-  const forgetRom = useCallback(async () => {
-    wanted.current = null;
-    generation.current++;
-    gameRef.current = null;
-    selectedRef.current = null;
-    await clearCachedRom().catch(() => {});
-    await clientRef.current?.close().catch(() => {});
-    setLevel(null);
-    setSelected(null);
-    setStats({});
-    setLevelError(null);
-    setRomError(null);
-    setRom({ status: 'empty' });
-  }, []);
+  const removeGame = useCallback(
+    async (gameId: string) => {
+      bumpGeneration(gameId);
+      await clientRef.current?.remove(gameId).catch(() => {});
+      const next = gamesRef.current.filter((g) => g.id !== gameId);
+      updateGames(next);
+      setStats((s) => {
+        const copy = { ...s };
+        delete copy[gameId];
+        return copy;
+      });
+      if (selectedRef.current?.gameId === gameId) {
+        if (wanted.current?.gameId === gameId) wanted.current = null;
+        selectedRef.current = null;
+        setSelected(null);
+        setLevel(null);
+        setLevelError(null);
+        if (next.length > 0) selectLevel({ gameId: next[0].id, index: readLastLevel(next[0]) });
+      }
+    },
+    [selectLevel, updateGames],
+  );
+
+  const toggleCollapsed = useCallback((gameId: string) => setCollapsed((c) => ({ ...c, [gameId]: !c[gameId] })), []);
 
   const pickFile = () => fileInput.current?.click();
-  const game = rom.status === 'ready' ? rom.game : null;
 
   return (
     <>
@@ -201,22 +261,22 @@ export function App() {
           if (file) void openFile(file);
         }}
       />
-      {rom.status === 'ready' && game ? (
+      {!checking && games.length > 0 ? (
         <div className="app">
           <Sidebar
-            gameTitle={game.title}
-            levels={game.levels}
+            games={games}
             selected={selected}
             loading={loading}
             stats={stats}
-            romName={rom.name}
+            collapsed={collapsed}
+            onToggleCollapsed={toggleCollapsed}
             onSelect={selectLevel}
-            onReplaceRom={pickFile}
-            onForgetRom={forgetRom}
+            onRemove={(id) => void removeGame(id)}
+            onAddRom={pickFile}
           />
           <Viewport
             level={level}
-            loadingName={romBusy ?? (loading !== null ? levelName(game, loading) : null)}
+            loadingName={romBusy ?? (loading !== null ? levelName(games, loading) : null)}
             error={levelError}
           />
           {romError && (
@@ -227,15 +287,11 @@ export function App() {
           )}
         </div>
       ) : (
-        <Landing
-          busy={rom.status === 'checking' ? 'Checking for a saved ROM…' : romBusy}
-          error={romError}
-          onPick={pickFile}
-        />
+        <Landing busy={checking ? 'Checking for saved ROMs…' : romBusy} error={romError} onPick={pickFile} />
       )}
       {dragging && (
         <div className="drop-overlay">
-          <div>Drop the ROM to load it</div>
+          <div>Drop a ROM to add it</div>
         </div>
       )}
     </>

@@ -88,7 +88,8 @@ interface Scene {
   batches: GpuBatch[];
   items: DrawItem[];
   blendItems: DrawItem[];
-  sky: GpuMesh[];
+  sky: GpuMesh[]; // legacy sky domes (Rush 2049: unplaced *SKY meshes)
+  skies: { name: string; mesh: GpuMesh }[]; // Level.skies (Rush 1), one drawn at a time
   clearColor: [number, number, number];
 }
 
@@ -108,6 +109,8 @@ export class LevelRenderer {
   private fogEnabled = false;
   private cullingEnabled = false;
   private skyGroundY = 0;
+  /** Selected Level.skies entry by name; undefined = first sky, null = none. */
+  private skySelection: string | null | undefined = undefined;
 
   private readonly program: WebGLProgram;
   private readonly uViewProj: WebGLUniformLocation | null;
@@ -201,6 +204,13 @@ export class LevelRenderer {
     this.dirty = true;
   }
 
+  /** Choose which of the level's `skies` to draw (by name), or null for none. Unknown names fall back to the first. */
+  setSky(name: string | null) {
+    if (this.skySelection === name) return;
+    this.skySelection = name;
+    this.dirty = true;
+  }
+
   setLevel(level: Level | null) {
     this.freeScene();
     this.dirty = true;
@@ -238,13 +248,32 @@ export class LevelRenderer {
     }
 
     const sky: GpuMesh[] = [];
+    const skies: Scene['skies'] = [];
     let clearColor = DEFAULT_CLEAR;
-    for (const index of level.unplaced) {
-      const src = level.meshes[index];
-      if (!src || !src.name.endsWith('SKY')) continue;
-      const mesh = getMesh(index);
-      if (mesh) sky.push(mesh);
-      clearColor = horizonColor(src, level) ?? clearColor;
+    if (level.skies && level.skies.length > 0) {
+      // Game-built skies: always alpha-blended (texture x vertex colour; alpha fades out at the horizon).
+      for (const entry of level.skies) {
+        const src = level.meshes[entry.mesh];
+        if (!src) continue;
+        const mesh: GpuMesh = { solid: [], blended: [] };
+        for (const b of src.batches) {
+          const gb = this.uploadBatch(b, textures);
+          if (!gb) continue;
+          gb.mode = Mode.Blend;
+          gb.cullBack = false;
+          batches.push(gb);
+          mesh.blended.push(gb);
+        }
+        skies.push({ name: entry.name, mesh });
+      }
+    } else {
+      for (const index of level.unplaced) {
+        const src = level.meshes[index];
+        if (!src || !src.name.endsWith('SKY')) continue;
+        const mesh = getMesh(index);
+        if (mesh) sky.push(mesh);
+        clearColor = horizonColor(src, level) ?? clearColor;
+      }
     }
 
     this.scene = {
@@ -254,6 +283,7 @@ export class LevelRenderer {
       items,
       blendItems: items.filter((i) => i.mesh.blended.length > 0),
       sky,
+      skies,
       clearColor,
     };
   }
@@ -322,13 +352,23 @@ export class LevelRenderer {
       drawCalls++;
     };
 
-    // Sky dome: follows the camera, drawn first, no depth.
+    // Sky: drawn first around the camera, without depth, fog or culling.
     const [cx, cy, cz] = camera.position;
-    mat4.translation(this.skyModel, cx, cy - this.skyGroundY, cz);
-    for (const mesh of scene.sky) {
-      // Never culled: the dome is seen from inside.
-      for (const b of mesh.solid) draw(b, this.skyModel, false, false, false, false);
-      for (const b of mesh.blended) draw(b, this.skyModel, false, false, false, false);
+    if (scene.skies.length > 0) {
+      // Level.skies positions are relative to the camera: only the camera rotation applies.
+      const sel = this.skySelection;
+      const active = sel === null ? null : (scene.skies.find((s) => s.name === sel) ?? scene.skies[0]);
+      if (active) {
+        mat4.translation(this.skyModel, cx, cy, cz);
+        for (const b of active.mesh.blended) draw(b, this.skyModel, false, false, false, false);
+      }
+    } else {
+      // Legacy dome: follows the camera, offset down by the ground height (see setSkyGroundHeight).
+      mat4.translation(this.skyModel, cx, cy - this.skyGroundY, cz);
+      for (const mesh of scene.sky) {
+        for (const b of mesh.solid) draw(b, this.skyModel, false, false, false, false);
+        for (const b of mesh.blended) draw(b, this.skyModel, false, false, false, false);
+      }
     }
 
     // Everything after the (unfogged) sky gets the game's fog when enabled.

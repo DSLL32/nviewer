@@ -19,7 +19,8 @@
 import { runDisplayList } from './displaylist';
 import { lzssRingDecode } from './lzss';
 import { normalizeByteOrder } from './rom';
-import type { Fog, Game, Instance, Level, LevelInfo, Mesh, Texture } from './types';
+import { decodeTexture, ImFmt, ImSiz, loadBlock, Tlut, TMEM_SIZE } from './texture';
+import type { Fog, Game, Instance, Level, LevelInfo, Mesh, Sky, Texture } from './types';
 import { cstr, emptyBounds, mirrorPlacementX, placementMatrix, pruneUnused, view } from './util';
 
 const MAIN_ROM = 0x7a7930;
@@ -158,7 +159,85 @@ export function loadRush1Level(rom: Rush1Rom, index: number): Level {
   }
 
   const pruned = pruneUnused(meshes, textures, instances, levelMeshCount);
-  return { info, id: cstr(place, 8, 16), instances, bounds, fog: RACE_FOG, ...pruned };
+  const skies = buildSkies(rom, pruned.meshes, pruned.textures);
+  return { info, id: cstr(place, 8, 16), instances, bounds, fog: RACE_FOG, skies, ...pruned };
+}
+
+// The race sky is not level data. Game code (@ 0x800A7494) builds a dome around the camera
+// from tables in main code and textures it with SKY01 or SKYFOUR from A[5], picked at
+// random per race. 25 vertices (centre and three rings of 8): positions at 0x800C7D88
+// (x, y, z floats, vertex units), texture coordinates at 0x800C7EB4 (u, v; 512 texture
+// units each), alpha at 0x800C7F7C (fading to 0 at the horizon); 24 polygons at
+// 0x800C7F98 (4 vertex indices, 0xFF for triangles, 0xFFFFFFFF ends). Drawn blended,
+// without depth or fog.
+const SKY_VERTICES = 0x800c7d88;
+const SKY_UVS = 0x800c7eb4;
+const SKY_ALPHA = 0x800c7f7c;
+const SKY_POLYGONS = 0x800c7f98;
+const SKY_TEXTURES = ['SKY01', 'SKYFOUR'];
+
+function buildSkies(rom: Rush1Rom, meshes: Mesh[], textures: Texture[]): Sky[] {
+  const main = view(rom.main);
+  const at = (addr: number) => addr - MAIN_VADDR;
+  const tris: number[][] = [];
+  for (let o = at(SKY_POLYGONS); rom.main[o] !== 0xff; o += 4) {
+    const [a, b, c, d] = rom.main.subarray(o, o + 4);
+    tris.push([a, b, c]);
+    if (d !== 0xff) tris.push([a, c, d]);
+  }
+
+  // A[5] texture table (+0x10: 32-byte entries of name, width, height, format, ..., image
+  // pointer, palette index) and palette table (+0x18: 24-byte entries, pointer at +20).
+  const shared = rom.file('A', SHARED_OBJECTS);
+  const sdv = view(shared);
+  const texTable = sdv.getUint32(0x10) & 0xffffff;
+  const texCount = sdv.getUint32(0x14);
+  const palTable = sdv.getUint32(0x18) & 0xffffff;
+
+  const skies: Sky[] = [];
+  for (const name of SKY_TEXTURES) {
+    let e = -1;
+    for (let i = 0; i < texCount && e < 0; i++) if (cstr(shared, texTable + i * 32, 16) === name) e = texTable + i * 32;
+    if (e < 0) continue;
+    const width = sdv.getUint16(e + 16);
+    const height = sdv.getUint16(e + 18);
+    const image = sdv.getUint32(e + 24) & 0xffffff;
+    const palette = sdv.getUint32(palTable + sdv.getUint16(e + 28) * 24 + 20) & 0xffffff;
+    // CI4 with an RGBA16 palette. The game's block load advances its row counter once per
+    // texel row, so the odd-row swaps cancel out.
+    const line = width / 2;
+    const mem = new Uint8Array(TMEM_SIZE);
+    loadBlock(mem, shared, image, line * height, 0, 16384 / line, ImSiz.B16);
+    const rgba = decodeTexture({
+      fmt: ImFmt.CI, siz: ImSiz.B4, width, height, mem, tmem: 0, line,
+      palette: shared.subarray(palette, palette + 32), tlut: Tlut.Rgba16,
+    });
+    const texture = textures.push({ width, height, rgba, wrapS: 'repeat', wrapT: 'repeat', format: 'CI4/RGBA16' }) - 1;
+
+    const positions: number[] = [];
+    const uvs: number[] = [];
+    const colors: number[] = [];
+    let radius = 0;
+    for (const tri of tris) {
+      for (const i of tri) {
+        const [x, y, z] = [0, 1, 2].map((k) => main.getFloat32(at(SKY_VERTICES) + (i * 3 + k) * 4) / 16);
+        positions.push(-x, y, z); // mirrored like the level
+        radius = Math.max(radius, Math.hypot(x, y, z));
+        uvs.push((main.getFloat32(at(SKY_UVS) + i * 8) * 16) / width, (main.getFloat32(at(SKY_UVS) + i * 8 + 4) * 16) / height);
+        colors.push(255, 255, 255, rom.main[at(SKY_ALPHA) + i]);
+      }
+    }
+    const mesh = meshes.push({
+      name,
+      radius,
+      batches: [{
+        texture, blend: 'blend', depthTest: false, depthWrite: false, cullBack: false,
+        positions: new Float32Array(positions), uvs: new Float32Array(uvs), colors: new Uint8Array(colors),
+      }],
+    }) - 1;
+    skies.push({ name, mesh });
+  }
+  return skies;
 }
 
 export function openRush1(bytes: Uint8Array): Game {
