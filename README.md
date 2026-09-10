@@ -43,6 +43,9 @@ Both games draw with the RDP tile commands and share several conventions:
   negates X in vertices and transforms. Without that, signs read backwards and landmarks swap sides:
   the Golden Gate Bridge appears left of the Rush 2049 start line instead of right of it. The
   games' own modelview matrices start with diag(−1, 1, 1).
+- **Culling.** With X negated, front faces wind counter-clockwise. The games cull back faces, and
+  double-sided faces are stored as reversed-winding twins. The viewer's culling is optional and off
+  by default.
 - **Fog.** Read from the per-frame display list in RAM during races.
   - Both games project with near 40 and far 32040 (vertex units) and use fog colour 0x9696BEFF.
   - Rush 1 sets gSPFogFactor(32000, −31744), fog position 996–1000. That gives haze from about

@@ -34,6 +34,7 @@ export function Viewport({ level, loadingName, error }: ViewportProps) {
   const [nearest, setNearest] = useState(false);
   const [showScripted, setShowScripted] = useState(true);
   const [fogOn, setFogOn] = useState(readFogSetting);
+  const [cullOn, setCullOn] = useState(() => readFlag(CULL_KEY));
   const [helpOpen, setHelpOpen] = useState(true);
   const actionRef = useRef<(a: ControlAction) => void>(() => {});
   const startViewRef = useRef<{ level: Level; view: StartView } | null>(null);
@@ -140,6 +141,10 @@ export function Viewport({ level, loadingName, error }: ViewportProps) {
       /* storage unavailable */
     }
   }, [fogOn]);
+  useEffect(() => {
+    engineRef.current?.renderer.setBackfaceCulling(cullOn);
+    writeFlag(CULL_KEY, cullOn);
+  }, [cullOn]);
 
   const hasScripted = level?.instances.some((i) => i.animated && i.mesh >= 0) ?? false;
   const hasFog = !!level?.fog;
@@ -206,6 +211,10 @@ export function Viewport({ level, loadingName, error }: ViewportProps) {
               />
               Authentic fog{!hasFog && level ? <span className="small muted"> (no fog in this game)</span> : null}
             </label>
+            <label className="check" title="Hide the back sides of single-sided polygons, as the game does">
+              <input id="cull-toggle" type="checkbox" checked={cullOn} onChange={(e) => setCullOn(e.target.checked)} />
+              Back-face culling
+            </label>
           </>
         )}
       </div>
@@ -214,6 +223,24 @@ export function Viewport({ level, loadingName, error }: ViewportProps) {
 }
 
 const FOG_KEY = 'nviewer.authenticFog';
+// New key: an "on" stored by the earlier culling implementation must not carry over (now off by default).
+const CULL_KEY = 'nviewer.backfaceCulling.v2';
+
+function readFlag(key: string): boolean {
+  try {
+    return localStorage.getItem(key) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function writeFlag(key: string, on: boolean) {
+  try {
+    localStorage.setItem(key, on ? '1' : '0');
+  } catch {
+    /* storage unavailable */
+  }
+}
 
 function readFogSetting(): boolean {
   try {

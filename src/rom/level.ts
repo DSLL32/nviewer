@@ -55,6 +55,8 @@ class MeshLibrary {
     const dv = view(model);
     const ctx = {
       buf: model, ucode: 'f3dex2' as const, textures: this.textures, textureKeys: this.textureKeys,
+      // Double-sided faces are modelled as reversed-winding twins, so the game culls back faces.
+      cullBackByDefault: true,
       keyPrefix: `${fileIndex}:`,
       // Texture images are addressed relative to IMAG; every other address is a file offset.
       resolve: (addr: number) => addr,

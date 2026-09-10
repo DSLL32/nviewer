@@ -25,6 +25,9 @@ export interface Batch {
   blend: BlendMode;
   depthTest: boolean;
   depthWrite: boolean;
+  // The game draws this batch with back-face culling (front faces wind counter-clockwise,
+  // the OpenGL convention).
+  cullBack: boolean;
   // Non-indexed triangles: 3 positions / 2 uvs / 4 colors per vertex.
   positions: Float32Array;
   uvs: Float32Array;

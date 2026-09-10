@@ -86,6 +86,8 @@ function addContainer(
   const count = dv.getUint32(4);
   const ctx = {
     buf, ucode: 'f3dex' as const, textures, textureKeys, keyPrefix,
+    // Double-sided faces are modelled as reversed-winding twins, so the game culls back faces.
+    cullBackByDefault: true,
     resolve: (addr: number) => (addr >>> 24 === segment && (addr & 0xffffff) < buf.length ? addr & 0xffffff : -1),
   };
   for (let i = 0; i < count; i++) {
