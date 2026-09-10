@@ -95,6 +95,17 @@ Textures are uploaded with the RDP tile commands, not read in place.
     - `WHDR`: level id.
     - `WOBJ`: 104-byte instances (name, matrix, translation, ids, bounds).
     - `GTLD`/`GDAT`: not used by the viewer.
+- **Music** (Factor 5 MusyX, mixed on the RSP at 22050 Hz). `src/rom/music/musyx.ts` renders
+  songs offline.
+  - **Files:** file 6 is the sound project, file 7 holds the instrument scripts (SoundMacros) and
+    ADSR tables, file 8 is a 195-entry sample directory, and file 9 is the sample data.
+  - **Songs:** song n is file 10+n, played with project group n. The names come from the AUDIO →
+    MUSIC TRACK table at 0x80110030.
+  - **Sample codec:** a 256-byte codebook (8 order-2 predictors), then 40-byte blocks of 64
+    samples, each two subframes of 2 raw samples plus a predictor/shift byte and 30 nibbles.
+  - **Song format:** a tempo table at 384 ticks per beat, loop-start ticks, up to 64 tracks of
+    region entries, and region data of run-length delta times plus 2-byte note, program and
+    controller events.
 - **Objects placed by name but stored elsewhere:** per-track props in file 82+n (race tracks), coins
   in 68, battle weapon icons in 76. Stored names carry suffixes such as `G1` and are truncated to
   15 characters.

@@ -1,5 +1,6 @@
 // Entry point: detect which supported game a ROM is and open it.
 import { LEVELS, loadLevel } from './level';
+import { decodeRush2049Music, listRush2049Music } from './music/rush2049';
 import { normalizeByteOrder, RushRom } from './rom';
 import { openRush1 } from './rush1';
 import type { Game } from './types';
@@ -12,7 +13,14 @@ export function openRom(bytes: Uint8Array): Game {
   switch (code) {
     case 'NRUE': {
       const r = new RushRom(rom);
-      return { id: 'rush2049', title: 'San Francisco Rush 2049', levels: LEVELS, loadLevel: (i) => loadLevel(r, i) };
+      return {
+        id: 'rush2049',
+        title: 'San Francisco Rush 2049',
+        levels: LEVELS,
+        loadLevel: (i) => loadLevel(r, i),
+        music: listRush2049Music(r),
+        decodeMusic: (i) => decodeRush2049Music(r, i),
+      };
     }
     case 'NSFE':
       return openRush1(rom);
