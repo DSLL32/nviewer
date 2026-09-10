@@ -1,0 +1,5 @@
+node_modules/
+dist/
+*.z64
+*.n64
+*.v64
