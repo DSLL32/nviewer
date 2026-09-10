@@ -1,6 +1,6 @@
 // Promise wrapper around the parser worker.
 import type { RomSummary, WorkerRequest, WorkerResponse } from '../protocol';
-import type { Level } from '../rom';
+import type { DecodedMusic, Level } from '../rom';
 
 type Pending = { resolve: (r: WorkerResponse) => void; reject: (e: Error) => void };
 type DistributiveOmit<T, K extends keyof T> = T extends unknown ? Omit<T, K> : never;
@@ -61,6 +61,14 @@ export class ParserClient {
     if (r.type !== 'level') throw new Error('Unexpected worker response');
     if (!r.ok) throw new Error(r.error);
     return { level: r.level, ms: r.ms };
+  }
+
+  /** Render one song of a game's soundtrack (in the worker; the sample arrays are transferred). */
+  async decodeMusic(gameId: string, index: number): Promise<DecodedMusic> {
+    const r = await this.request({ type: 'music', gameId, index });
+    if (r.type !== 'music') throw new Error('Unexpected worker response');
+    if (!r.ok) throw new Error(r.error);
+    return r.music;
   }
 
   dispose() {

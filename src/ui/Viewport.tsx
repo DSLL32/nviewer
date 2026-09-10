@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Level } from '../rom';
 import { FlyCamera } from '../render/camera';
 import { FlyControls, type ControlAction } from '../render/controls';
@@ -9,6 +9,8 @@ interface ViewportProps {
   level: Level | null;
   loadingName: string | null;
   error: string | null;
+  /** Extra panels stacked below the help panel (e.g. the music box). */
+  children?: ReactNode;
 }
 
 interface Engine {
@@ -24,7 +26,7 @@ declare global {
   }
 }
 
-export function Viewport({ level, loadingName, error }: ViewportProps) {
+export function Viewport({ level, loadingName, error, children }: ViewportProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const posRef = useRef<HTMLSpanElement>(null);
   const engineRef = useRef<Engine | null>(null);
@@ -178,7 +180,8 @@ export function Viewport({ level, loadingName, error }: ViewportProps) {
         <div className="click-hint">Click the view to fly · Esc to release</div>
       )}
 
-      <div className="hud" onMouseDown={(e) => e.stopPropagation()}>
+      <div className="hud-stack" onMouseDown={(e) => e.stopPropagation()}>
+      <div className="hud">
         <div className="hud-row">
           <strong>{level ? level.info.name : 'No level'}</strong>
           <button type="button" className="link" onClick={() => setHelpOpen((v) => !v)} aria-expanded={helpOpen}>
@@ -237,6 +240,8 @@ export function Viewport({ level, loadingName, error }: ViewportProps) {
             </label>
           </>
         )}
+      </div>
+      {children}
       </div>
     </main>
   );

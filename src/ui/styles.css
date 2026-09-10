@@ -90,8 +90,12 @@ button.link { background: none; border: none; padding: 0; color: var(--accent); 
   position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%);
   background: rgba(18, 20, 24, 0.7); border-radius: 999px; padding: 5px 14px; font-size: 12px; pointer-events: none;
 }
+.hud-stack {
+  position: absolute; top: 12px; right: 12px; width: 250px; max-height: calc(100% - 24px); overflow-y: auto;
+  display: flex; flex-direction: column; gap: 8px;
+}
 .hud {
-  position: absolute; top: 12px; right: 12px; width: 250px;
+  position: relative;
   background: rgba(18, 20, 24, 0.78); border: 1px solid var(--border); border-radius: 10px;
   padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; backdrop-filter: blur(4px);
 }
@@ -125,4 +129,19 @@ button.link { background: none; border: none; padding: 0; color: var(--accent); 
 .game-remove { font-size: 12px; flex: none; margin-top: 7px; }
 .add-rom { width: 100%; }
 .select-row { justify-content: space-between; }
-.select-row select { font: inherit; font-size: 12px; background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 2px 4px; }
+.select-row { gap: 8px; }
+.select-row select { font: inherit; font-size: 12px; background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 2px 4px; min-width: 0; max-width: 68%; text-overflow: ellipsis; }
+
+/* Music box (stacked below the help panel) */
+.music-now { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.music-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.music-seek { width: 100%; accent-color: var(--accent); }
+.music-controls { display: flex; align-items: center; gap: 6px; }
+.music-controls button { padding: 3px 8px; min-width: 32px; }
+.music-controls button:disabled { opacity: 0.45; cursor: default; }
+.music-controls input[type='range'] { flex: 1; min-width: 0; accent-color: var(--accent); }
+.music-status { min-height: 1.2em; display: flex; align-items: center; gap: 6px; }
+.music-list { list-style: none; margin: 0; padding: 0; max-height: 140px; overflow-y: auto; border-top: 1px solid var(--border); }
+.music-track { width: 100%; text-align: left; background: none; border: none; border-radius: 4px; padding: 3px 6px; font-size: 12px; }
+.music-track:hover { background: var(--panel-2); }
+.music-track.current { color: var(--accent); font-weight: 600; background: var(--accent-soft); }

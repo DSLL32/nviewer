@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { RomSummary } from '../protocol';
 import type { Level } from '../rom';
 import { Landing } from './Landing';
+import { MusicBox } from './MusicBox';
 import { computeStats, type LevelStats } from './levelStats';
 import { Sidebar, sameLevelRef, type LevelRef, type SidebarGame } from './Sidebar';
 import { useFileDrop } from './useFileDrop';
@@ -56,7 +57,7 @@ function readCollapsed(): Record<string, boolean> {
   }
 }
 
-const gameOf = (s: RomSummary): SidebarGame => ({ id: s.gameId, title: s.title, fileName: s.name, levels: s.levels });
+const gameOf = (s: RomSummary): SidebarGame => ({ id: s.gameId, title: s.title, fileName: s.name, levels: s.levels, music: s.music });
 
 const levelName = (games: SidebarGame[], ref: LevelRef) => {
   const game = games.find((g) => g.id === ref.gameId);
@@ -245,6 +246,11 @@ export function App() {
 
   const toggleCollapsed = useCallback((gameId: string) => setCollapsed((c) => ({ ...c, [gameId]: !c[gameId] })), []);
 
+  const decodeMusic = useCallback((gameId: string, index: number) => {
+    const client = clientRef.current;
+    return client ? client.decodeMusic(gameId, index) : Promise.reject(new Error('Parser not ready'));
+  }, []);
+
   const pickFile = () => fileInput.current?.click();
 
   return (
@@ -278,7 +284,9 @@ export function App() {
             level={level}
             loadingName={romBusy ?? (loading !== null ? levelName(games, loading) : null)}
             error={levelError}
-          />
+          >
+            <MusicBox games={games} currentGameId={selected?.gameId ?? null} decode={decodeMusic} />
+          </Viewport>
           {romError && (
             <div className="toast error" role="alert">
               {romError}

@@ -1,5 +1,5 @@
 import { useRef, type KeyboardEvent } from 'react';
-import type { LevelInfo, LevelKind } from '../rom';
+import type { LevelInfo, LevelKind, MusicTrack } from '../rom';
 import { formatCount, type LevelStats } from './levelStats';
 
 const GROUPS: { kind: LevelKind; title: string }[] = [
@@ -16,6 +16,7 @@ export interface SidebarGame {
   title: string;
   fileName: string;
   levels: LevelInfo[];
+  music?: MusicTrack[];
 }
 
 /** A level of a specific loaded game. */

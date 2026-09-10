@@ -1,7 +1,7 @@
 // Parser worker: opens ROMs (several games at once, keyed by game id), keeps them in memory and IndexedDB,
 // and parses levels on request.
 import type { RomSummary, WorkerRequest, WorkerResponse } from './protocol';
-import { openRom, type Game, type Level } from './rom';
+import { openRom, type DecodedMusic, type Game, type Level } from './rom';
 import { cacheKeyForGame, deleteCachedRom, isLegacyCacheKey, loadCachedRoms, saveCachedRom } from './romCache';
 
 interface OpenGame {
@@ -24,7 +24,16 @@ function open(bytes: ArrayBuffer): { game: Game; ms: number } {
 
 function summary(g: OpenGame, persisted: boolean, ms: number): RomSummary {
   const { game } = g;
-  return { gameId: game.id, title: game.title, levels: game.levels.map((l) => ({ ...l })), name: g.name, size: g.bytes.byteLength, persisted, ms };
+  return {
+    gameId: game.id,
+    title: game.title,
+    levels: game.levels.map((l) => ({ ...l })),
+    music: game.decodeMusic && game.music ? game.music.map((t) => ({ ...t })) : undefined,
+    name: g.name,
+    size: g.bytes.byteLength,
+    persisted,
+    ms,
+  };
 }
 
 self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
@@ -113,6 +122,33 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
       }
       return;
     }
+    case 'music': {
+      const entry = games.get(req.gameId);
+      const game = entry?.game;
+      if (!entry || !game) {
+        post({ type: 'music', id: req.id, ok: false, error: 'This ROM is not loaded' });
+        return;
+      }
+      if (!game.decodeMusic || !game.music?.some((t) => t.index === req.index)) {
+        post({ type: 'music', id: req.id, ok: false, error: `${game.title} has no track ${req.index}` });
+        return;
+      }
+      try {
+        const t0 = performance.now();
+        const decoded = game.decodeMusic(req.index);
+        const ms = performance.now() - t0;
+        // Give each channel its own exact-size buffer (decoders may return views into larger render buffers),
+        // then transfer those buffers instead of structured-cloning tens of megabytes.
+        const channels = decoded.channels.map((c) =>
+          c.byteOffset === 0 && c.byteLength === c.buffer.byteLength && c.buffer !== entry.bytes ? c : c.slice(),
+        );
+        const music: DecodedMusic = { ...decoded, channels };
+        post({ type: 'music', id: req.id, ok: true, music, ms }, collectTransferables(music, entry.bytes));
+      } catch (err) {
+        post({ type: 'music', id: req.id, ok: false, error: errorText(err) });
+      }
+      return;
+    }
   }
 };
 
@@ -122,7 +158,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
  * and the received file buffer is never transferred. Games build level arrays freshly per load (checked for
  * both supported games), so whole-buffer views are not shared with parser state.
  */
-function collectTransferables(level: Level, romBytes: ArrayBuffer): Transferable[] {
+function collectTransferables(level: Level | DecodedMusic, romBytes: ArrayBuffer): Transferable[] {
   const out = new Set<ArrayBuffer>();
   const seen = new Set<object>();
   const visit = (v: unknown, depth: number) => {
