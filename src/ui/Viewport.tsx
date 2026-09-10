@@ -33,7 +33,6 @@ export function Viewport({ level, loadingName, error }: ViewportProps) {
   const [locked, setLocked] = useState(false);
   const [nearest, setNearest] = useState(false);
   const [showScripted, setShowScripted] = useState(true);
-  const [culling, setCulling] = useState(true);
   const [helpOpen, setHelpOpen] = useState(true);
   const actionRef = useRef<(a: ControlAction) => void>(() => {});
   const startViewRef = useRef<{ level: Level; view: StartView } | null>(null);
@@ -132,7 +131,6 @@ export function Viewport({ level, loadingName, error }: ViewportProps) {
 
   useEffect(() => engineRef.current?.renderer.setNearestFiltering(nearest), [nearest]);
   useEffect(() => engineRef.current?.renderer.setShowAnimated(showScripted), [showScripted]);
-  useEffect(() => engineRef.current?.renderer.setBackfaceCulling(culling), [culling]);
 
   const hasScripted = level?.instances.some((i) => i.animated && i.mesh >= 0) ?? false;
 
@@ -187,10 +185,6 @@ export function Viewport({ level, loadingName, error }: ViewportProps) {
             <label className={`check${hasScripted ? '' : ' muted'}`}>
               <input type="checkbox" checked={showScripted} onChange={(e) => setShowScripted(e.target.checked)} />
               Show scripted objects
-            </label>
-            <label className="check">
-              <input type="checkbox" checked={culling} onChange={(e) => setCulling(e.target.checked)} />
-              Back-face culling
             </label>
           </>
         )}

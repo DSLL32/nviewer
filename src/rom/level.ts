@@ -11,7 +11,7 @@
 import { runDisplayList } from './displaylist';
 import type { RushRom } from './rom';
 import type { Instance, Level, LevelInfo, Mesh, Texture } from './types';
-import { cstr, emptyBounds, placementMatrix, pruneUnused, view } from './util';
+import { cstr, emptyBounds, mirrorMatrixX, mirrorPlacementX, placementMatrix, pruneUnused, view } from './util';
 
 export type * from './types';
 
@@ -55,8 +55,6 @@ class MeshLibrary {
     const dv = view(model);
     const ctx = {
       buf: model, ucode: 'f3dex2' as const, textures: this.textures, textureKeys: this.textureKeys,
-      // Double-sided faces are modelled as reversed-winding twins, so the game culls back faces.
-      cullBackByDefault: true,
       keyPrefix: `${fileIndex}:`,
       // Texture images are addressed relative to IMAG; every other address is a file offset.
       resolve: (addr: number) => addr,
@@ -128,7 +126,7 @@ export function loadLevel(rom: RushRom, index: number): Level {
   for (let i = 0; i < wobj.count; i++) {
     const o = wobj.offset + i * 104;
     const name = cstr(place, o, 16);
-    const m = Array.from({ length: 12 }, (_, k) => pdv.getFloat32(o + 16 + k * 4));
+    const m = mirrorPlacementX(Array.from({ length: 12 }, (_, k) => pdv.getFloat32(o + 16 + k * 4)));
     const mesh = resolve(name);
     instances.push({ name, mesh, matrix: placementMatrix(m) });
     if (mesh >= 0 && mesh < levelMeshCount) {
@@ -171,12 +169,12 @@ export function loadLevel(rom: RushRom, index: number): Level {
         name,
         mesh,
         animated: true,
-        matrix: new Float32Array([
+        matrix: mirrorMatrixX(new Float32Array([
           (1 - 2 * (y * y + z * z)) * sx, 2 * (x * y + w * z) * sx, 2 * (x * z - w * y) * sx, 0,
           2 * (x * y - w * z) * sy, (1 - 2 * (x * x + z * z)) * sy, 2 * (y * z + w * x) * sy, 0,
           2 * (x * z + w * y) * sz, 2 * (y * z - w * x) * sz, (1 - 2 * (x * x + y * y)) * sz, 0,
           f(0), f(1), f(2), 1,
-        ]),
+        ])),
       });
     }
   }

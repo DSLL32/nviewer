@@ -12,11 +12,6 @@ export interface DisplayListContext {
   // Map display-list/vertex and texture image addresses to offsets in buf (-1: not in buf).
   resolve: (addr: number) => number;
   resolveImage?: (addr: number) => number; // defaults to resolve
-  // Whether the game has back-face culling enabled when it draws these display lists
-  // (set by game code, not by the lists themselves).
-  cullBackByDefault?: boolean;
-  // Negate X: the game's world is mirrored relative to a right-handed, Y-up frame.
-  mirrorX?: boolean;
   // Texture cache shared across the display lists of a level.
   textures: Texture[];
   textureKeys: Map<string, number>;
@@ -42,7 +37,6 @@ const enum Rdp {
 }
 
 const G_ZBUFFER = 0x1;
-const G_CULL_BACK = { f3dex: 0x2000, f3dex2: 0x400 };
 const RM_Z_CMP = 0x10, RM_Z_UPD = 0x20, RM_CVG_X_ALPHA = 0x1000, RM_FORCE_BL = 0x4000;
 const RM_ZMODE_MASK = 0xc00, RM_ZMODE_XLU = 0x800;
 
@@ -78,7 +72,7 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
   const { buf, resolve } = ctx;
   const dv = view(buf);
   const st: State = {
-    vtx: [], geometryMode: G_ZBUFFER | (ctx.cullBackByDefault ? G_CULL_BACK[ctx.ucode] : 0), renderMode: RM_Z_CMP | RM_Z_UPD, alphaCompare: 0, textLut: 0,
+    vtx: [], geometryMode: G_ZBUFFER, renderMode: RM_Z_CMP | RM_Z_UPD, alphaCompare: 0, textLut: 0,
     // Many objects set up a texture without a G_TEXTURE command of their own: the
     // game leaves texturing enabled between objects.
     combineUsesTexel: true, textureOn: true, scaleS: 1, scaleT: 1, timg: -1, timgSiz: 0, image: -1, palette: -1,
@@ -123,24 +117,21 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
     const zbuf = (st.geometryMode & G_ZBUFFER) !== 0;
     const depthTest = zbuf && (rm & RM_Z_CMP) !== 0;
     const depthWrite = zbuf && (rm & RM_Z_UPD) !== 0 && blend !== 'blend';
-    const cullBack = (st.geometryMode & G_CULL_BACK[ctx.ucode]) !== 0;
-    const key = `${texture}/${blend}/${depthTest}/${depthWrite}/${cullBack}`;
+    const key = `${texture}/${blend}/${depthTest}/${depthWrite}`;
     let bb = builders.get(key);
     if (!bb) {
-      bb = { batch: { texture, blend, depthTest, depthWrite, cullBack }, pos: [], uv: [], col: [] };
+      bb = { batch: { texture, blend, depthTest, depthWrite }, pos: [], uv: [], col: [] };
       builders.set(key, bb);
     }
     const tile = st.tiles[0];
     const shift = (s: number) => (s > 10 ? 1 << (16 - s) : 1 / (1 << s));
     const su = texture >= 0 ? (st.scaleS * shift(tile.shiftS)) / (32 * tile.width) : 0;
     const sv = texture >= 0 ? (st.scaleT * shift(tile.shiftT)) / (32 * tile.height) : 0;
-    // N64 front faces wind clockwise in world space (the RSP's screen Y points down);
-    // emit counter-clockwise so batches follow the OpenGL convention. Mirroring the
-    // world flips the winding by itself.
-    const sx = ctx.mirrorX ? -VERTEX_SCALE : VERTEX_SCALE;
-    for (const i of ctx.mirrorX ? [a, b, c] : [a, c, b]) {
+    // The games' worlds are mirrored relative to a right-handed, Y-up frame: negate X
+    // (see mirrorPlacementX).
+    for (const i of [a, b, c]) {
       const v = st.vtx[i];
-      bb.pos.push(v.x * sx, v.y * VERTEX_SCALE, v.z * VERTEX_SCALE);
+      bb.pos.push(-v.x * VERTEX_SCALE, v.y * VERTEX_SCALE, v.z * VERTEX_SCALE);
       // The RDP samples texel (s - uls, t - ult) of the tile.
       bb.uv.push(texture >= 0 ? v.s * su - tile.uls / tile.width : 0, texture >= 0 ? v.t * sv - tile.ult / tile.height : 0);
       bb.col.push(v.c >>> 24, (v.c >>> 16) & 0xff, (v.c >>> 8) & 0xff, v.c & 0xff);

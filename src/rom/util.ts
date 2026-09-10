@@ -19,6 +19,21 @@ export function placementMatrix(m: number[]): Float32Array {
   ]);
 }
 
+// Both games' worlds are mirrored relative to the viewer's right-handed, Y-up frame
+// (signs read backwards and landmarks swap sides otherwise). Geometry negates X
+// (displaylist.ts); transforms become S M S with S = diag(-1, 1, 1).
+// `m` is a placement array: row-major 3x3 then translation.
+export function mirrorPlacementX(m: number[]): number[] {
+  for (const k of [1, 2, 3, 6, 9]) m[k] = -m[k];
+  return m;
+}
+
+// Same for a column-major 4x4.
+export function mirrorMatrixX(m: Float32Array): Float32Array {
+  for (const k of [1, 2, 4, 8, 12]) m[k] = -m[k];
+  return m;
+}
+
 // Keeps the level file's own meshes (the first `levelMeshCount`, indices unchanged)
 // plus the extra meshes instances actually use, and only the textures those meshes
 // reference. Remaps instance mesh indices in place.

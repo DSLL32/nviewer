@@ -44,7 +44,6 @@ interface GpuBatch {
   mode: Mode;
   depthTest: boolean;
   depthWrite: boolean;
-  cullBack: boolean;
 }
 
 interface GpuMesh {
@@ -56,7 +55,6 @@ interface DrawItem {
   mesh: GpuMesh;
   model: Mat4;
   animated: boolean;
-  mirrored: boolean; // negative determinant: winding is flipped
   x: number;
   y: number;
   z: number;
@@ -86,7 +84,6 @@ export class LevelRenderer {
   lastFrame: FrameStats = { drawCalls: 0 };
   private showAnimated = true;
   private skyGroundY = 0;
-  private cullingEnabled = true;
 
   private readonly program: WebGLProgram;
   private readonly uViewProj: WebGLUniformLocation | null;
@@ -103,8 +100,6 @@ export class LevelRenderer {
   private stDepthTest: boolean | null = null;
   private stDepthWrite: boolean | null = null;
   private stBlend: boolean | null = null;
-  private stCull: boolean | null = null;
-  private stMirrored: boolean | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
     const gl = canvas.getContext('webgl2', { antialias: true, alpha: false, powerPreference: 'high-performance' });
@@ -121,9 +116,7 @@ export class LevelRenderer {
     const maxAniso = this.anisoExt ? (gl.getParameter(this.anisoExt.MAX_TEXTURE_MAX_ANISOTROPY_EXT) as number) : 1;
     this.filter = { nearest: false, anisotropy: Math.min(8, maxAniso) };
     gl.depthFunc(gl.LEQUAL);
-    // Back faces are culled per batch (Batch.cullBack); the parser delivers OpenGL winding (counter-clockwise front).
-    gl.cullFace(gl.BACK);
-    gl.frontFace(gl.CCW);
+    gl.disable(gl.CULL_FACE); // no culling: both sides of every triangle are drawn
     gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
   }
 
@@ -131,13 +124,6 @@ export class LevelRenderer {
     if (this.filter.nearest === nearest) return;
     this.filter.nearest = nearest;
     for (const t of this.scene?.textures ?? []) applyTextureFilter(this.gl, t, this.filter, this.anisoExt);
-    this.dirty = true;
-  }
-
-  /** Globally allow or suppress back-face culling (for debugging); batches still decide via cullBack. */
-  setBackfaceCulling(enabled: boolean) {
-    if (this.cullingEnabled === enabled) return;
-    this.cullingEnabled = enabled;
     this.dirty = true;
   }
 
@@ -189,7 +175,7 @@ export class LevelRenderer {
       const mesh = getMesh(inst.mesh);
       if (!mesh) continue;
       const m = inst.matrix;
-      items.push({ mesh, model: m, animated: inst.animated === true, mirrored: det3(m) < 0, x: m[12], y: m[13], z: m[14], dist: 0 });
+      items.push({ mesh, model: m, animated: inst.animated === true, x: m[12], y: m[13], z: m[14], dist: 0 });
     }
 
     const sky: GpuMesh[] = [];
@@ -238,13 +224,10 @@ export class LevelRenderer {
     let boundMode = -1;
     let boundTextured = -1;
     let boundTexture: WebGLTexture | null = null;
-    const draw = (b: GpuBatch, model: Mat4, depthTest: boolean, depthWrite: boolean, mirrored: boolean, allowCull = true) => {
+    const draw = (b: GpuBatch, model: Mat4, depthTest: boolean, depthWrite: boolean) => {
       this.setDepthTest(depthTest);
       this.setDepthWrite(depthWrite);
       this.setBlend(b.mode === Mode.Blend);
-      const cull = allowCull && this.cullingEnabled && b.cullBack;
-      this.setCull(cull);
-      if (cull) this.setMirroredWinding(mirrored);
       if (model !== boundModel) {
         gl.uniformMatrix4fv(this.uModel, false, model);
         boundModel = model;
@@ -271,16 +254,15 @@ export class LevelRenderer {
     const [cx, cy, cz] = camera.position;
     mat4.translation(this.skyModel, cx, cy - this.skyGroundY, cz);
     for (const mesh of scene.sky) {
-      // No culling: the dome is seen from inside and has no depth anyway.
-      for (const b of mesh.solid) draw(b, this.skyModel, false, false, false, false);
-      for (const b of mesh.blended) draw(b, this.skyModel, false, false, false, false);
+      for (const b of mesh.solid) draw(b, this.skyModel, false, false);
+      for (const b of mesh.blended) draw(b, this.skyModel, false, false);
     }
 
     // Opaque and cutout geometry.
     const showAnimated = this.showAnimated;
     for (const item of scene.items) {
       if (item.animated && !showAnimated) continue;
-      for (const b of item.mesh.solid) draw(b, item.model, b.depthTest, b.depthWrite, item.mirrored);
+      for (const b of item.mesh.solid) draw(b, item.model, b.depthTest, b.depthWrite);
     }
 
     // Blended geometry, back to front by instance origin.
@@ -291,7 +273,7 @@ export class LevelRenderer {
     scene.blendItems.sort((a, b) => b.dist - a.dist);
     for (const item of scene.blendItems) {
       if (item.animated && !showAnimated) continue;
-      for (const b of item.mesh.blended) draw(b, item.model, b.depthTest, false, item.mirrored);
+      for (const b of item.mesh.blended) draw(b, item.model, b.depthTest, false);
     }
 
     gl.bindVertexArray(null);
@@ -335,7 +317,6 @@ export class LevelRenderer {
       mode: b.blend === 'blend' ? Mode.Blend : b.blend === 'cutout' ? Mode.Cutout : Mode.Opaque,
       depthTest: b.depthTest,
       depthWrite: b.depthWrite,
-      cullBack: b.cullBack === true,
     };
   }
 
@@ -362,20 +343,6 @@ export class LevelRenderer {
     if (this.stDepthWrite === on) return;
     this.gl.depthMask(on);
     this.stDepthWrite = on;
-  }
-
-  private setCull(on: boolean) {
-    if (this.stCull === on) return;
-    if (on) this.gl.enable(this.gl.CULL_FACE);
-    else this.gl.disable(this.gl.CULL_FACE);
-    this.stCull = on;
-  }
-
-  /** Front faces are counter-clockwise; a mirrored model matrix (negative determinant) flips that to clockwise. */
-  private setMirroredWinding(mirrored: boolean) {
-    if (this.stMirrored === mirrored) return;
-    this.gl.frontFace(mirrored ? this.gl.CW : this.gl.CCW);
-    this.stMirrored = mirrored;
   }
 
   private setBlend(on: boolean) {
@@ -421,13 +388,4 @@ function averageTextureColor(tex: Level['textures'][number] | undefined): [numbe
     b += tex.rgba[i + 2];
   }
   return [r / n / 255, g / n / 255, b / n / 255];
-}
-
-/** Determinant of the upper-left 3x3 of a column-major 4x4 matrix. */
-function det3(m: Mat4): number {
-  return (
-    m[0] * (m[5] * m[10] - m[6] * m[9]) -
-    m[4] * (m[1] * m[10] - m[2] * m[9]) +
-    m[8] * (m[1] * m[6] - m[2] * m[5])
-  );
 }

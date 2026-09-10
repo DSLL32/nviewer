@@ -25,8 +25,6 @@ export interface Batch {
   blend: BlendMode;
   depthTest: boolean;
   depthWrite: boolean;
-  // Back faces (clockwise winding as seen by the viewer, OpenGL convention) are not drawn.
-  cullBack: boolean;
   // Non-indexed triangles: 3 positions / 2 uvs / 4 colors per vertex.
   positions: Float32Array;
   uvs: Float32Array;

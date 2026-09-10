@@ -39,6 +39,9 @@ filtering · H help · Esc releases the mouse.
 Both games draw with the RDP tile commands and share several conventions:
 - Vertex coordinates are 1/16 of a world unit.
 - Placement matrices are 3×3 in row-vector convention, followed by a translation.
+- **Handedness.** Both worlds are mirrored relative to a right-handed, Y-up frame, so the viewer
+  negates X in vertices and transforms. Without that, signs read backwards and landmarks swap sides:
+  the Golden Gate Bridge appears left of the Rush 2049 start line instead of right of it.
 
 ### Texture memory (both games)
 
@@ -109,9 +112,6 @@ Textures are uploaded with the RDP tile commands, not read in place.
   - +0x10 and +0x18: texture and palette name tables.
   - From 0x20: 52-byte object records, with the display list at +12.
   - Display lists are F3DEX 1.21.
-- **Handedness.** The world is mirrored relative to Rush 2049; the viewer negates X. Without it, signs
-  read backwards and the Palace of Fine Arts lies west of the Golden Gate Bridge. In both games
-  back-face culling is on, and double-sided faces are stored as reversed-winding twins.
 - **Placement.** The level name sits at +8, followed by 100-byte instances from 0x18 (name, matrix,
   translation, flags, bounds). Instances form a tree:
   - +68 (i16) is the next sibling and +70 (i16) the first child, as entry indices.
