@@ -17,7 +17,7 @@ import { runDisplayList } from '../displaylist';
 import { inflateRaw } from '../inflate';
 import { parseLibmusBank, renderLibmusSong, type Wave } from '../music/libmus';
 import { view } from '../util';
-import { animatedMaterial, cstr, gex3ObjectMesh, instanceMatrix, isMarkerMesh, LEVEL_BASE, ObjectTable, startCamera, SyntheticList, titleCase, toRom, Z_UP } from './common';
+import { animatedMaterial, cstr, gex3ObjectMesh, instanceMatrix, isMarkerMesh, LEVEL_BASE, objectClass, ObjectTable, startCamera, SyntheticList, titleCase, toRom, Z_UP } from './common';
 
 const LEVEL_TABLE = 0x8013c;
 const LEVEL_SIZE = 0x54;
@@ -141,7 +141,7 @@ function loadLevel(rom: Uint8Array, objects: ObjectTable, def: LevelDef): Level 
   for (const [material, ranges] of groups) {
     for (const [w0, w1] of PRELUDE) syn.cmd(w0, w1);
     for (const [w0, w1] of materialCommands(material)) syn.cmd(w0, w1);
-    for (const [from, to] of ranges) for (let q = from; q < to; q += 8) syn.cmd(dv.getUint32(q), dv.getUint32(q + 4));
+    for (const [from, to] of ranges) for (let q = from; q < to; q += 8) syn.cmd(dv.getUint32(q), dv.getUint32(q + 4), q);
   }
   syn.cmd(0xdf000000, 0);
   const skyCount = u32(0x20);
@@ -181,8 +181,12 @@ function loadLevel(rom: Uint8Array, objects: ObjectTable, def: LevelDef): Level 
     for (let i = 3; i < t.rgba.length; i += 4) if (t.rgba[i] > 0 && t.rgba[i] < 255) n++;
     return n * 4 > t.rgba.length / 4;
   };
-  const world = run(0x0e000000).map((b) => (b.blend === 'cutout' && partialAlpha(textures[b.texture]) ? { ...b, blend: 'blend' as const, depthWrite: false } : b));
-  const meshes: Mesh[] = [meshFromBatches('world', world)];
+  const world = syn.remapSources(run(0x0e000000), list)
+    .map((b) => (b.blend === 'cutout' && partialAlpha(textures[b.texture]) ? { ...b, blend: 'blend' as const, depthWrite: false } : b));
+  const meshes: Mesh[] = [{
+    ...meshFromBatches('world', world),
+    info: { level: cstr(rom, toRom(rdv.getUint32(t))), triSource: 'offset in the inflated level image' },
+  }];
   const instances: Instance[] = [{ name: 'world', mesh: 0, matrix: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]) }];
   const extra: Partial<Level> = {};
   if (skyStart >= 0) {
@@ -205,13 +209,17 @@ function loadLevel(rom: Uint8Array, objects: ObjectTable, def: LevelDef): Level 
       entry = null;
       const data = objects.data(name);
       const obj = data ? gex3ObjectMesh(data, `obj:${name}:`, textures, textureKeys) : null;
-      if (obj && obj.batches.length && !isMarkerMesh(obj.batches, textures)) entry = { mesh: meshes.push(meshFromBatches(name.replace(/_+$/, ''), obj.batches)) - 1, skeletal: obj.skeletal };
+      if (obj && obj.batches.length && !isMarkerMesh(obj.batches, textures)) {
+        const mesh = { ...meshFromBatches(name.replace(/_+$/, ''), obj.batches), info: { object: name, class: objectClass(data!), triSource: 'offset in the object data (past its end: synthetic list)' } };
+        entry = { mesh: meshes.push(mesh) - 1, skeletal: obj.skeletal };
+      }
       meshOf.set(name, entry);
     }
     if (!entry) continue;
     instances.push({
       name: meshes[entry.mesh].name, mesh: entry.mesh,
       matrix: instanceMatrix(dv.getInt16(r + 8), dv.getInt16(r + 10), dv.getInt16(r + 12), dv.getInt16(r + 16), dv.getInt16(r + 18), dv.getInt16(r + 20)),
+      info: { instance: i, record: `0x${r.toString(16)}`, object: name, flags: dv.getUint16(r + 0x0e) },
     });
   }
 

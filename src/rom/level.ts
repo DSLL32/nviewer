@@ -71,6 +71,7 @@ class MeshLibrary {
         name: cstr(model, r, 16),
         radius: dv.getFloat32(r + 16),
         batches: runDisplayList(ctx, dv.getUint32(r + 32)),
+        info: { file: fileIndex, object: i, record: `0x${r.toString(16)}`, triSource: `offset in file ${fileIndex} (decompressed)` },
       });
     }
     return [first, this.meshes.length];
@@ -130,7 +131,7 @@ export function loadLevel(rom: RushRom, index: number): Level {
     const name = cstr(place, o, 16);
     const m = mirrorPlacementX(Array.from({ length: 12 }, (_, k) => pdv.getFloat32(o + 16 + k * 4)));
     const mesh = resolve(name);
-    instances.push({ name, mesh, matrix: placementMatrix(m) });
+    instances.push({ name, mesh, matrix: placementMatrix(m), info: { file: PLACEMENT_FILE_BASE + index, instance: i, record: `0x${o.toString(16)}` } });
     if (mesh >= 0 && mesh < levelMeshCount) {
       const rad = meshes[mesh].radius;
       for (let k = 0; k < 3; k++) {
@@ -171,6 +172,7 @@ export function loadLevel(rom: RushRom, index: number): Level {
         name,
         mesh,
         animated: true,
+        info: { file: MODEL_FILE_BASE + index, path: i, record: `0x${e.toString(16)}`, keyframe: `0x${k.toString(16)}` },
         matrix: mirrorMatrixX(new Float32Array([
           (1 - 2 * (y * y + z * z)) * sx, 2 * (x * y + w * z) * sx, 2 * (x * z - w * y) * sx, 0,
           2 * (x * y - w * z) * sy, (1 - 2 * (x * x + z * z)) * sy, 2 * (y * z + w * x) * sy, 0,

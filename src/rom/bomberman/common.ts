@@ -21,7 +21,7 @@ export function mergeBatches(batches: Batch[]): Batch[] {
   }
   return [...groups.values()].map((g) => {
     if (g.length === 1) return g[0];
-    const cat = <T extends Float32Array | Uint8Array>(get: (b: Batch) => T, make: (n: number) => T): T => {
+    const cat = <T extends Float32Array | Uint8Array | Uint32Array>(get: (b: Batch) => T, make: (n: number) => T): T => {
       const out = make(g.reduce((s, b) => s + get(b).length, 0));
       let o = 0;
       for (const b of g) {
@@ -35,6 +35,7 @@ export function mergeBatches(batches: Batch[]): Batch[] {
       positions: cat((b) => b.positions, (n) => new Float32Array(n)),
       uvs: cat((b) => b.uvs, (n) => new Float32Array(n)),
       colors: cat((b) => b.colors, (n) => new Uint8Array(n)),
+      ...(g.every((b) => b.triSource) ? { triSource: cat((b) => b.triSource!, (n) => new Uint32Array(n)) } : { triSource: undefined }),
     };
   });
 }

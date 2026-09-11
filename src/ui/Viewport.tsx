@@ -1,12 +1,21 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { Level } from '../rom';
 import { FlyCamera } from '../render/camera';
-import { FlyControls, type ControlAction } from '../render/controls';
+import { FlyControls, type ControlAction, type PickMode } from '../render/controls';
+import { LevelPicker, orientedBoxLines, triangleWorld } from '../render/picking';
 import { LevelRenderer } from '../render/renderer';
 import { computeStartView, type StartView } from '../render/startView';
+import { SelectionPanel } from './SelectionPanel';
+import { describeSelection, type Selection } from './selectionInfo';
+
+const OBJECT_HIGHLIGHT: [number, number, number] = [1, 0.2, 0.95]; // magenta
+const FACE_HIGHLIGHT: [number, number, number] = [1, 0.9, 0.1]; // yellow
 
 interface ViewportProps {
   level: Level | null;
+  /** Game the shown level belongs to (for the selection report). */
+  gameId?: string | null;
+  gameTitle?: string | null;
   loadingName: string | null;
   error: string | null;
   /** Extra panels stacked below the help panel (e.g. the music box). */
@@ -26,7 +35,7 @@ declare global {
   }
 }
 
-export function Viewport({ level, loadingName, error, children }: ViewportProps) {
+export function Viewport({ level, gameId, gameTitle, loadingName, error, children }: ViewportProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const posRef = useRef<HTMLSpanElement>(null);
   const engineRef = useRef<Engine | null>(null);
@@ -42,6 +51,44 @@ export function Viewport({ level, loadingName, error, children }: ViewportProps)
   const [helpOpen, setHelpOpen] = useState(true);
   const actionRef = useRef<(a: ControlAction) => void>(() => {});
   const startViewRef = useRef<{ level: Level; view: StartView } | null>(null);
+  const [pickMode, setPickMode] = useState<PickMode | null>(null);
+  // The selection remembers its level, so a newly loaded level never shows a stale index.
+  const [picked, setPicked] = useState<{ level: Level; sel: Selection } | null>(null);
+  const pickerRef = useRef<LevelPicker | null>(null);
+  const pickRef = useRef<(mode: PickMode, clientX: number, clientY: number) => void>(() => {});
+
+  const pickerFor = (lv: Level): LevelPicker => {
+    let picker = pickerRef.current;
+    if (!picker || picker.level !== lv) {
+      picker = new LevelPicker(lv);
+      pickerRef.current = picker;
+    }
+    return picker;
+  };
+
+  // Hidden instances (scripted objects switched off) cannot stay selected.
+  const selection =
+    picked && level && picked.level === level && (showScripted || !level.instances[picked.sel.instance]?.animated) ? picked.sel : null;
+
+  pickRef.current = (mode, clientX, clientY) => {
+    const engine = engineRef.current;
+    if (!engine || !level) return;
+    const canvas = engine.renderer.gl.canvas as HTMLCanvasElement;
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const ndcX = ((clientX - rect.left) / rect.width) * 2 - 1;
+    const ndcY = 1 - ((clientY - rect.top) / rect.height) * 2;
+    const cam = engine.camera;
+    const dir = cam.rayThrough(ndcX, ndcY, canvas.width / Math.max(1, canvas.height));
+    const hit = pickerFor(level).pick(cam.position, dir, {
+      include: (i) => showScripted || !level.instances[i].animated,
+      cullBackFaces: cullOn,
+      minT: cam.near,
+    });
+    if (!hit) setPicked(null);
+    else if (mode === 'object') setPicked({ level, sel: { kind: 'object', instance: hit.instance, point: hit.point } });
+    else setPicked({ level, sel: { kind: 'face', instance: hit.instance, batch: hit.batch, tri: hit.tri, point: hit.point } });
+  };
 
   actionRef.current = (a) => {
     const engine = engineRef.current;
@@ -64,6 +111,8 @@ export function Viewport({ level, loadingName, error, children }: ViewportProps)
       onSpeedChange: setSpeed,
       onLockChange: setLocked,
       onAction: (a) => actionRef.current(a),
+      onPickModeChange: setPickMode,
+      onPick: (mode, x, y) => pickRef.current(mode, x, y),
     });
     const engine: Engine = { renderer, camera, controls };
     engineRef.current = engine;
@@ -168,12 +217,60 @@ export function Viewport({ level, loadingName, error, children }: ViewportProps)
     writeString(BACKDROP_KEY, showBackdrop ? '1' : '0');
   }, [showBackdrop]);
 
+  // Selection overlay: the object's oriented bounding box, or the face filled and outlined.
+  useEffect(() => {
+    const renderer = engineRef.current?.renderer;
+    if (!renderer) return;
+    const inst = level && selection ? level.instances[selection.instance] : undefined;
+    if (!level || !selection || !inst) {
+      renderer.setHighlight(null);
+    } else if (selection.kind === 'object') {
+      const bounds = pickerFor(level).bounds(inst.mesh);
+      renderer.setHighlight(bounds ? { lines: orientedBoxLines(bounds, inst.matrix), color: OBJECT_HIGHLIGHT } : null);
+    } else {
+      const tri = triangleWorld(level, selection.instance, selection.batch, selection.tri);
+      renderer.setHighlight(
+        tri
+          ? {
+              fill: new Float32Array([...tri[0], ...tri[1], ...tri[2]]),
+              lines: new Float32Array([...tri[0], ...tri[1], ...tri[1], ...tri[2], ...tri[2], ...tri[0]]),
+              color: FACE_HIGHLIGHT,
+            }
+          : null,
+      );
+    }
+  }, [level, selection]);
+
+  // Esc clears the selection (while the mouse is captured, the browser uses Esc to release it instead).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      const t = e.target;
+      if (t instanceof HTMLSelectElement || t instanceof HTMLTextAreaElement) return;
+      if (t instanceof HTMLInputElement && t.type !== 'checkbox' && t.type !== 'range') return;
+      setPicked(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  const report = useMemo(
+    () => (level && selection ? describeSelection(level, gameId && gameTitle ? { id: gameId, title: gameTitle } : null, selection) : null),
+    [level, selection, gameId, gameTitle],
+  );
+  const reportTexture = report && report.texture !== null && level ? (level.textures[report.texture] ?? null) : null;
+
   const hasScripted = level?.instances.some((i) => i.animated && i.mesh >= 0) ?? false;
   const hasFog = !!level?.fog;
 
   return (
     <main className="viewport">
-      <canvas ref={canvasRef} className="gl-canvas" tabIndex={0} aria-label="Level view. Click to fly." />
+      <canvas
+        ref={canvasRef}
+        className={`gl-canvas${pickMode ? ` pick-${pickMode}` : ''}`}
+        tabIndex={0}
+        aria-label="Level view. Click to fly, Ctrl+click selects an object, Alt+click a face."
+      />
 
       {loadingName && (
         <div className="overlay center" role="status">
@@ -187,11 +284,17 @@ export function Viewport({ level, loadingName, error, children }: ViewportProps)
           <div className="error" role="alert">{glError ?? error}</div>
         </div>
       )}
-      {level && !locked && !loadingName && (
-        <div className="click-hint">Click the view to fly · Esc to release</div>
+      {level && !loadingName && (pickMode || !locked) && (
+        <div className="click-hint" id="click-hint">
+          {pickMode === 'object'
+            ? 'Click an object to select it · Esc clears the selection'
+            : pickMode === 'face'
+              ? 'Click a face to select it · Esc clears the selection'
+              : 'Click the view to fly · Esc to release'}
+        </div>
       )}
 
-      <div className="hud-stack" onMouseDown={(e) => e.stopPropagation()}>
+      <div className={`hud-stack${report ? ' wide' : ''}`} onMouseDown={(e) => e.stopPropagation()}>
       <div className="hud">
         <div className="hud-row">
           <strong>{level ? level.info.name : 'No level'}</strong>
@@ -210,11 +313,13 @@ export function Viewport({ level, loadingName, error, children }: ViewportProps)
               <dt>W A S D</dt><dd>Move</dd>
               <dt>Arrow keys</dt><dd>Look around</dd>
               <dt>Space / E</dt><dd>Up</dd>
-              <dt>C / Q / Ctrl</dt><dd>Down</dd>
+              <dt>C / Q</dt><dd>Down</dd>
               <dt>Shift</dt><dd>Fast (×5)</dd>
               <dt>Wheel</dt><dd>Adjust speed</dd>
               <dt>R</dt><dd>Reset view</dd>
               <dt>F</dt><dd>Toggle nearest filtering</dd>
+              <dt>Ctrl + click</dt><dd>Select object</dd>
+              <dt>Alt + click</dt><dd>Select face</dd>
             </dl>
             <label className="check">
               <input type="checkbox" checked={nearest} onChange={(e) => setNearest(e.target.checked)} />
@@ -262,6 +367,7 @@ export function Viewport({ level, loadingName, error, children }: ViewportProps)
         )}
       </div>
       {children}
+      {report && <SelectionPanel report={report} texture={reportTexture} onClear={() => setPicked(null)} />}
       </div>
     </main>
   );

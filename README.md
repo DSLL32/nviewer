@@ -16,7 +16,7 @@ Open the page, then choose or drop ROM files such as `San Francisco Rush 2049 (U
 `Bomberman Hero (U) [!].z64` (`.v64`/`.n64` byte orders work too).
 
 **Controls:** click the view to capture the mouse, then look around with the mouse · arrow keys look around · W A S D move ·
-Space/E up · C/Q/Ctrl down · Shift faster · mouse wheel changes speed · R reset view · F nearest
+Space/E up · C/Q down · Ctrl+click selects an object and Alt+click a face (details and a Copy button for bug reports) · Shift faster · mouse wheel changes speed · R reset view · F nearest
 filtering · H help · Esc releases the mouse.
 
 ## Layout

@@ -82,6 +82,7 @@ export class Rush1Rom {
 
 function addContainer(
   buf: Uint8Array, segment: number, keyPrefix: string, meshes: Mesh[], textures: Texture[], textureKeys: Map<string, number>,
+  file: string, triSource: string,
 ) {
   const dv = view(buf);
   const names = dv.getUint32(0) & 0xffffff;
@@ -97,6 +98,7 @@ function addContainer(
       name: cstr(buf, names + i * 24, 16),
       radius: dv.getFloat32(names + i * 24 + 16),
       batches: runDisplayList(ctx, dv.getUint32(0x20 + i * 52 + 12)),
+      info: { file, object: i, record: `0x${(0x20 + i * 52).toString(16)}`, triSource },
     });
   }
 }
@@ -115,9 +117,11 @@ export function loadRush1Level(rom: Rush1Rom, index: number): Level {
   const segment5 = new Uint8Array(((model.length + 15) & ~15) + shared.length);
   segment5.set(model);
   segment5.set(shared, (model.length + 15) & ~15);
-  addContainer(segment5, TRACK_SEGMENT, 'track:', meshes, textures, textureKeys);
+  addContainer(segment5, TRACK_SEGMENT, 'track:', meshes, textures, textureKeys, `A${TRACK_MODEL_BASE + n}`,
+    `offset in segment 5: file A${TRACK_MODEL_BASE + n} (decompressed), then A${SHARED_TEXTURES} from 0x${((model.length + 15) & ~15).toString(16)}`);
   const levelMeshCount = meshes.length;
-  addContainer(rom.file('A', SHARED_OBJECTS), SHARED_SEGMENT, 'shared:', meshes, textures, textureKeys);
+  addContainer(rom.file('A', SHARED_OBJECTS), SHARED_SEGMENT, 'shared:', meshes, textures, textureKeys, `A${SHARED_OBJECTS}`,
+    `offset in file A${SHARED_OBJECTS} (decompressed)`);
 
   const byName = new Map<string, number>();
   meshes.forEach((m, i) => { if (!byName.has(m.name)) byName.set(m.name, i); });
@@ -150,7 +154,7 @@ export function loadRush1Level(rom: Rush1Rom, index: number): Level {
     if (parent[i] >= 0) for (let k = 0; k < 3; k++) m[9 + k] += pdv.getFloat32(entry(parent[i]) + 52 + k * 4);
     mirrorPlacementX(m);
     const mesh = byName.get(name) ?? -1;
-    instances.push({ name, mesh, matrix: placementMatrix(m) });
+    instances.push({ name, mesh, matrix: placementMatrix(m), info: { file: `B${TRACK_PLACEMENT_BASE + n}`, instance: i, record: `0x${o.toString(16)}`, parent: parent[i] } });
     if (mesh >= 0 && mesh < levelMeshCount) {
       for (let k = 0; k < 3; k++) {
         bounds.min[k] = Math.min(bounds.min[k], m[9 + k] - meshes[mesh].radius);
@@ -181,10 +185,15 @@ function buildSkies(rom: Rush1Rom, meshes: Mesh[], textures: Texture[]): Sky[] {
   const main = view(rom.main);
   const at = (addr: number) => addr - MAIN_VADDR;
   const tris: number[][] = [];
+  const triRecords: number[] = []; // Batch.triSource: polygon record offsets in main code
   for (let o = at(SKY_POLYGONS); rom.main[o] !== 0xff; o += 4) {
     const [a, b, c, d] = rom.main.subarray(o, o + 4);
     tris.push([a, b, c]);
-    if (d !== 0xff) tris.push([a, c, d]);
+    triRecords.push(o);
+    if (d !== 0xff) {
+      tris.push([a, c, d]);
+      triRecords.push(o);
+    }
   }
 
   // A[5] texture table (+0x10: 32-byte entries of name, width, height, format, ..., image
@@ -234,7 +243,9 @@ function buildSkies(rom: Rush1Rom, meshes: Mesh[], textures: Texture[]): Sky[] {
       batches: [{
         texture, blend: 'blend', depthTest: false, depthWrite: false, cullBack: false,
         positions: new Float32Array(positions), uvs: new Float32Array(uvs), colors: new Uint8Array(colors),
+        triSource: new Uint32Array(triRecords),
       }],
+      info: { file: `A${SHARED_OBJECTS}`, texture: `0x${e.toString(16)}`, triSource: `offset in the main code image (RAM 0x${MAIN_VADDR.toString(16)} + offset): polygon record` },
     }) - 1;
     skies.push({ name, mesh });
   }

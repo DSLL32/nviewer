@@ -156,7 +156,7 @@ function loadArea(assets: Archive, index: number): Level {
   const instances: Instance[] = [];
   const light = areaLighting(a);
 
-  const place = (asset: number, at: [number, number, number] = [0, 0, 0], alpha?: number) => {
+  const place = (def: string, asset: number, at: [number, number, number] = [0, 0, 0], alpha?: number) => {
     const key = `${asset}/${alpha ?? 1}`;
     let mi = meshOf.get(key);
     if (mi === undefined) {
@@ -165,13 +165,15 @@ function loadArea(assets: Archive, index: number): Level {
         textures, textureKeys, keyPrefix: `${asset}:`, lighting: light,
       }));
       if (alpha !== undefined) mesh = withAlpha(mesh, alpha);
+      mesh.info = { asset, rom: `0x${assets.romOffset(asset).toString(16)}`, ...(alpha !== undefined ? { alpha } : {}), triSource: `offset in asset ${asset} (decompressed)` };
       mi = meshes.push(mesh) - 1;
       meshOf.set(key, mi);
     }
-    instances.push({ name: `asset ${asset}`, mesh: mi, matrix: translation(...at) });
+    // Placed by the area overlay's code (AREAS table here), not by a placement file.
+    instances.push({ name: `asset ${asset}`, mesh: mi, matrix: translation(...at), info: { area: index, def, asset } });
   };
-  place(a.map);
-  for (const p of a.parts ?? []) place(p.asset, p.at, p.alpha);
+  place('map', a.map);
+  (a.parts ?? []).forEach((p, k) => place(`parts[${k}]`, p.asset, p.at, p.alpha));
 
   const extra: Partial<Level> = {};
   // Most scenes clear the colour buffer to black; scenes with a background picture don't.

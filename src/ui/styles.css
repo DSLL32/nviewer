@@ -153,3 +153,20 @@ button.link { background: none; border: none; padding: 0; color: var(--accent); 
 .subgroup-name { flex: 1; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
 .subgroup-count { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .level-subgroup ul { padding-left: 12px; }
+
+/* Picking (Ctrl: object, Alt: face) and the selection panel */
+.gl-canvas.pick-object { cursor: pointer; }
+.gl-canvas.pick-face { cursor: crosshair; }
+.hud-stack.wide { width: 330px; }
+.selection-title { min-width: 0; overflow-wrap: anywhere; }
+.selection-actions { display: flex; align-items: center; gap: 8px; flex: none; }
+.selection-actions button { padding: 2px 8px; font-size: 12px; }
+.selection-section h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 4px 0 2px; font-weight: 600; }
+.selection-rows { margin: 0; font-size: 11px; display: flex; flex-direction: column; gap: 1px; }
+.selection-row { display: grid; grid-template-columns: 92px 1fr; gap: 6px; }
+.selection-row dt { color: var(--muted); overflow-wrap: anywhere; }
+.selection-row dd { margin: 0; overflow-wrap: anywhere; }
+.texture-thumb canvas {
+  display: block; image-rendering: pixelated; border: 1px solid var(--border);
+  background: repeating-conic-gradient(#5a5f69 0 25%, #353941 0 50%) 0 0 / 8px 8px;
+}

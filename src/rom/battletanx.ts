@@ -143,6 +143,18 @@ function loadLevel(rom: Uint8Array, index: number): Level {
     }
   }
 
+  // Batch.triSource: level-memory addresses back to ROM (chunks are copied in place).
+  const romOffset = (addr: number) => {
+    let lo = 0, hi = chunks.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (chunks[mid].at <= addr) lo = mid;
+      else hi = mid - 1;
+    }
+    const c = chunks[lo];
+    return c && addr >= c.at && addr < c.at + c.size ? c.src + addr - c.at : addr;
+  };
+
   const textures: Texture[] = [];
   const textureKeys = new Map<string, number>();
   const meshes: Mesh[] = [];
@@ -180,7 +192,14 @@ function loadLevel(rom: Uint8Array, index: number): Level {
       buf, ucode: 'f3dex', resolve: (addr) => (addr < buf.length ? addr : -1), textures, textureKeys, keyPrefix: '',
       vertexScale: 1, mirrorX: false, geometryMode: 0x1, combiner: true, tlutMode: 'slots', decals: true,
     }, scratch);
-    const mesh = meshes.push(meshFromBatches(`model ${mi}${animated ? ` frame ${frame}` : ''}`, batches)) - 1;
+    for (const b of batches) if (b.triSource) for (let k = 0; k < b.triSource.length; k++) b.triSource[k] = romOffset(b.triSource[k]);
+    const mesh = meshes.push({
+      ...meshFromBatches(`model ${mi}${animated ? ` frame ${frame}` : ''}`, batches),
+      info: {
+        file: `0x${LEVEL_FILES[id].toString(16)}`, model: mi, lod: models[mi].firstLod, pieces: `${lod.first}+${lod.count}`,
+        triSource: `ROM offset in the geometry pool at 0x${POOL_GEO.toString(16)} (mapped back from the level-memory copy)`,
+      },
+    }) - 1;
     meshOf.set(key, mesh);
     return mesh;
   };
@@ -203,7 +222,10 @@ function loadLevel(rom: Uint8Array, index: number): Level {
     if (mesh < 0 || !meshes[mesh].batches.length) continue;
     const ang = (yaw / 65536) * 2 * Math.PI;
     const c = Math.cos(ang), s = Math.sin(ang);
-    instances.push({ name: meshes[mesh].name, mesh, matrix: new Float32Array([c, 0, -s, 0, 0, 1, 0, 0, s, 0, c, 0, x, 0, z, 1]) });
+    instances.push({
+      name: meshes[mesh].name, mesh, matrix: new Float32Array([c, 0, -s, 0, 0, 1, 0, 0, s, 0, c, 0, x, 0, z, 1]),
+      info: { file: `0x${LEVEL_FILES[id].toString(16)}`, object: i, record: `0x${o.toString(16)}`, kind, flags: `0x${flags.toString(16)}` },
+    });
   }
 
   const rgb = RGB_TABLE - RAM + id * 3;

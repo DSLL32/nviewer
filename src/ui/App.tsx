@@ -73,6 +73,7 @@ export function App() {
   const [selected, setSelected] = useState<LevelRef | null>(null);
   const [loading, setLoading] = useState<LevelRef | null>(null);
   const [level, setLevel] = useState<Level | null>(null);
+  const [levelGameId, setLevelGameId] = useState<string | null>(null);
   const [levelError, setLevelError] = useState<string | null>(null);
   const [stats, setStats] = useState<Record<string, Record<number, LevelStats>>>({});
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(readCollapsed);
@@ -109,6 +110,7 @@ export function App() {
           const { level: loaded, ms } = await client.loadLevel(ref.gameId, ref.index);
           if (!sameLevelRef(wanted.current, ref) || generationOf(ref.gameId) !== gen) continue;
           setLevel(loaded);
+          setLevelGameId(ref.gameId);
           setLevelError(null);
           setStats((s) => ({ ...s, [ref.gameId]: { ...(s[ref.gameId] ?? {}), [ref.index]: computeStats(loaded, ms) } }));
         } catch (e) {
@@ -282,6 +284,8 @@ export function App() {
           />
           <Viewport
             level={level}
+            gameId={levelGameId}
+            gameTitle={games.find((g) => g.id === levelGameId)?.title ?? null}
             loadingName={romBusy ?? (loading !== null ? levelName(games, loading) : null)}
             error={levelError}
           >

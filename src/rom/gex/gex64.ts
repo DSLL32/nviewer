@@ -154,7 +154,10 @@ function loadLevel(rom: Uint8Array, objects: ObjectTable, def: LevelDef): Level 
     vertexScale: 1, mirrorX: false, geometryMode, matrix: Z_UP, combiner: true, decals: true,
   }, start);
 
-  const meshes: Mesh[] = [meshFromBatches('world', run(0x0e000000, 0x1))];
+  const meshes: Mesh[] = [{
+    ...meshFromBatches('world', run(0x0e000000, 0x1)),
+    info: { level: cstr(rom, t + 0x14), triSource: 'offset in the inflated level image' },
+  }];
   const instances: Instance[] = [{ name: 'world', mesh: 0, matrix: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]) }];
   const extra: Partial<Level> = {};
   if (skyStart >= 0) {
@@ -177,13 +180,17 @@ function loadLevel(rom: Uint8Array, objects: ObjectTable, def: LevelDef): Level 
       const data = objects.data(name);
       const hidden = data && HIDDEN_CLASSES.has(objectClass(data));
       const obj = data && !hidden ? gex64ObjectMesh(data, `obj:${name}:`, textures, textureKeys) : null;
-      if (obj && obj.batches.length) entry = { mesh: meshes.push(meshFromBatches(name.replace(/_+$/, ''), obj.batches)) - 1, skeletal: obj.skeletal };
+      if (obj && obj.batches.length) {
+        const mesh = { ...meshFromBatches(name.replace(/_+$/, ''), obj.batches), info: { object: name, class: objectClass(data!), triSource: 'offset in the object data (past its end: synthetic list)' } };
+        entry = { mesh: meshes.push(mesh) - 1, skeletal: obj.skeletal };
+      }
       meshOf.set(name, entry);
     }
     if (!entry) continue;
     instances.push({
       name: meshes[entry.mesh].name, mesh: entry.mesh,
       matrix: instanceMatrix(dv.getInt16(r + 8), dv.getInt16(r + 10), dv.getInt16(r + 12), dv.getInt16(r + 16), dv.getInt16(r + 18), dv.getInt16(r + 20)),
+      info: { instance: i, record: `0x${r.toString(16)}`, object: name },
     });
   }
 

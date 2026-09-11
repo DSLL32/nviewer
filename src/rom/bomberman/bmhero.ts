@@ -167,14 +167,18 @@ function loadStage(r: HeroRom, index: number): Level {
     const mesh = meshFromBatches(base ? `map sub 0x${base.toString(16)}` : 'map', drawContainer(map, base, {
       textures, textureKeys, keyPrefix: `${mapStart}/${base}:`, lighting: light, useTree: false,
     }));
-    if (mesh.batches.length) instances.push({ name: mesh.name, mesh: meshes.push(mesh) - 1, matrix: ident });
+    mesh.info = { file: `0x${mapStart.toString(16)}`, container: `0x${base.toString(16)}`, triSource: `offset in the map file at ROM 0x${mapStart.toString(16)} (decompressed)` };
+    if (mesh.batches.length) {
+      instances.push({ name: mesh.name, mesh: meshes.push(mesh) - 1, matrix: ident, info: { stage: i, fileRecord: `0x${fileRec.toString(16)}`, container: `0x${base.toString(16)}` } });
+    }
   }
 
   // Objects placed by the stage's placement records.
   const placement = r.u32v(PLACEMENT_TABLE + i * 4);
   const meshOf = new Map<string, number>();
   if (placement >= PLACEMENT_VRAM) {
-    for (let o = PLACEMENT_ROM + placement - PLACEMENT_VRAM; o + 16 <= r.rom.length; o += 16) {
+    const block = PLACEMENT_ROM + placement - PLACEMENT_VRAM;
+    for (let o = block; o + 16 <= r.rom.length; o += 16) {
       const cls = r.dv.getUint16(o);
       if (cls === 0xffff) break;
       if (cls >= CLASS_COUNT) continue;
@@ -197,7 +201,10 @@ function loadStage(r: HeroRom, index: number): Level {
         } catch {
           batches = [];
         }
-        mi = meshes.push(meshFromBatches(cstr(r.rom, desc + 0x48, 24) || `class ${cls}`, batches)) - 1;
+        mi = meshes.push({
+          ...meshFromBatches(cstr(r.rom, desc + 0x48, 24) || `class ${cls}`, batches),
+          info: { class: cls, file: `0x${modelStart.toString(16)}`, yaw, triSource: `offset in the model file at ROM 0x${modelStart.toString(16)} (decompressed)` },
+        }) - 1;
         meshOf.set(key, mi);
       }
       if (!meshes[mi].batches.length) continue;
@@ -206,6 +213,10 @@ function loadStage(r: HeroRom, index: number): Level {
       instances.push({
         name: meshes[mi].name, mesh: mi, noFog: true,
         matrix: new Float32Array([c, 0, -s, 0, 0, 1, 0, 0, s, 0, c, 0, x, y, z, 1]),
+        info: {
+          stage: i, record: (o - block) / 16, rom: `0x${o.toString(16)}`, class: cls,
+          params: [10, 12, 14].map((k) => r.dv.getInt16(o + k)).join(' '),
+        },
       });
     }
   }

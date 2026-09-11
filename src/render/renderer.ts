@@ -86,6 +86,36 @@ void main() {
   outColor = vec4(texture(uTexture, vUv).rgb * uTint, 1.0);
 }`;
 
+// Selection overlay (picked object box / face): flat colour with the scene's logarithmic depth, so one pass can be
+// depth-tested against the level and another drawn through it.
+const HIGHLIGHT_VS = `#version 300 es
+layout(location = 0) in vec3 aPosition;
+uniform mat4 uViewProj;
+uniform vec2 uOffset; // screen-space nudge in clip units per w: offset copies thicken 1-pixel lines
+out highp float vLogW;
+void main() {
+  gl_Position = uViewProj * vec4(aPosition, 1.0);
+  vLogW = 1.0 + gl_Position.w;
+  gl_Position.xy += uOffset * gl_Position.w;
+}`;
+
+const HIGHLIGHT_FS = `#version 300 es
+precision highp float;
+uniform vec4 uColor;
+uniform highp float uLogDepthCoef;
+uniform highp float uDepthBias;
+in highp float vLogW;
+out vec4 outColor;
+void main() {
+  gl_FragDepth = max(0.0, log2(max(vLogW, 1e-6)) * uLogDepthCoef - uDepthBias);
+  outColor = uColor;
+}`;
+
+// Pulls the depth-tested highlight lines slightly in front of the surfaces whose edges they trace.
+const HIGHLIGHT_DEPTH_BIAS = 1e-4;
+const HALO_OFFSETS = [[-2, -2], [2, -2], [-2, 2], [2, 2], [0, -2], [0, 2], [-2, 0], [2, 0]];
+const CORE_OFFSETS = [[0, 0], [1, 0], [0, 1], [1, 1]];
+
 const enum Mode { Opaque = 0, Cutout = 1, Blend = 2 }
 
 // Log-depth bias for decals: about 2e-4 of the view distance (0.2 units at 1000, 1 unit at 5000 with far 80000),
@@ -138,6 +168,13 @@ interface Scene {
 
 const DEFAULT_CLEAR: [number, number, number] = [0.46, 0.64, 0.86];
 
+/** What to draw over the scene for the current selection. */
+export interface Highlight {
+  lines: Float32Array; // world-space segments: xyz per vertex, two vertices per segment
+  fill?: Float32Array; // world-space triangles, shown translucent over everything
+  color: [number, number, number]; // 0..1
+}
+
 export interface FrameStats {
   drawCalls: number;
 }
@@ -175,6 +212,15 @@ export class LevelRenderer {
   private readonly uBackdropTint: WebGLUniformLocation | null;
   private readonly quadVao: WebGLVertexArrayObject;
   private readonly quadBuffer: WebGLBuffer;
+  private readonly highlightProgram: WebGLProgram;
+  private readonly uHlViewProj: WebGLUniformLocation | null;
+  private readonly uHlOffset: WebGLUniformLocation | null;
+  private readonly uHlColor: WebGLUniformLocation | null;
+  private readonly uHlLogDepthCoef: WebGLUniformLocation | null;
+  private readonly uHlDepthBias: WebGLUniformLocation | null;
+  private readonly highlightVao: WebGLVertexArrayObject;
+  private readonly highlightBuffer: WebGLBuffer;
+  private highlight: { color: [number, number, number]; fillCount: number; lineCount: number } | null = null;
   private readonly anisoExt: EXT_texture_filter_anisotropic | null;
   private readonly filter: TextureFilter;
   private scene: Scene | null = null;
@@ -223,6 +269,23 @@ export class LevelRenderer {
     gl.bindVertexArray(null);
     this.quadVao = quadVao;
     this.quadBuffer = quadBuffer;
+    const hp = createProgram(gl, HIGHLIGHT_VS, HIGHLIGHT_FS);
+    this.highlightProgram = hp;
+    this.uHlViewProj = gl.getUniformLocation(hp, 'uViewProj');
+    this.uHlOffset = gl.getUniformLocation(hp, 'uOffset');
+    this.uHlColor = gl.getUniformLocation(hp, 'uColor');
+    this.uHlLogDepthCoef = gl.getUniformLocation(hp, 'uLogDepthCoef');
+    this.uHlDepthBias = gl.getUniformLocation(hp, 'uDepthBias');
+    const hlVao = gl.createVertexArray();
+    const hlBuffer = gl.createBuffer();
+    if (!hlVao || !hlBuffer) throw new Error('Could not create highlight buffers');
+    gl.bindVertexArray(hlVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, hlBuffer);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+    gl.bindVertexArray(null);
+    this.highlightVao = hlVao;
+    this.highlightBuffer = hlBuffer;
     gl.useProgram(this.program);
     gl.uniform1i(gl.getUniformLocation(this.program, 'uTexture'), 0);
     this.anisoExt = gl.getExtension('EXT_texture_filter_anisotropic');
@@ -287,8 +350,26 @@ export class LevelRenderer {
     this.dirty = true;
   }
 
+  /** Overlay for the picked object or face (null clears it). */
+  setHighlight(h: Highlight | null) {
+    this.dirty = true;
+    const fill = h?.fill ?? new Float32Array(0);
+    if (!h || (h.lines.length === 0 && fill.length === 0)) {
+      this.highlight = null;
+      return;
+    }
+    const data = new Float32Array(fill.length + h.lines.length);
+    data.set(fill, 0);
+    data.set(h.lines, fill.length);
+    const gl = this.gl;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.highlightBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
+    this.highlight = { color: h.color, fillCount: Math.floor(fill.length / 3), lineCount: Math.floor(h.lines.length / 3) };
+  }
+
   setLevel(level: Level | null) {
     this.freeScene();
+    this.highlight = null;
     this.dirty = true;
     this.fog = level?.fog ?? null;
     if (!level) return;
@@ -327,7 +408,9 @@ export class LevelRenderer {
     const skies: Scene['skies'] = [];
     let clearColor = DEFAULT_CLEAR;
     if (level.skies && level.skies.length > 0) {
-      // Game-built skies: always alpha-blended (texture x vertex colour; alpha fades out at the horizon).
+      // Game-built skies: always alpha-blended (texture x vertex colour; alpha fades out at the horizon). Their
+      // cullBack flags are honoured whatever the culling toggle says: Gex 3 builds its sky from patches that must
+      // not be seen from behind.
       for (const entry of level.skies) {
         const src = level.meshes[entry.mesh];
         if (!src) continue;
@@ -336,7 +419,6 @@ export class LevelRenderer {
           const gb = this.uploadBatch(b, textures);
           if (!gb) continue;
           gb.mode = Mode.Blend;
-          gb.cullBack = false;
           batches.push(gb);
           mesh.blended.push(gb);
         }
@@ -404,7 +486,8 @@ export class LevelRenderer {
     }
 
     gl.useProgram(this.program);
-    gl.uniform1f(this.uLogDepthCoef, 1 / Math.log2(camera.far + 1));
+    const logDepthCoef = 1 / Math.log2(camera.far + 1);
+    gl.uniform1f(this.uLogDepthCoef, logDepthCoef);
     gl.uniform1f(this.uDepthBias, 0);
     camera.viewProjection(this.viewProj, canvas.width / Math.max(1, canvas.height));
     gl.uniformMatrix4fv(this.uViewProj, false, this.viewProj);
@@ -432,11 +515,13 @@ export class LevelRenderer {
     let boundMode = -1;
     let boundTextured = -1;
     let boundTexture: WebGLTexture | null = null;
-    const draw = (b: GpuBatch, model: Mat4, depthTest: boolean, depthWrite: boolean, mirrored = false, allowCull = true) => {
+    // Culling: 'toggle' = level geometry (the user's setting), 'game' = always as the batch says, 'never'.
+    type CullPolicy = 'toggle' | 'game' | 'never';
+    const draw = (b: GpuBatch, model: Mat4, depthTest: boolean, depthWrite: boolean, mirrored = false, policy: CullPolicy = 'toggle') => {
       this.setDepthTest(depthTest);
       this.setDepthWrite(depthWrite);
       this.setBlend(b.mode === Mode.Blend);
-      const cull = allowCull && this.cullingEnabled && b.cullBack;
+      const cull = policy === 'game' ? b.cullBack : policy === 'toggle' && this.cullingEnabled && b.cullBack;
       this.setCull(cull);
       if (cull) this.setMirroredWinding(mirrored);
       if (model !== boundModel) {
@@ -469,14 +554,14 @@ export class LevelRenderer {
       const active = sel === null ? null : (scene.skies.find((s) => s.name === sel) ?? scene.skies[0]);
       if (active) {
         mat4.translation(this.skyModel, cx, cy, cz);
-        for (const b of active.mesh.blended) draw(b, this.skyModel, false, false, false, false);
+        for (const b of active.mesh.blended) draw(b, this.skyModel, false, false, false, 'game');
       }
     } else {
       // Legacy dome: follows the camera, offset down by the ground height (see setSkyGroundHeight).
       mat4.translation(this.skyModel, cx, cy - this.skyGroundY, cz);
       for (const mesh of scene.sky) {
-        for (const b of mesh.solid) draw(b, this.skyModel, false, false, false, false);
-        for (const b of mesh.blended) draw(b, this.skyModel, false, false, false, false);
+        for (const b of mesh.solid) draw(b, this.skyModel, false, false, false, 'never');
+        for (const b of mesh.blended) draw(b, this.skyModel, false, false, false, 'never');
       }
     }
 
@@ -511,16 +596,67 @@ export class LevelRenderer {
       for (const b of item.mesh.blended) draw(b, item.model, b.depthTest, false, item.mirrored);
     }
 
+    drawCalls += this.drawHighlight(logDepthCoef);
+
     gl.bindVertexArray(null);
     this.lastFrame = { drawCalls };
   }
 
   dispose() {
     this.freeScene();
+    this.gl.deleteProgram(this.highlightProgram);
+    this.gl.deleteVertexArray(this.highlightVao);
+    this.gl.deleteBuffer(this.highlightBuffer);
     this.gl.deleteProgram(this.program);
     this.gl.deleteProgram(this.backdropProgram);
     this.gl.deleteVertexArray(this.quadVao);
     this.gl.deleteBuffer(this.quadBuffer);
+  }
+
+  /** The selection overlay, after the whole scene. Returns the number of draw calls. */
+  private drawHighlight(logDepthCoef: number): number {
+    const h = this.highlight;
+    if (!h) return 0;
+    const gl = this.gl;
+    const canvas = gl.canvas as HTMLCanvasElement;
+    let calls = 0;
+    gl.useProgram(this.highlightProgram);
+    gl.uniformMatrix4fv(this.uHlViewProj, false, this.viewProj);
+    gl.uniform1f(this.uHlLogDepthCoef, logDepthCoef);
+    gl.uniform1f(this.uHlDepthBias, HIGHLIGHT_DEPTH_BIAS);
+    gl.bindVertexArray(this.highlightVao);
+    this.setCull(false);
+    this.setBlend(true);
+    this.setDepthWrite(false);
+    // One CSS pixel in clip units (WebGL lines are one device pixel wide; offset copies make them bolder).
+    const dpr = canvas.clientWidth > 0 ? canvas.width / canvas.clientWidth : 1;
+    const sx = (2 * dpr) / Math.max(1, canvas.width);
+    const sy = (2 * dpr) / Math.max(1, canvas.height);
+    const [r, g, b] = h.color;
+    if (h.fillCount > 0) {
+      this.setDepthTest(false);
+      gl.uniform2f(this.uHlOffset, 0, 0);
+      gl.uniform4f(this.uHlColor, r, g, b, 0.4);
+      gl.drawArrays(gl.TRIANGLES, 0, h.fillCount);
+      calls++;
+    }
+    const lines = (offsets: number[][], rgba: [number, number, number, number]) => {
+      gl.uniform4f(this.uHlColor, rgba[0], rgba[1], rgba[2], rgba[3]);
+      for (const [ox, oy] of offsets) {
+        gl.uniform2f(this.uHlOffset, ox * sx, oy * sy);
+        gl.drawArrays(gl.LINES, h.fillCount, h.lineCount);
+        calls++;
+      }
+    };
+    if (h.lineCount > 0) {
+      // A dark halo and a dimmed line everywhere (also through walls), then the unoccluded part at full strength.
+      this.setDepthTest(false);
+      lines(HALO_OFFSETS, [0, 0, 0, 0.5]);
+      lines(CORE_OFFSETS, [r, g, b, 0.55]);
+      this.setDepthTest(true);
+      lines(CORE_OFFSETS, [r, g, b, 1]);
+    }
+    return calls;
   }
 
   private uploadBatch(b: Batch, textures: WebGLTexture[]): GpuBatch | null {

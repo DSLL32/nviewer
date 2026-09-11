@@ -1,13 +1,18 @@
-// Spectator-style input: pointer-lock mouse look, WASD fly, wheel speed.
+// Spectator-style input: pointer-lock mouse look, WASD fly, wheel speed; Ctrl/Alt + click picks for bug reports.
 import type { FlyCamera } from './camera';
 import { clamp, vec3, type Vec3 } from './math';
 
 export type ControlAction = 'reset' | 'toggle-filter' | 'toggle-help';
 
+/** Holding Ctrl picks whole objects (instances), holding Alt picks single triangles. */
+export type PickMode = 'object' | 'face';
+
 export interface ControlsCallbacks {
   onSpeedChange(speed: number): void;
   onLockChange(locked: boolean): void;
   onAction(action: ControlAction): void;
+  onPickModeChange(mode: PickMode | null): void;
+  onPick(mode: PickMode, clientX: number, clientY: number): void;
 }
 
 const LOOK_SENSITIVITY = 0.0022; // radians per mouse pixel
@@ -21,7 +26,7 @@ const BACK = ['KeyS'];
 const LEFT = ['KeyA'];
 const RIGHT = ['KeyD'];
 const UP = ['Space', 'KeyE'];
-const DOWN = ['KeyC', 'KeyQ', 'ControlLeft', 'ControlRight'];
+const DOWN = ['KeyC', 'KeyQ'];
 const TURN_LEFT = ['ArrowLeft'];
 const TURN_RIGHT = ['ArrowRight'];
 const LOOK_UP = ['ArrowUp'];
@@ -33,6 +38,10 @@ export class FlyControls {
   private keys = new Set<string>();
   private changed = false;
   private dragging = false;
+  private hover = false;
+  private ctrlHeld = false;
+  private altHeld = false;
+  private mode: PickMode | null = null;
   private readonly canvas: HTMLCanvasElement;
   private readonly camera: FlyCamera;
   private readonly cb: ControlsCallbacks;
@@ -43,6 +52,8 @@ export class FlyControls {
     this.cb = cb;
     canvas.addEventListener('mousedown', this.onMouseDown);
     canvas.addEventListener('wheel', this.onWheel, { passive: false });
+    canvas.addEventListener('pointerenter', this.onPointerEnter);
+    canvas.addEventListener('pointerleave', this.onPointerLeave);
     document.addEventListener('mousemove', this.onMouseMove);
     document.addEventListener('mouseup', this.onMouseUp);
     document.addEventListener('pointerlockchange', this.onLockChange);
@@ -55,6 +66,8 @@ export class FlyControls {
     const c = this.canvas;
     c.removeEventListener('mousedown', this.onMouseDown);
     c.removeEventListener('wheel', this.onWheel);
+    c.removeEventListener('pointerenter', this.onPointerEnter);
+    c.removeEventListener('pointerleave', this.onPointerLeave);
     document.removeEventListener('mousemove', this.onMouseMove);
     document.removeEventListener('mouseup', this.onMouseUp);
     document.removeEventListener('pointerlockchange', this.onLockChange);
@@ -71,6 +84,10 @@ export class FlyControls {
   /** Keys drive the camera only while the mouse is captured or the canvas has focus. */
   get active() {
     return this.locked || document.activeElement === this.canvas;
+  }
+
+  get pickMode(): PickMode | null {
+    return this.mode;
   }
 
   setSpeed(speed: number) {
@@ -115,9 +132,28 @@ export class FlyControls {
     return moved;
   }
 
+  /** Pick mode follows the held modifiers; entering it releases the mouse so the pointer can aim. */
+  private updatePickMode() {
+    const mode: PickMode | null = this.altHeld ? 'face' : this.ctrlHeld ? 'object' : null;
+    if (mode === this.mode) return;
+    this.mode = mode;
+    if (mode) {
+      this.dragging = false;
+      if (this.locked) document.exitPointerLock();
+    }
+    this.cb.onPickModeChange(mode);
+  }
+
   private onMouseDown = (e: MouseEvent) => {
     if (e.button !== 0) return;
     this.canvas.focus();
+    const mode: PickMode | null = e.altKey ? 'face' : e.ctrlKey ? 'object' : this.mode;
+    if (mode) {
+      e.preventDefault();
+      if (this.locked) document.exitPointerLock(); // no meaningful cursor position while captured
+      else this.cb.onPick(mode, e.clientX, e.clientY);
+      return;
+    }
     this.dragging = true;
     if (!this.locked) {
       try {
@@ -135,6 +171,16 @@ export class FlyControls {
   };
 
   private onMouseMove = (e: MouseEvent) => {
+    if (!this.locked) {
+      // Resynchronise with the real modifier state (a key-up can be swallowed, e.g. by the window manager).
+      const ctrl = e.ctrlKey && (this.ctrlHeld || this.hover);
+      const alt = e.altKey && (this.altHeld || this.hover);
+      if (ctrl !== this.ctrlHeld || alt !== this.altHeld) {
+        this.ctrlHeld = ctrl;
+        this.altHeld = alt;
+        this.updatePickMode();
+      }
+    }
     if (!this.locked && !this.dragging) return;
     // Some browsers report a spurious huge delta right after locking.
     const dx = clamp(e.movementX, -300, 300);
@@ -150,16 +196,33 @@ export class FlyControls {
     this.setSpeed(this.camera.speed * Math.pow(1.2, -Math.sign(e.deltaY)));
   };
 
+  private onPointerEnter = () => {
+    this.hover = true;
+  };
+
+  private onPointerLeave = () => {
+    this.hover = false;
+  };
+
   private onLockChange = () => {
     if (!this.locked) this.keys.clear();
     this.cb.onLockChange(this.locked);
   };
 
   private onKeyDown = (e: KeyboardEvent) => {
+    if (e.key === 'Control' || e.key === 'Alt') {
+      if (!this.active && !this.hover) return;
+      // Alt alone would focus the browser's menu bar and take keyboard focus away from the view.
+      if (e.key === 'Alt') e.preventDefault();
+      if (e.key === 'Control') this.ctrlHeld = true;
+      else this.altHeld = true;
+      this.updatePickMode();
+      return;
+    }
     if (!this.active || e.metaKey || e.altKey) return;
     if (HELD_KEYS.has(e.code)) {
       this.keys.add(e.code);
-      e.preventDefault(); // stop page scrolling on Space/arrows and Ctrl+letter shortcuts where possible
+      e.preventDefault(); // stop page scrolling on Space/arrows
       return;
     }
     if (e.repeat || e.ctrlKey) return;
@@ -173,10 +236,19 @@ export class FlyControls {
 
   private onKeyUp = (e: KeyboardEvent) => {
     this.keys.delete(e.code);
+    if (e.key === 'Control' || e.key === 'Alt') {
+      if (e.key === 'Alt' && (this.active || this.hover || this.altHeld)) e.preventDefault();
+      if (e.key === 'Control') this.ctrlHeld = false;
+      else this.altHeld = false;
+      this.updatePickMode();
+    }
   };
 
   private onBlur = () => {
     this.keys.clear();
     this.dragging = false;
+    this.ctrlHeld = false;
+    this.altHeld = false;
+    this.updatePickMode();
   };
 }

@@ -220,12 +220,25 @@ class LevelMemory {
     dv.setUint32(sp, G_ENDDL << 24);
     return this.scratch;
   }
+
+  // A level-memory address as a ROM offset (chunks are copied in place), for Batch.triSource.
+  romOffset(addr: number): number {
+    let lo = 0, hi = this.chunks.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (this.chunks[mid].at <= addr) lo = mid;
+      else hi = mid - 1;
+    }
+    const c = this.chunks[lo];
+    return c && addr >= c.at && addr < c.at + c.len ? c.pool + c.off + addr - c.at : addr;
+  }
 }
 
 function loadLevel(rom: Uint8Array, index: number): Level {
   const def = DEFS[index];
   if (!def) throw new Error(`No level ${index}`);
-  const worlds = (FILES[`${def.id}/${def.variant}`] ?? []).map((start) => parseWorld(lzariDecode(rom, start)));
+  const files = FILES[`${def.id}/${def.variant}`] ?? [];
+  const worlds = files.map((start) => parseWorld(lzariDecode(rom, start)));
 
   // Fog colour and two lights (kind 37), ambient colour (kind 38).
   let fogColor: [number, number, number] | undefined;
@@ -274,16 +287,23 @@ function loadLevel(rom: Uint8Array, index: number): Level {
       vertexScale: 1, mirrorX: false, geometryMode: 0x230405, renderMode: 0x552078, matrix, lighting: lights,
       combiner: true, tlutMode: 'merged', decals: true,
     }, start);
-    const mesh = meshes.push(meshFromBatches(`world ${wi} model ${mi}`, batches)) - 1;
+    for (const b of batches) if (b.triSource) for (let k = 0; k < b.triSource.length; k++) b.triSource[k] = memory.romOffset(b.triSource[k]);
+    const mesh = meshes.push({
+      ...meshFromBatches(`world ${wi} model ${mi}`, batches),
+      info: {
+        file: `0x${files[wi].toString(16)}`, model: mi, yaw,
+        triSource: `ROM offset in the geometry pool at 0x${POOL_GEO.toString(16)} (mapped back from the level-memory copy)`,
+      },
+    }) - 1;
     meshOf.set(key, mesh);
     return mesh;
   };
 
   // Resolve placements first, so the level memory holds exactly the chunks of placed models.
-  const placed: { wi: number; mi: number; kind: number; x: number; y: number; z: number; yaw: number }[] = [];
+  const placed: { wi: number; pi: number; def: number; mi: number; kind: number; x: number; y: number; z: number; yaw: number }[] = [];
   let startView: Level['camera'];
   worlds.forEach((w, wi) => {
-    for (const p of w.placements) {
+    for (const [pi, p] of w.placements.entries()) {
       let o = w.h[3] + p.def;
       let kind = w.data[o];
       // Conditional includes {39, cond, u16 flag, u32 definition}: with no game mode running,
@@ -303,7 +323,7 @@ function loadLevel(rom: Uint8Array, index: number): Level {
       if (field === undefined) continue;
       const mi = w.dv.getUint16(o + field);
       if (mi === 0xffff || mi >= w.models.length) continue;
-      placed.push({ wi, mi, kind, x: p.x, y: p.y, z: p.z, yaw: p.yaw });
+      placed.push({ wi, pi, def: o, mi, kind, x: p.x, y: p.y, z: p.z, yaw: p.yaw });
       memory.add(modelRefs(wi, mi));
     }
   });
@@ -312,7 +332,13 @@ function loadLevel(rom: Uint8Array, index: number): Level {
   for (const p of placed) {
     const mesh = meshFor(p.wi, p.mi, p.yaw);
     if (!meshes[mesh].batches.length) continue;
-    instances.push({ name: `kind ${p.kind} ${meshes[mesh].name}`, mesh, matrix: translation(p.x, p.y, p.z) });
+    instances.push({
+      name: `kind ${p.kind} ${meshes[mesh].name}`, mesh, matrix: translation(p.x, p.y, p.z),
+      info: {
+        file: `0x${files[p.wi].toString(16)}`, placement: p.pi, record: `0x${(worlds[p.wi].h[2] + p.pi * 12).toString(16)}`,
+        definition: `0x${p.def.toString(16)}`, kind: p.kind,
+      },
+    });
   }
 
   const extra: Partial<Level> = {};

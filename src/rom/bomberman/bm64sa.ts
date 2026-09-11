@@ -150,7 +150,8 @@ function loadScene(res: Archive, index: number): Level {
   const map = mapRes > 0 ? parseNiff(res.file(mapRes)) : null;
   if (map) {
     const mesh = meshFromBatches(`map ${mapRes}`, drawNiff(map, { textures, textureKeys, keyPrefix: `${mapRes}:`, env }));
-    instances.push({ name: mesh.name, mesh: meshes.push(mesh) - 1, matrix: ident });
+    mesh.info = { resource: mapRes, rom: `0x${res.romOffset(mapRes).toString(16)}`, triSource: `offset in resource ${mapRes} (decompressed NIFF)` };
+    instances.push({ name: mesh.name, mesh: meshes.push(mesh) - 1, matrix: ident, info: { scene: s.desc, map: mapRes } });
   }
 
   // Candidate soft-block positions (the game picks some at random each round).
@@ -161,15 +162,19 @@ function loadScene(res: Archive, index: number): Level {
     if (o + 76 > d.length) break;
     const kind = 16 + dv.getUint32(o) * 32;
     if (kind + 32 > d.length || dv.getUint32(kind) !== 4 || dv.getUint32(kind + 0x14) !== SOFT_BLOCK_ID) continue;
-    blocks.push([dv.getFloat32(o + 4), dv.getFloat32(o + 8), dv.getFloat32(o + 12)]);
+    blocks.push([dv.getFloat32(o + 4), dv.getFloat32(o + 8), dv.getFloat32(o + 12), i, o]);
   }
   if (blocks.length) {
     const block = parseNiff(res.file(SOFT_BLOCK_NIFF));
     if (block) {
       const mesh = meshFromBatches('soft block', drawNiff(block, { textures, textureKeys, keyPrefix: `${SOFT_BLOCK_NIFF}:`, env }));
+      mesh.info = { resource: SOFT_BLOCK_NIFF, rom: `0x${res.romOffset(SOFT_BLOCK_NIFF).toString(16)}`, triSource: `offset in resource ${SOFT_BLOCK_NIFF} (decompressed NIFF)` };
       const mi = meshes.push(mesh) - 1;
-      for (const [x, y, z] of blocks) {
-        instances.push({ name: 'soft block', mesh: mi, matrix: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x + 50, y, z + 50, 1]), animated: true });
+      for (const [x, y, z, object, record] of blocks) {
+        instances.push({
+          name: 'soft block', mesh: mi, matrix: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x + 50, y, z + 50, 1]), animated: true,
+          info: { scene: s.desc, object, record: `0x${record.toString(16)}`, kind: dv.getUint32(record) },
+        });
       }
     }
   }

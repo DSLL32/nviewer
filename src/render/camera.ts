@@ -39,6 +39,17 @@ export class FlyCamera {
     this.pitch = clamp(Math.atan2(d[1], Math.hypot(d[0], d[2])), -MAX_PITCH, MAX_PITCH);
   }
 
+  /** Unit world-space direction through a point of the view in normalised device coordinates (-1..1, y up). */
+  rayThrough(ndcX: number, ndcY: number, aspect: number): Vec3 {
+    const f = this.forward();
+    const r = this.right();
+    const u = vec3.cross(r, f);
+    const t = Math.tan(this.fovY / 2);
+    const x = ndcX * t * aspect;
+    const y = ndcY * t;
+    return vec3.normalize([f[0] + r[0] * x + u[0] * y, f[1] + r[1] * x + u[1] * y, f[2] + r[2] * x + u[2] * y]);
+  }
+
   viewMatrix(out: Mat4): Mat4 {
     const f = this.forward();
     const r = this.right();

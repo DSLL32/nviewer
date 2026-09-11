@@ -168,9 +168,24 @@ export function startCamera(x: number, y: number, z: number, world: Mesh): Camer
 export class SyntheticList {
   readonly words: number[] = [];
   readonly verts: number[] = []; // 16 bytes each, as byte values
+  private readonly origins: number[] = []; // per command: data offset it was copied from, or -1
 
-  cmd(w0: number, w1: number) {
+  cmd(w0: number, w1: number, origin = -1) {
     this.words.push(w0 >>> 0, w1 >>> 0);
+    this.origins.push(origin);
+  }
+
+  // Points Batch.triSource entries of copied commands (in the list placed at `list`) back at the
+  // data offsets they were copied from.
+  remapSources(batches: Batch[], list: number): Batch[] {
+    for (const b of batches) {
+      if (!b.triSource) continue;
+      for (let i = 0; i < b.triSource.length; i++) {
+        const k = (b.triSource[i] - list) / 8;
+        if (Number.isInteger(k) && k >= 0 && k < this.origins.length && this.origins[k] >= 0) b.triSource[i] = this.origins[k];
+      }
+    }
+    return batches;
   }
 
   get address() {

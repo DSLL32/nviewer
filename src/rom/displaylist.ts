@@ -134,7 +134,7 @@ interface State {
   lighting: DlLighting | null;
 }
 
-interface BatchBuilder { batch: Omit<Batch, 'positions' | 'uvs' | 'colors'>; pos: number[]; uv: number[]; col: number[] }
+interface BatchBuilder { batch: Omit<Batch, 'positions' | 'uvs' | 'colors' | 'triSource'>; pos: number[]; uv: number[]; col: number[]; src: number[] }
 
 // G_SETCOMBINE fields per cycle: color a, b, c, d then alpha a, b, c, d
 // (output = (a - b) * c + d).
@@ -227,6 +227,7 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
       : null,
   };
   const builders = new Map<string, BatchBuilder>();
+  let cmdAddr = 0; // buffer offset of the command being interpreted (Batch.triSource)
 
   const currentTexture = (): number => {
     if (!st.textureOn || !st.combineUsesTexel || st.image < 0) return -1;
@@ -250,6 +251,7 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
       ctx.textures.push({
         width: t.width, height: t.height, rgba: decodeTexture(desc), wrapS: wrap(t.cms), wrapT: wrap(t.cmt),
         format: desc.fmt === ImFmt.CI ? `${fmtName}/${desc.tlut === Tlut.Ia16 ? 'IA16' : 'RGBA16'}` : fmtName,
+        source: `image 0x${st.image.toString(16)}${ci ? (merged ? ` tlut ${st.tlutKey}` : ` palette 0x${paletteAt.toString(16)}`) : ''} tmem 0x${t.tmem.toString(16)}`,
       });
       ctx.textureKeys.set(key, idx);
     }
@@ -271,9 +273,10 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
     const key = `${texture}/${blend}/${depthTest}/${depthWrite}/${cullBack}${decal ? '/decal' : ''}`;
     let bb = builders.get(key);
     if (!bb) {
-      bb = { batch: { texture, blend, depthTest, depthWrite, cullBack, ...(decal ? { decal } : {}) }, pos: [], uv: [], col: [] };
+      bb = { batch: { texture, blend, depthTest, depthWrite, cullBack, ...(decal ? { decal } : {}) }, pos: [], uv: [], col: [], src: [] };
       builders.set(key, bb);
     }
+    bb.src.push(cmdAddr);
     const tile = st.tiles[0];
     const shift = (s: number) => (s > 10 ? 1 << (16 - s) : 1 / (1 << s));
     const su = texture >= 0 ? (st.scaleS * shift(tile.shiftS)) / (32 * tile.width) : 0;
@@ -480,6 +483,7 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
     if (pc < 0 || pc + 8 > buf.length) break;
     const w0 = dv.getUint32(pc);
     const w1 = dv.getUint32(pc + 4);
+    cmdAddr = pc;
     pc += 8;
     const op = w0 >>> 24;
     let call = -1; // display list to call or branch to
@@ -581,5 +585,6 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
     positions: new Float32Array(b.pos),
     uvs: new Float32Array(b.uv),
     colors: new Uint8Array(b.col),
+    triSource: new Uint32Array(b.src),
   }));
 }
