@@ -24,9 +24,23 @@ interface StaticGeometry {
   bounds: Bounds;
 }
 
+/**
+ * Whether an instance is part of what the level shows by default: not in a layer that starts hidden (collision, hidden
+ * rooms or backdrops, invisible objects) nor in a collision overlay. Instances outside any layer count.
+ */
+function shownByDefault(level: Level): (index: number) => boolean {
+  const hidden = new Set<number>();
+  for (const layer of level.layers ?? []) {
+    if (layer.visibleByDefault === false || layer.kind === 'collision') for (const i of layer.instances) hidden.add(i);
+  }
+  return (index) => !hidden.has(index);
+}
+
 function gatherGeometry(level: Level): StaticGeometry {
   let total = 0;
-  const placed = level.instances.filter((i) => i.mesh >= 0 && i.mesh < level.meshes.length && !i.animated);
+  // The start view, speed and sky ground height come from the static geometry shown when the level opens.
+  const shown = shownByDefault(level);
+  const placed = level.instances.filter((inst, index) => inst.mesh >= 0 && inst.mesh < level.meshes.length && !inst.animated && shown(index));
   for (const inst of placed) {
     for (const b of level.meshes[inst.mesh].batches) total += Math.floor(b.positions.length / 9);
   }
