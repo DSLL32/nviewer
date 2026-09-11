@@ -1,6 +1,6 @@
 // Render-ready level data shared by all supported games.
 
-export type LevelKind = 'race' | 'battle' | 'stunt' | 'obstacle' | 'adventure';
+export type LevelKind = 'race' | 'battle' | 'stunt' | 'obstacle' | 'adventure' | 'campaign' | 'other';
 
 export interface LevelInfo {
   index: number;
@@ -127,7 +127,7 @@ export interface DecodedMusic {
 
 // A loaded ROM of one supported game.
 export interface Game {
-  id: 'rush2049' | 'rush1' | 'bm64' | 'bm64sa' | 'bmhero';
+  id: 'rush2049' | 'rush1' | 'bm64' | 'bm64sa' | 'bmhero' | 'battletanx' | 'battletanxga';
   title: string;
   levels: LevelInfo[];
   loadLevel(index: number): Level;

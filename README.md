@@ -1,8 +1,8 @@
 # N64 Level Viewer
 
 A browser viewer for the levels of these N64 games (USA versions): *San Francisco Rush 2049*,
-*San Francisco Rush: Extreme Racing*, *Bomberman 64*, *Bomberman 64: The Second Attack!* and
-*Bomberman Hero*. Load one or more ROMs, pick a level in the sidebar, and fly around freely, with
+*San Francisco Rush: Extreme Racing*, *Bomberman 64*, *Bomberman 64: The Second Attack!*,
+*Bomberman Hero*, *BattleTanx* and *BattleTanx: Global Assault*. Load one or more ROMs, pick a level in the sidebar, and fly around freely, with
 each game's soundtrack in the music box. ROMs are parsed entirely in the browser (in a Web Worker)
 and cached in IndexedDB; nothing is uploaded anywhere.
 
@@ -33,8 +33,11 @@ filtering · H help · Esc releases the mouse.
     - `container64.ts`, `bm64.ts`, `bmhero.ts`: "64" model containers, Bomberman 64 and Hero levels
     - `niff.ts`, `bm64sa.ts`: NIFF models and The Second Attack scenes
     - `music.ts`: song tables and compressed MIDI
+  - `lzari.ts`, `battletanx.ts`, `battletanxga.ts`: BattleTanx and Global Assault (format notes
+    in `BATTLETANX.md`)
   - `music/`: `musyx.ts`, `rush2049.ts` (Rush 2049), `libultra.ts` (libultra bank/sequence
-    synthesizer shared by Rush 1 and the Bomberman games), `rush1.ts`
+    synthesizer shared by Rush 1, the Bomberman games and BattleTanx), `rush1.ts`, `libmus.ts`
+    (Global Assault's libmus player)
 - `src/worker.ts`: parses the ROM and levels off the main thread
 - `src/render/`: WebGL2 renderer, free-fly camera and controls
 - `src/ui/`: React UI (landing page, sidebar, viewport)
@@ -183,6 +186,26 @@ Textures are uploaded with the RDP tile commands, not read in place.
   uncompressed from one "S2" blob per game, output at 32 kHz. Bomberman 64 and Hero loudness match
   captured game audio as is; The Second Attack's sequence volume needs a factor of 0.75.
 
+### BattleTanx, BattleTanx: Global Assault
+
+`BATTLETANX.md` documents the formats in full; in short:
+- **Files.** Both games have uncompressed code with file ranges hard-coded in it; LZARI is the only
+  asset codec. Level files hold placements, models and references into raw ROM pools of small
+  display-list chunks (texture/render state and geometry) with chunk-relative addresses.
+- **Loading.** Like the games, the loaders copy the chunks a level uses, relocate them and patch them:
+  BattleTanx swaps in fog render modes and scales vertex colours by 1.92; Global Assault forces fog
+  and culling in its state chunks and lights everything with the level's two lights and ambient
+  colour (baked per placed yaw).
+- **Space.** World units, right-handed, Y up, no mirroring; placements turn about Y.
+- **Levels.** BattleTanx: the 17 campaign levels, the Battlelord territories and four levels no menu
+  reaches (the attract-mode set and Test 2-4). Global Assault: the 19 missions, the battle arenas,
+  cutscene variants, an unused SF Airport arena and a test maze. Palettes are per slot (BattleTanx,
+  also team colours) or merged 16-entry loads (Global Assault).
+- **Fog and sky.** Every level is fogged and the sky is cleared to the fog colour.
+- **Music.** BattleTanx: Standard MIDI files on libultra's sequence player; Global Assault:
+  Software Creations' libmus, emulated tick by tick with BIGROOM reverb. Both at 22047 Hz; loudness
+  and loop lengths checked against captured game audio.
+
 ## Known gaps
 
 - Rush 2049: scripted objects are shown frozen at the start of their paths.
@@ -193,3 +216,6 @@ Textures are uploaded with the RDP tile commands, not read in place.
   are not shown. Textures bound at run time from texture sets stay untextured.
 - Bomberman: animated textures (UV scrolling water) are static; environment mapping is approximate;
   translucent effects that blend by fog alpha are not modelled.
+- BattleTanx: tanks, pickups and destructible states other than the intact one are not shown; team
+  colour palette animations show a fixed frame; only the most detailed LOD is used. BattleTanx music
+  runs about 0.05% fast (the game's 16 ms audio poll rounding is not modelled).

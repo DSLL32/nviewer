@@ -128,9 +128,22 @@ export interface RenderStats {
   tailSeconds: number;
 }
 
+// libultra's equal-power pan table.
+const EQPOWER = Int32Array.from([
+  32767, 32764, 32757, 32744, 32727, 32704, 32677, 32644, 32607, 32564, 32517, 32464, 32407, 32344, 32277, 32205,
+  32127, 32045, 31958, 31866, 31770, 31668, 31561, 31450, 31334, 31213, 31087, 30957, 30822, 30682, 30537, 30388,
+  30234, 30075, 29912, 29744, 29572, 29395, 29214, 29028, 28838, 28643, 28444, 28241, 28033, 27821, 27605, 27385,
+  27160, 26931, 26698, 26461, 26220, 25975, 25726, 25473, 25216, 24956, 24691, 24423, 24151, 23875, 23596, 23313,
+  23026, 22736, 22442, 22145, 21845, 21541, 21234, 20924, 20610, 20294, 19974, 19651, 19325, 18997, 18665, 18331,
+  17993, 17653, 17310, 16965, 16617, 16266, 15913, 15558, 15200, 14840, 14477, 14113, 13746, 13377, 13006, 12633,
+  12258, 11881, 11503, 11122, 10740, 10357, 9971, 9584, 9196, 8806, 8415, 8023, 7630, 7235, 6839, 6442,
+  6044, 5646, 5246, 4845, 4444, 4042, 3640, 3237, 2833, 2429, 2025, 1620, 1216, 810, 405, 0,
+]);
+
 // ALBankFile at `ctl` (offsets relative to it), sample data at `tbl`; bank `index`. The
-// equal-power pan table (128 s16) is read from the ROM at `eqpowerRom`.
-export function parseBank(bytes: Uint8Array, ctl: number, tbl: number, index: number, eqpowerRom: number): Bank {
+// equal-power pan table (128 s16) is read from the ROM at `eqpowerRom`, or is libultra's own
+// when null.
+export function parseBank(bytes: Uint8Array, ctl: number, tbl: number, index: number, eqpowerRom: number | null): Bank {
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   if (dv.getUint16(ctl) !== 0x4231) throw new Error('Music instrument bank not found');
   const u8 = (o: number) => bytes[ctl + o];
@@ -186,7 +199,7 @@ export function parseBank(bytes: Uint8Array, ctl: number, tbl: number, index: nu
     instruments.push(o ? instrument(o) : null);
   }
   const perc = u32(b + 8);
-  const eqpower = Int32Array.from({ length: 128 }, (_, i) => dv.getInt16(eqpowerRom + i * 2));
+  const eqpower = eqpowerRom === null ? EQPOWER : Int32Array.from({ length: 128 }, (_, i) => dv.getInt16(eqpowerRom + i * 2));
   return {
     sampleRate: s32(b + 4), instruments, percussion: perc ? instrument(perc) : null, waves: [...waves.values()], eqpower,
   };
@@ -370,6 +383,8 @@ export interface RenderOptions {
   seqVol: number; // sequence volume, 0..0x7FFF
   loop: boolean; // repeat [loopStart, end) of the song forever
   extra?: number; // samples rendered past the loop end (for verifying the loop seam)
+  // Factor applied to every voice's pitch ratio; default bank sample rate / output rate.
+  pitchScale?: number;
 }
 
 export function renderSequence(bytes: Uint8Array, bank: Bank, seq: Sequence, opts: RenderOptions) {
@@ -391,7 +406,7 @@ export function renderSequence(bytes: Uint8Array, bank: Bank, seq: Sequence, opt
   const left = new Float32Array(limit + extra);
   const right = new Float32Array(limit + extra);
   const eqpower = bank.eqpower;
-  const pitchScale = bank.sampleRate / rate;
+  const pitchScale = opts.pitchScale ?? bank.sampleRate / rate;
 
   // __initFromBank: every channel gets the first instrument, channel 9 the percussion
   // instrument.

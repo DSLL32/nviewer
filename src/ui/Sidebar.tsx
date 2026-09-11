@@ -3,11 +3,13 @@ import type { LevelInfo, LevelKind, MusicTrack } from '../rom';
 import { formatCount, type LevelStats } from './levelStats';
 
 const GROUPS: { kind: LevelKind; title: string }[] = [
-  { kind: 'race', title: 'Race Tracks' },
+  { kind: 'campaign', title: 'Campaign' },
   { kind: 'adventure', title: 'Adventure' },
+  { kind: 'race', title: 'Race Tracks' },
   { kind: 'battle', title: 'Battle Arenas' },
   { kind: 'stunt', title: 'Stunt Arenas' },
   { kind: 'obstacle', title: 'Obstacle Course' },
+  { kind: 'other', title: 'Other' },
 ];
 
 export const APP_NAME = 'N64 Level Viewer';

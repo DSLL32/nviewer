@@ -23,6 +23,8 @@ export function Landing({ busy, error, onPick }: LandingProps) {
             <li>Bomberman 64 (U)</li>
             <li>Bomberman 64: The Second Attack! (U)</li>
             <li>Bomberman Hero (U)</li>
+            <li>BattleTanx (U)</li>
+            <li>BattleTanx: Global Assault (U)</li>
           </ul>
         </div>
         <div className="dropzone" aria-busy={busy !== null}>

@@ -57,6 +57,11 @@ export interface DisplayListContext {
   textureGen?: boolean;
   // Mark batches drawn with ZMODE_DEC.
   decals?: boolean;
+  // How G_LOADTLUT palettes are addressed. Default: the last loaded palette. 'slots': each
+  // load goes to slot (tmem / 8 - 0x100) / 16 of the load tile, and G_SETTILE's palette field
+  // (w1 bits 20-23) selects the slot (BattleTanx). 'merged': 16-entry loads at tmem 0x800 +
+  // 0x80 * k form one 256-entry table indexed by texel value (Global Assault).
+  tlutMode?: 'slots' | 'merged';
 }
 
 // Vertex coordinates are 1/16 of a world unit in both Rush games.
@@ -90,6 +95,7 @@ interface Tile {
   fmt: number; siz: number; width: number; height: number; cms: number; cmt: number; shiftS: number; shiftT: number;
   uls: number; ult: number; // upper-left texel of the tile, subtracted from texture coordinates
   line: number; tmem: number; // bytes per texel row, offset into texture memory
+  pal: number; // palette field of G_SETTILE
 }
 
 interface Vertex {
@@ -116,6 +122,9 @@ interface State {
   timgWidth: number;
   image: number;
   palette: number;
+  palettes: Map<number, number>; // tlutMode 'slots': slot -> palette offset in buf
+  tlut: Uint8Array; // tlutMode 'merged': 256 RGBA16 entries
+  tlutKey: string;
   mem: Uint8Array; // RDP texture memory
   loadKey: string; // identifies the last load into texture memory
   tiles: Tile[];
@@ -207,8 +216,9 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
     // game leaves texturing enabled between objects.
     combineUsesTexel: true, combine: decodeCombine(0xfc127e24, 0xfffff3f9), prim: 0xffffffff, env: 0xffffffff,
     textureOn: true, scaleS: 1, scaleT: 1, timg: -1, timgSiz: 0, timgWidth: 0, image: -1, palette: -1,
+    palettes: new Map(), tlut: new Uint8Array(512), tlutKey: '',
     mem: new Uint8Array(TMEM_SIZE), loadKey: '',
-    tiles: Array.from({ length: 8 }, () => ({ fmt: 0, siz: 0, width: 0, height: 0, cms: 0, cmt: 0, shiftS: 0, shiftT: 0, uls: 0, ult: 0, line: 0, tmem: 0 })),
+    tiles: Array.from({ length: 8 }, () => ({ fmt: 0, siz: 0, width: 0, height: 0, cms: 0, cmt: 0, shiftS: 0, shiftT: 0, uls: 0, ult: 0, line: 0, tmem: 0, pal: 0 })),
     rdpHalf1: 0,
     mtx: ctx.matrix ? ctx.matrix.slice() : null,
     mtxStack: [],
@@ -223,13 +233,16 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
     const t = st.tiles[0];
     if (t.width <= 0 || t.height <= 0) return -1;
     const wrap = (cm: number): WrapMode => (cm & 2 ? 'clamp' : cm & 1 ? 'mirror' : 'repeat');
-    const ci = t.fmt === ImFmt.CI && st.palette >= 0;
+    const merged = ctx.tlutMode === 'merged';
+    const paletteAt = ctx.tlutMode === 'slots' ? (st.palettes.get(t.pal) ?? st.palette) : st.palette;
+    const ci = t.fmt === ImFmt.CI && (merged ? st.tlutKey !== '' : paletteAt >= 0);
     const desc: TextureDesc = {
       fmt: t.fmt as ImFmt, siz: t.siz as ImSiz, width: t.width, height: t.height,
       mem: st.mem, tmem: t.tmem, line: t.siz === ImSiz.B32 ? t.line * 2 : t.line,
-      palette: ci ? buf.subarray(st.palette, st.palette + 512) : null, tlut: st.textLut as Tlut,
+      palette: ci ? (merged ? st.tlut : buf.subarray(paletteAt, paletteAt + 512)) : null, tlut: st.textLut as Tlut,
     };
-    const key = `${ctx.keyPrefix}${st.loadKey}/${t.tmem}/${desc.line}/${ci ? st.palette : -1}/${desc.fmt}/${desc.siz}/${desc.width}x${desc.height}/${desc.tlut}/${t.cms}/${t.cmt}`;
+    const paletteKey = ci ? (merged ? st.tlutKey : paletteAt) : -1;
+    const key = `${ctx.keyPrefix}${st.loadKey}/${t.tmem}/${desc.line}/${paletteKey}/${desc.fmt}/${desc.siz}/${desc.width}x${desc.height}/${desc.tlut}/${t.cms}/${t.cmt}`;
     let idx = ctx.textureKeys.get(key);
     if (idx === undefined) {
       idx = ctx.textures.length;
@@ -413,8 +426,25 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
         st.loadKey = `T${st.timg}/${st.timgWidth}/${sl},${tl},${sh},${th}/${tile.tmem}/${tile.line}`;
         break;
       }
-      case Rdp.LOADTLUT:
+      case Rdp.LOADTLUT: {
+        const tile = st.tiles[(w1 >>> 24) & 7];
+        if (ctx.tlutMode === 'merged') {
+          if (st.timg < 0) break;
+          const first = (tile.tmem - 0x800) >> 3;
+          const count = ((w1 >>> 14) & 0x3ff) + 1;
+          for (let i = 0; i < count && first + i >= 0 && first + i < 256; i++) {
+            st.tlut[(first + i) * 2] = buf[st.timg + i * 2] ?? 0;
+            st.tlut[(first + i) * 2 + 1] = buf[st.timg + i * 2 + 1] ?? 0;
+          }
+          st.tlutKey += `${st.timg}@${first},`;
+        } else if (ctx.tlutMode === 'slots') {
+          st.palettes.set(((tile.tmem >> 3) - 0x100) >> 4, st.timg);
+        }
         st.palette = st.timg;
+        break;
+      }
+      case 0xe8: // G_RDPTILESYNC starts each palette group in Global Assault's texture chunks
+        if (ctx.tlutMode === 'merged') st.tlutKey = '';
         break;
       case Rdp.SETTILE: {
         const t = st.tiles[(w1 >>> 24) & 7];
@@ -422,6 +452,7 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
         t.siz = (w0 >>> 19) & 3;
         t.line = ((w0 >>> 9) & 0x1ff) * 8;
         t.tmem = (w0 & 0x1ff) * 8;
+        t.pal = (w1 >>> 20) & 0xf;
         t.cmt = (w1 >>> 18) & 3;
         t.shiftT = (w1 >>> 10) & 0xf;
         t.cms = (w1 >>> 8) & 3;
