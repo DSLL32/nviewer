@@ -309,9 +309,9 @@ function loadLevel(y: YoshiRom, def: LevelDef): Level {
     // Switchable units: record {u16 tile[5]} ending at 0x8000, swapped by the level's switches (a bush covering a
     // hidden room turns into platforms, a hut wall opens onto the jungle). Each connected region of switchable
     // units is scored by how well its first and last tiles' edges match the fixed units around it. Where the
-    // first tile fits (a bush or wall that later opens), it is drawn with the last tile just in front, so the
-    // platforms show over an intact bush; otherwise the last tile is drawn alone (edges that replace fill
-    // tiles) and the first goes to an optional layer.
+    // first tile fits (a bush or wall that later opens), all its tiles are drawn in order, each just in front of
+    // the previous, so platforms and their trunks show over an intact bush; otherwise the last tile is drawn
+    // alone (edges that replace fill tiles) and the earlier ones go to an optional layer.
     const frames = (v: number): number[] => {
       if (!(v & 0x8000)) return [v];
       const o = (v & 0x7fff) * 10;
@@ -380,15 +380,14 @@ function loadLevel(y: YoshiRom, def: LevelDef): Level {
       if (score((s) => s[0]) < score((s) => s[s.length - 1])) for (const k of region) firstState.add(k);
     }
     const placed: [number, number, number, number][] = []; // px, py, cell, z offset
-    const other: [number, number, number][] = [];
+    const other: [number, number, number, number][] = [];
     for (const [key, f] of grid) {
       const px = (key % 65536) * unitW, py = Math.floor(key / 65536) * unitH;
-      const last = cellOf(f[f.length - 1]);
       if (firstState.has(key)) {
-        placed.push([px, py, cellOf(f[0]), 0], [px, py, last, 0.001]);
+        f.forEach((t, i) => placed.push([px, py, cellOf(t), 0.001 * i])); // every state, later ones in front
       } else {
-        placed.push([px, py, last, 0]);
-        if (switchable(f)) other.push([px, py, cellOf(f[0])]);
+        placed.push([px, py, cellOf(f[f.length - 1]), 0]);
+        if (switchable(f)) f.slice(0, -1).forEach((t, i) => other.push([px, py, cellOf(t), 0.001 * i]));
       }
     }
     if (!placed.length) continue;
@@ -414,7 +413,7 @@ function loadLevel(y: YoshiRom, def: LevelDef): Level {
     if (other.length) {
       // The other state of the switchable units, just in front of the layer.
       const qo = new QuadBuilder();
-      for (const [px, py, cell] of other) qo.quad(px, -py, layer.unitW, layer.unitH, uv(cell));
+      for (const [px, py, cell, z] of other) qo.quad(px, -py, layer.unitW, layer.unitH, uv(cell), undefined, z);
       const om = { ...meshFromBatches(`${name} other state`, [qo.batch(tex, 'cutout')]), info: { cast: hex(a.id), units: other.length, state: 'other state of switch tiles' } };
       const oi = push(om, new Float32Array([s, 0, 0, 0, 0, s, 0, 0, 0, 0, 1, 0, X0, -Y0, depthOf(a.z) + 0.001, 1]), { actor: a.index, cast: hex(a.id), state: 'other' });
       layers.push({ name: `switch tiles, other state (${name})`, kind, instances: [oi], depth: +a.z.toFixed(3), parallax: +r.toFixed(4), visibleByDefault: false });
