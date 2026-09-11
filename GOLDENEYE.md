@@ -910,7 +910,20 @@ end: an all-zero 8-byte record, then 24-36 bytes of padding to the file end
   (`[player]+0x70 × levelScale`, to 0.01 BG units) and the player's current tile on 13/14 captures (the 14th player had
   moved); picks the same tile as the game's resolved pad tiles for 3,014 of 3,029 pads (11 of the 15 others are
   coplanar overlaps; 4 differ in height).
-- `Tbg_cat_all_p_stanZ` (Citadel) doesn't follow this layout (§8).
+- **Older format** (`Tbg_cat_all_p_stanZ`, the Citadel, §8; verified from the bytes: 485 tiles in 46 rooms, every byte
+  accounted for). The retail layout reads no tiles from it; the viewer decodes it (`stan.ts parseStan`):
+  ```
+  +00 u32 0; +04 u32 0xC (first tile); +08 u32 0
+  tile (12 + 16n bytes):
+    +0 u32 name        file offset of the tile's 8-byte name ("p502a2" …), one name per tile in tile order
+    +4 u16 w           unknown (retail-flag-like values: 0x0FFF, 0x0CCC, 0x0AAA …)
+    +6 u16 room        BG room number
+    +8 u8  n           3..7 points
+    +9 u8 b1, b2, b3   unknown (always three distinct point indices; every point lies in the plane of those three)
+    n × {f32 x, y, z; u32 link}   BG units (whole numbers; every tile lies in its room's BG box);
+                                  link = file offset of the neighbour tile across edge k → k+1, 0 = none (1,122 of 1,122)
+  end: 8 zero bytes, 32 bytes holding the string "unstric" (unknown), then the name table (485 × 8 bytes), 8 zero bytes
+  ```
 
 ### 4.11 Spawn camera (verified on 12 stages)
 
@@ -1362,7 +1375,7 @@ confidence.
 |---|---|---|
 | **Citadel (stage 0x28, code `cat`)**: a cut arena (multiplayer-style: it has multiplayer environment records and was never given a solo setup; hypothesis on intent). Its BG file `bg_cat_all_p.seg` (0x5530 bytes) and clipping file `Tbg_cat_all_p_stanZ` survive, as do an environment record (colour `185038`, sky on, far 20000, and multiplayer variants 240/340/440), a memory configuration (`-mgfx100 -mvtx50 -mt650 -ma150`), main music **song 6**, and the names "Citadel"/"CITADEL" in the title bank (`0x9CAE`/`0x9CAF`). There is no `UsetupcatZ` or `Ump_setupcatZ` (the setup table still names `UsetupcatZ`), no multiplayer menu record, an empty text bank `Lcat`, and no case for 0x28 in the stage → text-bank switch | file table, stage/BG/environment/music/memory tables, text reference scan (`unused/stage_inventory.tsv`, `unused/text/text_refs.tsv`) | verified, high |
 | **The Citadel doesn't load.** Requesting stage 0x28 in the emulator hangs with the last front-end frame on screen; the registers show the switch default `0x7F0C16DC` (an endless `b .`) called from the setup loader (`ra 0x7F003D84`) | `unused/shots/citadel_warp_solo_frozen.png`, `unused/citadel_crash_dbg.txt` | verified, high |
-| **The Citadel's clipping file is an older format** the retail code can't read: float points, per-tile names ("p502a2" …), and a name table. It holds 485 tiles in 46 rooms; every byte is accounted for, all 1,122 links resolve, and each room's tiles lie inside that room's BG box. All 26 other stan files use the compact s16 format of §4.10, which reads 0 tiles from `Tbg_cat`. So even with a setup and a text case, the retail game would have no usable floor for it | `unused/stan.py`, `unused/stancheck.ts`, `unused/renders/citadel_stan_tiles_top_by_room.png` | verified (format), high; "retail can't use it" is static inference, high |
+| **The Citadel's clipping file is an older format** the retail code can't read: float points, per-tile names ("p502a2" …), and a name table. It holds 485 tiles in 46 rooms; every byte is accounted for, all 1,122 links resolve, and each room's tiles lie inside that room's BG box. All 26 other stan files use the compact s16 format of §4.10, which reads 0 tiles from `Tbg_cat`. So even with a setup and a text case, the retail game would have no usable floor for it. The layout is in §4.10; the viewer decodes it and shows the tiles in the Citadel's hidden "collision" layer (485 tiles over the 46 rooms, aligned with the floors) | `unused/stan.py`, `unused/stancheck.ts`, `unused/renders/citadel_stan_tiles_top_by_room.png`; viewer `stan.ts parseStan` | verified (format), high; "retail can't use it" is static inference, high |
 | **Citadel renders** (the BG parses and renders like any retail BG): 46 rooms, 52 portals, 1,101 triangles, all opaque, and three textures (901, 315, 710), all shared with Severnaya, Control, Caverns and Facility. The layout is a square arena around a star-shaped central hub with a pyramid, four quadrants (a grove of cross-shaped pillars, a room of tilted blocks, triangular floor wedges, raised ramps and walkways) and a sunken area under the hub, with tall white spikes. Lead viewed the overview and an eye-level view | `bg/renders/bg_cat_citadel_unused_overview.png`, `_top.png`; `unused/renders/citadel_bg_cat_overview_34.png`, `citadel_bg_cat_top.png`, `citadel_eye_room01_open_floor.png`, `citadel_eye_room03_open_floor.png`, `citadel_eye_room04_open_floor.png` | verified, high |
 | **Nine empty stage slots:** `sho` 0x2A, `eld` 0x2C, `lue` 0x2F, `rit` 0x31, `ear` 0x33, `lee` 0x34, `lip` 0x35, `wax` 0x37, `pam` 0x38. Each has names in the setup and BG tables, zero-byte BG and stan entries (`Tbg_sho` is not even in the file table), empty text banks, no setups, no menu entries and no text case (loading hangs). `sho` alone keeps a music entry (song 28, shared with Surface 2) | tables, file table | verified, high |
 | **Duplicate stage 0x15 "sevbunker"**: a setup-table entry only (no BG record, briefing or menu). Requesting it loads `UsetupsevbunkerZ`, then hangs in the text switch (breakpoint on `0x7F0C16DC` hit with `a0 = 0x15`) | `unused/stage15_dbg.txt`, `unused/shots/stage15_hang.png` | verified, high |

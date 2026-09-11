@@ -48,6 +48,27 @@ export function parseStan(b: Uint8Array): Stan {
     });
     o += 8 + 8 * n;
   }
+  // Older format, only in the Citadel's Tbg_cat (GOLDENEYE.md §4.10): u32 0; u32 0xC; u32 0; then tiles
+  //   {u32 name (file offset of an 8-byte string, "p502a2" …); u16 flags; u16 room; u8 n; u8 i0, i1, i2;
+  //    n × {f32 x, y, z (BG units); u32 link (file offset of the neighbour tile across edge k → k+1, 0 = none)}}
+  // up to an all-zero record, followed by the table of names. The retail layout reads no tiles from it.
+  if (!tiles.length && first === 0xc) {
+    for (let o = first; o + 12 <= b.length; ) {
+      const n = b[o + 8];
+      if (dv.getUint32(o) === 0 || n < 3 || n > 16 || o + 12 + 16 * n > b.length) break;
+      const points: StanPoint[] = [];
+      for (let k = 0; k < n; k++) {
+        const p = o + 12 + 16 * k;
+        points.push({ x: dv.getFloat32(p), y: dv.getFloat32(p + 4), z: dv.getFloat32(p + 8), link: dv.getUint32(p + 12) });
+      }
+      const xs = points.map((p) => p.x), zs = points.map((p) => p.z);
+      tiles.push({
+        offset: o, id: tiles.length, room: dv.getUint16(o + 6), flags: dv.getUint16(o + 4), plane: [b[o + 9], b[o + 10], b[o + 11]], points,
+        minX: Math.min(...xs), maxX: Math.max(...xs), minZ: Math.min(...zs), maxZ: Math.max(...zs),
+      });
+      o += 12 + 16 * n;
+    }
+  }
   const grid = new Map<number, StanTile[]>();
   for (const t of tiles) {
     for (let gx = Math.floor(t.minX / CELL); gx <= Math.floor(t.maxX / CELL); gx++) {
