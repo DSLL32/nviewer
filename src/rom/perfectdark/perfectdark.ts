@@ -155,7 +155,7 @@ function loadLevel(r: PdRom, def: StageDef): Level {
   const play = playVisibility(r, def, bg), seen = play.visible;
   // One layer per room, grouped, like Zelda's scenes; the hidden ones share a layer in the same group.
   const roomLayers: LevelLayer[] = [];
-  const hiddenLayer: LevelLayer = { name: 'rooms never visible from play', kind: 'background', instances: [], visibleByDefault: false, group: 'rooms' };
+  const hiddenLayer: LevelLayer = { name: 'rooms never visible from play', kind: 'background', instances: [], visibleByDefault: false };
   for (const g of rooms) {
     const mesh = meshes.push(g.mesh) - 1;
     if (g.sky) {
