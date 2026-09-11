@@ -52,6 +52,22 @@ When asked to investigate a game (ROM formats for the viewer):
    with the copy text verbatim; fix the class of bug (scan every level), not
    just the reported spot.
 
+# Viewer bug reports
+
+The viewer's Report button (dev server only) writes reports to `reports/` in the
+repo root (or `$NVIEWER_REPORTS_DIR`), ignored by git:
+ - `NNNN.view.png` (the view), `NNNN.highlight.png` (with the selected face or
+   object highlighted; identical for whole-view reports), `NNNN.json`
+   (description, kind, copy text, game, level, exact camera, canvas and aspect
+   rectangle, layers, toggles). A report is complete once `NNNN.json` exists;
+   `.serial` holds the last number.
+ - The main session watches the folder. For each new report: look at both
+   images and the JSON, route it verbatim (paths to all three files) to the
+   agent that owns the code (the game's loader agent, or the frontend agent),
+   and have it fix the class of bug, not just the spot.
+ - When the fix is committed, write `NNNN.done` containing the commit hash and a
+   one-line note (or "no change needed: <reason>"). Never delete reports.
+
 # Techniques
 
 ## Level loads
