@@ -15,6 +15,7 @@ import { normalizeByteOrder, RushRom } from './rom';
 import { openRush1 } from './rush1';
 import { openStarFox64 } from './sf64/sf64';
 import type { Game } from './types';
+import { isZeldaAlpha, openZeldaAlpha } from './zelda/alpha';
 import { findZeldaBuild } from './zelda/fs';
 import { openZelda64 } from './zelda/zelda';
 
@@ -23,6 +24,8 @@ export type * from './types';
 export function openRom(bytes: Uint8Array): Game {
   const rom = normalizeByteOrder(bytes);
   const code = String.fromCharCode(...rom.subarray(0x3b, 0x3f));
+  // The Ocarina of Time prototype on an F-Zero X cartridge: by the whole file's hash, before any other detection.
+  if (isZeldaAlpha(rom)) return openZeldaAlpha(rom);
   switch (code) {
     case 'NRUE': {
       const r = new RushRom(rom);

@@ -25,11 +25,11 @@ import {
   actorProfile, findDayNightTextures, findMmAreaTextures, findMmSkyFiles, findOotSkyFiles, findTables, type ZeldaGame, type ZeldaTables,
 } from './tables';
 
-interface LevelDef { scene: number; layer: number; file: string }
+interface LevelDef { scene: number; layer: number; file: string; time?: number } // time: a time-of-day variant
 
 // Loader options for offline comparisons with captures: the time of day (0..0xFFFF, default noon; OoT night layers
 // midnight) and the MM day (default 1).
-export interface ZeldaOptions { time?: number; day?: number }
+export interface ZeldaOptions { time?: number; day?: number; trace?: (message: string) => void }
 
 interface Zelda {
   options: ZeldaOptions;
@@ -125,7 +125,7 @@ function mergeBatches(batches: Batch[]): Batch[] {
   });
 }
 
-function meshOf(name: string, batches: Batch[], info: DebugInfo): Mesh {
+export function meshOf(name: string, batches: Batch[], info: DebugInfo): Mesh {
   const merged = mergeBatches(batches);
   let radius = 0;
   for (const b of merged) for (let k = 0; k < b.positions.length; k += 3) radius = Math.max(radius, Math.hypot(b.positions[k], b.positions[k + 1], b.positions[k + 2]));
@@ -134,7 +134,7 @@ function meshOf(name: string, batches: Batch[], info: DebugInfo): Mesh {
 
 // The RDP samples texel centres at integer texel coordinates, GL at +0.5: shift every texture coordinate by half a
 // texel (ZELDA64.md §5.3.3).
-function halfTexel(batches: Batch[], textures: Texture[]) {
+export function halfTexel(batches: Batch[], textures: Texture[]) {
   for (const b of batches) {
     const shift = (uvs: Float32Array | undefined, tex: number | undefined) => {
       const t = tex !== undefined && tex >= 0 ? textures[tex] : null;
@@ -150,7 +150,109 @@ function halfTexel(batches: Batch[], textures: Texture[]) {
 }
 
 // A fresh matrix per instance: the worker transfers each instance's buffer with the level.
-const translation = (p: number[]) => new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, p[0], p[1], p[2], 1]);
+export const translation = (p: number[]) => new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, p[0], p[1], p[2], 1]);
+
+// World-space triangles of the opaque and cutout room batches (room instances are at the identity).
+export function roomGeometry(meshes: Mesh[]): Float32Array[] {
+  const out: Float32Array[] = [];
+  const seen = new Set<Mesh>();
+  for (const m of meshes) {
+    if (!m.name.startsWith('room ') || seen.has(m)) continue;
+    seen.add(m);
+    for (const b of m.batches) if (b.blend !== 'blend') out.push(b.positions);
+  }
+  return out;
+}
+
+// The fraction (0..1) of the segment a -> b before it hits one of the triangles (flat xyz triples), 1 if none.
+function trianglesHit(tris: Float32Array, a: number[], b: number[]): number {
+  const d0 = b[0] - a[0], d1 = b[1] - a[1], d2 = b[2] - a[2];
+  let best = 1;
+  for (let k = 0; k + 9 <= tris.length; k += 9) {
+    const e10 = tris[k + 3] - tris[k], e11 = tris[k + 4] - tris[k + 1], e12 = tris[k + 5] - tris[k + 2];
+    const e20 = tris[k + 6] - tris[k], e21 = tris[k + 7] - tris[k + 1], e22 = tris[k + 8] - tris[k + 2];
+    const h0 = d1 * e22 - d2 * e21, h1 = d2 * e20 - d0 * e22, h2 = d0 * e21 - d1 * e20;
+    const det = e10 * h0 + e11 * h1 + e12 * h2;
+    if (Math.abs(det) < 1e-9) continue;
+    const inv = 1 / det, s0 = a[0] - tris[k], s1 = a[1] - tris[k + 1], s2 = a[2] - tris[k + 2];
+    const u = inv * (s0 * h0 + s1 * h1 + s2 * h2);
+    if (u < 0 || u > 1) continue;
+    const q0 = s1 * e12 - s2 * e11, q1 = s2 * e10 - s0 * e12, q2 = s0 * e11 - s1 * e10;
+    const v = inv * (d0 * q0 + d1 * q1 + d2 * q2);
+    if (v < 0 || u + v > 1) continue;
+    const t = inv * (e20 * q0 + e21 * q1 + e22 * q2);
+    if (t > 1e-4 && t < best) best = t;
+  }
+  return best;
+}
+
+// The start camera for a player entry (ZELDA64.md §7.6): the game's normal camera 176 units behind the player and 31
+// above its 44-unit target. Candidates: behind the player, turned by 45 and 90 degrees, and with the player walked
+// forward (spawns at doors and gates walk in). A candidate needs a clear line to the player and a floor below; its
+// openness is the mean free distance (up to 700 units) of 15 rays across the view (collision and room geometry). The first candidate
+// within 85% of the most open one wins, so open places keep the game's own camera.
+export function chooseStartCamera(
+  player: { pos: [number, number, number]; rot: [number, number, number] }, collision: Collision | null, geometry: Float32Array[],
+  trace?: (message: string) => void,
+): CameraView {
+  const [px, py, pz] = player.pos;
+  const R = 1400, RAY = 700, NEAR = 250;
+  const near: number[] = [];
+  for (const g of geometry) {
+    for (let k = 0; k + 9 <= g.length; k += 9) {
+      const x0 = Math.min(g[k], g[k + 3], g[k + 6]), x1 = Math.max(g[k], g[k + 3], g[k + 6]);
+      const z0 = Math.min(g[k + 2], g[k + 5], g[k + 8]), z1 = Math.max(g[k + 2], g[k + 5], g[k + 8]);
+      const y0 = Math.min(g[k + 1], g[k + 4], g[k + 7]), y1 = Math.max(g[k + 1], g[k + 4], g[k + 7]);
+      if (x1 < px - R || x0 > px + R || z1 < pz - R || z0 > pz + R || y1 < py - R || y0 > py + R) continue;
+      for (let j = 0; j < 9; j++) near.push(g[k + j]);
+    }
+  }
+  const tris = new Float32Array(near);
+  const hit = (a: number[], b: number[]) => Math.min(collision ? segmentHit(collision, a, b) : 1, trianglesHit(tris, a, b));
+  const yaw0 = (((player.rot[1] << 16) >> 16) / 0x8000) * Math.PI;
+  const candidate = (forward: number, turn: number) => {
+    const target: [number, number, number] = [px + forward * Math.sin(yaw0), py + 44, pz + forward * Math.cos(yaw0)];
+    const yaw = yaw0 + turn;
+    const eye: [number, number, number] = [target[0] - 176 * Math.sin(yaw), target[1] + 31, target[2] - 176 * Math.cos(yaw)];
+    return { eye, target };
+  };
+  const openness = (c: { eye: number[]; target: number[] }): number => {
+    const [ex, ey, ez] = c.eye;
+    if (hit(c.target, c.eye) < 1 || hit([c.target[0], c.target[1] - 30, c.target[2]], c.target) < 1) return -1;
+    const floor = collision ? floorBgCam(collision, ex, ey - 40, ez) >= 0 : trianglesHit(tris, c.eye, [ex, ey - 600, ez]) < 1;
+    if (!floor) return -1;
+    const dx = c.target[0] - ex, dy = c.target[1] - ey, dz = c.target[2] - ez;
+    const yaw = Math.atan2(dx, dz), pitch = Math.atan2(dy, Math.hypot(dx, dz));
+    let sum = 0, far = 0;
+    for (const dyaw of [-0.45, -0.22, 0, 0.22, 0.45]) {
+      for (const dp of [-0.25, 0, 0.25]) {
+        const y = yaw + dyaw, p = pitch + dp;
+        const h = hit(c.eye, [ex + Math.sin(y) * Math.cos(p) * RAY, ey + Math.sin(p) * RAY, ez + Math.cos(y) * Math.cos(p) * RAY]);
+        sum += Math.min(1, (h * RAY) / NEAR);
+        far += h;
+      }
+    }
+    trace?.(`free within ${NEAR} units ${(sum / 15).toFixed(2)}, mean free distance ${(far / 15).toFixed(2)} of ${RAY}`);
+    return far / 15;
+  };
+  const scored: { c: { eye: [number, number, number]; target: [number, number, number] }; score: number }[] = [];
+  for (const forward of [0, 100, 200, 300, 400]) {
+    for (const turn of [0, Math.PI / 4, -Math.PI / 4, Math.PI / 2, -Math.PI / 2]) {
+      const c = candidate(forward, turn);
+      trace?.(`candidate forward ${forward} turn ${Math.round((turn * 180) / Math.PI)}`);
+      scored.push({ c, score: openness(c) });
+    }
+  }
+  const best = Math.max(...scored.map((x) => x.score));
+  if (best > 0) {
+    const pick = scored.find((x) => x.score >= best * 0.85)!;
+    return { ...pick.c, fovY: 60 };
+  }
+  const c = candidate(0, 0);
+  const h = hit(c.target, c.eye);
+  const k = h < 1 ? Math.max(0.1, h - 15 / 179) : 1;
+  return { target: c.target, eye: [0, 1, 2].map((i) => c.target[i] + (c.eye[i] - c.target[i]) * k) as [number, number, number], fovY: 60 };
+}
 
 function norm(v: number[]): [number, number, number] {
   const l = Math.hypot(v[0], v[1], v[2]) || 1;
@@ -201,9 +303,9 @@ function loadLevel(z: Zelda, def: LevelDef, info: LevelInfo): Level {
 
   // ---- time and environment ----
   const night = game === 'oot' && (def.layer === 1 || def.layer === 3);
-  let time = night ? 0 : 0x8000;
+  let time = def.time ?? (night ? 0 : 0x8000);
   const fixed = spawnRoom?.header.time;
-  if (fixed && fixed[0] !== 0xff) time = CLOCK(fixed[0], fixed[1]);
+  if (fixed && fixed[0] !== 0xff && def.time === undefined) time = CLOCK(fixed[0], fixed[1]);
   if (z.options.time !== undefined) time = z.options.time;
   const day = z.options.day ?? 1;
   const lights = currentLights(game, sh.lightMode, sh.lights, time);
@@ -541,40 +643,7 @@ function loadLevel(z: Zelda, def: LevelDef, info: LevelInfo): Level {
     if (bc && Math.hypot(bc.eye[0] - at[0], bc.eye[1] - at[1], bc.eye[2] - at[2]) > 30) {
       camera = { eye: bc.eye, target: at, fovY: 60 };
     } else {
-      // Candidates: behind the player, then turned, then with the player walked forward (spawns at doors walk in).
-      // The first with a clear line of sight, a floor below and no walls close on three sides wins.
-      const yaw0 = ((player.rot[1] << 16) >> 16) / 0x8000 * Math.PI;
-      const candidate = (forward: number, turn: number) => {
-        const target: [number, number, number] = [player.pos[0] + forward * Math.sin(yaw0), player.pos[1] + 44, player.pos[2] + forward * Math.cos(yaw0)];
-        const yaw = yaw0 + turn;
-        const eye: [number, number, number] = [target[0] - 176 * Math.sin(yaw), target[1] + 31, target[2] - 176 * Math.cos(yaw)];
-        return { eye, target };
-      };
-      const clear = (c: { eye: number[]; target: number[] }) => {
-        if (!collision) return true;
-        if (segmentHit(collision, c.target, c.eye) < 1 || segmentHit(collision, [c.target[0], c.target[1] - 30, c.target[2]], c.target) < 1) return false;
-        if (floorBgCam(collision, c.eye[0], c.eye[1] - 40, c.eye[2]) < 0) return false;
-        let walls = 0;
-        for (const [dx, dz] of [[80, 0], [-80, 0], [0, 80], [0, -80]]) if (segmentHit(collision, c.eye, [c.eye[0] + dx, c.eye[1], c.eye[2] + dz]) < 1) walls++;
-        return walls <= 2;
-      };
-      let pick: { eye: [number, number, number]; target: [number, number, number] } | null = null;
-      search: for (const forward of [0, 100, 200]) {
-        for (const turn of [0, Math.PI / 4, -Math.PI / 4, Math.PI / 2, -Math.PI / 2]) {
-          const c = candidate(forward, turn);
-          if (clear(c)) {
-            pick = c;
-            break search;
-          }
-        }
-      }
-      if (!pick) {
-        const c = candidate(0, 0);
-        const hit = collision ? segmentHit(collision, c.target, c.eye) : 1;
-        const k = hit < 1 ? Math.max(0.1, hit - 15 / 179) : 1;
-        pick = { target: c.target, eye: [0, 1, 2].map((i) => c.target[i] + (c.eye[i] - c.target[i]) * k) as [number, number, number] };
-      }
-      camera = { ...pick, fovY: 60 };
+      camera = chooseStartCamera(player, collision, roomGeometry(meshes), z.options.trace);
     }
   }
 
@@ -608,6 +677,13 @@ function sceneLevels(z: Zelda): { defs: LevelDef[]; levels: LevelInfo[] } {
       data = fs.data(e.file);
     } catch {
       continue;
+    }
+    // MM has no night layers: scenes whose lights follow the time of day get a night variant (day 1, 23:00; night
+    // half-day actors, sky and lights), as OoT's child night layers.
+    if (game === 'mm') {
+      const main = parseHeader(data, 0);
+      const sky = main?.find((c) => c.code === 0x11);
+      if (sky && data[sky.off + 6] === 0) push({ scene: id, layer: 0, file, time: CLOCK(23, 0) }, `${name} (night)`, kind, group);
     }
     alternateHeaders(data, 2).forEach((h, k) => {
       const layer = k + 1;

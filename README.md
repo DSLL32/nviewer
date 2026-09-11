@@ -4,7 +4,8 @@ A browser viewer for the levels of these N64 games (USA versions): *San Francisc
 *San Francisco Rush: Extreme Racing*, *Bomberman 64*, *Bomberman 64: The Second Attack!*,
 *Bomberman Hero*, *BattleTanx*, *BattleTanx: Global Assault*, *Gex 64: Enter the Gecko*,
 *Gex 3: Deep Cover Gecko*, *Yoshi's Story* (Japan), *Star Fox 64* (V1.0 and V1.1), *GoldenEye 007*, *Perfect Dark* (V1.0), and *The Legend of Zelda: Ocarina of Time* and
-*Majora's Mask* (retail and debug builds). Load one or more ROMs, pick a level in the sidebar, and fly around freely, with
+*Majora's Mask* (retail and debug builds, plus the 1997 Ocarina of Time prototype preserved on an F-Zero X development
+cartridge). Load one or more ROMs, pick a level in the sidebar, and fly around freely, with
 each game's soundtrack in the music box. ROMs are parsed entirely in the browser (in a Web Worker)
 and cached in IndexedDB; nothing is uploaded anywhere.
 
@@ -66,6 +67,8 @@ filtering · H help · Esc releases the mouse.
     - `drawconfig.ts`: animated materials at frame 0; `env.ts`, `sky.ts`, `jpeg.ts`: lights, fog, skyboxes, prerendered
       backgrounds; `collision.ts`, `actors.ts`, `names.ts`: collision, static actors, names; `zelda.ts`: levels;
       `music.ts` with `music/zelda64.ts` (Zelda's revision of the EAD sequence driver)
+    - `alpha.ts`: the Ocarina of Time prototype in the F-Zero X ROM (identified by hash; its 52 scenes are raw in the
+      upper half of the ROM)
   - `music/`: `musyx.ts`, `rush2049.ts` (Rush 2049), `libultra.ts` (libultra bank/sequence
     synthesizer shared by Rush 1, the Bomberman games and BattleTanx), `rush1.ts`, `libmus.ts`
     (Software Creations' libmus as used by Global Assault and Gex 3), `libmus64.ts` (the older libmus
@@ -329,6 +332,11 @@ Textures are uploaded with the RDP tile commands, not read in place.
   collision and waterboxes as overlays, static actors from recipes and the rest as markers.
 - **Music.** Zelda's revision of Nintendo EAD's sequence driver, sample-identical to the research renderer, which
   matches captured game audio.
+- **The 1997 prototype.** The upper half of an F-Zero X development ROM (`F-ZERO X [CFZE].z64`, identified by its MD5)
+  holds 52 scenes of a Spaceworld 97-era Ocarina of Time, stored raw without a file table, code, objects, skyboxes or
+  audio. They use F3DEX display lists, no palette textures, 12-byte waterboxes and raw RGBA16 prerendered
+  backgrounds; actor ids are shifted by one from 0x24. The level list follows `ZELDA64.md` §11.4, and each room's
+  info names its retail counterpart and how much collision and texture data it shares with it.
 
 ### GoldenEye 007
 
@@ -379,7 +387,9 @@ Textures are uploaded with the RDP tile commands, not read in place.
   approximation; music has no reverb.
 - Zelda 64: skeletal actors (people, enemies, animated objects), torch flames and the sun and moon are markers or not
   shown; animated materials show their first frame; Majora's Mask's sky rotation is fixed; Hyrule Field's music
-  plays its random parts in a fixed order; music has no reverb.
+  plays its random parts in a fixed order; music has no reverb. The 1997 prototype has no objects, skyboxes or music
+  in the ROM: actors are markers, keep-object textures are untextured, animated-material segments are unresolved, and
+  some scene names are the sw97 project's guesses.
 - GoldenEye: portals and visibility are ignored (all rooms are drawn), so a few distant Dam mountain tops show above
   the cliffs and rooms the game never shows together can overlap (Aztec rooms 18 and 44); translucent surfaces are
   sorted per room, not per triangle; animated textures, the water ripple and the

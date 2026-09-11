@@ -32,6 +32,7 @@ export function Landing({ busy, error, onPick }: LandingProps) {
             <li>GoldenEye 007 (U)</li>
             <li>Perfect Dark (U) (V1.0)</li>
             <li>The Legend of Zelda: Ocarina of Time, Majora's Mask (retail and debug)</li>
+            <li>F-Zero X (CFZE) development ROM with the 1997 Ocarina of Time prototype</li>
           </ul>
         </div>
         <div className="dropzone" aria-busy={busy !== null}>
