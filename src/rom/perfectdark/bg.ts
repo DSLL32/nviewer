@@ -6,8 +6,8 @@
 // stream of u16 texture numbers; section 3 likewise: per room 1..N-1 an s16 room-relative box (min, max), then u16 gfx
 // sizes / 16, then u8 light counts.
 // Primary data (segment 0x0F): +4 rooms {ptr gfx; f32 x, y, z; u8, u8; u16} (entry 0 unused; the entry after the last room
-// holds only the end pointer), +8 portals, +0x0C visibility commands, +0x10 lights. The viewer draws every room and ignores
-// portals and commands.
+// holds only the end pointer), +8 portals, +0x0C visibility commands, +0x10 lights. Portals and commands decide which rooms
+// the game can ever show (visibility.ts).
 // Room gfx (linked at its room pointer): ptr vertices; ptr colours; ptr opaque blocks; ptr translucent blocks; s16 × 4; then
 // 0x14-byte blocks {u8 type; ptr next; leaf (0): ptr DL, vertices (segment 14), colours (segment 13); parent (1): ptr
 // child, split plane}. World position = room position + vertex.
@@ -40,10 +40,27 @@ export interface PdBgRoom {
   bboxMax: Vec3;
 }
 
+/** A portal between two rooms: a convex polygon in world units (§4.3). */
+export interface PdPortal {
+  index: number;
+  rooms: [number, number];
+  flags: number; // 0 in every retail BG
+  points: Vec3[];
+}
+
+/** A visibility command (§4.3): u8 type; u8 len; u16 0; s32 param. Types ≥ 100 are the arguments of the command before. */
+export interface PdBgCommand {
+  type: number;
+  len: number;
+  param: number;
+}
+
 export interface PdBg {
   file: Uint8Array;
   rooms: PdBgRoom[]; // rooms[0] is the unused room 0, so indices are room numbers
   textureNumbers: number[]; // section 2
+  portals: PdPortal[];
+  commands: PdBgCommand[]; // up to and including END (type 0)
 }
 
 /** 0x200-byte BG files are stubs with one trivial room. */
@@ -76,7 +93,32 @@ export function parseBg(file: Uint8Array): PdBg {
     const box = (k: number): Vec3 => (r > 0 && b + k + 6 <= sec3.length ? [s3.getInt16(b + k) + pos[0], s3.getInt16(b + k + 2) + pos[1], s3.getInt16(b + k + 4) + pos[2]] : [...pos]);
     rooms.push({ index: r, ptr: ptrs[r], pos, fileOffset: r > 0 ? 12 + primaryStreamLen + (ptrs[r] - SEG - primarySize) : -1, bboxMin: box(0), bboxMax: box(6) });
   }
-  return { file, rooms, textureNumbers };
+  // Portals: {u16 1-based vertex list; s16 room, room; u8 flags; u8} until a zero list number, then the vertex lists
+  // {u8 count; 3 × u8; count × f32 x, y, z} until a zero count.
+  const portals: PdPortal[] = [];
+  const portalTable = pv.getUint32(8) ? pv.getUint32(8) - SEG : -1;
+  if (portalTable >= 0) {
+    const refs: number[] = [];
+    for (let o = portalTable; o + 8 <= primary.length && pv.getUint16(o) !== 0; o += 8) {
+      refs.push(pv.getUint16(o));
+      portals.push({ index: portals.length, rooms: [pv.getInt16(o + 2), pv.getInt16(o + 4)], flags: primary[o + 6], points: [] });
+    }
+    const lists: Vec3[][] = [];
+    for (let o = portalTable + (portals.length + 1) * 8; o < primary.length && primary[o] > 0; o += 4 + primary[o] * 12) {
+      const list: Vec3[] = [];
+      for (let k = 0; k < primary[o] && o + 16 + k * 12 <= primary.length; k++) list.push([pv.getFloat32(o + 4 + k * 12), pv.getFloat32(o + 8 + k * 12), pv.getFloat32(o + 12 + k * 12)]);
+      lists.push(list);
+    }
+    portals.forEach((p, i) => { p.points = lists[refs[i] - 1] ?? []; });
+  }
+  const commands: PdBgCommand[] = [];
+  if (pv.getUint32(12)) {
+    for (let o = pv.getUint32(12) - SEG; o >= 0 && o + 8 <= primary.length; o += 8) {
+      commands.push({ type: primary[o], len: primary[o + 1], param: pv.getInt32(o + 4) });
+      if (primary[o] === 0) break;
+    }
+  }
+  return { file, rooms, textureNumbers, portals, commands };
 }
 
 interface Leaf {

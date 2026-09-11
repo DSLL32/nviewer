@@ -5,13 +5,14 @@
 // planes need the scale (§4.7, §4.9).
 import { buildLevel } from '../bomberman/common';
 import type { CameraView, Game, Instance, Level, LevelInfo, LevelLayer, Mesh, Sky } from '../types';
-import { buildRooms, isStubBg, parseBg, type RoomMesh } from './bg';
+import { buildRooms, isStubBg, parseBg, type PdBg, type RoomMesh } from './bg';
 import { findEnvironment, levelEnvironment } from './environment';
 import { perfectDarkMusic } from './music';
 import { addObjects } from './objects';
 import { parsePads, readSpawnPads } from './pads';
 import { PdRom, type StageRecord } from './rom';
 import { PdTextures } from './texture';
+import { PdVisibility, type PlayVisibility } from './visibility';
 
 // A standing player's eye is 159 units above the floor; spawn pads sit 47 above it (verified in the Defection capture).
 const EYE_ABOVE_SPAWN_PAD = 112;
@@ -120,6 +121,18 @@ function spawnCamera(r: PdRom, def: StageDef, rooms: RoomMesh[]): CameraView | u
   return views.map((v) => ({ v, d: open(v) })).reduce((a, b) => (b.d > a.d ? b : a)).v;
 }
 
+/**
+ * Rooms visible from play: seeded by the setup's spawn pads and every pad of the stage (null: no seed stands on a floor, keep
+ * every room).
+ */
+function playVisibility(r: PdRom, def: StageDef, bg: PdBg): PlayVisibility | null {
+  const { stage } = def;
+  if (!r.hasFile(stage.tiles) || !r.hasFile(stage.pads)) return null;
+  const pads = parsePads(r.file(stage.pads)).pads;
+  const spawns = def.setup ? readSpawnPads(r.file(def.setup)).flatMap((n) => (pads[n] ? [pads[n].pos] : [])) : [];
+  return new PdVisibility(bg, r.file(stage.tiles)).fromPlay([...spawns, ...pads.map((p) => p.pos)]);
+}
+
 function loadLevel(r: PdRom, def: StageDef): Level {
   const { stage } = def;
   const textures = new PdTextures(r);
@@ -131,12 +144,22 @@ function loadLevel(r: PdRom, def: StageDef): Level {
 
   // ---- BG rooms (sky rooms go to Level.skies) ----
   const bgName = r.names[stage.bg];
-  const rooms = buildRooms(parseBg(r.file(stage.bg)), bgName, textures, { envAlpha: env.envAlpha });
+  const bg = parseBg(r.file(stage.bg));
+  const rooms = buildRooms(bg, bgName, textures, { envAlpha: env.envAlpha });
+  // Rooms the game's portals and visibility script can never show from where the player can be (visibility.ts) go to a
+  // hidden layer: scenery such as Defection's city towers, which the viewer would otherwise draw.
+  const seen = playVisibility(r, def, bg);
   const roomLayer: LevelLayer = { name: 'rooms', kind: 'main', instances: [] };
+  const hiddenLayer: LevelLayer = { name: 'rooms never visible from play', kind: 'background', instances: [], visibleByDefault: false };
   for (const g of rooms) {
     const mesh = meshes.push(g.mesh) - 1;
-    if (g.sky) skies.push({ name: g.mesh.name, mesh });
-    else roomLayer.instances.push(instances.push({ name: g.mesh.name, mesh, matrix: translation(g.center), info: { room: g.room.index, bg: bgName } }) - 1);
+    if (g.sky) {
+      skies.push({ name: g.mesh.name, mesh });
+      continue;
+    }
+    const hidden = seen !== null && !seen.visible.has(g.room.index);
+    const info = { room: g.room.index, bg: bgName, ...(hidden ? { visibility: 'no portal path or script shows this room from the playable area' } : {}) };
+    (hidden ? hiddenLayer : roomLayer).instances.push(instances.push({ name: g.mesh.name, mesh, matrix: translation(g.center), info }) - 1);
   }
   layers.push(roomLayer);
 
@@ -146,6 +169,7 @@ function loadLevel(r: PdRom, def: StageDef): Level {
     ? addObjects(r, { setupFile: def.setup, padsFile: stage.pads, multiplayer: def.multiplayer, textures, meshes, instances, rooms, firstLayer: layers.length })
     : null;
   if (objects) layers.push(...objects.layers);
+  if (hiddenLayer.instances.length) layers.push(hiddenLayer); // last: the object layers' marker indices stay put
 
   // ---- environment: fog, clear colour, cloud and water planes ----
   const environment = levelEnvironment(env, stage.worldScale, textures);
