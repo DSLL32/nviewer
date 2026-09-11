@@ -8,7 +8,7 @@
 import { buildLevel, fogPosition, meshFromBatches } from '../bomberman/common';
 import { sf64Music } from '../music/sf64';
 import { type DlLighting, runDisplayList } from '../displaylist';
-import type { Backdrop, Batch, CameraView, DebugInfo, Game, Instance, Level, LevelInfo, LevelKind, LevelLayer, Marker, Mesh, Texture } from '../types';
+import type { Backdrop, Batch, CameraView, DebugInfo, Game, Instance, Level, LevelInfo, LevelKind, LevelLayer, Marker, Mesh, Sky, Texture } from '../types';
 import { Sf64Files, Space } from './fs';
 import { EVENT_NAMES, OBJECT_NAMES } from './names';
 
@@ -33,7 +33,8 @@ const CULL_BACK = 0x2000;
 const prim = (r: number, g: number, b: number, a: number): W => [0xfa000000, ((r << 24) | (g << 16) | (b << 8) | a) >>> 0];
 const POINT_FILTER: W = [0xba001402, 0]; // G_SETOTHERMODE_H texture filter = point
 
-// gDPLoadTileTexture + gDPSetupTile for an RGBA16 tile, as game code textures the grounds.
+// gDPLoadTileTexture + gDPSetupTile for an RGBA16 tile, as game code textures the grounds (mask 5 = 32 texels; the
+// games pass shift 0, G_TX_NOLOD).
 function tileTexture(timg: number, w: number, h: number, cms: number, cmt: number, shift: number): W[] {
   const setTile = (siz: number, line: number, tile: number, ct: number, mt: number, st: number, cs: number, ms: number, ss: number): W =>
     [(0xf5 << 24) | (siz << 19) | ((line & 0x1ff) << 9), (tile << 24) | (ct << 18) | (mt << 14) | (st << 10) | (cs << 8) | (ms << 4) | ss];
@@ -337,6 +338,57 @@ const CORNERIA_SURFACES: [number, number][] = [[0, 2], [41181.4, 0], [141510.3, 
 
 const rgba5551 = (c: number): [number, number, number] => [((c >> 11) & 31) * 8, ((c >> 6) & 31) * 8, ((c >> 1) & 31) * 8];
 
+// Rand_SetSeed / Rand_ZeroOneSeeded: a Wichmann-Hill generator in f32.
+function seededRandom(a: number, b: number, c: number) {
+  return () => {
+    a = (a * 171) % 30269; b = (b * 172) % 30307; c = (c * 170) % 30323;
+    return Math.abs(Math.fround(Math.fround(Math.fround(a / 30269) + Math.fround(b / 30307)) + Math.fround(c / 30323)) % 1);
+  };
+}
+
+// Space levels (and Training): the backdrop sprite Background_DrawBackdrop places in view space at T(x, y, -290) S(scale)
+// for the level's start view, where 1 unit is 1 pixel of the 320 x 240 screen, and gStarCount.
+interface SpaceBackdrop { stars: number; dl: number; scale: number; x?: number; y?: number; preset?: number; alpha?: number; rotX?: boolean }
+const SPACE_BACKDROPS: Record<number, SpaceBackdrop> = {
+  1: { stars: 600, dl: 0x0600ddf0, scale: 0.4, y: -130 }, // Meteo: shown from path progress 185668
+  2: { stars: 600, dl: 0x06029890, scale: 3, x: 60, y: 40, preset: 62, alpha: 192 },
+  3: { stars: 300, dl: 0x0601bb40, scale: 0.375 }, // Area 6: grows to 2.625 along the level
+  4: { stars: 600, dl: 0x0601bb40, scale: 0.375 },
+  5: { stars: 600, dl: 0x06001840, scale: 0.4, x: -60, preset: 62, alpha: 192 },
+  10: { stars: 800, dl: 0x06003760, scale: 0.2, x: -30, y: 40, preset: 62, alpha: 255 },
+  17: { stars: 300, dl: 0x0600d190, scale: 1, y: 100 },
+  18: { stars: 600, dl: 0x06002f80, scale: 0.5, rotX: true },
+};
+const WARP_BACKDROP: SpaceBackdrop = { stars: 600, dl: 0x07001540, scale: 1.7, preset: 62, alpha: 192 };
+
+// Background_DrawStarfield: 1 x 1 pixel stars at seeded offsets in a 480 x 360 pattern that scrolls 305.6 pixels per
+// radian of camera yaw and pitch (Camera_SetStarfieldPos), so it repeats every 90 degrees of yaw and 67.5 of pitch.
+// As a sky: one star quad per repeat, at the direction its pixel has at the start view.
+const STAR_COLORS = [0x108b, 0x108b, 0x1087, 0x1089, 0x39ff, 0x190d, 0x108b, 0x1089, 0x294b, 0x18df, 0x294b, 0x1085, 0x39ff, 0x108b, 0x18cd, 0x108b];
+function starfield(count: number): Batch {
+  const rand = seededRandom(1, 29000, 9876);
+  const PX = 305.58, D = 290, H = 0.6;
+  const pos: number[] = [], col: number[] = [];
+  for (let i = 0; i < count; i++) {
+    let bx = rand() * 480 - 80 + 120, by = rand() * 360 - 60 + 120;
+    if (bx >= 400) bx -= 480;
+    if (by >= 300) by -= 360;
+    const c = rgba5551(STAR_COLORS[i % 16]);
+    for (let k = 0; k < 4; k++) {
+      for (let j = -1; j <= 1; j++) {
+        const th = (bx - 160) / PX + (k * Math.PI) / 2, ph = (120 - by + j * 360) / PX;
+        if (Math.abs(ph) > 1.45) continue;
+        const ct = Math.cos(th), st = Math.sin(th), cp = Math.cos(ph), sp = Math.sin(ph);
+        const ctr = [D * cp * st, D * sp, -D * cp * ct], t1 = [ct, 0, st], t2 = [-sp * st, cp, sp * ct];
+        const v = (a: number, b: number) => [0, 1, 2].map((q) => ctr[q] + H * (a * t1[q] + b * t2[q]));
+        for (const [a, b] of [[-1, -1], [1, -1], [1, 1], [-1, -1], [1, 1], [-1, 1]]) { pos.push(...v(a, b)); col.push(c[0], c[1], c[2], 255); }
+      }
+    }
+  }
+  const n = pos.length / 3;
+  return { texture: -1, blend: 'opaque', depthTest: false, depthWrite: false, cullBack: false, positions: new Float32Array(pos), uvs: new Float32Array(n * 2), colors: new Uint8Array(col) };
+}
+
 function loadLevel(files: Sf64Files, def: LevelDef, levelInfo: LevelInfo): Level {
   const L = files.layout;
   const space = new Space(files, files.scene(def.scene), 0x100000);
@@ -351,6 +403,9 @@ function loadLevel(files: Sf64Files, def: LevelDef, levelInfo: LevelInfo): Level
   let fogColor: [number, number, number] = [i32(12), i32(16), i32(20)];
   let light: [number, number, number] = [i32(44), i32(48), i32(52)], ambient: [number, number, number] = [i32(56), i32(60), i32(64)];
   if (def.warp) { fogColor = [178, 190, 90]; light = [200, 200, 120]; ambient = [0, 50, 100]; }
+  // Aquas after its intro: level code forces the light yaw to 90 and dims the colours (values read in RAM).
+  const aquas = def.level === 13;
+  if (aquas) { light = [30, 70, 90]; ambient = [15, 22, 37]; }
 
   // Zoness' sea texture is written every frame by HUD_Texture_Wave from a source texture: start from the source.
   if (def.level === 8 && space.has(0x0602c2cc) && space.has(0x0600d990)) space.buf.copyWithin(space.resolve(0x0600d990), space.resolve(0x0602c2cc), space.resolve(0x0602c2cc) + 32 * 32 * 2);
@@ -365,10 +420,11 @@ function loadLevel(files: Sf64Files, def: LevelDef, levelInfo: LevelInfo): Level
   // Light: RX(x) RY(y) RZ(z) applied to (0, 0, 1). Camera_SetupLights rotates it by the camera every frame, which
   // the RSP's modelview transform undoes, so it is fixed in world space.
   const lm = ident();
-  rotX(lm, dv.getFloat32(envAt + 32) * DTOR); rotY(lm, dv.getFloat32(envAt + 36) * DTOR); rotZ(lm, dv.getFloat32(envAt + 40) * DTOR);
+  rotX(lm, dv.getFloat32(envAt + 32) * DTOR); rotY(lm, (aquas ? 90 : dv.getFloat32(envAt + 36)) * DTOR); rotZ(lm, dv.getFloat32(envAt + 40) * DTOR);
   const ld = [lm[8], lm[9], lm[10]];
   const ll = Math.hypot(...ld) || 1;
-  const lighting: DlLighting = { lights: [{ color: light, dir: [ld[0] / ll, ld[1] / ll, ld[2] / ll] }], ambient };
+  // Lights_SetOneLight fills light slots 0-3 with this light (4-6 black), so it counts four times.
+  const lighting: DlLighting = { lights: Array.from({ length: 4 }, () => ({ color: light, dir: [ld[0] / ll, ld[1] / ll, ld[2] / ll] as [number, number, number] })), ambient };
 
   const textures: Texture[] = [];
   const textureKeys = new Map<string, number>();
@@ -441,17 +497,17 @@ function loadLevel(files: Sf64Files, def: LevelDef, levelInfo: LevelInfo): Level
       let surface = 0;
       for (const [p0, s] of CORNERIA_SURFACES) if (progress >= p0) surface = s;
       const [tex, preset] = tiles[surface];
-      return [P(preset), ...(surface === 2 ? [prim(255, 255, 255, 128)] : []), ...tileTexture(tex, 32, 32, 0, 0, 5), G_DL(0x0601b640)];
+      return [P(preset), ...(surface === 2 ? [prim(255, 255, 255, 128)] : []), ...tileTexture(tex, 32, 32, 0, 0, 0), G_DL(0x0601b640)];
     });
   } else if (g?.kind === 'rails') {
-    railsStrip([P(g.preset), ...(g.tex ? tileTexture(g.tex, 32, 32, 0, 0, 5) : []), G_DL(g.dl)], 'ground', { list: hex(g.dl) }, 2000, -length - 12000);
+    railsStrip([P(g.preset), ...(g.tex ? tileTexture(g.tex, 32, 32, 0, 0, 0) : []), G_DL(g.dl)], 'ground', { list: hex(g.dl) }, 2000, -length - 12000);
   } else if (g?.kind === 'aquas') {
-    railsStrip([P(20), ...tileTexture(0x0600ab68, 32, 32, 0, 0, 5), G_DL(0x0600ab10)], 'sea floor', { list: '0x600ab10' }, 2000, -length - 12000);
+    railsStrip([P(20), ...tileTexture(0x0600ab68, 32, 32, 0, 0, 0), G_DL(0x0600ab10)], 'sea floor', { list: '0x600ab10' }, 2000, -length - 12000);
     // Water surface at y 1600: Scale(2, 1, 0.5), translucent (preset 37, prim alpha 128).
     for (let z = 2000; z > -length - 12000; z -= 6000) {
       const m = ident();
       scale(m, 2, 1, 0.5);
-      const words = [P(37), prim(255, 255, 255, 128), ...tileTexture(0x0602acc0, 32, 32, 0, 0, 5), G_DL(0x0602ac40)];
+      const words = [P(37), prim(255, 255, 255, 128), ...tileTexture(0x0602acc0, 32, 32, 0, 0, 0), G_DL(0x0602ac40)];
       place('water surface', 'foreground', meshOf('water surface', [{ words, m }], { list: '0x602ac40' }), 'water surface', [0, 1600, z - 3000], { ground: 'water surface' });
     }
   } else if (g?.kind === 'range') {
@@ -477,7 +533,7 @@ function loadLevel(files: Sf64Files, def: LevelDef, levelInfo: LevelInfo): Level
     }
   } else if (g?.kind === 'titania') {
     const { rows, flat } = simulateTitania(objs, length);
-    const tex = tileTexture(0x06001ba8, 32, 32, 1, 1, 5);
+    const tex = tileTexture(0x06001ba8, 32, 32, 1, 1, 0);
     const writeVtx = (at: number, x: number, y: number, z: number, s: number, t: number, n: number[]) => {
       const o = space.resolve(at);
       dv.setInt16(o, Math.round(x)); dv.setInt16(o + 2, Math.round(y)); dv.setInt16(o + 4, Math.round(z)); dv.setInt16(o + 6, 0);
@@ -508,7 +564,7 @@ function loadLevel(files: Sf64Files, def: LevelDef, levelInfo: LevelInfo): Level
     const flatVtx = space.alloc(4 * 16);
     [[-3410, -5720, 0, 0], [-3410, 0, 0, 26624], [3410, 0, -32768, 26624], [3410, -5720, -32768, 0]]
       .forEach(([x, z, s, t], i) => writeVtx(flatVtx + i * 16, x, 0, z, s, t, [0, 127, 0]));
-    const flatWords: W[] = [P(29), ...tileTexture(0x06001ba8, 32, 32, 1, 0, 5), vtxCmd(4, flatVtx), tri(0, 1, 2), tri(0, 2, 3)];
+    const flatWords: W[] = [P(29), ...tileTexture(0x06001ba8, 32, 32, 1, 0, 0), vtxCmd(4, flatVtx), tri(0, 1, 2), tri(0, 2, 3)];
     const flatMesh = meshOf('flat plane', [{ words: flatWords, m: ident() }], {}, 'titania flat', true);
     for (const [a, b] of flat) for (let p = a; p <= b + 5720; p += 5720) place(groundLayer, 'background', flatMesh, 'flat plane', [0, 0, -p + 200], { progress: p });
   }
@@ -685,11 +741,7 @@ function loadLevel(files: Sf64Files, def: LevelDef, levelInfo: LevelInfo): Level
   };
 
   // Training all-range: Rand_SetSeed(1, 29000, 9876), then y = yPos - RAND_FLOAT_SEEDED(300) per scenery object.
-  const seeds = [1, 29000, 9876];
-  const randomSeeded = () => {
-    seeds[0] = (seeds[0] * 171) % 30269; seeds[1] = (seeds[1] * 172) % 30307; seeds[2] = (seeds[2] * 170) % 30323;
-    return Math.abs(Math.fround(seeds[0] / 30269 + seeds[1] / 30307 + seeds[2] / 30323) % 1);
-  };
+  const randomSeeded = seededRandom(1, 29000, 9876);
 
   let unhandled = 0;
   for (const o of objs) {
@@ -758,10 +810,23 @@ function loadLevel(files: Sf64Files, def: LevelDef, levelInfo: LevelInfo): Level
     }
   }
 
+  // Space backdrop and starfield, drawn around the camera.
+  const skies: Sky[] = [];
+  const spaceBg = def.level === 20 ? undefined : def.warp ? WARP_BACKDROP : SPACE_BACKDROPS[def.level];
+  if (spaceBg) {
+    const m = ident();
+    translate(m, spaceBg.x ?? 0, spaceBg.y ?? 0, -290);
+    scale(m, spaceBg.scale, spaceBg.scale, spaceBg.rotX ? spaceBg.scale : 1);
+    if (spaceBg.rotX) rotX(m, Math.PI / 2);
+    const sprite = run([P(spaceBg.preset ?? 36), prim(255, 255, 255, spaceBg.alpha ?? 255), G_DL(spaceBg.dl)], m, false);
+    const batches = [starfield(spaceBg.stars), ...sprite.map((b) => ({ ...b, depthTest: false, depthWrite: false, cullBack: false }))];
+    skies.push({ name: 'starfield', mesh: meshes.push({ ...meshFromBatches('starfield', batches), info: { backdrop: hex(spaceBg.dl), stars: spaceBg.stars } }) - 1 });
+  }
+
   const camera: CameraView = { eye: eye as [number, number, number], target: target as [number, number, number], fovY: 45 };
   void unhandled;
   return buildLevel(levelInfo, `sf64-${levelInfo.index}`, textures, meshes, instances, {
-    layers, markers, fog, clearColor, camera, ...(backdrop ? { backdrop } : {}),
+    layers, markers, fog, clearColor, camera, ...(backdrop ? { backdrop } : {}), ...(skies.length ? { skies } : {}),
   });
 }
 

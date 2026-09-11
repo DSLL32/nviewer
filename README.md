@@ -285,7 +285,8 @@ Textures are uploaded with the RDP tile commands, not read in place.
 - **Grounds.** The game draws the ground attached to the camera; the viewer tiles it along the level (Corneria's
   grass, rock and water sections follow the event scripts), and Titania's terrain is simulated from its records.
 - **Environment.** Fog, clear colour and the planet backdrop window come from the environment record and the
-  game's start camera.
+  game's start camera. Space levels get the game's starfield and backdrop sprite as a sky around the camera.
+  The level light counts four times (the game fills four RSP light slots with it).
 - **Music.** Nintendo EAD's sequence driver (the Mario 64 / Ocarina lineage, with its note pool, integer mixer
   and per-song reverb) rendered at 32 kHz at the game's own level; loops follow the sequences' jumps.
 
@@ -312,5 +313,6 @@ Textures are uploaded with the RDP tile commands, not read in place.
   per-song channel mute masks), without the happy, sad and "super" variants, and reverb is not modelled.
 - Star Fox 64: enemies and props drawn by code without a plain model (fish, birds, Titania rovers, Bolse
   cannons, Sector Y robots) are markers; moving event actors stand at their spawn point (the "scripted"
-  toggle hides them); space backdrops, the starfield, water reflections, Solar and Zoness waves and Bolse's
-  dynamic ground are not shown; the ground is tiled statically, so its texture seams may not line up.
+  toggle hides them); water reflections, Solar and Zoness waves and Bolse's dynamic ground are not shown; the
+  ground is tiled statically, so its texture seams may not line up; space backdrops are placed for the start view
+  (Area 6's planet at its starting size, Meteo's planet where it rises at the end).
