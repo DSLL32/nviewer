@@ -16,7 +16,7 @@ export function Landing({ busy, error, onPick }: LandingProps) {
           they are parsed locally and cached for next time. Load several games at once.
         </p>
         <div className="supported">
-          <div className="small muted">Supported ROMs (USA versions, .z64 / .v64 / .n64):</div>
+          <div className="small muted">Supported ROMs (.z64 / .v64 / .n64):</div>
           <ul>
             <li>San Francisco Rush 2049 (U)</li>
             <li>San Francisco Rush: Extreme Racing (U)</li>
@@ -27,6 +27,7 @@ export function Landing({ busy, error, onPick }: LandingProps) {
             <li>BattleTanx: Global Assault (U)</li>
             <li>Gex 64: Enter the Gecko (U)</li>
             <li>Gex 3: Deep Cover Gecko (U)</li>
+            <li>Yoshi's Story (J)</li>
           </ul>
         </div>
         <div className="dropzone" aria-busy={busy !== null}>

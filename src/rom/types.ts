@@ -101,8 +101,39 @@ export interface CameraView {
   fovY?: number; // degrees
 }
 
+// A named group of instances the UI can show or hide (tile layers, objects, collision, markers).
+export interface LevelLayer {
+  name: string; // e.g. "far (wrd_1_1_1_enkei)", "main", "objects"
+  kind: 'background' | 'main' | 'foreground' | 'objects' | 'collision' | 'markers';
+  instances: number[]; // indices into Level.instances
+  depth?: number; // the game's depth value, for display
+  parallax?: number; // scroll factor relative to the main plane, for display
+  visibleByDefault?: boolean; // default true
+}
+
+// Camera for side-scrolling games: a fixed-lens camera looking down -Z at the plane Z = 0, without
+// rotation. The lens must not be re-framed: the game's parallax depends on it.
+export interface SideView {
+  fovY: number; // degrees
+  distance: number; // eye distance from the Z = 0 plane
+  start: [number, number]; // eye X, Y at level start
+  bounds: { min: [number, number]; max: [number, number] }; // pan limits for the eye
+}
+
+// A labelled point, for objects without decoded art.
+export interface Marker {
+  label: string; // e.g. "4199 atamaheiho"
+  position: [number, number, number];
+  layer?: number; // index into Level.layers (its visibility toggle applies)
+  info?: DebugInfo;
+}
+
 export interface Level {
   info: LevelInfo;
+  layers?: LevelLayer[];
+  sideView?: SideView;
+  markers?: Marker[];
+  pixelArt?: boolean; // default to nearest texture filtering
   fog?: Fog; // absent when the game shows no fog
   // Skies the game chooses between (at random, for Rush 1), if it builds them itself.
   skies?: Sky[];
@@ -136,7 +167,7 @@ export interface DecodedMusic {
 
 // A loaded ROM of one supported game.
 export interface Game {
-  id: 'rush2049' | 'rush1' | 'bm64' | 'bm64sa' | 'bmhero' | 'battletanx' | 'battletanxga' | 'gex64' | 'gex3';
+  id: 'rush2049' | 'rush1' | 'bm64' | 'bm64sa' | 'bmhero' | 'battletanx' | 'battletanxga' | 'gex64' | 'gex3' | 'yoshistory';
   title: string;
   levels: LevelInfo[];
   loadLevel(index: number): Level;

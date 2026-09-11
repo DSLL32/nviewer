@@ -141,6 +141,7 @@ interface GpuMesh {
 }
 
 interface DrawItem {
+  index: number; // into Level.instances
   mesh: GpuMesh;
   model: Mat4;
   animated: boolean;
@@ -185,6 +186,7 @@ export class LevelRenderer {
   dirty = true;
   lastFrame: FrameStats = { drawCalls: 0 };
   private showAnimated = true;
+  private hiddenInstances: ReadonlySet<number> | null = null;
   private fog: Fog | null = null;
   private fogEnabled = false;
   private cullingEnabled = false;
@@ -350,6 +352,12 @@ export class LevelRenderer {
     this.dirty = true;
   }
 
+  /** Instances (indices into Level.instances) not to draw, e.g. from layers switched off; null draws all. */
+  setHiddenInstances(indices: ReadonlySet<number> | null) {
+    this.hiddenInstances = indices && indices.size > 0 ? indices : null;
+    this.dirty = true;
+  }
+
   /** Overlay for the picked object or face (null clears it). */
   setHighlight(h: Highlight | null) {
     this.dirty = true;
@@ -396,12 +404,13 @@ export class LevelRenderer {
     };
 
     const items: DrawItem[] = [];
-    for (const inst of level.instances) {
+    for (let index = 0; index < level.instances.length; index++) {
+      const inst = level.instances[index];
       if (inst.mesh < 0) continue;
       const mesh = getMesh(inst.mesh);
       if (!mesh) continue;
       const m = inst.matrix;
-      items.push({ mesh, model: m, animated: inst.animated === true, noFog: inst.noFog === true, mirrored: det3(m) < 0, x: m[12], y: m[13], z: m[14], dist: 0 });
+      items.push({ index, mesh, model: m, animated: inst.animated === true, noFog: inst.noFog === true, mirrored: det3(m) < 0, x: m[12], y: m[13], z: m[14], dist: 0 });
     }
 
     const sky: GpuMesh[] = [];
@@ -567,8 +576,9 @@ export class LevelRenderer {
 
     // Opaque and cutout geometry.
     const showAnimated = this.showAnimated;
+    const hidden = this.hiddenInstances;
     for (const item of scene.items) {
-      if (item.animated && !showAnimated) continue;
+      if ((item.animated && !showAnimated) || hidden?.has(item.index)) continue;
       fogFor(item);
       for (const b of item.mesh.solid) draw(b, item.model, b.depthTest, b.depthWrite, item.mirrored);
     }
@@ -577,7 +587,7 @@ export class LevelRenderer {
     if (scene.hasDecals) {
       gl.uniform1f(this.uDepthBias, DECAL_DEPTH_BIAS);
       for (const item of scene.items) {
-        if (item.animated && !showAnimated) continue;
+        if ((item.animated && !showAnimated) || hidden?.has(item.index)) continue;
         fogFor(item);
         for (const b of item.mesh.decal) draw(b, item.model, b.depthTest, false, item.mirrored);
       }
@@ -591,7 +601,7 @@ export class LevelRenderer {
     }
     scene.blendItems.sort((a, b) => b.dist - a.dist);
     for (const item of scene.blendItems) {
-      if (item.animated && !showAnimated) continue;
+      if ((item.animated && !showAnimated) || hidden?.has(item.index)) continue;
       fogFor(item);
       for (const b of item.mesh.blended) draw(b, item.model, b.depthTest, false, item.mirrored);
     }

@@ -198,7 +198,6 @@ export function App() {
   }, [selectLevel, updateGames]);
 
   useEffect(() => writeStorage(COLLAPSED_KEY, JSON.stringify(collapsed)), [collapsed]);
-
   const openFile = useCallback(
     async (file: File) => {
       const client = clientRef.current;

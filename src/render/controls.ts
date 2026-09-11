@@ -1,11 +1,19 @@
-// Spectator-style input: pointer-lock mouse look, WASD fly, wheel speed; Ctrl/Alt + click picks for bug reports.
+// Camera input: pointer-lock free fly (mouse look, WASD, wheel speed) or a side-scroller view (pan in X/Y,
+// zoom in Z, no rotation); Ctrl/Alt + click picks for bug reports in both.
 import type { FlyCamera } from './camera';
 import { clamp, vec3, type Vec3 } from './math';
 
-export type ControlAction = 'reset' | 'toggle-filter' | 'toggle-help';
+export type ControlAction = 'reset' | 'toggle-filter' | 'toggle-help' | 'toggle-view';
 
 /** Holding Ctrl picks whole objects (instances), holding Alt picks single triangles. */
 export type PickMode = 'object' | 'face';
+
+/** Side view: the eye pans in X/Y within bounds and moves in Z (distance from the Z = 0 plane) to zoom. */
+export interface SideViewLimits {
+  bounds: { min: [number, number]; max: [number, number] };
+  minDistance: number;
+  maxDistance: number;
+}
 
 export interface ControlsCallbacks {
   onSpeedChange(speed: number): void;
@@ -20,6 +28,11 @@ const KEY_TURN_RATE = 1.8; // radians per second for arrow-key looking
 const FAST_MULTIPLIER = 5;
 export const MIN_SPEED = 0.5;
 export const MAX_SPEED = 100000;
+
+const SIDE_PAN_RATE = 1.5; // screen heights per second
+const SIDE_ZOOM_RATE = 1.2; // e-folds of distance per second
+const SIDE_FAST = 4;
+const SIDE_WHEEL_STEP = 1.15;
 
 const FORWARD = ['KeyW'];
 const BACK = ['KeyS'];
@@ -42,6 +55,7 @@ export class FlyControls {
   private ctrlHeld = false;
   private altHeld = false;
   private mode: PickMode | null = null;
+  private side: SideViewLimits | null = null;
   private readonly canvas: HTMLCanvasElement;
   private readonly camera: FlyCamera;
   private readonly cb: ControlsCallbacks;
@@ -92,9 +106,30 @@ export class FlyControls {
     return this.mode;
   }
 
+  /** Whether the side-scroller view is active (else free fly). */
+  get sideView(): boolean {
+    return this.side !== null;
+  }
+
   setSpeed(speed: number) {
     this.camera.speed = clamp(speed, MIN_SPEED, MAX_SPEED);
     this.cb.onSpeedChange(this.camera.speed);
+  }
+
+  /**
+   * Switch to the side view with these limits, or back to free fly (null). The side view never rotates and never
+   * captures the mouse; entering it levels the camera and clamps the eye.
+   */
+  setSideView(limits: SideViewLimits | null) {
+    this.side = limits;
+    this.dragging = false;
+    if (limits) {
+      if (this.locked) document.exitPointerLock();
+      this.camera.yaw = 0;
+      this.camera.pitch = 0;
+      this.clampSide();
+    }
+    this.changed = true;
   }
 
   /** Mark the view as changed (e.g. after an external camera edit). */
@@ -108,6 +143,27 @@ export class FlyControls {
     const cam = this.camera;
     let moved = this.changed;
     this.changed = false;
+
+    if (this.side) {
+      const fast = has(FAST) ? SIDE_FAST : 1;
+      const panX = (has(RIGHT) || has(TURN_RIGHT) ? 1 : 0) - (has(LEFT) || has(TURN_LEFT) ? 1 : 0);
+      const panY = (has(FORWARD) || has(LOOK_UP) ? 1 : 0) - (has(BACK) || has(LOOK_DOWN) ? 1 : 0);
+      const zoom = (has(DOWN) ? 1 : 0) - (has(UP) ? 1 : 0); // C/Q back away, Space/E move in
+      if (panX !== 0 || panY !== 0 || zoom !== 0) {
+        const [x, y, z] = cam.position;
+        // Pan speed follows the zoom: the visible height is 2 * z * tan(fovY / 2).
+        const v = 2 * z * Math.tan(cam.fovY / 2) * SIDE_PAN_RATE * fast * dt;
+        cam.position = [x + panX * v, y + panY * v, z * Math.exp(zoom * SIDE_ZOOM_RATE * fast * dt)];
+        this.clampSide();
+        moved = true;
+      }
+      if (cam.yaw !== 0 || cam.pitch !== 0) {
+        cam.yaw = 0;
+        cam.pitch = 0;
+        moved = true;
+      }
+      return moved;
+    }
 
     // Arrow keys look around (same pitch clamp as mouse look, applied in FlyCamera.rotate).
     const turn = (has(TURN_RIGHT) ? 1 : 0) - (has(TURN_LEFT) ? 1 : 0);
@@ -134,6 +190,17 @@ export class FlyControls {
     return moved;
   }
 
+  private clampSide() {
+    const s = this.side;
+    if (!s) return;
+    const [x, y, z] = this.camera.position;
+    this.camera.position = [
+      clamp(x, s.bounds.min[0], Math.max(s.bounds.min[0], s.bounds.max[0])),
+      clamp(y, s.bounds.min[1], Math.max(s.bounds.min[1], s.bounds.max[1])),
+      clamp(z, s.minDistance, s.maxDistance),
+    ];
+  }
+
   /** Pick mode follows the held modifiers; entering it releases the mouse so the pointer can aim. */
   private updatePickMode() {
     const mode: PickMode | null = this.altHeld ? 'face' : this.ctrlHeld ? 'object' : null;
@@ -144,6 +211,12 @@ export class FlyControls {
       if (this.locked) document.exitPointerLock();
     }
     this.cb.onPickModeChange(mode);
+  }
+
+  private resetModifiers() {
+    this.ctrlHeld = false;
+    this.altHeld = false;
+    this.updatePickMode();
   }
 
   private onMouseDown = (e: MouseEvent) => {
@@ -159,6 +232,10 @@ export class FlyControls {
       return;
     }
     this.dragging = true;
+    if (this.side) {
+      e.preventDefault(); // drag pans; no text selection, no capture
+      return;
+    }
     if (!this.locked) {
       try {
         // Returns a promise in current browsers; a refusal (e.g. sandboxed iframe) falls back to drag-look.
@@ -185,6 +262,16 @@ export class FlyControls {
         this.updatePickMode();
       }
     }
+    if (this.side) {
+      if (!this.dragging || (e.movementX === 0 && e.movementY === 0)) return;
+      // Grab-and-drag: the plane under the cursor follows the mouse (exact on the Z = 0 plane).
+      const cam = this.camera;
+      const perPixel = (2 * cam.position[2] * Math.tan(cam.fovY / 2)) / Math.max(1, this.canvas.clientHeight);
+      cam.position = [cam.position[0] - e.movementX * perPixel, cam.position[1] + e.movementY * perPixel, cam.position[2]];
+      this.clampSide();
+      this.changed = true;
+      return;
+    }
     if (!this.locked && !this.dragging) return;
     // Some browsers report a spurious huge delta right after locking.
     const dx = clamp(e.movementX, -300, 300);
@@ -197,6 +284,13 @@ export class FlyControls {
   private onWheel = (e: WheelEvent) => {
     e.preventDefault();
     if (e.deltaY === 0) return;
+    if (this.side) {
+      const [x, y, z] = this.camera.position;
+      this.camera.position = [x, y, z * Math.pow(SIDE_WHEEL_STEP, Math.sign(e.deltaY))];
+      this.clampSide();
+      this.changed = true;
+      return;
+    }
     this.setSpeed(this.camera.speed * Math.pow(1.2, -Math.sign(e.deltaY)));
   };
 
@@ -231,7 +325,11 @@ export class FlyControls {
     }
     if (e.repeat || e.ctrlKey) return;
     const action: ControlAction | null =
-      e.code === 'KeyR' ? 'reset' : e.code === 'KeyF' ? 'toggle-filter' : e.code === 'KeyH' ? 'toggle-help' : null;
+      e.code === 'KeyR' ? 'reset'
+      : e.code === 'KeyF' ? 'toggle-filter'
+      : e.code === 'KeyH' ? 'toggle-help'
+      : e.code === 'KeyV' ? 'toggle-view'
+      : null;
     if (action) {
       e.preventDefault();
       this.cb.onAction(action);
@@ -247,12 +345,6 @@ export class FlyControls {
       this.updatePickMode();
     }
   };
-
-  private resetModifiers() {
-    this.ctrlHeld = false;
-    this.altHeld = false;
-    this.updatePickMode();
-  }
 
   // Key-ups are not delivered while the window is in the background: drop held keys and any pick mode.
   private onBlur = () => {

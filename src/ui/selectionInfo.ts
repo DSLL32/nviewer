@@ -5,7 +5,8 @@ import { det3, instanceWorldBounds, transformPoint } from '../render/picking';
 
 export type Selection =
   | { kind: 'object'; instance: number; point: Vec3 }
-  | { kind: 'face'; instance: number; batch: number; tri: number; point: Vec3 };
+  | { kind: 'face'; instance: number; batch: number; tri: number; point: Vec3 }
+  | { kind: 'marker'; marker: number };
 
 export interface InfoSection {
   title: string;
@@ -42,6 +43,11 @@ function infoSection(title: string, info: DebugInfo | undefined): InfoSection[] 
   return rows.length > 0 ? [{ title, rows }] : [];
 }
 
+function layerLabel(level: Level, index: number): string {
+  const layer = level.layers?.[index];
+  return layer ? `#${index} ${layer.name} (${layer.kind})` : `#${index}`;
+}
+
 function levelSection(level: Level, game: GameIdentity | null): InfoSection {
   const info = level.info;
   return {
@@ -56,6 +62,21 @@ function levelSection(level: Level, game: GameIdentity | null): InfoSection {
 }
 
 export function describeSelection(level: Level, game: GameIdentity | null, sel: Selection): SelectionReport | null {
+  if (sel.kind === 'marker') {
+    const marker = level.markers?.[sel.marker];
+    if (!marker) return null;
+    const rows: [string, string][] = [
+      ['Marker', `#${sel.marker} ${marker.label}`],
+      ['Position', vec(marker.position, 2)],
+    ];
+    if (marker.layer !== undefined) rows.push(['Layer', layerLabel(level, marker.layer)]);
+    return {
+      title: `Marker: ${marker.label}`,
+      sections: [levelSection(level, game), { title: 'Marker', rows }, ...infoSection('Marker.info', marker.info)],
+      texture: null,
+    };
+  }
+
   const inst = level.instances[sel.instance];
   const mesh = inst && inst.mesh >= 0 ? level.meshes[inst.mesh] : undefined;
   if (!inst || !mesh) return null;
@@ -66,6 +87,8 @@ export function describeSelection(level: Level, game: GameIdentity | null, sel: 
     ['Mesh', `#${inst.mesh} ${mesh.name}`],
   ];
   if (flags.length) identity.push(['Flags', flags.join(', ')]);
+  const layers = (level.layers ?? []).flatMap((l, i) => (l.instances.includes(sel.instance) ? [layerLabel(level, i)] : []));
+  if (layers.length) identity.push(['Layer', layers.join(', ')]);
 
   if (sel.kind === 'object') {
     const tris = mesh.batches.reduce((s, b) => s + Math.floor(b.positions.length / 9), 0);

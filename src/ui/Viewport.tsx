@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import type { Level } from '../rom';
+import type { Level, Marker, SideView } from '../rom';
 import { FlyCamera } from '../render/camera';
-import { FlyControls, type ControlAction, type PickMode } from '../render/controls';
+import { FlyControls, type ControlAction, type PickMode, type SideViewLimits } from '../render/controls';
+import { mat4, type Mat4 } from '../render/math';
 import { LevelPicker, orientedBoxLines, triangleWorld } from '../render/picking';
 import { LevelRenderer } from '../render/renderer';
 import { computeStartView, type StartView } from '../render/startView';
@@ -10,6 +11,15 @@ import { describeSelection, type Selection } from './selectionInfo';
 
 const OBJECT_HIGHLIGHT: [number, number, number] = [1, 0.2, 0.95]; // magenta
 const FACE_HIGHLIGHT: [number, number, number] = [1, 0.9, 0.1]; // yellow
+
+const FREE_FLY_FOV_Y = (60 * Math.PI) / 180;
+// Side view zoom range: the eye's distance from the Z = 0 plane.
+const SIDE_MIN_DISTANCE = 60;
+const SIDE_MAX_DISTANCE = 6000;
+const MARKER_PICK_RADIUS = 10; // CSS px around a marker dot
+const MAX_MARKER_LABELS = 150; // more markers on screen than this: dots only
+const LABEL_CELL_W = 40; // label de-cluttering grid, CSS px
+const LABEL_CELL_H = 14;
 
 interface ViewportProps {
   level: Level | null;
@@ -28,6 +38,15 @@ interface Engine {
   controls: FlyControls;
 }
 
+/** A marker's DOM element, positioned each frame from the camera. */
+interface MarkerEntry {
+  el: HTMLDivElement;
+  label: HTMLSpanElement;
+  position: [number, number, number];
+  labelWidth: number; // estimated, CSS px
+  selected: boolean;
+}
+
 declare global {
   interface Window {
     /** Debug handle for poking at the viewer from the console. */
@@ -38,6 +57,8 @@ declare global {
 export function Viewport({ level, gameId, gameTitle, loadingName, error, children }: ViewportProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const posRef = useRef<HTMLSpanElement>(null);
+  const markerHostRef = useRef<HTMLDivElement>(null);
+  const markerEntriesRef = useRef<MarkerEntry[]>([]);
   const engineRef = useRef<Engine | null>(null);
   const [glError, setGlError] = useState<string | null>(null);
   const [speed, setSpeed] = useState(500);
@@ -52,10 +73,33 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
   const actionRef = useRef<(a: ControlAction) => void>(() => {});
   const startViewRef = useRef<{ level: Level; view: StartView } | null>(null);
   const [pickMode, setPickMode] = useState<PickMode | null>(null);
-  // The selection remembers its level, so a newly loaded level never shows a stale index.
+  // Per-level UI state remembers its level, so a newly loaded level starts from its defaults.
   const [picked, setPicked] = useState<{ level: Level; sel: Selection } | null>(null);
+  const [flyLevel, setFlyLevel] = useState<Level | null>(null); // level switched from side view to free fly
+  const [layerState, setLayerState] = useState<{ level: Level; hidden: ReadonlySet<number> } | null>(null);
   const pickerRef = useRef<LevelPicker | null>(null);
   const pickRef = useRef<(mode: PickMode, clientX: number, clientY: number) => void>(() => {});
+  const pixelArtRef = useRef(false);
+
+  const sideView = level?.sideView ?? null;
+  const sideActive = !!sideView && flyLevel !== level;
+
+  // Layer visibility: checkboxes from Level.layers; `visibleByDefault: false` layers start hidden.
+  const defaultHiddenLayers = useMemo(
+    () => new Set((level?.layers ?? []).flatMap((l, i) => (l.visibleByDefault === false ? [i] : []))),
+    [level],
+  );
+  const hiddenLayers = layerState && layerState.level === level ? layerState.hidden : defaultHiddenLayers;
+  const hiddenInstances = useMemo(() => {
+    const out = new Set<number>();
+    level?.layers?.forEach((l, i) => {
+      if (hiddenLayers.has(i)) for (const inst of l.instances) out.add(inst);
+    });
+    return out;
+  }, [level, hiddenLayers]);
+
+  const instanceVisible = (lv: Level, i: number) => !hiddenInstances.has(i) && (showScripted || !lv.instances[i]?.animated);
+  const markerVisible = (m: Marker | undefined) => !!m && (m.layer === undefined || !hiddenLayers.has(m.layer));
 
   const pickerFor = (lv: Level): LevelPicker => {
     let picker = pickerRef.current;
@@ -66,9 +110,15 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
     return picker;
   };
 
-  // Hidden instances (scripted objects switched off) cannot stay selected.
+  // Hidden things (scripted objects or layers switched off) cannot stay selected.
   const selection =
-    picked && level && picked.level === level && (showScripted || !level.instances[picked.sel.instance]?.animated) ? picked.sel : null;
+    picked &&
+    level &&
+    picked.level === level &&
+    (picked.sel.kind === 'marker' ? markerVisible(level.markers?.[picked.sel.marker]) : instanceVisible(level, picked.sel.instance))
+      ? picked.sel
+      : null;
+  const selectedMarker = selection?.kind === 'marker' ? selection.marker : -1;
 
   pickRef.current = (mode, clientX, clientY) => {
     const engine = engineRef.current;
@@ -76,12 +126,33 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
     const canvas = engine.renderer.gl.canvas as HTMLCanvasElement;
     const rect = canvas.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return;
+    const cam = engine.camera;
+    const aspect = canvas.width / Math.max(1, canvas.height);
+    if (mode === 'object' && level.markers?.length) {
+      // Marker dots first: they mark objects that have no geometry to hit.
+      const vp = cam.viewProjection(mat4.create(), aspect);
+      let best = -1;
+      let bestDist = MARKER_PICK_RADIUS;
+      level.markers.forEach((m, i) => {
+        if (!markerVisible(m)) return;
+        const s = projectToCss(vp, m.position, rect.width, rect.height);
+        if (!s) return;
+        const d = Math.hypot(s[0] - (clientX - rect.left), s[1] - (clientY - rect.top));
+        if (d <= bestDist) {
+          bestDist = d;
+          best = i;
+        }
+      });
+      if (best >= 0) {
+        setPicked({ level, sel: { kind: 'marker', marker: best } });
+        return;
+      }
+    }
     const ndcX = ((clientX - rect.left) / rect.width) * 2 - 1;
     const ndcY = 1 - ((clientY - rect.top) / rect.height) * 2;
-    const cam = engine.camera;
-    const dir = cam.rayThrough(ndcX, ndcY, canvas.width / Math.max(1, canvas.height));
+    const dir = cam.rayThrough(ndcX, ndcY, aspect);
     const hit = pickerFor(level).pick(cam.position, dir, {
-      include: (i) => showScripted || !level.instances[i].animated,
+      include: (i) => instanceVisible(level, i),
       cullBackFaces: cullOn,
       minT: cam.near,
     });
@@ -90,11 +161,20 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
     else setPicked({ level, sel: { kind: 'face', instance: hit.instance, batch: hit.batch, tri: hit.tri, point: hit.point } });
   };
 
+  const toggleView = () => {
+    if (!level?.sideView) return;
+    setFlyLevel(sideActive ? level : null);
+  };
+
   actionRef.current = (a) => {
     const engine = engineRef.current;
     if (a === 'toggle-filter') setNearest((v) => !v);
     else if (a === 'toggle-help') setHelpOpen((v) => !v);
-    else if (a === 'reset' && engine && startViewRef.current) applyView(engine, startViewRef.current.view);
+    else if (a === 'toggle-view') toggleView();
+    else if (a === 'reset' && engine && startViewRef.current) {
+      applyView(engine, startViewRef.current.view);
+      if (sideActive && sideView && level) engine.controls.setSideView(sideLimits(sideView, level));
+    }
   };
 
   useEffect(() => {
@@ -136,6 +216,7 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
     let last = performance.now();
     let lastReadout = 0;
     let readoutStale = true;
+    const markerMatrix = mat4.create();
     const frame = (t: number) => {
       raf = requestAnimationFrame(frame);
       const dt = Math.min(Math.max((t - last) / 1000, 0), 0.1);
@@ -143,6 +224,7 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
       const moved = controls.update(dt);
       if (moved || renderer.dirty) {
         renderer.render(camera);
+        layoutMarkers(markerEntriesRef.current, camera, canvas, markerMatrix);
         readoutStale = true;
       }
       // Throttled, but always catches up once the camera stops.
@@ -183,15 +265,47 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
       ? Math.hypot(max[0] - min[0], max[1] - min[1], max[2] - min[2])
       : 0;
     engine.camera.far = Math.max(50000, diag * 4);
-    const canvas = engine.renderer.gl.canvas as HTMLCanvasElement;
-    const view = computeStartView(level, canvas.width / Math.max(1, canvas.height), engine.camera.fovY);
+    const sv = level.sideView;
+    let view: StartView;
+    if (sv) {
+      // The game's own lens, never re-framed: its parallax depends on the field of view and eye distance.
+      engine.camera.fovY = (sv.fovY * Math.PI) / 180;
+      view = { position: [sv.start[0], sv.start[1], sv.distance], yaw: 0, pitch: 0, speed: Math.min(5000, Math.max(50, sv.distance)), groundY: 0 };
+    } else {
+      engine.camera.fovY = FREE_FLY_FOV_Y;
+      const canvas = engine.renderer.gl.canvas as HTMLCanvasElement;
+      view = computeStartView(level, canvas.width / Math.max(1, canvas.height), engine.camera.fovY);
+    }
     startViewRef.current = { level, view };
     engine.renderer.setSkyGroundHeight(view.groundY);
     applyView(engine, view);
   }, [level]);
 
+  // Side view on or off; free fly starts from wherever the side-view eye is.
+  useEffect(() => {
+    const engine = engineRef.current;
+    if (!engine) return;
+    const sv = level?.sideView;
+    if (sv && level && sideActive) {
+      engine.controls.setSideView(sideLimits(sv, level));
+    } else {
+      engine.controls.setSideView(null);
+      if (sv) engine.controls.setSpeed(Math.min(5000, Math.max(50, engine.camera.position[2])));
+    }
+  }, [level, sideActive]);
+
+  // Pixel-art levels default to nearest filtering (F still toggles); leaving them restores linear filtering.
+  useEffect(() => {
+    const pixelArt = !!level?.pixelArt;
+    if (pixelArt !== pixelArtRef.current) {
+      pixelArtRef.current = pixelArt;
+      setNearest(pixelArt);
+    }
+  }, [level]);
+
   useEffect(() => engineRef.current?.renderer.setNearestFiltering(nearest), [nearest]);
   useEffect(() => engineRef.current?.renderer.setShowAnimated(showScripted), [showScripted]);
+  useEffect(() => engineRef.current?.renderer.setHiddenInstances(hiddenInstances), [hiddenInstances]);
   useEffect(() => {
     engineRef.current?.renderer.setFogEnabled(fogOn);
     try {
@@ -217,12 +331,39 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
     writeString(BACKDROP_KEY, showBackdrop ? '1' : '0');
   }, [showBackdrop]);
 
-  // Selection overlay: the object's oriented bounding box, or the face filled and outlined.
+  // Marker overlay elements (positions are updated by the frame loop whenever the view changes).
+  useEffect(() => {
+    const host = markerHostRef.current;
+    if (!host) return;
+    host.replaceChildren();
+    const entries: MarkerEntry[] = [];
+    (level?.markers ?? []).forEach((m, i) => {
+      if (m.layer !== undefined && hiddenLayers.has(m.layer)) return;
+      const el = document.createElement('div');
+      el.className = i === selectedMarker ? 'marker selected' : 'marker';
+      el.dataset.marker = String(i);
+      const dot = document.createElement('span');
+      dot.className = 'marker-dot';
+      const label = document.createElement('span');
+      label.className = 'marker-label';
+      label.textContent = m.label;
+      el.append(dot, label);
+      host.append(el);
+      entries.push({ el, label, position: m.position, labelWidth: 14 + m.label.length * 6.6, selected: i === selectedMarker });
+    });
+    // The selected marker claims its label space first.
+    entries.sort((a, b) => Number(b.selected) - Number(a.selected));
+    markerEntriesRef.current = entries;
+    if (engineRef.current) engineRef.current.renderer.dirty = true;
+  }, [level, hiddenLayers, selectedMarker]);
+
+  // Selection overlay: the object's oriented bounding box, or the face filled and outlined (markers are
+  // highlighted in the marker overlay).
   useEffect(() => {
     const renderer = engineRef.current?.renderer;
     if (!renderer) return;
-    const inst = level && selection ? level.instances[selection.instance] : undefined;
-    if (!level || !selection || !inst) {
+    const inst = level && selection && selection.kind !== 'marker' ? level.instances[selection.instance] : undefined;
+    if (!level || !selection || selection.kind === 'marker' || !inst) {
       renderer.setHighlight(null);
     } else if (selection.kind === 'object') {
       const bounds = pickerFor(level).bounds(inst.mesh);
@@ -260,17 +401,31 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
   );
   const reportTexture = report && report.texture !== null && level ? (level.textures[report.texture] ?? null) : null;
 
+  const setLayerVisible = (index: number, visible: boolean) => {
+    if (!level) return;
+    const next = new Set(hiddenLayers);
+    if (visible) next.delete(index);
+    else next.add(index);
+    setLayerState({ level, hidden: next });
+  };
+
   const hasScripted = level?.instances.some((i) => i.animated && i.mesh >= 0) ?? false;
   const hasFog = !!level?.fog;
+  const layers = level?.layers ?? [];
 
   return (
     <main className="viewport">
       <canvas
         ref={canvasRef}
-        className={`gl-canvas${pickMode ? ` pick-${pickMode}` : ''}`}
+        className={`gl-canvas${pickMode ? ` pick-${pickMode}` : ''}${sideActive ? ' side-view' : ''}`}
         tabIndex={0}
-        aria-label="Level view. Click to fly, Ctrl+click selects an object, Alt+click a face."
+        aria-label={
+          sideActive
+            ? 'Level view. Drag or use the arrow keys to pan, wheel to zoom, Ctrl+click selects an object, Alt+click a face.'
+            : 'Level view. Click to fly, Ctrl+click selects an object, Alt+click a face.'
+        }
       />
+      <div ref={markerHostRef} className="marker-layer" aria-hidden="true" />
 
       {loadingName && (
         <div className="overlay center" role="status">
@@ -290,7 +445,9 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
             ? 'Click an object to select it · Esc clears the selection'
             : pickMode === 'face'
               ? 'Click a face to select it · Esc clears the selection'
-              : 'Click the view to fly · Esc to release'}
+              : sideActive
+                ? 'Drag or W A S D to pan · wheel zooms · V for free fly'
+                : 'Click the view to fly · Esc to release'}
         </div>
       )}
 
@@ -303,26 +460,53 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
           </button>
         </div>
         <div className="hud-row small muted">
-          <span>Speed <strong className="speed">{Math.round(speed)}</strong> u/s</span>
+          {sideActive ? (
+            <span id="view-mode">Side view</span>
+          ) : (
+            <span id="view-mode">{sideView ? 'Free fly · ' : ''}Speed <strong className="speed">{Math.round(speed)}</strong> u/s</span>
+          )}
           <span ref={posRef} className="mono" />
         </div>
+        {sideView && (
+          <label className="check" title="The game's own side-scrolling camera, or free fly through the layers (V)">
+            <input id="side-view-toggle" type="checkbox" checked={sideActive} onChange={toggleView} />
+            Side view (V)
+          </label>
+        )}
         {helpOpen && (
           <>
-            <dl className="controls-help">
-              <dt>Mouse</dt><dd>Look (click to capture, Esc releases)</dd>
-              <dt>W A S D</dt><dd>Move</dd>
-              <dt>Arrow keys</dt><dd>Look around</dd>
-              <dt>Space / E</dt><dd>Up</dd>
-              <dt>C / Q</dt><dd>Down</dd>
-              <dt>Shift</dt><dd>Fast (×5)</dd>
-              <dt>Wheel</dt><dd>Adjust speed</dd>
-              <dt>R</dt><dd>Reset view</dd>
-              <dt>F</dt><dd>Toggle nearest filtering</dd>
-              <dt>Ctrl + click</dt><dd>Select object</dd>
-              <dt>Alt + click</dt><dd>Select face</dd>
-            </dl>
+            {sideActive ? (
+              <dl className="controls-help">
+                <dt>Drag</dt><dd>Pan</dd>
+                <dt>W A S D / arrows</dt><dd>Pan</dd>
+                <dt>Wheel</dt><dd>Zoom</dd>
+                <dt>Space / E</dt><dd>Zoom in</dd>
+                <dt>C / Q</dt><dd>Zoom out</dd>
+                <dt>Shift</dt><dd>Fast (×4)</dd>
+                <dt>V</dt><dd>Free fly</dd>
+                <dt>R</dt><dd>Reset view</dd>
+                <dt>F</dt><dd>Toggle nearest filtering</dd>
+                <dt>Ctrl + click</dt><dd>Select object or marker</dd>
+                <dt>Alt + click</dt><dd>Select face</dd>
+              </dl>
+            ) : (
+              <dl className="controls-help">
+                <dt>Mouse</dt><dd>Look (click to capture, Esc releases)</dd>
+                <dt>W A S D</dt><dd>Move</dd>
+                <dt>Arrow keys</dt><dd>Look around</dd>
+                <dt>Space / E</dt><dd>Up</dd>
+                <dt>C / Q</dt><dd>Down</dd>
+                <dt>Shift</dt><dd>Fast (×5)</dd>
+                <dt>Wheel</dt><dd>Adjust speed</dd>
+                {sideView && (<><dt>V</dt><dd>Side view</dd></>)}
+                <dt>R</dt><dd>Reset view</dd>
+                <dt>F</dt><dd>Toggle nearest filtering</dd>
+                <dt>Ctrl + click</dt><dd>Select {level?.markers?.length ? 'object or marker' : 'object'}</dd>
+                <dt>Alt + click</dt><dd>Select face</dd>
+              </dl>
+            )}
             <label className="check">
-              <input type="checkbox" checked={nearest} onChange={(e) => setNearest(e.target.checked)} />
+              <input id="nearest-toggle" type="checkbox" checked={nearest} onChange={(e) => setNearest(e.target.checked)} />
               Nearest texture filtering
             </label>
             <label
@@ -366,6 +550,26 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
           </>
         )}
       </div>
+      {layers.length > 0 && (
+        <div className="hud layer-panel" id="layer-panel">
+          <div className="hud-row">
+            <strong>Layers</strong>
+            <span className="small muted">{layers.length - layers.filter((_, i) => hiddenLayers.has(i)).length} of {layers.length} shown</span>
+          </div>
+          {layers.map((l, i) => (
+            <label key={i} className="check layer-row" title={`${l.kind}: ${l.instances.length} instance${l.instances.length === 1 ? '' : 's'}`}>
+              <input type="checkbox" data-layer={i} checked={!hiddenLayers.has(i)} onChange={(e) => setLayerVisible(i, e.target.checked)} />
+              <span className="layer-name">{l.name}</span>
+              <span className="layer-meta small muted">
+                {[
+                  l.depth !== undefined ? `z ${+l.depth.toFixed(2)}` : null,
+                  l.parallax !== undefined ? `×${l.parallax.toFixed(2)}` : null,
+                ].filter(Boolean).join(' · ')}
+              </span>
+            </label>
+          ))}
+        </div>
+      )}
       {children}
       {report && <SelectionPanel report={report} texture={reportTexture} onClear={() => setPicked(null)} />}
       </div>
@@ -380,6 +584,67 @@ const CULL_KEY = 'nviewer.backfaceCulling.v2';
 const SKY_KEY = 'nviewer.sky';
 const BACKDROP_KEY = 'nviewer.showBackdrop';
 const SKY_NONE = '__none__';
+
+function sideLimits(sv: SideView, level: Level): SideViewLimits {
+  const min: [number, number] = [sv.bounds.min[0], sv.bounds.min[1]];
+  const max: [number, number] = [sv.bounds.max[0], sv.bounds.max[1]];
+  // A zero-size pan range on an axis would freeze the view there: fall back to the level's own extent.
+  for (const k of [0, 1] as const) {
+    if (!(max[k] > min[k]) && Number.isFinite(level.bounds.min[k]) && Number.isFinite(level.bounds.max[k])) {
+      min[k] = Math.min(min[k], level.bounds.min[k]);
+      max[k] = Math.max(max[k], level.bounds.max[k]);
+    }
+  }
+  return {
+    bounds: { min, max },
+    minDistance: Math.min(SIDE_MIN_DISTANCE, sv.distance),
+    maxDistance: Math.max(SIDE_MAX_DISTANCE, sv.distance),
+  };
+}
+
+/** CSS pixel position of a world point (origin at the canvas's top left), or null behind the camera. */
+function projectToCss(vp: Mat4, p: readonly number[], width: number, height: number): [number, number] | null {
+  const w = vp[3] * p[0] + vp[7] * p[1] + vp[11] * p[2] + vp[15];
+  if (w <= 1e-6) return null;
+  const x = (vp[0] * p[0] + vp[4] * p[1] + vp[8] * p[2] + vp[12]) / w;
+  const y = (vp[1] * p[0] + vp[5] * p[1] + vp[9] * p[2] + vp[13]) / w;
+  return [(x * 0.5 + 0.5) * width, (0.5 - y * 0.5) * height];
+}
+
+/**
+ * Position marker dots for the current camera. Labels are shown only while they fit: at most MAX_MARKER_LABELS
+ * markers on screen, and greedily on a coarse grid so that overlapping labels are skipped.
+ */
+function layoutMarkers(entries: MarkerEntry[], camera: FlyCamera, canvas: HTMLCanvasElement, vp: Mat4) {
+  if (entries.length === 0) return;
+  const width = canvas.clientWidth;
+  const height = canvas.clientHeight;
+  camera.viewProjection(vp, canvas.width / Math.max(1, canvas.height));
+  const onScreen: { e: MarkerEntry; x: number; y: number }[] = [];
+  for (const e of entries) {
+    const s = projectToCss(vp, e.position, width, height);
+    if (!s || s[0] < -8 || s[1] < -8 || s[0] > width + 8 || s[1] > height + 8) {
+      if (e.el.style.display !== 'none') e.el.style.display = 'none';
+      continue;
+    }
+    onScreen.push({ e, x: s[0], y: s[1] });
+  }
+  const labels = onScreen.length <= MAX_MARKER_LABELS;
+  const taken = new Set<number>();
+  for (const { e, x, y } of onScreen) {
+    e.el.style.display = '';
+    e.el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
+    let show = labels || e.selected;
+    if (show) {
+      const row = Math.floor(y / LABEL_CELL_H);
+      const first = Math.floor(x / LABEL_CELL_W);
+      const last = Math.floor((x + e.labelWidth) / LABEL_CELL_W);
+      for (let c = first; c <= last && show; c++) if (taken.has(row * 4096 + c)) show = e.selected;
+      if (show) for (let c = first; c <= last; c++) taken.add(row * 4096 + c);
+    }
+    e.label.style.visibility = show ? '' : 'hidden';
+  }
+}
 
 function readString(key: string): string | null {
   try {

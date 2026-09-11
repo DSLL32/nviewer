@@ -5,9 +5,9 @@ import { formatCount, type LevelStats } from './levelStats';
 const GROUPS: { kind: LevelKind; title: string }[] = [
   { kind: 'hub', title: 'Hub' },
   { kind: 'campaign', title: 'Campaign' },
+  { kind: 'adventure', title: 'Adventure' },
   { kind: 'bonus', title: 'Bonus' },
   { kind: 'boss', title: 'Boss' },
-  { kind: 'adventure', title: 'Adventure' },
   { kind: 'race', title: 'Race Tracks' },
   { kind: 'battle', title: 'Battle Arenas' },
   { kind: 'stunt', title: 'Stunt Arenas' },

@@ -2,8 +2,8 @@
 
 A browser viewer for the levels of these N64 games (USA versions): *San Francisco Rush 2049*,
 *San Francisco Rush: Extreme Racing*, *Bomberman 64*, *Bomberman 64: The Second Attack!*,
-*Bomberman Hero*, *BattleTanx*, *BattleTanx: Global Assault*, *Gex 64: Enter the Gecko* and
-*Gex 3: Deep Cover Gecko*. Load one or more ROMs, pick a level in the sidebar, and fly around freely, with
+*Bomberman Hero*, *BattleTanx*, *BattleTanx: Global Assault*, *Gex 64: Enter the Gecko*,
+*Gex 3: Deep Cover Gecko*, and *Yoshi's Story* (Japan). Load one or more ROMs, pick a level in the sidebar, and fly around freely, with
 each game's soundtrack in the music box. ROMs are parsed entirely in the browser (in a Web Worker)
 and cached in IndexedDB; nothing is uploaded anywhere.
 
@@ -14,6 +14,10 @@ and cached in IndexedDB; nothing is uploaded anywhere.
 
 Open the page, then choose or drop ROM files such as `San Francisco Rush 2049 (U) [!].z64` or
 `Bomberman Hero (U) [!].z64` (`.v64`/`.n64` byte orders work too).
+
+**Side-scrollers** (Yoshi's Story) open in a side view through the game's own camera: drag or W A S D / arrow keys
+pan, the wheel (or Space/E, C/Q) zooms, V switches to free fly, and the Layers panel shows or hides background
+layers, objects, collision and markers.
 
 **Controls:** click the view to capture the mouse, then look around with the mouse · arrow keys look around · W A S D move ·
 Space/E up · C/Q down · Ctrl+click selects an object and Alt+click a face (details and a Copy button for bug reports) · Shift faster · mouse wheel changes speed · R reset view · F nearest
@@ -39,10 +43,14 @@ filtering · H help · Esc releases the mouse.
   - `gex/`: Gex 64 and Gex 3 (format notes in `GEX.md`)
     - `common.ts`: object table, synthetic display lists, Z-up transform, object meshes
     - `gex64.ts`, `gex3.ts`: level tables, render trees, skies, placements
+  - `yoshi/`: Yoshi's Story (format notes in `YOSHISTORY.md`)
+    - `slide.ts`: the CMPR/SMSR00 slide-LZ codec
+    - `yoshi.ts`: world list, tile layers at parallax depths, collision overlay, sprites and markers
+    - `yoshicell.ts`: Yoshi's animation cells; `music.ts`: song table; `names.ts`: leak cast and world names
   - `music/`: `musyx.ts`, `rush2049.ts` (Rush 2049), `libultra.ts` (libultra bank/sequence
     synthesizer shared by Rush 1, the Bomberman games and BattleTanx), `rush1.ts`, `libmus.ts`
     (Software Creations' libmus as used by Global Assault and Gex 3), `libmus64.ts` (the older libmus
-    revision in Gex 64)
+    revision in Gex 64), `nas.ts` (Nintendo EAD's "Nas" sequence driver, used by Yoshi's Story)
 - `src/worker.ts`: parses the ROM and levels off the main thread
 - `src/render/`: WebGL2 renderer, free-fly camera and controls
 - `src/ui/`: React UI (landing page, sidebar, viewport)
@@ -239,6 +247,24 @@ Textures are uploaded with the RDP tile commands, not read in place.
   - Both games play music quietly (about −33 dBFS; renders match captured game audio within about
     1 dB and without drift). The viewer boosts them for playback (Gex 64 ×2.25, Gex 3 ×6).
 
+### Yoshi's Story (Japan)
+
+`YOSHISTORY.md` documents the formats in full; in short:
+- **Files.** No file table: cast and world records are read through segmented pointers (castData at ROM
+  0x528430, worldDatabase at 0xB16170), and image records may be CMPR/SMSR00 slide-LZ compressed.
+- **Levels.** A world (one room) lists actors in world pixels; actors 0x8xxx are tile layers (16 × 16 CI8 units
+  grouped in 256 × 256 blocks, with an RGBA5551 palette), the others objects. Worlds are grouped into the 24
+  courses by page; boss rooms, the practice course and unused test worlds are listed too.
+- **Side view.** The game's parallax is an exact perspective projection: layers are placed as planes at their
+  depths (`floor(z) − 500` behind the main plane), scaled so their texels stay 1:1 and offset by each layer's
+  anchor, and shown through the game's 40° camera 329.7 px in front of the main plane (`Level.sideView`). The
+  viewer pans that camera; free fly shows the layers apart.
+- **Objects.** Unit sprites show their first listed frame, Yoshi stands at the player start (cell 0, green),
+  and objects drawn by code (exits, lifts, effects) are labelled markers. The collision map of the main layer
+  is an optional overlay.
+- **Music.** Nintendo EAD's "Nas" driver (sequence, channel and layer scripts, instrument banks and drum kits,
+  VADPCM, envelopes, vibrato) rendered at 32 kHz; tempo and loop points follow the game.
+
 ## Known gaps
 
 - Rush 2049: scripted objects are shown frozen at the start of their paths.
@@ -257,3 +283,6 @@ Textures are uploaded with the RDP tile commands, not read in place.
   level scripts spawn are not shown; invisible volumes and marker boxes (Gex 3 sound emitters) are
   hidden by class or by their all-black placeholder texture. Vertex-colour animation (flickering
   lights) shows the file's colours.
+- Yoshi's Story: animated tiles and sprites show one frame; actors drawn by code or meshes (lifts, the Bowser
+  room arena, bosses) are markers; menu worlds are not listed; reverb and Yoshi's mood-dependent music changes
+  are not modelled.
