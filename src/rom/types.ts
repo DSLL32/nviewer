@@ -142,6 +142,9 @@ export interface LevelLayer {
   // An overlay the game makes see-through while the player is behind it (e.g. a hut's roof and walls): the
   // viewer fades it out while the pointer is over it.
   fadeOnHover?: boolean;
+  // Layers with the same group are listed together under a collapsible heading with a toggle for the whole group
+  // (e.g. "rooms" for one layer per room).
+  group?: string;
 }
 
 // Camera for side-scrolling games: a fixed-lens camera looking down -Z at the plane Z = 0, without
