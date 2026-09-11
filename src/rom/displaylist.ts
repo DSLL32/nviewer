@@ -1,10 +1,21 @@
-// N64 display-list interpretation (F3DEX 1.x and F3DEX2 microcode) into
+// N64 display-list interpretation (F3DEX 1.x, F3DEX2 and Fast3D microcode) into
 // render-ready triangle batches.
 import { decodeTexture, ImFmt, ImSiz, loadBlock, Tlut, TMEM_SIZE, type TextureDesc } from './texture';
 import type { Batch, BlendMode, Texture, WrapMode } from './types';
 import { view } from './util';
 
-export type Ucode = 'f3dex' | 'f3dex2';
+// 'f3d': Fast3D (RSP 2.0G) as GoldenEye stores its lists, with Rare's B1 (four triangles) and C0 (texture number)
+// commands, which the game expands before drawing (GOLDENEYE.md §3.3).
+export type Ucode = 'f3dex' | 'f3dex2' | 'f3d';
+
+// What a C0 command resolves to: a texture already in DisplayListContext.textures and its level-0 size.
+export interface RareTexture {
+  texture: number; // index into ctx.textures, -1 for none
+  width: number; // level-0 texels
+  height: number;
+  uls: number; // texels subtracted from s and t (the game's bilinear half-texel tile offset; 0 for GPU filtering)
+  ult: number;
+}
 
 // A directional light as the RSP uses it: colour 0..255, unit direction in the space the
 // vertex normals are transformed into (world space for the supported games).
@@ -62,6 +73,10 @@ export interface DisplayListContext {
   // (w1 bits 20-23) selects the slot (BattleTanx). 'merged': 16-entry loads at tmem 0x800 +
   // 0x80 * k form one 256-entry table indexed by texel value (Global Assault).
   tlutMode?: 'slots' | 'merged';
+  // Ucode 'f3d': resolves C0 texture commands (w0, w1 as stored); without it C0 leaves the geometry untextured.
+  rareTexture?: (w0: number, w1: number) => RareTexture | null;
+  // Added to every vertex position before scaling (GoldenEye's room position).
+  vertexOffset?: [number, number, number];
 }
 
 // Vertex coordinates are 1/16 of a world unit in both Rush games.
@@ -86,7 +101,7 @@ const enum Rdp {
 const G_ZBUFFER = 0x1;
 const G_LIGHTING = 0x20000;
 const G_TEXTURE_GEN = 0x40000;
-const G_CULL_BACK = { f3dex: 0x2000, f3dex2: 0x400 };
+const G_CULL_BACK = { f3dex: 0x2000, f3dex2: 0x400, f3d: 0x2000 };
 const G_MW_LIGHTCOL = 0x0a;
 const RM_Z_CMP = 0x10, RM_Z_UPD = 0x20, RM_CVG_X_ALPHA = 0x1000, RM_FORCE_BL = 0x4000;
 const RM_ZMODE_MASK = 0xc00, RM_ZMODE_XLU = 0x800, RM_ZMODE_DEC = 0xc00;
@@ -128,6 +143,7 @@ interface State {
   mem: Uint8Array; // RDP texture memory
   loadKey: string; // identifies the last load into texture memory
   tiles: Tile[];
+  rare: RareTexture | null; // 'f3d': the last C0 texture
   rdpHalf1: number;
   mtx: Mtx | null;
   mtxStack: Mtx[];
@@ -219,6 +235,7 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
     palettes: new Map(), tlut: new Uint8Array(512), tlutKey: '',
     mem: new Uint8Array(TMEM_SIZE), loadKey: '',
     tiles: Array.from({ length: 8 }, () => ({ fmt: 0, siz: 0, width: 0, height: 0, cms: 0, cmt: 0, shiftS: 0, shiftT: 0, uls: 0, ult: 0, line: 0, tmem: 0, pal: 0 })),
+    rare: null,
     rdpHalf1: 0,
     mtx: ctx.matrix ? ctx.matrix.slice() : null,
     mtxStack: [],
@@ -230,6 +247,7 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
   let cmdAddr = 0; // buffer offset of the command being interpreted (Batch.triSource)
 
   const currentTexture = (): number => {
+    if (ctx.ucode === 'f3d') return st.textureOn && st.combineUsesTexel && st.rare ? st.rare.texture : -1;
     if (!st.textureOn || !st.combineUsesTexel || st.image < 0) return -1;
     const t = st.tiles[0];
     if (t.width <= 0 || t.height <= 0) return -1;
@@ -277,7 +295,8 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
       builders.set(key, bb);
     }
     bb.src.push(cmdAddr);
-    const tile = st.tiles[0];
+    const rt = ctx.ucode === 'f3d' ? st.rare : null;
+    const tile = rt ? { width: rt.width, height: rt.height, uls: rt.uls, ult: rt.ult, shiftS: 0, shiftT: 0 } : st.tiles[0];
     const shift = (s: number) => (s > 10 ? 1 << (16 - s) : 1 / (1 << s));
     const su = texture >= 0 ? (st.scaleS * shift(tile.shiftS)) / (32 * tile.width) : 0;
     const sv = texture >= 0 ? (st.scaleT * shift(tile.shiftT)) / (32 * tile.height) : 0;
@@ -285,9 +304,10 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
     // The Rush worlds are mirrored relative to a right-handed, Y-up frame: negate X
     // (see mirrorPlacementX). The winding then follows OpenGL (counter-clockwise front).
     const mx = mirrorX ? -scale : scale;
+    const [ox, oy, oz] = ctx.vertexOffset ?? [0, 0, 0];
     for (const i of [a, b, c]) {
       const v = st.vtx[i];
-      bb.pos.push(v.x * mx, v.y * scale, v.z * scale);
+      bb.pos.push((v.x + ox) * mx, (v.y + oy) * scale, (v.z + oz) * scale);
       if (texture < 0) bb.uv.push(0, 0);
       else if (v.gen) bb.uv.push(v.gen[0], v.gen[1]);
       // The RDP samples texel (s - uls, t - ult) of the tile.
@@ -296,7 +316,10 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
         const out = evalCombine(st.combine, rgbaUnit(v.c), fold.prim, fold.env);
         bb.col.push(...out.map((q) => Math.round(q * 255)));
       } else {
-        bb.col.push(v.c >>> 24, (v.c >>> 16) & 0xff, (v.c >>> 8) & 0xff, v.c & 0xff);
+        // GoldenEye: the C0 expander patches the combiners' second alpha cycle from SHADE to ENV alpha (shade alpha
+        // carries fog), so the list's FB alpha is the surface alpha (verified: RAM 1F1093FF -> 1F1493FF, Egyptian pool).
+        const alpha = ctx.ucode === 'f3d' ? Math.round(((v.c & 0xff) * (st.env & 0xff)) / 255) : v.c & 0xff;
+        bb.col.push(v.c >>> 24, (v.c >>> 16) & 0xff, (v.c >>> 8) & 0xff, alpha);
       }
     }
   };
@@ -477,6 +500,7 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
 
   const tri = (w: number) => triangle(((w >>> 16) & 0xff) >> 1, ((w >>> 8) & 0xff) >> 1, (w & 0xff) >> 1);
   const f3dex2 = ctx.ucode === 'f3dex2';
+  const f3d = ctx.ucode === 'f3d';
   const stack: number[] = [];
   let pc = resolve(start);
   for (let steps = 0; steps < 1_000_000; steps++) {
@@ -489,7 +513,36 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
     let call = -1; // display list to call or branch to
     let push = false;
     let end = false;
-    if (f3dex2) {
+    if (f3d) {
+      switch (op) {
+        // Fast3D G_VTX: w0 = 04 | (n - 1) << 20 | v0 << 16 | n * 16 (4-bit count and start).
+        case 0x04: vertices(w1, ((w0 >>> 20) & 0xf) + 1, (w0 >>> 16) & 0xf); break;
+        // Fast3D G_TRI1: vertex indices stored multiplied by 10.
+        case F3DEX.TRI1: triangle(((w1 >>> 16) & 0xff) / 10, ((w1 >>> 8) & 0xff) / 10, (w1 & 0xff) / 10); break;
+        // Rare B1: four triangles of 4-bit indices, triangle k = (w1 >> 8k+4, w1 >> 8k, w0 >> 4k); (0, 0, 0) = unused.
+        case 0xb1:
+          for (let k = 0; k < 4; k++) {
+            const i0 = (w1 >>> (8 * k + 4)) & 15, i1 = (w1 >>> (8 * k)) & 15, i2 = (w0 >>> (4 * k)) & 15;
+            if (i0 | i1 | i2) triangle(i0, i1, i2);
+          }
+          break;
+        case 0xc0: st.rare = ctx.rareTexture ? ctx.rareTexture(w0, w1) : null; break;
+        case F3DEX.TEXTURE:
+          st.textureOn = (w0 & 1) !== 0;
+          st.scaleS = (w1 >>> 16) / 65536;
+          st.scaleT = (w1 & 0xffff) / 65536;
+          break;
+        case F3DEX.SETGEOMETRYMODE: st.geometryMode = (st.geometryMode | w1) >>> 0; break;
+        case F3DEX.CLEARGEOMETRYMODE: st.geometryMode = (st.geometryMode & ~w1) >>> 0; break;
+        case F3DEX.SETOTHERMODE_L:
+        case F3DEX.SETOTHERMODE_H:
+          otherMode(op === F3DEX.SETOTHERMODE_L, (w0 >>> 8) & 0xff, w0 & 0xff, w1);
+          break;
+        case F3DEX.DL: call = w1; push = ((w0 >>> 16) & 0xff) === 0; break;
+        case F3DEX.ENDDL: end = true; break;
+        default: rdp(w0, w1);
+      }
+    } else if (f3dex2) {
       switch (op) {
         case F3DEX2.VTX: {
           const n = (w0 >>> 12) & 0xff;
