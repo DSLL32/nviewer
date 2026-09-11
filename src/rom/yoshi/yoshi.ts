@@ -333,14 +333,16 @@ function loadLevel(y: YoshiRom, def: LevelDef): Level {
     });
     const switchable = (f: number[] | undefined) => !!f && f.length > 1 && f[0] !== f[f.length - 1];
     const texel = (t: number, x: number, y: number) => pv.getUint16(ut[t * npx + y * unitW + x] * 2);
-    // Colour difference along the shared edge of tile a (left or above) and tile b, over opaque texel pairs.
+    // Mismatch along the shared edge of tile a (left or above) and tile b (-1 = empty unit): colour difference
+    // for opaque pairs, and a fixed penalty where only one side is opaque (a gap or an overhang).
     const seam = (a: number, b: number, horizontal: boolean, acc: [number, number]) => {
       for (let k = 0; k < (horizontal ? unitH : unitW); k++) {
-        const p = horizontal ? texel(a, unitW - 1, k) : texel(a, k, unitH - 1);
-        const q = horizontal ? texel(b, 0, k) : texel(b, k, 0);
-        if (!(p & 1) || !(q & 1)) continue;
-        acc[0] += Math.abs(((p >> 11) & 31) - ((q >> 11) & 31)) + Math.abs(((p >> 6) & 31) - ((q >> 6) & 31)) + Math.abs(((p >> 1) & 31) - ((q >> 1) & 31));
+        const p = a < 0 ? 0 : horizontal ? texel(a, unitW - 1, k) : texel(a, k, unitH - 1);
+        const q = b < 0 ? 0 : horizontal ? texel(b, 0, k) : texel(b, k, 0);
+        if (!(p & 1) && !(q & 1)) continue;
         acc[1]++;
+        if ((p & 1) !== (q & 1)) acc[0] += 45;
+        else acc[0] += Math.abs(((p >> 11) & 31) - ((q >> 11) & 31)) + Math.abs(((p >> 6) & 31) - ((q >> 6) & 31)) + Math.abs(((p >> 1) & 31) - ((q >> 1) & 31));
       }
     };
     const firstState = new Set<number>(); // switchable units showing their first tile
@@ -367,8 +369,8 @@ function loadLevel(y: YoshiRom, def: LevelDef): Level {
           const t = pick(grid.get(k)!);
           for (const [n, dx, dy] of neighbours(k)) {
             const nf = grid.get(n);
-            if (!nf || switchable(nf)) continue;
-            const nt = nf[nf.length - 1];
+            if (switchable(nf)) continue;
+            const nt = nf ? nf[nf.length - 1] : -1;
             if (dx) seam(dx < 0 ? nt : t, dx < 0 ? t : nt, true, acc);
             else seam(dy < 0 ? nt : t, dy < 0 ? t : nt, false, acc);
           }
