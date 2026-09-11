@@ -7,6 +7,7 @@
 //   A[29+n]  model container (segment 5)      B[29+n]  placement
 //   A[29]    shared track textures, loaded right after the model in segment 5
 //   A[5]     shared objects: trees, cones... (segment 6)
+//   A[36+n]  collision polygons (rushcollision.ts)
 //
 // Model container: header of segment pointers. u32 +0 -> name table (24 bytes per
 // object: name, radius, flags), u32 +4 object count, +0x10/+0x18 texture and palette
@@ -20,8 +21,9 @@ import { runDisplayList } from './displaylist';
 import { lzssRingDecode } from './lzss';
 import { decodeRush1Music, listRush1Music } from './music/rush1';
 import { normalizeByteOrder } from './rom';
+import { appendCollisionLayers, parseRushCollision } from './rushcollision';
 import { decodeTexture, ImFmt, ImSiz, loadBlock, Tlut, TMEM_SIZE } from './texture';
-import type { Fog, Game, Instance, Level, LevelInfo, Mesh, Sky, Texture } from './types';
+import type { Fog, Game, Instance, Level, LevelInfo, LevelLayer, Mesh, Sky, Texture } from './types';
 import { cstr, emptyBounds, mirrorPlacementX, placementMatrix, pruneUnused, view } from './util';
 
 const MAIN_ROM = 0x7a7930;
@@ -34,6 +36,7 @@ const TRACK_MODEL_BASE = 29; // A[29 + n]
 const TRACK_PLACEMENT_BASE = 29; // B[29 + n]
 const SHARED_OBJECTS = 5; // A[5]
 const SHARED_TEXTURES = 29; // A[29]
+const TRACK_COLLISION_BASE = 36; // A[36 + n]
 const TRACK_SEGMENT = 5;
 const SHARED_SEGMENT = 6;
 
@@ -163,9 +166,19 @@ export function loadRush1Level(rom: Rush1Rom, index: number): Level {
     }
   }
 
+  // Layers: the track container's pieces and the shared objects. Collision (hidden) goes last.
+  const track: LevelLayer = { name: 'track', kind: 'main', instances: [] };
+  const objects: LevelLayer = { name: 'objects', kind: 'objects', instances: [] };
+  instances.forEach((inst, i) => (inst.mesh >= 0 && inst.mesh < levelMeshCount ? track : objects).instances.push(i));
+
   const pruned = pruneUnused(meshes, textures, instances, levelMeshCount);
   const skies = buildSkies(rom, pruned.meshes, pruned.textures);
-  return { info, id: cstr(place, 8, 16), instances, bounds, fog: RACE_FOG, skies, ...pruned };
+  const level: Level = {
+    info, id: cstr(place, 8, 16), instances, bounds, fog: RACE_FOG, skies, layers: [track, objects].filter((l) => l.instances.length), ...pruned,
+  };
+  // The race loads A[44 + n] instead when the byte at 0x800EA13E is set (0x800AA340): nearly the same polygons.
+  appendCollisionLayers(level, parseRushCollision(rom.file('A', TRACK_COLLISION_BASE + n), 'rush1'), `A${TRACK_COLLISION_BASE + n}`);
+  return level;
 }
 
 // The race sky is not level data. Game code (@ 0x800A7494) builds a dome around the camera

@@ -35,6 +35,7 @@ filtering · H help · Esc releases the mouse.
   - `inflate.ts`, `lzss.ts`: codecs (raw DEFLATE, and both games' LZSS variants)
   - `rom.ts`, `level.ts`: Rush 2049 file table and level containers
   - `rush1.ts`: Rush (Extreme Racing) file tables and track containers
+  - `rushcollision.ts`: both Rush games' collision polygons (hidden overlay layers)
   - `bomberman/`: the Bomberman games (full format notes in `BOMBERMAN.md`)
     - `codecs.ts`, `archive.ts`: LZSS (1 KB and 4 KB rings), Yay0, file archives
     - `container64.ts`, `bm64.ts`, `bmhero.ts`: "64" model containers, Bomberman 64 and Hero levels
@@ -157,6 +158,16 @@ Textures are uploaded with the RDP tile commands, not read in place.
 - **Objects placed by name but stored elsewhere:** per-track props in file 82+n (race tracks), coins
   in 68, battle weapon icons in 76. Stored names carry suffixes such as `G1` and are truncated to
   15 characters.
+- **Collision.** File 139+n (`rushcollision.ts`). A 16-byte header of counts, then 132-byte track sections (the
+  track's path; none in arenas), 20-byte quadtree nodes, 24-byte polygons, 8-byte vertices, 32-byte alternates,
+  index streams and quadtree leaf lists.
+  - Polygon: u16 flags (low nibble: surface class, 5 = walls), u16 (low nibble: vertex count), a 3×3 Q14 basis,
+    u16 index-stream offset.
+  - Index stream: big-endian u16 vertex indices; a following byte ≥ 0xE0 adds (byte & 0x1F) consecutive indices.
+  - Vertex: i16 x, y, z plus a u16 of 5-bit fractions (1/32 unit), in the render frame. The first vertex is the
+    polygon's world position; the others lie in its plane and are placed with the transposed basis.
+  - Alternates: other placements of scripted objects' polygons (doors, trapdoors, rotors), copied over them by
+    0x800B2D20; 0x800B2CB4 switches a group off (flags 0x000F).
 
 ### San Francisco Rush: Extreme Racing
 
@@ -199,6 +210,9 @@ Textures are uploaded with the RDP tile commands, not read in place.
   - +68 (i16) is the next sibling and +70 (i16) the first child, as entry indices.
   - A child's translation is relative to its parent's, e.g. cones and trees parented to track
     pieces.
+- **Collision.** A[36+n] (A[43+n] when the byte at 0x800EA13E is set). Same format as Rush 2049, except: a 0x20-byte
+  header, 26-byte polygons (an extra u16 before the basis), no alternates, leaf lists before the index streams,
+  run bytes ≥ 0xC0 (count & 0x3F), the basis applied untransposed, and axes (Z, X, −Y) of the render frame.
 
 ### Bomberman 64, The Second Attack!, Bomberman Hero
 
@@ -373,7 +387,8 @@ Textures are uploaded with the RDP tile commands, not read in place.
 ## Known gaps
 
 - Rush 2049: scripted objects are shown frozen at the start of their paths.
-- Rush: not shown: checkpoint flags, weapon power-up icons, invisible trigger/collision volumes, cars.
+- Rush: not shown: checkpoint flags, weapon power-up icons, cars, and the collision files' track sections. The
+  collision layer is coloured by surface class, but only walls (class 5) are identified.
 - Rush: no fog, and only the most detailed LOD is used.
 - Bomberman 64: props placed by stage code, and boss arenas built only from object models, are not
   shown. The Second Attack: only map geometry and battle soft blocks; story objects and characters

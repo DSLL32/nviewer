@@ -8,15 +8,19 @@
 //
 // Placement file: same trailer layout. WHDR holds the level id, WOBJ the placed
 // instances (104 bytes: name, 3x3 matrix, translation, ..., bounds).
+//
+// Collision file (file 139 + n): polygons, see rushcollision.ts.
 import { runDisplayList } from './displaylist';
 import type { RushRom } from './rom';
-import type { Instance, Level, LevelInfo, Mesh, Texture } from './types';
+import { appendCollisionLayers, parseRushCollision } from './rushcollision';
+import type { Instance, Level, LevelInfo, LevelLayer, Mesh, Texture } from './types';
 import { cstr, emptyBounds, mirrorMatrixX, mirrorPlacementX, placementMatrix, pruneUnused, view } from './util';
 
 export type * from './types';
 
 const MODEL_FILE_BASE = 101;
 const PLACEMENT_FILE_BASE = 120;
+const COLLISION_FILE_BASE = 139;
 
 export const LEVELS: LevelInfo[] = [
   ...[1, 2, 3, 4, 5, 6].map((n) => ({ name: `Track ${n}`, kind: 'race' as const })),
@@ -183,6 +187,15 @@ export function loadLevel(rom: RushRom, index: number): Level {
     }
   }
 
+  // Layers: the level file's placed geometry; props, pickups and scripted objects. Collision (hidden) goes last.
+  const main: LevelLayer = { name: info.kind === 'race' ? 'track' : 'arena', kind: 'main', instances: [] };
+  const objects: LevelLayer = { name: 'objects', kind: 'objects', instances: [] };
+  instances.forEach((inst, i) => (inst.mesh >= 0 && inst.mesh < levelMeshCount && !inst.animated ? main : objects).instances.push(i));
+
   const pruned = pruneUnused(meshes, textures, instances, levelMeshCount);
-  return { info, id: cstr(place, whdr.offset + 8, 16), instances, bounds, ...pruned };
+  const level: Level = {
+    info, id: cstr(place, whdr.offset + 8, 16), instances, bounds, layers: [main, objects].filter((l) => l.instances.length), ...pruned,
+  };
+  appendCollisionLayers(level, parseRushCollision(rom.file(COLLISION_FILE_BASE + index), 'rush2049'), `${COLLISION_FILE_BASE + index}`);
+  return level;
 }
