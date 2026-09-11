@@ -13,8 +13,8 @@ export interface ControlsCallbacks {
 const LOOK_SENSITIVITY = 0.0022; // radians per mouse pixel
 const KEY_TURN_RATE = 1.8; // radians per second for arrow-key looking
 const FAST_MULTIPLIER = 5;
-export const MIN_SPEED = 5;
-export const MAX_SPEED = 20000;
+export const MIN_SPEED = 0.5;
+export const MAX_SPEED = 100000;
 
 const FORWARD = ['KeyW'];
 const BACK = ['KeyS'];

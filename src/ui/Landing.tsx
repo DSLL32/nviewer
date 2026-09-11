@@ -12,14 +12,17 @@ export function Landing({ busy, error, onPick }: LandingProps) {
       <div className="landing-card">
         <h1>{APP_NAME}</h1>
         <p className="muted">
-          Fly through the tracks and arenas of the N64 <em>San Francisco Rush</em> games. Your ROM stays in this
-          browser: it is parsed locally and cached for next time.
+          Fly through the levels of N64 games: tracks, arenas and adventure maps. Your ROMs stay in this browser:
+          they are parsed locally and cached for next time. Load several games at once.
         </p>
         <div className="supported">
           <div className="small muted">Supported ROMs (USA versions, .z64 / .v64 / .n64):</div>
           <ul>
             <li>San Francisco Rush 2049 (U)</li>
             <li>San Francisco Rush: Extreme Racing (U)</li>
+            <li>Bomberman 64 (U)</li>
+            <li>Bomberman 64: The Second Attack! (U)</li>
+            <li>Bomberman Hero (U)</li>
           </ul>
         </div>
         <div className="dropzone" aria-busy={busy !== null}>

@@ -38,6 +38,7 @@ export function Viewport({ level, loadingName, error, children }: ViewportProps)
   const [fogOn, setFogOn] = useState(readFogSetting);
   const [cullOn, setCullOn] = useState(() => readFlag(CULL_KEY));
   const [skyPref, setSkyPref] = useState<string>(() => readString(SKY_KEY) ?? '');
+  const [showBackdrop, setShowBackdrop] = useState(() => readString(BACKDROP_KEY) !== '0');
   const [helpOpen, setHelpOpen] = useState(true);
   const actionRef = useRef<(a: ControlAction) => void>(() => {});
   const startViewRef = useRef<{ level: Level; view: StartView } | null>(null);
@@ -127,6 +128,12 @@ export function Viewport({ level, loadingName, error, children }: ViewportProps)
     if (!engine) return;
     engine.renderer.setLevel(level);
     if (!level) return;
+    // Far plane from the level size (the logarithmic depth buffer keeps precision across the whole range).
+    const { min, max } = level.bounds;
+    const diag = [0, 1, 2].every((k) => Number.isFinite(min[k]) && Number.isFinite(max[k]))
+      ? Math.hypot(max[0] - min[0], max[1] - min[1], max[2] - min[2])
+      : 0;
+    engine.camera.far = Math.max(50000, diag * 4);
     const canvas = engine.renderer.gl.canvas as HTMLCanvasElement;
     const view = computeStartView(level, canvas.width / Math.max(1, canvas.height), engine.camera.fovY);
     startViewRef.current = { level, view };
@@ -156,6 +163,10 @@ export function Viewport({ level, loadingName, error, children }: ViewportProps)
   useEffect(() => {
     if (skyPref) writeString(SKY_KEY, skyPref);
   }, [skyPref]);
+  useEffect(() => {
+    engineRef.current?.renderer.setBackdropVisible(showBackdrop);
+    writeString(BACKDROP_KEY, showBackdrop ? '1' : '0');
+  }, [showBackdrop]);
 
   const hasScripted = level?.instances.some((i) => i.animated && i.mesh >= 0) ?? false;
   const hasFog = !!level?.fog;
@@ -209,9 +220,12 @@ export function Viewport({ level, loadingName, error, children }: ViewportProps)
               <input type="checkbox" checked={nearest} onChange={(e) => setNearest(e.target.checked)} />
               Nearest texture filtering
             </label>
-            <label className={`check${hasScripted ? '' : ' muted'}`}>
-              <input type="checkbox" checked={showScripted} onChange={(e) => setShowScripted(e.target.checked)} />
-              Show scripted objects
+            <label
+              className={`check${hasScripted ? '' : ' muted'}`}
+              title="Objects the game moves along a path (shown at their start) or places at random (e.g. battle soft-block positions)"
+            >
+              <input id="scripted-toggle" type="checkbox" checked={showScripted} onChange={(e) => setShowScripted(e.target.checked)} />
+              Show scripted/random objects
             </label>
             <label className={`check${hasFog ? '' : ' muted'}`} title={hasFog ? "The game's own distance fog" : 'No fog in this game'}>
               <input
@@ -234,6 +248,12 @@ export function Viewport({ level, loadingName, error, children }: ViewportProps)
                 </select>
               </label>
             )}
+            {level?.backdrop && (
+              <label className="check" title="The 2D picture the game draws behind the level">
+                <input id="backdrop-toggle" type="checkbox" checked={showBackdrop} onChange={(e) => setShowBackdrop(e.target.checked)} />
+                Show backdrop
+              </label>
+            )}
             <label className="check" title="Hide the back sides of single-sided polygons, as the game does">
               <input id="cull-toggle" type="checkbox" checked={cullOn} onChange={(e) => setCullOn(e.target.checked)} />
               Back-face culling
@@ -252,6 +272,7 @@ const FOG_KEY = 'nviewer.authenticFog';
 const CULL_KEY = 'nviewer.backfaceCulling.v2';
 
 const SKY_KEY = 'nviewer.sky';
+const BACKDROP_KEY = 'nviewer.showBackdrop';
 const SKY_NONE = '__none__';
 
 function readString(key: string): string | null {

@@ -13,7 +13,8 @@ export class FlyCamera {
   yaw = 0;
   pitch = 0;
   fovY = (60 * Math.PI) / 180;
-  near = 1;
+  /** Clip planes. The depth buffer is logarithmic, so a small near plane costs no precision; far is set per level. */
+  near = 0.2;
   far = 50000;
   /** Base movement speed in world units per second. */
   speed = 500;

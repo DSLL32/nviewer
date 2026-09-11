@@ -142,6 +142,14 @@ button.link { background: none; border: none; padding: 0; color: var(--accent); 
 .music-controls input[type='range'] { flex: 1; min-width: 0; accent-color: var(--accent); }
 .music-status { min-height: 1.2em; display: flex; align-items: center; gap: 6px; }
 .music-list { list-style: none; margin: 0; padding: 0; max-height: 140px; overflow-y: auto; border-top: 1px solid var(--border); }
-.music-track { width: 100%; text-align: left; background: none; border: none; border-radius: 4px; padding: 3px 6px; font-size: 12px; }
+.music-track { width: 100%; text-align: left; background: none; border: none; border-radius: 4px; padding: 3px 6px; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .music-track:hover { background: var(--panel-2); }
 .music-track.current { color: var(--accent); font-weight: 600; background: var(--accent-soft); }
+
+/* Collapsible sub-groups inside a kind group (worlds, planets) */
+.level-subgroup { margin: 2px 0; }
+.subgroup-toggle { width: 100%; display: flex; align-items: center; gap: 6px; background: none; border: none; padding: 4px 8px; text-align: left; font-size: 12px; color: var(--text); }
+.subgroup-toggle:hover { background: var(--panel-2); }
+.subgroup-name { flex: 1; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+.subgroup-count { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.level-subgroup ul { padding-left: 12px; }

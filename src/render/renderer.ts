@@ -1,5 +1,5 @@
 // WebGL2 level renderer: uploads a parsed Level once, then draws sky, opaque/cutout and blended passes.
-import type { Batch, Fog, Level, Mesh } from '../rom';
+import type { Backdrop, Batch, Fog, Level, Mesh } from '../rom';
 import type { FlyCamera } from './camera';
 import { applyTextureFilter, createProgram, uploadTexture, type TextureFilter } from './gl';
 import { mat4, type Mat4 } from './math';
@@ -11,15 +11,31 @@ layout(location = 2) in vec4 aColor;
 uniform mat4 uViewProj;
 uniform mat4 uView;
 uniform mat4 uModel;
+// N64 RSP fog (gSPFogPosition), computed per vertex and interpolated like on the hardware: zndc from the game's
+// fog projection near/far, then (zndc * mul + offset) / 255, clamped per vertex.
+uniform bool uFog;
+uniform highp float uFogNear;
+uniform highp float uFogFar;
+uniform highp float uFogMul;
+uniform highp float uFogOffset;
 out vec2 vUv;
 out vec4 vColor;
-out highp float vDepth; // positive view-space depth (along the view axis), world units
+out highp float vFog;
+out highp float vLogW; // 1 + clip w, for the logarithmic depth buffer
 void main() {
   vUv = aUv;
   vColor = aColor;
   vec4 world = uModel * vec4(aPosition, 1.0);
-  vDepth = -(uView * world).z;
+  highp float depth = -(uView * world).z; // positive view-space depth along the view axis, world units
+  vFog = 0.0;
+  if (uFog) {
+    highp float d = max(depth, 1e-3);
+    highp float range = uFogFar - uFogNear;
+    highp float zndc = (uFogFar + uFogNear) / range - 2.0 * uFogFar * uFogNear / (range * d);
+    vFog = clamp((zndc * uFogMul + uFogOffset) / 255.0, 0.0, 1.0);
+  }
   gl_Position = uViewProj * world;
+  vLogW = 1.0 + gl_Position.w;
 }`;
 
 const FS = `#version 300 es
@@ -27,33 +43,54 @@ precision highp float;
 uniform sampler2D uTexture;
 uniform bool uTextured;
 uniform int uMode; // 0 opaque, 1 cutout, 2 blend
-// N64 RSP fog (gSPFogPosition): zndc from the game's fog projection near/far, then (zndc * mul + offset) / 255.
 uniform bool uFog;
 uniform vec3 uFogColor;
-uniform highp float uFogNear;
-uniform highp float uFogFar;
-uniform highp float uFogMul;
-uniform highp float uFogOffset;
+// Logarithmic depth (1 / log2(far + 1)): keeps precision over both 10k-unit Rush tracks and 20k-unit Bomberman
+// maps with few-unit details, where a 24-bit perspective depth buffer would z-fight at a distance.
+uniform highp float uLogDepthCoef;
+// Pulls decal batches (coplanar markings) towards the camera in log-depth space; 0 for everything else.
+uniform highp float uDepthBias;
 in vec2 vUv;
 in vec4 vColor;
-in highp float vDepth;
+in highp float vFog;
+in highp float vLogW;
 out vec4 outColor;
 void main() {
+  gl_FragDepth = max(0.0, log2(max(vLogW, 1e-6)) * uLogDepthCoef - uDepthBias);
   vec4 c = vColor;
   if (uTextured) c *= texture(uTexture, vUv);
   if (uMode == 1 && c.a < 0.5) discard;
   if (uMode == 0) c.a = 1.0;
-  if (uFog) {
-    highp float d = max(vDepth, 1e-3);
-    highp float range = uFogFar - uFogNear;
-    highp float zndc = (uFogFar + uFogNear) / range - 2.0 * uFogFar * uFogNear / (range * d);
-    highp float f = clamp((zndc * uFogMul + uFogOffset) / 255.0, 0.0, 1.0);
-    c.rgb = mix(c.rgb, uFogColor, f);
-  }
+  if (uFog) c.rgb = mix(c.rgb, uFogColor, vFog);
   outColor = c;
 }`;
 
+// Screen-fixed backdrop picture: a full-screen quad showing the texture window [u0,u1] x [v0,v1]
+// left to right and top to bottom, multiplied by a tint.
+const BACKDROP_VS = `#version 300 es
+layout(location = 0) in vec2 aCorner; // 0..1, y up
+uniform vec4 uWindow; // u0, v0, u1, v1
+out vec2 vUv;
+void main() {
+  vUv = vec2(mix(uWindow.x, uWindow.z, aCorner.x), mix(uWindow.y, uWindow.w, 1.0 - aCorner.y));
+  gl_Position = vec4(aCorner * 2.0 - 1.0, 0.0, 1.0);
+}`;
+
+const BACKDROP_FS = `#version 300 es
+precision highp float;
+uniform sampler2D uTexture;
+uniform vec3 uTint;
+in vec2 vUv;
+out vec4 outColor;
+void main() {
+  outColor = vec4(texture(uTexture, vUv).rgb * uTint, 1.0);
+}`;
+
 const enum Mode { Opaque = 0, Cutout = 1, Blend = 2 }
+
+// Log-depth bias for decals: about 2e-4 of the view distance (0.2 units at 1000, 1 unit at 5000 with far 80000),
+// roughly 300 steps of a 24-bit depth buffer.
+const DECAL_DEPTH_BIAS = 2e-5;
 
 interface GpuBatch {
   vao: WebGLVertexArrayObject;
@@ -64,10 +101,12 @@ interface GpuBatch {
   depthTest: boolean;
   depthWrite: boolean;
   cullBack: boolean;
+  decal: boolean;
 }
 
 interface GpuMesh {
   solid: GpuBatch[]; // opaque + cutout, in display-list order
+  decal: GpuBatch[]; // coplanar decals (any blend mode), drawn after all solid geometry with a depth bias
   blended: GpuBatch[];
 }
 
@@ -75,6 +114,7 @@ interface DrawItem {
   mesh: GpuMesh;
   model: Mat4;
   animated: boolean;
+  noFog: boolean; // the game draws this instance without fog even when fog is on
   mirrored: boolean; // negative determinant: winding is flipped
   x: number;
   y: number;
@@ -88,9 +128,12 @@ interface Scene {
   batches: GpuBatch[];
   items: DrawItem[];
   blendItems: DrawItem[];
+  hasDecals: boolean;
   sky: GpuMesh[]; // legacy sky domes (Rush 2049: unplaced *SKY meshes)
   skies: { name: string; mesh: GpuMesh }[]; // Level.skies (Rush 1), one drawn at a time
-  clearColor: [number, number, number];
+  clearColor: [number, number, number]; // 0..1
+  levelClearColor: [number, number, number] | null; // Level.clearColor, 0..1
+  backdrop: { texture: WebGLTexture; window: [number, number, number, number]; tint: [number, number, number] } | null;
 }
 
 const DEFAULT_CLEAR: [number, number, number] = [0.46, 0.64, 0.86];
@@ -108,6 +151,7 @@ export class LevelRenderer {
   private fog: Fog | null = null;
   private fogEnabled = false;
   private cullingEnabled = false;
+  private backdropVisible = true;
   private skyGroundY = 0;
   /** Selected Level.skies entry by name; undefined = first sky, null = none. */
   private skySelection: string | null | undefined = undefined;
@@ -124,6 +168,13 @@ export class LevelRenderer {
   private readonly uFogFar: WebGLUniformLocation | null;
   private readonly uFogMul: WebGLUniformLocation | null;
   private readonly uFogOffset: WebGLUniformLocation | null;
+  private readonly uLogDepthCoef: WebGLUniformLocation | null;
+  private readonly uDepthBias: WebGLUniformLocation | null;
+  private readonly backdropProgram: WebGLProgram;
+  private readonly uBackdropWindow: WebGLUniformLocation | null;
+  private readonly uBackdropTint: WebGLUniformLocation | null;
+  private readonly quadVao: WebGLVertexArrayObject;
+  private readonly quadBuffer: WebGLBuffer;
   private readonly anisoExt: EXT_texture_filter_anisotropic | null;
   private readonly filter: TextureFilter;
   private scene: Scene | null = null;
@@ -154,6 +205,24 @@ export class LevelRenderer {
     this.uFogFar = gl.getUniformLocation(this.program, 'uFogFar');
     this.uFogMul = gl.getUniformLocation(this.program, 'uFogMul');
     this.uFogOffset = gl.getUniformLocation(this.program, 'uFogOffset');
+    this.uLogDepthCoef = gl.getUniformLocation(this.program, 'uLogDepthCoef');
+    this.uDepthBias = gl.getUniformLocation(this.program, 'uDepthBias');
+    this.backdropProgram = createProgram(gl, BACKDROP_VS, BACKDROP_FS);
+    this.uBackdropWindow = gl.getUniformLocation(this.backdropProgram, 'uWindow');
+    this.uBackdropTint = gl.getUniformLocation(this.backdropProgram, 'uTint');
+    gl.useProgram(this.backdropProgram);
+    gl.uniform1i(gl.getUniformLocation(this.backdropProgram, 'uTexture'), 0);
+    const quadVao = gl.createVertexArray();
+    const quadBuffer = gl.createBuffer();
+    if (!quadVao || !quadBuffer) throw new Error('Could not create backdrop quad');
+    gl.bindVertexArray(quadVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, quadBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]), gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    gl.bindVertexArray(null);
+    this.quadVao = quadVao;
+    this.quadBuffer = quadBuffer;
     gl.useProgram(this.program);
     gl.uniform1i(gl.getUniformLocation(this.program, 'uTexture'), 0);
     this.anisoExt = gl.getExtension('EXT_texture_filter_anisotropic');
@@ -185,6 +254,13 @@ export class LevelRenderer {
   setBackfaceCulling(enabled: boolean) {
     if (this.cullingEnabled === enabled) return;
     this.cullingEnabled = enabled;
+    this.dirty = true;
+  }
+
+  /** Show or hide the level's screen-fixed backdrop picture (Level.backdrop). */
+  setBackdropVisible(visible: boolean) {
+    if (this.backdropVisible === visible) return;
+    this.backdropVisible = visible;
     this.dirty = true;
   }
 
@@ -226,12 +302,12 @@ export class LevelRenderer {
       if (!src) return null;
       let mesh = meshes.get(index);
       if (!mesh) {
-        mesh = { solid: [], blended: [] };
+        mesh = { solid: [], decal: [], blended: [] };
         for (const b of src.batches) {
           const gb = this.uploadBatch(b, textures);
           if (!gb) continue;
           batches.push(gb);
-          (gb.mode === Mode.Blend ? mesh.blended : mesh.solid).push(gb);
+          (gb.decal ? mesh.decal : gb.mode === Mode.Blend ? mesh.blended : mesh.solid).push(gb);
         }
         meshes.set(index, mesh);
       }
@@ -244,7 +320,7 @@ export class LevelRenderer {
       const mesh = getMesh(inst.mesh);
       if (!mesh) continue;
       const m = inst.matrix;
-      items.push({ mesh, model: m, animated: inst.animated === true, mirrored: det3(m) < 0, x: m[12], y: m[13], z: m[14], dist: 0 });
+      items.push({ mesh, model: m, animated: inst.animated === true, noFog: inst.noFog === true, mirrored: det3(m) < 0, x: m[12], y: m[13], z: m[14], dist: 0 });
     }
 
     const sky: GpuMesh[] = [];
@@ -255,7 +331,7 @@ export class LevelRenderer {
       for (const entry of level.skies) {
         const src = level.meshes[entry.mesh];
         if (!src) continue;
-        const mesh: GpuMesh = { solid: [], blended: [] };
+        const mesh: GpuMesh = { solid: [], decal: [], blended: [] };
         for (const b of src.batches) {
           const gb = this.uploadBatch(b, textures);
           if (!gb) continue;
@@ -282,9 +358,12 @@ export class LevelRenderer {
       batches,
       items,
       blendItems: items.filter((i) => i.mesh.blended.length > 0),
+      hasDecals: items.some((i) => i.mesh.decal.length > 0),
       sky,
       skies,
       clearColor,
+      levelClearColor: level.clearColor ? [level.clearColor[0] / 255, level.clearColor[1] / 255, level.clearColor[2] / 255] : null,
+      backdrop: backdropOf(level.backdrop, textures),
     };
   }
 
@@ -295,7 +374,10 @@ export class LevelRenderer {
     let drawCalls = 0;
     gl.viewport(0, 0, canvas.width, canvas.height);
     const fog = this.fogEnabled && this.scene ? this.fog : null;
-    const cc = fog ? [fog.color[0] / 255, fog.color[1] / 255, fog.color[2] / 255] : (this.scene?.clearColor ?? [0.08, 0.09, 0.11]);
+    // Background: the fog colour when authentic fog is on, else the game's own clear colour, else our default.
+    const cc = fog
+      ? [fog.color[0] / 255, fog.color[1] / 255, fog.color[2] / 255]
+      : (this.scene?.levelClearColor ?? this.scene?.clearColor ?? [0.08, 0.09, 0.11]);
     gl.clearColor(cc[0], cc[1], cc[2], 1);
     this.setDepthWrite(true);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
@@ -305,11 +387,38 @@ export class LevelRenderer {
       return;
     }
 
+    // Screen-fixed backdrop picture, before everything else.
+    if (scene.backdrop && this.backdropVisible) {
+      this.setDepthTest(false);
+      this.setDepthWrite(false);
+      this.setBlend(false);
+      this.setCull(false);
+      gl.useProgram(this.backdropProgram);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, scene.backdrop.texture);
+      gl.uniform4fv(this.uBackdropWindow, scene.backdrop.window);
+      gl.uniform3fv(this.uBackdropTint, scene.backdrop.tint);
+      gl.bindVertexArray(this.quadVao);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      drawCalls++;
+    }
+
     gl.useProgram(this.program);
+    gl.uniform1f(this.uLogDepthCoef, 1 / Math.log2(camera.far + 1));
+    gl.uniform1f(this.uDepthBias, 0);
     camera.viewProjection(this.viewProj, canvas.width / Math.max(1, canvas.height));
     gl.uniformMatrix4fv(this.uViewProj, false, this.viewProj);
     gl.uniformMatrix4fv(this.uView, false, camera.viewMatrix(this.view));
+    let boundFog = 0;
     gl.uniform1i(this.uFog, 0);
+    // Per-instance fog switch: instances the game draws unfogged keep fog factor 0.
+    const fogFor = (item: DrawItem) => {
+      const want = fog && !item.noFog ? 1 : 0;
+      if (want !== boundFog) {
+        gl.uniform1i(this.uFog, want);
+        boundFog = want;
+      }
+    };
     if (fog) {
       gl.uniform3f(this.uFogColor, fog.color[0] / 255, fog.color[1] / 255, fog.color[2] / 255);
       gl.uniform1f(this.uFogNear, fog.near);
@@ -371,14 +480,23 @@ export class LevelRenderer {
       }
     }
 
-    // Everything after the (unfogged) sky gets the game's fog when enabled.
-    if (fog) gl.uniform1i(this.uFog, 1);
-
     // Opaque and cutout geometry.
     const showAnimated = this.showAnimated;
     for (const item of scene.items) {
       if (item.animated && !showAnimated) continue;
+      fogFor(item);
       for (const b of item.mesh.solid) draw(b, item.model, b.depthTest, b.depthWrite, item.mirrored);
+    }
+
+    // Decals (RDP decal depth mode, e.g. floor markings): after the surfaces they lie on, pulled towards the camera.
+    if (scene.hasDecals) {
+      gl.uniform1f(this.uDepthBias, DECAL_DEPTH_BIAS);
+      for (const item of scene.items) {
+        if (item.animated && !showAnimated) continue;
+        fogFor(item);
+        for (const b of item.mesh.decal) draw(b, item.model, b.depthTest, false, item.mirrored);
+      }
+      gl.uniform1f(this.uDepthBias, 0);
     }
 
     // Blended geometry, back to front by instance origin.
@@ -389,6 +507,7 @@ export class LevelRenderer {
     scene.blendItems.sort((a, b) => b.dist - a.dist);
     for (const item of scene.blendItems) {
       if (item.animated && !showAnimated) continue;
+      fogFor(item);
       for (const b of item.mesh.blended) draw(b, item.model, b.depthTest, false, item.mirrored);
     }
 
@@ -399,6 +518,9 @@ export class LevelRenderer {
   dispose() {
     this.freeScene();
     this.gl.deleteProgram(this.program);
+    this.gl.deleteProgram(this.backdropProgram);
+    this.gl.deleteVertexArray(this.quadVao);
+    this.gl.deleteBuffer(this.quadBuffer);
   }
 
   private uploadBatch(b: Batch, textures: WebGLTexture[]): GpuBatch | null {
@@ -434,6 +556,7 @@ export class LevelRenderer {
       depthTest: b.depthTest,
       depthWrite: b.depthWrite,
       cullBack: b.cullBack === true,
+      decal: b.decal === true,
     };
   }
 
@@ -482,6 +605,12 @@ export class LevelRenderer {
     else this.gl.disable(this.gl.BLEND);
     this.stBlend = on;
   }
+}
+
+function backdropOf(b: Backdrop | undefined, textures: WebGLTexture[]): Scene['backdrop'] {
+  if (!b || b.texture < 0 || b.texture >= textures.length) return null;
+  const tint = b.tint ?? [255, 255, 255];
+  return { texture: textures[b.texture], window: [b.u0, b.v0, b.u1, b.v1], tint: [tint[0] / 255, tint[1] / 255, tint[2] / 255] };
 }
 
 /** Average color along the lowest ring of the sky dome, used as the clear color below it. */

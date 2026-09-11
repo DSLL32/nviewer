@@ -113,6 +113,12 @@ export function MusicBox({ games, currentGameId, decode }: MusicBoxProps) {
     if (track && !games.some((g) => g.id === track.gameId)) playerRef.current?.stop();
   }, [games, state.track]);
 
+  // Keep the playing track visible in long lists (e.g. 76 songs).
+  const listRef = useRef<HTMLUListElement>(null);
+  useEffect(() => {
+    listRef.current?.querySelector('.music-track.current')?.scrollIntoView({ block: 'nearest' });
+  }, [state.track?.gameId, state.track?.index, pickedGame, currentGameId, visible]);
+
   // Follow the shown level's game unless the user picked another soundtrack.
   useEffect(() => setPickedGame(null), [currentGameId]);
 
@@ -208,7 +214,7 @@ export function MusicBox({ games, currentGameId, decode }: MusicBoxProps) {
             {state.status === 'rendering' && <span className="spinner tiny" aria-hidden="true" />} {status}
           </div>
           {tracks.length > 0 && listGame ? (
-            <ul className="music-list" aria-label={`${listGame.title} soundtrack`}>
+            <ul ref={listRef} className="music-list" aria-label={`${listGame.title} soundtrack (${tracks.length} tracks)`}>
               {tracks.map((t) => {
                 const current = state.track?.gameId === listGame.id && state.track.index === t.index && state.status !== 'idle';
                 return (
@@ -217,6 +223,7 @@ export function MusicBox({ games, currentGameId, decode }: MusicBoxProps) {
                       type="button"
                       className={`music-track${current ? ' current' : ''}`}
                       data-track={t.name}
+                      title={t.name}
                       onClick={() => playTrack(listGame.id, t)}
                     >
                       {t.name}

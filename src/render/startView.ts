@@ -1,7 +1,7 @@
 // Initial camera placement for a level: an elevated overview for open levels, or a spot inside
 // enclosed arenas (detected by casting vertical rays through the static geometry, then choosing the
 // position/heading with the longest clear horizontal line of sight).
-import type { Level } from '../rom';
+import type { CameraView, Level } from '../rom';
 import type { Bounds } from './camera';
 import type { Vec3 } from './math';
 
@@ -19,6 +19,7 @@ const HEADINGS = 8;
 
 interface StaticGeometry {
   tris: Float32Array; // world-space xyz * 3 per triangle
+  solid: Uint8Array; // 1 for opaque/cutout triangles, 0 for translucent ones (water surfaces don't count as a roof)
   count: number;
   bounds: Bounds;
 }
@@ -30,6 +31,8 @@ function gatherGeometry(level: Level): StaticGeometry {
     for (const b of level.meshes[inst.mesh].batches) total += Math.floor(b.positions.length / 9);
   }
   const tris = new Float32Array(total * 9);
+  const solid = new Uint8Array(total);
+  let t = 0;
   const min: Vec3 = [Infinity, Infinity, Infinity];
   const max: Vec3 = [-Infinity, -Infinity, -Infinity];
   let o = 0;
@@ -38,6 +41,8 @@ function gatherGeometry(level: Level): StaticGeometry {
     for (const b of level.meshes[inst.mesh].batches) {
       const p = b.positions;
       const n = Math.floor(p.length / 9) * 9;
+      solid.fill(b.blend === 'blend' ? 0 : 1, t, t + n / 9);
+      t += n / 9;
       for (let i = 0; i < n; i += 3) {
         const x = p[i], y = p[i + 1], z = p[i + 2];
         for (let r = 0; r < 3; r++) {
@@ -49,7 +54,7 @@ function gatherGeometry(level: Level): StaticGeometry {
       }
     }
   }
-  return { tris, count: total, bounds: { min, max } };
+  return { tris, solid, count: total, bounds: { min, max } };
 }
 
 function medianHeight(g: StaticGeometry): number {
@@ -67,6 +72,7 @@ function columnHits(g: StaticGeometry, cell: number[], x: number, z: number): nu
   const t = g.tris;
   const hits: number[] = [];
   for (const k of cell) {
+    if (!g.solid[k]) continue;
     const o = k * 9;
     const ax = t[o], ay = t[o + 1], az = t[o + 2];
     const bx = t[o + 3], by = t[o + 4], bz = t[o + 5];
@@ -85,6 +91,7 @@ function columnHits(g: StaticGeometry, cell: number[], x: number, z: number): nu
 function rayDistance(g: StaticGeometry, o: Vec3, d: Vec3, maxDist: number): number {
   const t = g.tris;
   let best = maxDist;
+  // Translucent geometry still blocks the view (e.g. glass or energy walls); only roof detection ignores it.
   for (let k = 0; k < g.count; k++) {
     const i = k * 9;
     const e1x = t[i + 3] - t[i], e1y = t[i + 4] - t[i + 1], e1z = t[i + 5] - t[i + 2];
@@ -116,14 +123,32 @@ export function computeStartView(level: Level, aspect: number, fovY: number): St
   const ex = max[0] - min[0];
   const ez = max[2] - min[2];
   const long = Math.max(ex, ez);
-  const speed = Math.min(5000, Math.max(50, Math.round(long / 8)));
+  const speed = Math.min(20000, Math.max(5, Math.round(long / 8)));
   const groundY = medianHeight(g);
 
-  if (level.info.kind === 'battle' || level.info.kind === 'stunt') {
+  // The game's own camera for the level, re-framed for the viewer's field of view.
+  const gameView = level.camera ? fromGameCamera(level.camera, fovY) : null;
+  if (gameView) return { ...gameView, speed, groundY };
+
+  if (level.info.kind === 'battle' || level.info.kind === 'stunt' || level.info.kind === 'adventure') {
     const interior = findInterior(g, min, max);
     if (interior) return { ...interior, speed, groundY };
   }
   return { ...overview(min, max, aspect, fovY), speed, groundY };
+}
+
+/**
+ * Keep the game camera's target and look direction but move the eye along the view ray so the framing matches:
+ * game cameras use narrow FOVs (e.g. 10 degrees from 6500 units away), the viewer keeps its own wider FOV.
+ */
+export function fromGameCamera(cam: CameraView, viewerFovY: number): Pick<StartView, 'position' | 'yaw' | 'pitch'> | null {
+  const d: Vec3 = [cam.target[0] - cam.eye[0], cam.target[1] - cam.eye[1], cam.target[2] - cam.eye[2]];
+  const dist = Math.hypot(d[0], d[1], d[2]);
+  if (!(dist > 1e-6) || !cam.eye.every(Number.isFinite) || !cam.target.every(Number.isFinite)) return null;
+  const gameFov = cam.fovY && cam.fovY > 0 && cam.fovY < 179 ? (cam.fovY * Math.PI) / 180 : viewerFovY;
+  const framed = (dist * Math.tan(gameFov / 2)) / Math.tan(viewerFovY / 2);
+  const position: Vec3 = [cam.target[0] - (d[0] / dist) * framed, cam.target[1] - (d[1] / dist) * framed, cam.target[2] - (d[2] / dist) * framed];
+  return { position, yaw: Math.atan2(d[0], -d[2]), pitch: Math.atan2(d[1], Math.hypot(d[0], d[2])) };
 }
 
 function overview(min: Vec3, max: Vec3, aspect: number, fovY: number): Pick<StartView, 'position' | 'yaw' | 'pitch'> {
@@ -200,11 +225,18 @@ function findInterior(g: StaticGeometry, min: Vec3, max: Vec3): Pick<StartView, 
   for (const c of covered) {
     const eye: Vec3 = [c.x, c.floor + Math.max(30, Math.min(c.gap * 0.35, 160)), c.z];
     const centrality = 1 - Math.hypot(c.x - cx, c.z - cz) / range;
-    for (let h = 0; h < HEADINGS; h++) {
+    const dists = Array.from({ length: HEADINGS }, (_, h) => {
       const yaw = (h / HEADINGS) * Math.PI * 2;
-      const dist = rayDistance(g, eye, [Math.sin(yaw), 0, -Math.cos(yaw)], range);
-      const score = dist / range + 0.15 * centrality;
-      if (score > best.score) best = { score, position: eye, yaw };
+      return rayDistance(g, eye, [Math.sin(yaw), 0, -Math.cos(yaw)], range);
+    });
+    for (let h = 0; h < HEADINGS; h++) {
+      // Prefer wide open views: weigh the heading with its two neighbours, so a single narrow sightline between
+      // walls loses against an open hall (and capped "full range" rays don't tie on iteration order).
+      const left = dists[(h + HEADINGS - 1) % HEADINGS];
+      const right = dists[(h + 1) % HEADINGS];
+      const openness = (left + 2 * dists[h] + right) / (4 * range);
+      const score = openness + 0.15 * centrality;
+      if (score > best.score) best = { score, position: eye, yaw: (h / HEADINGS) * Math.PI * 2 };
     }
   }
   return { position: best.position, yaw: best.yaw, pitch: (-8 * Math.PI) / 180 };

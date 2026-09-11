@@ -1,17 +1,18 @@
-# Rush Level Viewer
+# N64 Level Viewer
 
-A browser viewer for the levels of the N64 games *San Francisco Rush 2049* (USA) and *San Francisco
-Rush: Extreme Racing* (USA). Load a ROM, pick a level in the sidebar, and fly around freely. The
-ROM is parsed entirely in the browser (in a Web Worker) and cached in IndexedDB; nothing is uploaded
-anywhere.
+A browser viewer for the levels of these N64 games (USA versions): *San Francisco Rush 2049*,
+*San Francisco Rush: Extreme Racing*, *Bomberman 64*, *Bomberman 64: The Second Attack!* and
+*Bomberman Hero*. Load one or more ROMs, pick a level in the sidebar, and fly around freely, with
+each game's soundtrack in the music box. ROMs are parsed entirely in the browser (in a Web Worker)
+and cached in IndexedDB; nothing is uploaded anywhere.
 
 ## Run
 
     npm install
     npm run dev          # or: npm run build && npm run preview
 
-Open the page, then choose or drop `San Francisco Rush 2049 (U) [!].z64` or
-`San Francisco Rush - Extreme Racing (U) (M3) [!].z64` (`.v64`/`.n64` byte orders work too).
+Open the page, then choose or drop ROM files such as `San Francisco Rush 2049 (U) [!].z64` or
+`Bomberman Hero (U) [!].z64` (`.v64`/`.n64` byte orders work too).
 
 **Controls:** click the view to capture the mouse, then look around with the mouse · arrow keys look around · W A S D move ·
 Space/E up · C/Q/Ctrl down · Shift faster · mouse wheel changes speed · R reset view · F nearest
@@ -27,6 +28,13 @@ filtering · H help · Esc releases the mouse.
   - `inflate.ts`, `lzss.ts`: codecs (raw DEFLATE, and both games' LZSS variants)
   - `rom.ts`, `level.ts`: Rush 2049 file table and level containers
   - `rush1.ts`: Rush (Extreme Racing) file tables and track containers
+  - `bomberman/`: the Bomberman games (full format notes in `BOMBERMAN.md`)
+    - `codecs.ts`, `archive.ts`: LZSS (1 KB and 4 KB rings), Yay0, file archives
+    - `container64.ts`, `bm64.ts`, `bmhero.ts`: "64" model containers, Bomberman 64 and Hero levels
+    - `niff.ts`, `bm64sa.ts`: NIFF models and The Second Attack scenes
+    - `music.ts`: song tables and compressed MIDI
+  - `music/`: `musyx.ts`, `rush2049.ts` (Rush 2049), `libultra.ts` (libultra bank/sequence
+    synthesizer shared by Rush 1 and the Bomberman games), `rush1.ts`
 - `src/worker.ts`: parses the ROM and levels off the main thread
 - `src/render/`: WebGL2 renderer, free-fly camera and controls
 - `src/ui/`: React UI (landing page, sidebar, viewport)
@@ -152,8 +160,36 @@ Textures are uploaded with the RDP tile commands, not read in place.
   - A child's translation is relative to its parent's, e.g. cones and trees parented to track
     pieces.
 
+### Bomberman 64, The Second Attack!, Bomberman Hero
+
+`BOMBERMAN.md` documents the formats in full; in short:
+- **Files.** Bomberman 64 keeps assets in an indexed archive at ROM 0x300000 (1 KB-ring LZSS), The
+  Second Attack in a resource block at 0x2A0000 (LZSS or Yay0). Hero's files are 4 KB-ring LZSS
+  streams addressed by ROM offset.
+- **Geometry.** Vertex units are world units, right-handed and Y up (no mirroring). Bomberman 64
+  and Hero use "64" containers with F3DEX 1.x lists (segment 2 = container); The Second Attack uses
+  NIFF models with F3DEX2 lists, whose render mode comes from each object's draw layer.
+- **Render state from game code.** The lists rely on geometry and render modes set by the game
+  (back-face culling, cutout alpha), and on RSP lighting: vertex colour bytes are normals. The
+  loaders bake the lights the game sets up into vertex colours (world-space directions).
+  `displaylist.ts` gained options for all of this, plus G_LOADTILE, matrices and a combiner fold
+  for PRIM/ENV colours; the Rush loaders don't use them.
+- **Levels.** The per-stage setup (map parts, fog, clear colour, lights, backdrop picture) is
+  hard-coded in each Bomberman 64 stage overlay, so `bm64.ts` tables it. Hero and The Second
+  Attack read it from stage tables, environment records and scene descriptors.
+- **Backdrops.** Skies are 2D pictures drawn across the screen before the 3D pass
+  (`Level.backdrop`).
+- **Music.** libultra's compressed-MIDI player (alCSPlayer) with ALBankFile banks and VADPCM, read
+  uncompressed from one "S2" blob per game, output at 32 kHz. Hero's loudness matches captured game
+  audio; The Second Attack's needed a gain of 0.555 against its capture.
+
 ## Known gaps
 
 - Rush 2049: scripted objects are shown frozen at the start of their paths.
-- Not shown: checkpoint flags, weapon power-up icons, invisible trigger/collision volumes, cars.
-- No fog, and only the most detailed LOD is used.
+- Rush: not shown: checkpoint flags, weapon power-up icons, invisible trigger/collision volumes, cars.
+- Rush: no fog, and only the most detailed LOD is used.
+- Bomberman 64: props placed by stage code, and boss arenas built only from object models, are not
+  shown. The Second Attack: only map geometry and battle soft blocks; story objects and characters
+  are not shown. Textures bound at run time from texture sets stay untextured.
+- Bomberman: animated textures (UV scrolling water) are static; environment mapping is approximate;
+  translucent effects that blend by fog alpha are not modelled.

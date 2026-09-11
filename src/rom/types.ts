@@ -1,11 +1,13 @@
 // Render-ready level data shared by all supported games.
 
-export type LevelKind = 'race' | 'battle' | 'stunt' | 'obstacle';
+export type LevelKind = 'race' | 'battle' | 'stunt' | 'obstacle' | 'adventure';
 
 export interface LevelInfo {
   index: number;
   name: string;
   kind: LevelKind;
+  // Sub-heading within the kind's group (e.g. the world or planet), shared by consecutive levels.
+  group?: string;
 }
 
 export type WrapMode = 'repeat' | 'mirror' | 'clamp';
@@ -28,6 +30,9 @@ export interface Batch {
   // The game draws this batch with back-face culling (front faces wind counter-clockwise,
   // the OpenGL convention).
   cullBack: boolean;
+  // Coplanar decal over other geometry (the RDP's decal depth mode): draw after the
+  // surfaces it lies on, with a depth offset towards the camera.
+  decal?: boolean;
   // Non-indexed triangles: 3 positions / 2 uvs / 4 colors per vertex.
   positions: Float32Array;
   uvs: Float32Array;
@@ -45,6 +50,7 @@ export interface Instance {
   mesh: number; // index into Level.meshes, -1 when no object of that name exists
   matrix: Float32Array; // 4x4 column-major, object -> world
   animated?: boolean; // scripted object, shown at the start of its motion path
+  noFog?: boolean; // the game draws this instance without fog, even when the level has fog
 }
 
 // N64 RSP fog as the game sets it (gSPFogFactor / G_SETFOGCOLOR). Per vertex the RSP
@@ -67,11 +73,34 @@ export interface Sky {
   mesh: number;
 }
 
+// A 2D picture the game draws across the whole screen before the level (no depth, no fog).
+// The texture window [u0, u1] x [v0, v1] (0..1 across the texture) spans the screen
+// left to right and top to bottom.
+export interface Backdrop {
+  texture: number; // index into Level.textures
+  u0: number;
+  v0: number;
+  u1: number;
+  v1: number;
+  tint?: [number, number, number]; // multiplies the texture, 0..255
+}
+
+// A camera the game itself uses for the level, as a starting view.
+export interface CameraView {
+  eye: [number, number, number];
+  target: [number, number, number];
+  fovY?: number; // degrees
+}
+
 export interface Level {
   info: LevelInfo;
   fog?: Fog; // absent when the game shows no fog
   // Skies the game chooses between (at random, for Rush 1), if it builds them itself.
   skies?: Sky[];
+  // Colour the game clears the screen to (0..255), when it clears it.
+  clearColor?: [number, number, number];
+  backdrop?: Backdrop;
+  camera?: CameraView;
   id: string;
   textures: Texture[];
   meshes: Mesh[];
@@ -98,7 +127,7 @@ export interface DecodedMusic {
 
 // A loaded ROM of one supported game.
 export interface Game {
-  id: 'rush2049' | 'rush1';
+  id: 'rush2049' | 'rush1' | 'bm64' | 'bm64sa' | 'bmhero';
   title: string;
   levels: LevelInfo[];
   loadLevel(index: number): Level;

@@ -1,4 +1,7 @@
 // Entry point: detect which supported game a ROM is and open it.
+import { openBomberman64 } from './bomberman/bm64';
+import { openBomberman64SA } from './bomberman/bm64sa';
+import { openBombermanHero } from './bomberman/bmhero';
 import { LEVELS, loadLevel } from './level';
 import { decodeRush2049Music, listRush2049Music } from './music/rush2049';
 import { normalizeByteOrder, RushRom } from './rom';
@@ -24,8 +27,15 @@ export function openRom(bytes: Uint8Array): Game {
     }
     case 'NSFE':
       return openRush1(rom);
+    case 'NBME':
+      return openBomberman64(rom);
+    case 'NBDE':
+      return openBombermanHero(rom);
+    case 'NBVE':
+      return openBomberman64SA(rom);
     default:
       throw new Error(`Unsupported ROM (game code "${code.replace(/[^\x20-\x7e]/g, '?')}"). ` +
-        'Supported: San Francisco Rush 2049 (U), San Francisco Rush: Extreme Racing (U).');
+        'Supported: San Francisco Rush 2049 (U), San Francisco Rush: Extreme Racing (U), Bomberman 64 (U), ' +
+        'Bomberman 64: The Second Attack! (U), Bomberman Hero (U).');
   }
 }
