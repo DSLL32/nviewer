@@ -149,8 +149,8 @@ function halfTexel(batches: Batch[], textures: Texture[]) {
   }
 }
 
+// A fresh matrix per instance: the worker transfers each instance's buffer with the level.
 const translation = (p: number[]) => new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, p[0], p[1], p[2], 1]);
-const IDENTITY = translation([0, 0, 0]);
 
 function norm(v: number[]): [number, number, number] {
   const l = Math.hypot(v[0], v[1], v[2]) || 1;
@@ -460,9 +460,9 @@ function loadLevel(z: Zelda, def: LevelDef, info: LevelInfo): Level {
     };
     const visible = covered ? xlu : [...opa, ...xlu];
     for (const b of [...opa, ...xlu]) roomTris += b.positions.length / 9;
-    if (visible.length) place(`room ${r.index}`, 'main', meshOf(`room ${r.index}`, visible, roomInfo), IDENTITY, `room ${r.index}`, roomInfo);
+    if (visible.length) place(`room ${r.index}`, 'main', meshOf(`room ${r.index}`, visible, roomInfo), translation([0, 0, 0]), `room ${r.index}`, roomInfo);
     if (covered && opa.length) {
-      place('opaque room lists under the background', 'background', meshOf(`room ${r.index} (covered)`, opa, roomInfo), IDENTITY, `room ${r.index} opaque`, roomInfo, false);
+      place('opaque room lists under the background', 'background', meshOf(`room ${r.index} (covered)`, opa, roomInfo), translation([0, 0, 0]), `room ${r.index} opaque`, roomInfo, false);
     }
   }
   // Textures used by the level first, then sky and background pictures.
@@ -525,9 +525,9 @@ function loadLevel(z: Zelda, def: LevelDef, info: LevelInfo): Level {
   if (collision) {
     const cInfo: DebugInfo = { scene: sceneName, polygons: collision.polys.length, vertices: collision.vertices.length, waterBoxes: collision.waterBoxes.length, bgCams: collision.bgCams.length };
     const cb = collisionBatch(collision);
-    if (cb) place('collision', 'collision', meshOf('collision', [cb], cInfo), IDENTITY, 'collision', cInfo, false);
+    if (cb) place('collision', 'collision', meshOf('collision', [cb], cInfo), translation([0, 0, 0]), 'collision', cInfo, false);
     const wb = waterBoxBatch(collision);
-    if (wb) place('waterboxes', 'collision', meshOf('waterboxes', [wb], cInfo), IDENTITY, 'waterboxes', cInfo, false);
+    if (wb) place('waterboxes', 'collision', meshOf('waterboxes', [wb], cInfo), translation([0, 0, 0]), 'waterboxes', cInfo, false);
   }
 
   // ---- start camera: spawn 0 and the bg camera of the floor under it (ZELDA64.md §7.6) ----
