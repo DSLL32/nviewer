@@ -319,10 +319,10 @@ White Glacier "Blizzard Peaks".
 | Overlay (archive/file) | Map | Attribute | Status |
 |---|---|---|---|
 | 0x90 (0x2E0000/1) | 513 | 537 | **Rock Garden** (verified: emulator load log, RDRAM, screenshot) |
-| 0x91 | 514 | – | UP and Down |
+| 0x91 | 514 | 538 | UP and Down |
 | 0x92 | 518 | 539 | Pyramid |
 | 0x93 | 520 | 540 | Greedy TraP |
-| 0x94 | 525 | – | Top Rules |
+| 0x94 | 525 | 541 | Top Rules |
 | 0x95 | 529 | 542 | Field of Grass |
 | 0x96 | 530 | 543 | In the Gutter (locked on a new save) |
 | 0x97 | 534 | 544 | Sea Sick (locked) |
@@ -680,8 +680,7 @@ For stage index `i`:
     - +0x2C u8 **backdrop picture**: 0 none, n ≥ 1 = entry n − 1 of the 30-entry picture table 0x801051E0
     - +0x31/+0x32/+0x33 u8 **fog colour** R, G, B
     - +0x34/+0x36 s16 **fog min / max** (gSPFogPosition arguments)
-    - the rest, probably per-cell collision/attribute data (a 4 × 6 grid of 960-unit cells), is a hypothesis
-      and not needed for drawing
+    - +0x00..+0x1C bounds and the collision grid, +0x3C the collision cells (5.2.7)
   - `sub[]` = offsets (−1 = none) of nested sub-containers inside B, drawn at identity in stage 1-1 (hypothesis:
     doors/platforms driven by stage code).
 
@@ -779,6 +778,69 @@ material looked wrong in the frame replay. The debug menu's [LIGHT EDIT] page sh
 - `hero_level/renders/frame_s11_cmp.png`: replay of all 157 draw calls of the captured frame (segment bases and
   matrices from RAM). The gate, side gates and Bomberman appear in place; remaining differences are the HUD, the
   undrawn backdrop and filtering.
+
+#### 5.2.7 Collision (stage blob A; verified: code, RDRAM, all 103 viewer stages)
+
+Hero's static collision is a grid of **planes** in the stage blob; the map container holds none. Blob A is loaded
+at exactly 0x802D0000 and is linked there (absolute pointers, no relocation: stage 1-1 RAM from 0x802D0000 equals the
+decompressed file, 0x48D0 bytes). The header (u32 at blob +0, the last 0x54 bytes) begins:
+
+```
++0x00 s16 xmin, ymin, zmin, xmax, ymax, zmax    the query rejects x <= xmin, z <= zmin, x >= xmax, z >= zmax
++0x0C s16 × 6                                    a second box (copied to 0x801778F0; not used by collision)
++0x18 s16 nx, ny, nz                            cells of 960 units from (xmin, zmin); x/z spans = nx·960, nz·960 in all 102 blobs
++0x1E s16 × 3 = 16                               tiles per cell (the query hardcodes 16 tiles of 60 units)
++0x38 ptr  nx·ny·nz 16-byte records             not read by the collision code (hypothesis: draw lists)
++0x3C ptr  u32[nx·nz] cell blocks, index iz·nx + ix, 0 = no collision in the cell
++0x40 ptr  push table for attribute 252 (2 blobs); +0x44 always 0
+cell block (3 pointers stored after the cell's data):
+  +0 tiles   256 × { u8 diagonal; u8 list0; u8 list1 }   index tz·16 + tx, tile = 60 × 60 units
+  +4 planes  28-byte records, up to `lists`
+  +8 lists   u8 plane indices, each list ended by 0xFF; tile.listH = offset of the list for half H
+plane (28 bytes): s32 a, b, c, d     a·x + b·y + c·z = d, i.e. y = (d − a·x − c·z) / b (0x80015D2C); b is never 0
+                  s32 b (again)      its sign is the facing: b > 0 top, b < 0 underside (3,085 of 13,033 planes)
+                  s32 attr           200..255 (255 = plain)
+                  s32 param          0xFFFF when unused
+```
+
+- **Tile halves:** diagonal 0 → half 0 is `lx + lz < 60`; diagonal 1 → half 0 is `lz < lx` (lx, lz local to the tile).
+  A plane's surface is the union of the tile halves whose list names it; there are no vertices.
+- **Query** 0x80067748(x, y, z) (header fields copied to 0x80177788.. by 0x80066AE8): in the tile half containing
+  (x, z), the highest plane at or below y is the floor, the lowest above y the ceiling; none → y ∓30000, attr 255.
+  Results at 0x801776F0.. (plane, attr 0x80177740, param 0x80177750, height 0x80177760); 0x801776E0 bit 0 is set
+  when the surface below faces down or the one above faces up.
+- **No wall polygons:** walls are steep planes (about 1,200 records steeper than 60°) and height steps between planes.
+  0x80084430 compares the new plane with the previous one using 30- and 60-unit thresholds (hypothesis: the step
+  limit). Moving platforms are runtime triangles (10 object slots × 6 at 0x80176610, 0x80068CC4, merged by 0x80069314).
+- **Checks:** stage 1-1 RDRAM, Bomberman at (0, 0, 1560): the query returns plane (0, 1008, 0, 0), attr 255, the RAM
+  result. Fog Route (`rd_s18.bin`), player at (0, 1382.857, 4400): cell 25 plane (0, 1764, −252, 1330560) gives exactly
+  1382.857. Plain up-facing tiles lie within 2 units of a coplanar map triangle for 85–100% of most stages (Battle Room
+  90.2%, Secret Room 98.5%, Fog Route 98.2%, Dark Prison 99.1%); mirroring X drops asymmetric maps to near 0 (Sky Room
+  94.9% → 0.4%), so scale, offset and handedness match the map. Low scores: Vs. Baruda (37, attr-200 planes above a
+  two-disc map), scene 170 (one plane under a sphere), Hades Crater (39, collision about 50 below the map: not
+  explained), Killer Gate (33, ±100 offsets, probably moving parts).
+- **Attributes** (+0x14, the value the MASTER DEBUG "NO ATTRIBUTE" flag s8 0x8016E404 disables): the player's floor
+  handler 0x80085D54 dispatches attr 215..255 through the jump table 0x8010CCA8.
+
+  | attr | Meaning | Evidence |
+  |---|---|---|
+  | 255 | plain surface (floor, steep or underside by its normal) | default |
+  | 245, 217 | param 0: kill floor (678 planes, mostly pits and lava); else hazard (costs one health) | 0x80086AD0 → 0x8016E080 = 3/4/5; seg1 0x80023B8C; skipped with NO DAMAGE 0x8016E3FC |
+  | 247, 248 | hazard kind 1 / 2 | 0x8016E080 = 1 / 2, same damage path |
+  | 230, 231, 246, 254 | room exit; exit number = signed low byte of param | 0x80069D04 / 0x80069D88 → 0x80069AD8 reads target stage and entry from info record +8 |
+  | 218 | special exit (stages 68, 105–107) | same table |
+  | 238, 241 | door to another room, exit = low byte of param | overlay 0x802845C4: player state 45, sound 58 |
+  | 239 | launch pad, heading 90·param | 0x802844D4: state 44 |
+  | 227 | boost pad | 0x80284840: state 48 |
+  | 233 | fall-in hole (all four points ±25 must be 233) | 0x80284758: state 47 |
+  | 240 | knock-back (hypothesis) | 0x802828C0: state 5 or 8 by vertical speed |
+  | 237, 236, 232, 215 | current 1..4: adds/subtracts 16 to player +36 / +44 (hypothesis: X / Z) | 0x8016E288; overlay 0x80280B6C |
+  | 252 | push zone param + 1, directions from the header +0x40 table | overlay 0x80280928 |
+  | 200, 223–226, 228, 229, 235, 242, 249, 250, 253 | unknown (228/229 only counted by object 0x8009CC88, Move Stone plates: hypothesis) | no other readers found |
+
+- **Viewer** (`collision.ts`): tile halves, joined into rectangles where one plane covers whole tiles (80,754 triangles
+  for the 103 stages, from 1.53 million halves), in hidden layers "collision" (up-facing planes, by class: floor,
+  steep, kill, hazard, exit, door, launch, boost, hole, knock-back, current, push, other) and "collision undersides".
 
 ### 5.3 Bomberman 64: The Second Attack! (NIFF)
 
@@ -1049,7 +1111,7 @@ record (yaw 0, pitch 50°, distance 6500, look-at (650, 0, 500), eye (650, 4979,
 ready-made initial viewer camera for battle stages.
 
 **Collision file** (descriptor +0x04): bounds plus a grid of 52-byte polygons; used for hit tests and to clamp
-the follow camera; not drawn.
+the follow camera; not drawn by the game. Format in 5.3.11.
 
 **Bitmap resources** (380 files): `u32 total; u32 pixOff (0x20); u32 palOff; u32 bpp (4|8); u32 width; u32
 height; u32 nColors; u32 0`; pixels at pixOff, RGBA16 palette at palOff.
@@ -1129,6 +1191,54 @@ camera-relative quad) textured with the bitmap and tinted by the mode colour.
   bases, `sa_stage/objmap.py`): battle soft block id 25 draws **NIFF 586** at placement + (50, 0, 50), scale 1.
   On Rope Bridge, ids 241/213 draw NIFFs 676 and 930 (which is which not separated). Other ids are open; a
   static lead is a possible id → resource table in exec 0x27 (file 0x3F66).
+
+#### 5.3.11 Collision file (verified: code, all 168 files, 4 RDRAM dumps)
+
+Scene descriptor +0x04 names the resource (−1 = none; 168 distinct files for the 182 descriptors). Big-endian:
+
+```
++0x00  u32 nGrids                          1 in every file
++0x04  f32 maxX, maxY, maxZ                camera clamp bounds (see below)
++0x10  f32 minX, minY, minZ
++0x1C  nGrids × 36-byte grid:
+         +0x00 u32 nx; +0x04 u32 ny (always 1); +0x08 u32 nz
+         +0x0C f32 originX, originY, originZ
+         +0x18 u32 cells        file offset of nx·nz × { u32 count; u32 list }   list = count × u32 polygon index
+         +0x1C u32 polyCount
+         +0x20 u32 polys        file offset of polyCount × 52-byte polygons
+polygon (52 bytes):
+  +0x00 f32 nx, ny, nz          unit normal
+  +0x0C f32 x, y, z             vertex 0      (world units, the map NIFF's space)
+  +0x18 f32 x, y, z             vertex 1
+  +0x24 f32 x, y, z             vertex 2
+  +0x30 u32 attr                attribute bits
+```
+
+- **Loader** `gamesceneSetupAttr` 0x8002D418: `gameresAlloc(res)` → 0x8008F4BC, first grid → 0x8008F4C0; bounds +0x04/+0x0C/+0x10/+0x18
+  → 0x800ABD20/28/2C/34 (the Y fields are replaced by constants from 0x80095878/7C); relocates grid +0x18 and +0x20, every
+  cell list pointer, and rewrites each polygon index in place as `polys + 52·index`. RDRAM (Normal res 16, Park 18, Rope Bridge
+  30, area 2101 res 112): header, grid and polygons identical to the file; all 2,214 cell references relocated exactly so.
+- **Cell lookup** 0x8002F32C (`gamesceneGetBoun…`, called by the map hit test at 0x8004DC4C): `ix = trunc(x − originX) >> 8`,
+  `iz = trunc(z − originZ) >> 8`, i.e. **256-unit cells**; out of range → none; cell record = `cells + 8·(ix·nz + iz)`. Static
+  check: 53,028 of 53,162 cell references overlap their polygon's XZ extent (±1 unit); every polygon is referenced.
+  `gamesceneChkMapR…` 0x8002F24C tests a point against the bounds with a margin.
+- **Winding:** the stored normal equals `normalize((v1 − v0) × (v2 − v0))` for all 16,094 polygons: front faces are
+  counter-clockwise, as in the viewer.
+- **Attribute bits:**
+  - **0x2 = floor**: `rpRM_CHK_FLOOR` 0x80057800 reports a hit as floor when `attr & 2` (else it tests the normal). 3,968
+    of the 4,222 attr-0x2 polygons face up.
+  - **0xC00 = which objects collide**: `hitchkIgnore` 0x8004C1C4(attr, mask) accepts a polygon for a hit-check object when
+    `attr & 0xC00` is 0 (everyone), 0x400 and `mask & 0xF00` = 0, 0x800 and `mask & 0xF00` = 0x300, or 0xC00 and
+    `mask & 0xF00` is neither 0 nor 0x300. Which objects carry which mask class was not traced.
+  - `hitchkAreaMain` ORs the attributes of all polygons touched; `hitchkMapFoot` stores the floor polygon's attribute in
+    the hit object (+0x58). The other bits are tested outside main code (overlays) and are not decoded. Hypothesis: 0x1C
+    = solid wall (10,318 of the 11,094 attr-0x1C polygons are walls, 746 ceilings).
+  - Values over all files (polygons; w/f/c = wall/floor/ceiling by normal): 0x0 16, **0x2 4,222**, 0x17 100 (w), **0x1C 11,094**,
+    0x1D 140, 0x92 8 (f), 0xD2 14 (f), 0x112 6 (f), 0x11D 182 (w), 0x240 8, 0x31C 7, 0x389 58, 0x41D 38 (w), 0x7DD 5 (c),
+    0x81C 92 (w), 0x1202 50, 0x12C0 48, 0x1352 6 (f).
+- The battle arenas are boxed in by tall invisible walls (Normal: to y = 1000 around x 0..1300, z 0..1100).
+- **Viewer** (`collision.ts`): hidden layer "collision", one mesh per attribute value; floor (bit 0x2) green, bits 0x1C
+  orange, restricted (0xC00) blue, others purple.
 
 ### 5.4 Bomberman 64
 
@@ -1291,19 +1401,7 @@ Source: `notes/bm64_stage.md`.
   the instance in RAM. There is no single placement format: a viewer needs per-overlay extraction or the RAM
   positions. Green Garden 1 prop positions from RAM are in `bm64_stage.md` §4.3 (e.g. six pots, asset 147, at
   (900|1100|1300, 200, 1300|1800)).
-- **Attribute file** (collision and object grid; the layout parses every byte):
-
-  ```
-  u8 layerCount; u8 originX; u8 originLayer; u8 originZ; u8 floorByte
-  layerCount × { u8 blocksX (6); u8 blocksZ (4); u8 flag;
-                 blocksX·blocksZ × { u16 blockId = col << 8 | row; u16 cell[64] (8 × 8, row-major) } }
-  ```
-
-  - Each layer is 48 × 32 cells; **one cell = 100 × 100 world units**, origin (0, 0). This was verified by sampling
-    the Green Garden prop positions, which give one code per prop type: pots 147 → 0x0061, 144 → 0x0041.
-  - Codes (hypothesis): 0x0010 empty, 0x0011 floor, 0x001F solid, 0x0411 water strip. The mapping of layer to height
-    is open.
-  - Not needed for drawing.
+- **Attribute file:** the 3-D collision and object grid, section 5.4.7.
 - **Per-stage environment API** (verified, disassembly; values confirmed in Green Garden 1 and Blizzard Peaks):
   - 0x2201 `setClearColor(r, g, b)` becomes the FILLCOLOR: Green Garden (55, 77, 255) → 0x327F.
   - 0x2104 `setFog(min, max, r, g, b)`; 0x2103 fog off.
@@ -1317,6 +1415,61 @@ Source: `notes/bm64_stage.md`.
     as predicted.
   - For the viewer's `Fog`: colour (r, g, b), multiplier fm, offset fo, near 200, far 20000.
   - Per-area fog values are in the section 4.1 table; the title screen uses 900–960.
+
+#### 5.4.7 Attribute grid: the collision (verified: code, 4 RDRAM dumps, map geometry)
+
+The attribute file is Bomberman 64's **only map collision**: ground height (`groundHeight` 0x8026E938, 23 seg2 and 16
+overlay call sites) and wall blocking (0x80290498 inside 0x802909FC) read the grid, never the map containers. Moving
+platforms are objects (0x8026E8E0 walks the object list 0x802A55F4).
+
+```
+u8 layerCount; u8 originX; u8 originLayer; u8 originZ          (origins 0 in all 67 files)
+u8 floorByte      bit 7 = bottomless; low 7 bits b: fall-out height floorY = −100·b (stored at 0x802AFC5C)
+layerCount × { u8 blocksX (6); u8 blocksZ (4); u8 unit      layer height in hundreds; 0xFF on the top layer
+               blocksX·blocksZ × { u16 blockId = col << 8 | row; u16 cell[64] (8 × 8, row-major) } }
+```
+
+- **Loading:** ZeroJump table 0x0D at 0x802A1450: 0x0D00 `loadAttributes` 0x8026FF64, 0x0D0C parser 0x8026FC08 (fills
+  each layer with 0x2010, then `setCell(col·8 + originX + i % 8, layer + originLayer, row·8 + originZ + i / 8)`),
+  0x0D0D random soft blocks and spawn markers 0x8026F8B0, 0x0D04 `setCell` 0x8026D620, 0x0D0B `getCell` 0x8026D7D8
+  (outside the grid → 0x2010; below layer 0 → 0x000F under a non-empty layer-0 cell), 0x0D08 `worldToCell` 0x8026DCAC,
+  0x0D11 `layerBase` 0x8026E2B0, 0x0D15 `groundHeight`. Grid in RAM at 0x800B15D8. Blue Resort (0x38–0x3D) and 0x6F call
+  the parser directly, skipping the random-block and marker pass. The unused debug printer 0x8026ECF4 calls the
+  per-layer byte "Layer Unit". File size = 5 + 3123·layerCount; every layer is 48 × 32 cells.
+- **Cell space:** cell (i, k) is **centred** on (100·i, 100·k) and spans ±50 (`worldToCell` rounds at 0x8026DE88;
+  movement uses `int((x + 50)·0.01)` at 0x80290AE0). Layer L spans `base(L) = 100·Σ unit(k < L)` up by `100·unit(L)`
+  (0x8026E2B0; `layerOfY` 0x8026EE18); y < 0 is layer −1. There is no per-cell height: only slopes lie between layers.
+- **Ground** (0x8026E938): from the cell at the object's layer, step down while the cell's shape is empty and the
+  cell below has no object bits (0x60); ground = base of that layer, or the slope height for shapes 3–6; below
+  layer 0: floorY, or no ground (20000.0) when bottomless. Objects at or below floorY have fallen (0x80233428,
+  0x8023FAE4).
+- **Cell code bits:**
+
+  | Bits | Meaning | Evidence |
+  |---|---|---|
+  | 0x000F | shape: 0 empty; 1 floor; 3/4/5/6 slope rising towards +z/−z/+x/−x over the run of equal cells and the layer height; 7/8/12/13 corner (solid half towards (−x,−z)/(−x,+z)/(+x,−z)/(+x,+z)); 15 solid for the whole layer; 2, 9, 10, 11 walkable floors of unknown kind | slope run 0x8026DFB8, height 0x8026E3AC, test 0x8026E278; blocking 0x80290498 (jump table 0x802A460C, directions 0x802A45D8) |
+  | 0x0010 | excluded from random soft-block placement (needs `(code & 0x70) == 0`) | 0x8027E124, 0x8026FA24 |
+  | 0x0060 | grid object kind 1–3 (per stage; kind 1 = battle soft block), solid when scanning a column | model tables 0x802B0190 / 0x802B01D8, `placeObject` 0x8026F068 |
+  | 0x0380 | spawn marker 1–7 (battle 1–4: hypothesis, player starts) | 0x8026F5E8 → 0x802511EC / 0x80286CA8; GG1 marker 4 = asset 222 (×4), 5 = 847 (×3) |
+  | 0x1C00 | trigger id 1–7 → per-stage callback table 0x802B01F4 (0x8027F858), registered by overlays (0x8027F88C) | e.g. GG1 id 1 = the water strip (the old 0x0411 "water" code) |
+  | 0x2000, 0x4000, 0x8000 | unknown (0x2010 is the fill value; 0x4000 marks a cell as not free; 0x8000 tested with mask 0x11) | 0x80247358, 0x8026E608; 0x80273A6C; 0x80245190 |
+
+- **RDRAM checks** (Green Garden 1, Blizzard Peaks, Field of Grass, Rock Garden): header and cells equal the file
+  except runtime edits (Rock Garden 12 and Field of Grass 6 cells 0x0001 → 0x0021 exactly under the random soft blocks;
+  Green Garden 1: prop footprints and closed passages). `groundHeight(x, y + 1, z) == y` for 39/42, 21/30, 8/10 and
+  17/19 objects (misses are floating or animated), including a slope (object at y 190.0679).
+- **Against the map:** floor cells at base(L) coincide with map floors for 91–100% (Rock Garden 100%, Green Garden 1
+  97%, Switches and Bridges 1 91%, Field of Grass 100%, Hot on the Trail 1 95.5%); all slopes match (81/81, 106/106,
+  78/78, 56/60); horizontal rays find map walls at the solid-cell faces for 74–84% (cells taken to start at 100·i
+  instead: 0–6.5%). Blizzard Peaks' snow is drawn 40 units above the collision (544 of 613 floors, all 278 slopes);
+  objects in RAM stand at the collision height.
+- **Mismatches with the overlay scan:** 0x9B passes asset 564, a "64" container, to `loadAttributes`
+  (0x9B is unused, section 10).
+- **Viewer** (`collision.ts`): hidden layers "collision" (solid boxes without shared faces, floor quads, slope ramps,
+  corner prisms, the fall-out plane under empty columns when not bottomless; open top layers drawn 300 high),
+  "attribute volumes" (object-kind boxes, trigger-id volumes of empty cells, the bottomless fall-out height) and
+  "attribute markers" (spawn markers). "Side room" (map 399, shared by overlays 0x4D–0x4F and 0x55, whose attribute
+  files 405–408 differ) uses 405.
 
 ## 6. Music (shared system, all three games)
 
@@ -1744,6 +1897,9 @@ rendering, HLE RSP). Its `--debug` core was used for breakpoints and RDRAM dumps
 | Hero names | label sprite files decoded and read; stage-index table 0x80106DA0 disassembled | full named list (4.3) |
 | Hero all maps decode | `hero_level/render_all_maps.ts` | 102/102 map files render, 0 failures (`renders/maps/contact_sheet.png`) |
 | Hero fog formula | stage-select table patch to Fog Route; frame list from RDRAM; fogged render vs screenshot (`verify/`) | BC fog word fm 2560 / fo −2304 and colour DCE1E6 as predicted; map-only fog; render diff 20.6 (fog) vs 37.6 (no fog) |
+| SA collision file | relocated file in RDRAM (Normal, Park, Rope Bridge, area 2101); cell lookup code vs polygon extents; stored normals vs cross products (`/home/n64/.ai-tmp/bmcol/sa/`) | identical; 53,028/53,162 references overlap; 16,094/16,094 normals |
+| Hero collision planes | floor query port vs RAM results (stage 1-1, Fog Route); plain floors vs coplanar map triangles, with a mirrored control (`/home/n64/.ai-tmp/bmcol/hero/stats.txt`) | results equal; 85–100% on most stages, mirrored near 0 |
+| BM64 attribute grid | RAM grids (4 dumps) vs file; `groundHeight` port vs object heights; floors, slopes and walls vs map geometry (`/home/n64/.ai-tmp/bmcol/bm64/run.out`, `align.out`) | equal except runtime edits; 85 of 101 objects; 91–100% floors |
 | SA fog formula | warp to area 2101 at `gamesceneSetup`; frame lists from RDRAM (`verify/sa/`) | DB08 fm 3282 / fo −3026 and colour 000F2E as predicted; fog render modes active; objects fogged |
 
 ### 8.3 Sample extractions
@@ -1778,7 +1934,10 @@ Everything here is **unverified**. Verified facts are in sections 1–8 and 10.
 - Names of worlds 4/5 (Black Fortress, Rainbow Palace) by elimination only; which stages are bosses (inferred from
   music and structure); Blue Resort area 0x3D shared by stages 1 and 3; entry param → spawn point mapping.
 - Prop placement has no single data format: positions come from overlay code and data records (verified for Green
-  Garden 1 only). Meaning of attribute-cell codes beyond prop kinds; layer ↔ height.
+  Garden 1 only).
+- Attribute grid (5.4.7): bits 0x2000/0x4000/0x8000; floor shapes 2, 9, 10, 11; per-stage trigger callbacks (id 5
+  fills large empty volumes: a fall zone?); battle markers 1–4 as player starts; whether maps chamfer corner cells;
+  Green Garden 1 (43) and Switches and Bridges 1 (84) floor cells without a map surface (props, hypothesis).
 - The map-part flag 0x60 path (Black Fortress, Trap Tower parts).
 - Blue Resort's water (animated?) was not captured. The per-band texture-offset formula of the `setBackground`
   backdrop is unknown.
@@ -1794,7 +1953,9 @@ Everything here is **unverified**. Verified facts are in sections 1–8 and 10.
   world; world-name index equals world index (order match only).
 - UV-scroll speeds on maps other than Park; deform tracks (shape+52, class 4); normals of rotated objects in the bake;
   texture-set selection for characters.
-- Class-3 animation channel semantics, class 4/5 data, NIFF header +0x14; 52-byte collision polygon layout.
+- Class-3 animation channel semantics, class 4/5 data, NIFF header +0x14.
+- Collision attribute bits other than 0x2 (floor) and 0xC00 (object filter), e.g. 0x1C as solid wall; which objects have
+  mask classes 0 / 0x300 (5.3.11).
 
 **Hero**
 - Only stages 1-1 and 18 (Fog Route) were loaded in the emulator; the other maps are verified by static decode
@@ -1802,6 +1963,8 @@ Everything here is **unverified**. Verified facts are in sections 1–8 and 10.
 - Whether the backdrop picture scrolls with the camera.
 - Scale source of some object classes (switch 0.9); MAPWOOD's Y offset; a placement-record-driven render of 1-1.
 - Lighting bake: F3DEX 1.x light-direction transform, alpha, combiner; Bomberman's material looks wrong in the replay.
+- Collision (5.2.7): attributes 200, 223–226, 228, 229, 235, 242, 249, 250, 253; X/Z meaning of player +36/+44 for
+  currents; knock-back 240; the step rule of 0x80084430; Hades Crater's −50 and Killer Gate's ±100 offsets.
 - Which label slot the select screen shows per area (name mapping by area order is consistent with every count
   and boss position, but the index was not traced); info-record fields +3/+4/+5/+8/+0x20/+0x30/+0x34.
 

@@ -64,9 +64,11 @@ export function withAlpha(mesh: Mesh, alpha: number): Mesh {
   };
 }
 
-export function buildLevel(info: LevelInfo, id: string, textures: Texture[], meshes: Mesh[], instances: Instance[], extra: Partial<Level> = {}): Level {
+// `notInBounds`: instances that don't count towards the level's extent (e.g. collision overlays).
+export function buildLevel(info: LevelInfo, id: string, textures: Texture[], meshes: Mesh[], instances: Instance[], extra: Partial<Level> = {}, notInBounds?: ReadonlySet<number>): Level {
   const bounds = emptyBounds();
-  for (const inst of instances) {
+  for (const [i, inst] of instances.entries()) {
+    if (notInBounds?.has(i)) continue;
     const mesh = meshes[inst.mesh];
     if (!mesh) continue;
     const m = inst.matrix;

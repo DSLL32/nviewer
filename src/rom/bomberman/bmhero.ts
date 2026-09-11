@@ -12,9 +12,10 @@
 // Object classes: 0x60-byte records at ROM 0x1172B0 + class * 0x60 (name at +0x48); +0x24 ->
 // {u16 slot, u16 flags, u32 model start, u32 end}; +0x28 -> shape (s16[1] = height offset).
 import type { DlLighting } from '../displaylist';
-import type { Backdrop, Game, Instance, Level, LevelInfo, Mesh, Texture } from '../types';
+import type { Backdrop, Game, Instance, Level, LevelInfo, LevelLayer, Mesh, Texture } from '../types';
 import { cstr, view } from '../util';
 import { HeroFiles } from './archive';
+import { addCollisionLayer, collisionInstances, heroCollisionGroups, parseHeroCollision } from './collision';
 import { buildLevel, decodeImage, fogPosition, lighting, meshFromBatches } from './common';
 import { drawContainer, records64 } from './container64';
 import { bombermanMusic } from './music';
@@ -154,6 +155,9 @@ function loadStage(r: HeroRom, index: number): Level {
   const meshes: Mesh[] = [];
   const instances: Instance[] = [];
   const ident = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+  const mapLayer: LevelLayer = { name: 'map', kind: 'main', instances: [] };
+  const objectLayer: LevelLayer = { name: 'objects', kind: 'objects', instances: [] };
+  const layers: LevelLayer[] = [mapLayer, objectLayer];
 
   // The map: every display list of the container and of its nested sub-containers.
   const map = r.files.lzss(mapStart);
@@ -169,7 +173,7 @@ function loadStage(r: HeroRom, index: number): Level {
     }));
     mesh.info = { file: `0x${mapStart.toString(16)}`, container: `0x${base.toString(16)}`, triSource: `offset in the map file at ROM 0x${mapStart.toString(16)} (decompressed)` };
     if (mesh.batches.length) {
-      instances.push({ name: mesh.name, mesh: meshes.push(mesh) - 1, matrix: ident, info: { stage: i, fileRecord: `0x${fileRec.toString(16)}`, container: `0x${base.toString(16)}` } });
+      mapLayer.instances.push(instances.push({ name: mesh.name, mesh: meshes.push(mesh) - 1, matrix: ident, info: { stage: i, fileRecord: `0x${fileRec.toString(16)}`, container: `0x${base.toString(16)}` } }) - 1);
     }
   }
 
@@ -210,6 +214,7 @@ function loadStage(r: HeroRom, index: number): Level {
       if (!meshes[mi].batches.length) continue;
       const c = Math.cos(rot), s = Math.sin(rot);
       // Only map sections are fogged; objects draw without fog.
+      objectLayer.instances.push(instances.length);
       instances.push({
         name: meshes[mi].name, mesh: mi, noFog: true,
         matrix: new Float32Array([c, 0, -s, 0, 0, 1, 0, 0, s, 0, c, 0, x, y, z, 1]),
@@ -242,8 +247,16 @@ function loadStage(r: HeroRom, index: number): Level {
       } satisfies Backdrop;
     }
   }
+  // Collision planes from the stage blob (hidden layers).
+  const collision = parseHeroCollision(blob);
+  if (collision) {
+    const groups = heroCollisionGroups(collision, { stage: i, blob: `0x${blobStart.toString(16)}` });
+    addCollisionLayer(meshes, instances, layers, groups.top);
+    addCollisionLayer(meshes, instances, layers, groups.under, 'collision undersides');
+  }
+  extra.layers = layers.filter((l) => l.instances.length);
   extra.clearColor = extra.fog?.color ?? [0, 0, 0];
-  return buildLevel(HERO_LEVELS[index], `bmhero-${index}`, textures, meshes, instances, extra);
+  return buildLevel(HERO_LEVELS[index], `bmhero-${index}`, textures, meshes, instances, extra, collisionInstances(layers));
 }
 
 export function openBombermanHero(rom: Uint8Array): Game {

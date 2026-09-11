@@ -5,9 +5,10 @@
 // environment record (lights, fog, clear colour) comes from the world's area-info file (2036 +
 // world, 2045 for battle), the camera from the camera files (2046 + world, 2055 for battle).
 // Some stages draw a 2D backdrop bitmap first (BOMBERMAN.md 5.3.9).
-import type { Backdrop, CameraView, Game, Instance, Level, LevelInfo, Mesh, Texture } from '../types';
+import type { Backdrop, CameraView, Game, Instance, Level, LevelInfo, LevelLayer, Mesh, Texture } from '../types';
 import { view } from '../util';
 import { type Archive, bm64saResources } from './archive';
+import { addCollisionLayer, collisionInstances, parseSaCollision, saCollisionGroups } from './collision';
 import { buildLevel, decodeImage, fogPosition, meshFromBatches } from './common';
 import { bombermanMusic } from './music';
 import { drawNiff, type Env, parseEnv, parseNiff } from './niff';
@@ -146,12 +147,14 @@ function loadScene(res: Archive, index: number): Level {
   const meshes: Mesh[] = [];
   const instances: Instance[] = [];
   const ident = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+  const layers: LevelLayer[] = [];
 
   const map = mapRes > 0 ? parseNiff(res.file(mapRes)) : null;
   if (map) {
     const mesh = meshFromBatches(`map ${mapRes}`, drawNiff(map, { textures, textureKeys, keyPrefix: `${mapRes}:`, env }));
     mesh.info = { resource: mapRes, rom: `0x${res.romOffset(mapRes).toString(16)}`, triSource: `offset in resource ${mapRes} (decompressed NIFF)` };
-    instances.push({ name: mesh.name, mesh: meshes.push(mesh) - 1, matrix: ident, info: { scene: s.desc, map: mapRes } });
+    const i = instances.push({ name: mesh.name, mesh: meshes.push(mesh) - 1, matrix: ident, info: { scene: s.desc, map: mapRes } }) - 1;
+    layers.push({ name: 'map', kind: 'main', instances: [i] });
   }
 
   // Candidate soft-block positions (the game picks some at random each round).
@@ -170,7 +173,10 @@ function loadScene(res: Archive, index: number): Level {
       const mesh = meshFromBatches('soft block', drawNiff(block, { textures, textureKeys, keyPrefix: `${SOFT_BLOCK_NIFF}:`, env }));
       mesh.info = { resource: SOFT_BLOCK_NIFF, rom: `0x${res.romOffset(SOFT_BLOCK_NIFF).toString(16)}`, triSource: `offset in resource ${SOFT_BLOCK_NIFF} (decompressed NIFF)` };
       const mi = meshes.push(mesh) - 1;
+      const layer: LevelLayer = { name: 'soft blocks', kind: 'objects', instances: [] };
+      layers.push(layer);
       for (const [x, y, z, object, record] of blocks) {
+        layer.instances.push(instances.length);
         instances.push({
           name: 'soft block', mesh: mi, matrix: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x + 50, y, z + 50, 1]), animated: true,
           info: { scene: s.desc, object, record: `0x${record.toString(16)}`, kind: dv.getUint32(record) },
@@ -179,7 +185,14 @@ function loadScene(res: Archive, index: number): Level {
     }
   }
 
-  const extra: Partial<Level> = {};
+  // Collision polygons from the descriptor's collision file.
+  const attrRes = dv.getInt32(4);
+  if (attrRes > 0) {
+    const c = parseSaCollision(res.file(attrRes));
+    addCollisionLayer(meshes, instances, layers, saCollisionGroups(c, { scene: s.desc, resource: attrRes, rom: `0x${res.romOffset(attrRes).toString(16)}` }));
+  }
+
+  const extra: Partial<Level> = { layers };
   if (s.backdrop) {
     const [mode, image] = s.backdrop;
     const picture = bitmap(res.file(image));
@@ -195,7 +208,7 @@ function loadScene(res: Archive, index: number): Level {
   if (env?.fog) extra.fog = fogPosition(env.fog.min, 1000, env.fog.color, 200, 8000);
   const camera = cameraOf(res, s.world < 0 ? 2055 : 2046 + s.world, s.desc);
   if (camera) extra.camera = camera;
-  return buildLevel(SA_LEVELS[index], `bm64sa-${index}`, textures, meshes, instances, extra);
+  return buildLevel(SA_LEVELS[index], `bm64sa-${index}`, textures, meshes, instances, extra, collisionInstances(layers));
 }
 
 export function openBomberman64SA(rom: Uint8Array): Game {

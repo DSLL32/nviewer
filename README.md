@@ -236,6 +236,10 @@ Textures are uploaded with the RDP tile commands, not read in place.
 - **Music.** libultra's compressed-MIDI player (alCSPlayer) with ALBankFile banks and VADPCM, read
   uncompressed from one "S2" blob per game, output at 32 kHz. Bomberman 64 and Hero loudness match
   captured game audio as is; The Second Attack's sequence volume needs a factor of 0.75.
+- **Collision.** Hidden layers draw each game's collision, coloured by surface type: Bomberman 64's 3-D attribute
+  grid (100-unit cells in layers; solid, floor, slope and corner shapes, plus object, trigger and spawn-marker
+  cells), Hero's planes (60-unit tiles in 960-unit cells, with kill, hazard, exit, door and pad attributes) and The
+  Second Attack's polygon files (256-unit cells; floor bit and object-filter bits).
 
 ### BattleTanx, BattleTanx: Global Assault
 
@@ -399,6 +403,9 @@ Textures are uploaded with the RDP tile commands, not read in place.
 - Bomberman 64: props placed by stage code, and boss arenas built only from object models, are not
   shown. The Second Attack: only map geometry and battle soft blocks; story objects and characters
   are not shown. Textures bound at run time from texture sets stay untextured.
+- Bomberman collision: some attribute values are not identified (Bomberman 64 cell flags 0x2000/0x4000/0x8000 and
+  floor shapes 2, 9–11; about a dozen Hero attributes; most The Second Attack bits besides floor and object filter).
+  Moving platforms, whose collision exists only at run time, are not shown.
 - Bomberman: animated textures (UV scrolling water) are static; environment mapping is approximate;
   translucent effects that blend by fog alpha are not modelled.
 - BattleTanx: tanks, pickups and destructible states other than the intact one are not shown; team
