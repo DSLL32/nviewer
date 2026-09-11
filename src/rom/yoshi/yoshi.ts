@@ -463,7 +463,7 @@ function loadLevel(y: YoshiRom, def: LevelDef): Level {
   const bx = [rx + Math.min(160, rw / 2), rx + Math.max(rw - 160, rw / 2)], byy = [ry + Math.min(120, rh / 2), ry + Math.max(rh - 120, rh / 2)];
   const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
   const extra: Partial<Level> = {
-    layers, markers, pixelArt: true, clearColor: clearColor ?? [0, 0, 0],
+    layers, markers, clearColor: clearColor ?? [0, 0, 0],
     sideView: {
       fovY: FOV_Y, distance: K,
       start: [clamp(cam0[0] + 160, bx[0], bx[1]), -clamp(cam0[1] + 120, byy[0], byy[1])],
