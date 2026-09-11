@@ -43,6 +43,7 @@ precision highp float;
 uniform sampler2D uTexture;
 uniform bool uTextured;
 uniform int uMode; // 0 opaque, 1 cutout, 2 blend
+uniform float uOpacity; // fades whole instances (an overlay under the pointer); 1 otherwise
 uniform bool uFog;
 uniform vec3 uFogColor;
 // Logarithmic depth (1 / log2(far + 1)): keeps precision over both 10k-unit Rush tracks and 20k-unit Bomberman
@@ -61,6 +62,7 @@ void main() {
   if (uTextured) c *= texture(uTexture, vUv);
   if (uMode == 1 && c.a < 0.5) discard;
   if (uMode == 0) c.a = 1.0;
+  c.a *= uOpacity; // after the cutout test: a faded cutout keeps its shape
   if (uFog) c.rgb = mix(c.rgb, uFogColor, vFog);
   outColor = c;
 }`;
@@ -187,6 +189,7 @@ export class LevelRenderer {
   lastFrame: FrameStats = { drawCalls: 0 };
   private showAnimated = true;
   private hiddenInstances: ReadonlySet<number> | null = null;
+  private instanceOpacity: ReadonlyMap<number, number> | null = null;
   private fog: Fog | null = null;
   private fogEnabled = false;
   private cullingEnabled = false;
@@ -209,6 +212,7 @@ export class LevelRenderer {
   private readonly uFogOffset: WebGLUniformLocation | null;
   private readonly uLogDepthCoef: WebGLUniformLocation | null;
   private readonly uDepthBias: WebGLUniformLocation | null;
+  private readonly uOpacity: WebGLUniformLocation | null;
   private readonly backdropProgram: WebGLProgram;
   private readonly uBackdropWindow: WebGLUniformLocation | null;
   private readonly uBackdropTint: WebGLUniformLocation | null;
@@ -255,6 +259,7 @@ export class LevelRenderer {
     this.uFogOffset = gl.getUniformLocation(this.program, 'uFogOffset');
     this.uLogDepthCoef = gl.getUniformLocation(this.program, 'uLogDepthCoef');
     this.uDepthBias = gl.getUniformLocation(this.program, 'uDepthBias');
+    this.uOpacity = gl.getUniformLocation(this.program, 'uOpacity');
     this.backdropProgram = createProgram(gl, BACKDROP_VS, BACKDROP_FS);
     this.uBackdropWindow = gl.getUniformLocation(this.backdropProgram, 'uWindow');
     this.uBackdropTint = gl.getUniformLocation(this.backdropProgram, 'uTint');
@@ -358,6 +363,15 @@ export class LevelRenderer {
     this.dirty = true;
   }
 
+  /**
+   * Opacity below 1 per instance (index into Level.instances), e.g. an overlay the pointer is over. Such instances
+   * are drawn last, blended and without depth writes, so what lies behind them shows through. null: all opaque.
+   */
+  setInstanceOpacity(opacity: ReadonlyMap<number, number> | null) {
+    this.instanceOpacity = opacity && opacity.size > 0 ? opacity : null;
+    this.dirty = true;
+  }
+
   /** Overlay for the picked object or face (null clears it). */
   setHighlight(h: Highlight | null) {
     this.dirty = true;
@@ -378,6 +392,7 @@ export class LevelRenderer {
   setLevel(level: Level | null) {
     this.freeScene();
     this.highlight = null;
+    this.instanceOpacity = null;
     this.dirty = true;
     this.fog = level?.fog ?? null;
     if (!level) return;
@@ -498,6 +513,7 @@ export class LevelRenderer {
     const logDepthCoef = 1 / Math.log2(camera.far + 1);
     gl.uniform1f(this.uLogDepthCoef, logDepthCoef);
     gl.uniform1f(this.uDepthBias, 0);
+    gl.uniform1f(this.uOpacity, 1);
     camera.viewProjection(this.viewProj, canvas.width / Math.max(1, canvas.height));
     gl.uniformMatrix4fv(this.uViewProj, false, this.viewProj);
     gl.uniformMatrix4fv(this.uView, false, camera.viewMatrix(this.view));
@@ -526,10 +542,10 @@ export class LevelRenderer {
     let boundTexture: WebGLTexture | null = null;
     // Culling: 'toggle' = level geometry (the user's setting), 'game' = always as the batch says, 'never'.
     type CullPolicy = 'toggle' | 'game' | 'never';
-    const draw = (b: GpuBatch, model: Mat4, depthTest: boolean, depthWrite: boolean, mirrored = false, policy: CullPolicy = 'toggle') => {
+    const draw = (b: GpuBatch, model: Mat4, depthTest: boolean, depthWrite: boolean, mirrored = false, policy: CullPolicy = 'toggle', forceBlend = false) => {
       this.setDepthTest(depthTest);
       this.setDepthWrite(depthWrite);
-      this.setBlend(b.mode === Mode.Blend);
+      this.setBlend(forceBlend || b.mode === Mode.Blend);
       const cull = policy === 'game' ? b.cullBack : policy === 'toggle' && this.cullingEnabled && b.cullBack;
       this.setCull(cull);
       if (cull) this.setMirroredWinding(mirrored);
@@ -577,8 +593,9 @@ export class LevelRenderer {
     // Opaque and cutout geometry.
     const showAnimated = this.showAnimated;
     const hidden = this.hiddenInstances;
+    const opacity = this.instanceOpacity;
     for (const item of scene.items) {
-      if ((item.animated && !showAnimated) || hidden?.has(item.index)) continue;
+      if ((item.animated && !showAnimated) || hidden?.has(item.index) || opacity?.has(item.index)) continue;
       fogFor(item);
       for (const b of item.mesh.solid) draw(b, item.model, b.depthTest, b.depthWrite, item.mirrored);
     }
@@ -587,7 +604,7 @@ export class LevelRenderer {
     if (scene.hasDecals) {
       gl.uniform1f(this.uDepthBias, DECAL_DEPTH_BIAS);
       for (const item of scene.items) {
-        if ((item.animated && !showAnimated) || hidden?.has(item.index)) continue;
+        if ((item.animated && !showAnimated) || hidden?.has(item.index) || opacity?.has(item.index)) continue;
         fogFor(item);
         for (const b of item.mesh.decal) draw(b, item.model, b.depthTest, false, item.mirrored);
       }
@@ -601,9 +618,27 @@ export class LevelRenderer {
     }
     scene.blendItems.sort((a, b) => b.dist - a.dist);
     for (const item of scene.blendItems) {
-      if ((item.animated && !showAnimated) || hidden?.has(item.index)) continue;
+      if ((item.animated && !showAnimated) || hidden?.has(item.index) || opacity?.has(item.index)) continue;
       fogFor(item);
       for (const b of item.mesh.blended) draw(b, item.model, b.depthTest, false, item.mirrored);
+    }
+
+    // Faded instances: after everything else, blended, depth-tested but not written, so the level shows through.
+    if (opacity) {
+      for (const item of scene.items) {
+        const alpha = opacity.get(item.index);
+        if (alpha === undefined || (item.animated && !showAnimated) || hidden?.has(item.index)) continue;
+        fogFor(item);
+        gl.uniform1f(this.uOpacity, alpha);
+        for (const b of item.mesh.solid) draw(b, item.model, b.depthTest, false, item.mirrored, 'toggle', true);
+        if (item.mesh.decal.length > 0) {
+          gl.uniform1f(this.uDepthBias, DECAL_DEPTH_BIAS);
+          for (const b of item.mesh.decal) draw(b, item.model, b.depthTest, false, item.mirrored, 'toggle', true);
+          gl.uniform1f(this.uDepthBias, 0);
+        }
+        for (const b of item.mesh.blended) draw(b, item.model, b.depthTest, false, item.mirrored, 'toggle', true);
+      }
+      gl.uniform1f(this.uOpacity, 1);
     }
 
     drawCalls += this.drawHighlight(logDepthCoef);

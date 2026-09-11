@@ -20,6 +20,8 @@ const MARKER_PICK_RADIUS = 10; // CSS px around a marker dot
 const MAX_MARKER_LABELS = 150; // more markers on screen than this: dots only
 const LABEL_CELL_W = 40; // label de-cluttering grid, CSS px
 const LABEL_CELL_H = 14;
+const FADED_OPACITY = 0.2; // fadeOnHover layers under the pointer
+const FADE_SECONDS = 0.15;
 
 interface ViewportProps {
   level: Level | null;
@@ -45,6 +47,24 @@ interface MarkerEntry {
   position: [number, number, number];
   labelWidth: number; // estimated, CSS px
   selected: boolean;
+}
+
+/** Layers that fade while the pointer is over them (LevelLayer.fadeOnHover), animated by the frame loop. */
+interface FadeState {
+  level: Level;
+  picker: LevelPicker;
+  layers: { index: number; opacity: number; target: number }[];
+  layerOfInstance: Map<number, number>; // instance index -> position in `layers`
+  stale: boolean; // re-test the hover (new state)
+  push: boolean; // send the opacities to the renderer
+}
+
+interface PointerState {
+  x: number; // CSS px within the canvas
+  y: number;
+  inside: boolean;
+  moved: boolean;
+  locked: boolean;
 }
 
 declare global {
@@ -80,6 +100,7 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
   const pickerRef = useRef<LevelPicker | null>(null);
   const pickRef = useRef<(mode: PickMode, clientX: number, clientY: number) => void>(() => {});
   const pixelArtRef = useRef(false);
+  const fadeRef = useRef<FadeState | null>(null);
 
   const sideView = level?.sideView ?? null;
   const sideActive = !!sideView && flyLevel !== level;
@@ -120,6 +141,14 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
       : null;
   const selectedMarker = selection?.kind === 'marker' ? selection.marker : -1;
 
+  // A faded overlay is see-through for picking as well.
+  const isFaded = (lv: Level, i: number) => {
+    const fade = fadeRef.current;
+    if (!fade || fade.level !== lv) return false;
+    const k = fade.layerOfInstance.get(i);
+    return k !== undefined && fade.layers[k].opacity < 1;
+  };
+
   pickRef.current = (mode, clientX, clientY) => {
     const engine = engineRef.current;
     if (!engine || !level) return;
@@ -152,7 +181,7 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
     const ndcY = 1 - ((clientY - rect.top) / rect.height) * 2;
     const dir = cam.rayThrough(ndcX, ndcY, aspect);
     const hit = pickerFor(level).pick(cam.position, dir, {
-      include: (i) => instanceVisible(level, i),
+      include: (i) => instanceVisible(level, i) && !isFaded(level, i),
       cullBackFaces: cullOn,
       minT: cam.near,
     });
@@ -212,6 +241,22 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
     observer.observe(canvas);
     resize();
 
+    // Pointer position for hover effects (fading overlays).
+    const pointer: PointerState = { x: 0, y: 0, inside: false, moved: false, locked: false };
+    const onPointerMove = (e: PointerEvent) => {
+      const r = canvas.getBoundingClientRect();
+      pointer.x = e.clientX - r.left;
+      pointer.y = e.clientY - r.top;
+      pointer.inside = true;
+      pointer.moved = true;
+    };
+    const onPointerLeave = () => {
+      pointer.inside = false;
+      pointer.moved = true;
+    };
+    canvas.addEventListener('pointermove', onPointerMove);
+    canvas.addEventListener('pointerleave', onPointerLeave);
+
     let raf = 0;
     let last = performance.now();
     let lastReadout = 0;
@@ -222,6 +267,7 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
       const dt = Math.min(Math.max((t - last) / 1000, 0), 0.1);
       last = t;
       const moved = controls.update(dt);
+      updateFade(fadeRef.current, pointer, moved, dt, engine, canvas);
       if (moved || renderer.dirty) {
         renderer.render(camera);
         layoutMarkers(markerEntriesRef.current, camera, canvas, markerMatrix);
@@ -247,6 +293,8 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
       cancelAnimationFrame(raf);
       observer.disconnect();
       canvas.removeEventListener('webglcontextlost', onLost);
+      canvas.removeEventListener('pointermove', onPointerMove);
+      canvas.removeEventListener('pointerleave', onPointerLeave);
       controls.dispose();
       renderer.dispose();
       engineRef.current = null;
@@ -330,6 +378,21 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
     engineRef.current?.renderer.setBackdropVisible(showBackdrop);
     writeString(BACKDROP_KEY, showBackdrop ? '1' : '0');
   }, [showBackdrop]);
+
+  // Hover-fading overlays (LevelLayer.fadeOnHover). Layers switched off in the panel take no part.
+  useEffect(() => {
+    const prev = fadeRef.current;
+    const layers: FadeState['layers'] = [];
+    const layerOfInstance = new Map<number, number>();
+    level?.layers?.forEach((l, index) => {
+      if (!l.fadeOnHover || hiddenLayers.has(index)) return;
+      const old = prev && prev.level === level ? prev.layers.find((x) => x.index === index) : undefined;
+      for (const inst of l.instances) layerOfInstance.set(inst, layers.length);
+      layers.push({ index, opacity: old?.opacity ?? 1, target: old?.target ?? 1 });
+    });
+    fadeRef.current = level && layers.length > 0 ? { level, picker: pickerFor(level), layers, layerOfInstance, stale: true, push: true } : null;
+    if (!fadeRef.current) engineRef.current?.renderer.setInstanceOpacity(null);
+  }, [level, hiddenLayers]);
 
   // Marker overlay elements (positions are updated by the frame loop whenever the view changes).
   useEffect(() => {
@@ -600,6 +663,46 @@ function sideLimits(sv: SideView, level: Level): SideViewLimits {
     minDistance: Math.min(SIDE_MIN_DISTANCE, sv.distance),
     maxDistance: Math.max(SIDE_MAX_DISTANCE, sv.distance),
   };
+}
+
+/**
+ * Fade overlays under the pointer. The hover test is a ray pick against the fade layers' own triangles (with the cutout
+ * alpha), whatever their current opacity, so a faded layer stays hovered. Captured free fly has no pointer: no fade.
+ */
+function updateFade(fade: FadeState | null, pointer: PointerState, cameraMoved: boolean, dt: number, engine: Engine, canvas: HTMLCanvasElement) {
+  if (!fade) return;
+  const { camera, controls, renderer } = engine;
+  const locked = controls.locked;
+  if (pointer.moved || cameraMoved || fade.stale || locked !== pointer.locked) {
+    pointer.moved = false;
+    pointer.locked = locked;
+    fade.stale = false;
+    let hit = -1;
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    if (pointer.inside && !locked && w > 0 && h > 0) {
+      const dir = camera.rayThrough((pointer.x / w) * 2 - 1, 1 - (pointer.y / h) * 2, canvas.width / Math.max(1, canvas.height));
+      const found = fade.picker.pick(camera.position, dir, { include: (i) => fade.layerOfInstance.has(i), cullBackFaces: false, minT: camera.near });
+      if (found) hit = fade.layerOfInstance.get(found.instance) ?? -1;
+    }
+    fade.layers.forEach((l, k) => {
+      l.target = k === hit ? FADED_OPACITY : 1;
+    });
+  }
+  const step = ((1 - FADED_OPACITY) * dt) / FADE_SECONDS;
+  let changed = fade.push;
+  for (const l of fade.layers) {
+    if (l.opacity === l.target) continue;
+    l.opacity = l.opacity > l.target ? Math.max(l.target, l.opacity - step) : Math.min(l.target, l.opacity + step);
+    changed = true;
+  }
+  if (!changed) return;
+  fade.push = false;
+  const opacity = new Map<number, number>();
+  fade.layerOfInstance.forEach((k, inst) => {
+    if (fade.layers[k].opacity < 1) opacity.set(inst, fade.layers[k].opacity);
+  });
+  renderer.setInstanceOpacity(opacity);
 }
 
 /** CSS pixel position of a world point (origin at the canvas's top left), or null behind the camera. */
