@@ -3,7 +3,8 @@
 A browser viewer for the levels of these N64 games (USA versions): *San Francisco Rush 2049*,
 *San Francisco Rush: Extreme Racing*, *Bomberman 64*, *Bomberman 64: The Second Attack!*,
 *Bomberman Hero*, *BattleTanx*, *BattleTanx: Global Assault*, *Gex 64: Enter the Gecko*,
-*Gex 3: Deep Cover Gecko*, *Yoshi's Story* (Japan), *Star Fox 64* (V1.0 and V1.1) and *GoldenEye 007*. Load one or more ROMs, pick a level in the sidebar, and fly around freely, with
+*Gex 3: Deep Cover Gecko*, *Yoshi's Story* (Japan), *Star Fox 64* (V1.0 and V1.1), *GoldenEye 007*, *Perfect Dark* (V1.0), and *The Legend of Zelda: Ocarina of Time* and
+*Majora's Mask* (retail and debug builds). Load one or more ROMs, pick a level in the sidebar, and fly around freely, with
 each game's soundtrack in the music box. ROMs are parsed entirely in the browser (in a Web Worker)
 and cached in IndexedDB; nothing is uploaded anywhere.
 
@@ -56,6 +57,15 @@ filtering · H help · Esc releases the mouse.
     - `bg.ts`: BG rooms; `environment.ts`: fog, clear colour, sky planes; `setup.ts`, `stan.ts`: setup files, floors
     - `models.ts`, `place.ts`: prop and character models at rest, object placement; `goldeneye.ts`: levels;
       `music.ts`: songs and their loop rules
+  - `perfectdark/`: Perfect Dark (format notes in `PERFECTDARK.md`)
+    - `rom.ts`: data segment, file and stage tables, text; `texture.ts`: the global texture store and its two decoders
+    - `gbi.ts`: Perfect Dark's display-list microcode; `bg.ts`: rooms and sky rooms; `environment.ts`: fog, sky planes;
+      `pads.ts`: pads and spawns; `perfectdark.ts`: levels; `music.ts`: songs
+  - `zelda/`: Ocarina of Time and Majora's Mask (format notes in `ZELDA64.md`)
+    - `fs.ts`, `tables.ts`: build detection, Yaz0 filesystem, code tables; `scene.ts`: scene and room headers
+    - `drawconfig.ts`: animated materials at frame 0; `env.ts`, `sky.ts`, `jpeg.ts`: lights, fog, skyboxes, prerendered
+      backgrounds; `collision.ts`, `actors.ts`, `names.ts`: collision, static actors, names; `zelda.ts`: levels;
+      `music.ts` with `music/zelda64.ts` (Zelda's revision of the EAD sequence driver)
   - `music/`: `musyx.ts`, `rush2049.ts` (Rush 2049), `libultra.ts` (libultra bank/sequence
     synthesizer shared by Rush 1, the Bomberman games and BattleTanx), `rush1.ts`, `libmus.ts`
     (Software Creations' libmus as used by Global Assault and Gex 3), `libmus64.ts` (the older libmus
@@ -295,6 +305,31 @@ Textures are uploaded with the RDP tile commands, not read in place.
 - **Music.** Nintendo EAD's sequence driver (the Mario 64 / Ocarina lineage, with its note pool, integer mixer
   and per-song reverb) rendered at 32 kHz at the game's own level; loops follow the sequences' jumps.
 
+### Perfect Dark
+
+`PERFECTDARK.md` documents the formats in full; in short:
+- **Files.** Game code is paged from compressed 4 KiB pages; files and sections are "rarezip" streams (`11 73`, a 24-bit
+  size, raw DEFLATE). A stage record names its BG, pads and setups.
+- **Levels.** BG files hold rooms (block trees with display lists, 12-byte vertices, colour arrays), portals and
+  sky rooms, drawn with Rare's own microcode (`gbi.ts`); textures come from a global store of 3,503. Missions,
+  special assignments, Carrington Institute and the Combat Simulator arenas are listed.
+- **Environment.** Fog and sky colour from the environment tables; clouds and water as sky planes; sky rooms drawn
+  around the camera. The start camera stands on a spawn pad.
+- **Music.** 119 sequences for libultra's n_audio player with linear voice volume; every track loops on its own
+  (`music/cseq.ts`, shared with GoldenEye).
+
+### Zelda 64
+
+`ZELDA64.md` documents the formats in full; in short:
+- **Detection.** Ocarina of Time and Majora's Mask, retail and debug builds, are found by structure: the `zelda@`
+  build string next to the file table, and the scene table's record size.
+- **Levels.** Scenes (with their alternate layers or setups as sub-levels) and rooms, F3DEX2 display lists with
+  animated materials at their first frame, textures read as whole images with palette memory and a second
+  texture where the combiner blends two, skyboxes and prerendered JPEG backgrounds, light settings by time of day,
+  collision and waterboxes as overlays, static actors from recipes and the rest as markers.
+- **Music.** Zelda's revision of Nintendo EAD's sequence driver, sample-identical to the research renderer, which
+  matches captured game audio.
+
 ### GoldenEye 007
 
 `GOLDENEYE.md` documents the formats in full; in short:
@@ -339,6 +374,12 @@ Textures are uploaded with the RDP tile commands, not read in place.
   toggle hides them); water reflections, Solar and Zoness waves and Bolse's dynamic ground are not shown; the
   ground is tiled statically, so its texture seams may not line up; space backdrops are placed for the start view
   (Area 6's planet at its starting size, Meteo's planet where it rises at the end).
+- Perfect Dark: objects and characters are not shown yet; Defection's star field, suns and lens flares and cloud
+  scrolling are not drawn; some city backdrop rooms the game hides are drawn; environment-mapped surfaces use an
+  approximation; music has no reverb.
+- Zelda 64: skeletal actors (people, enemies, animated objects), torch flames and the sun and moon are markers or not
+  shown; animated materials show their first frame; Majora's Mask's sky rotation is fixed; Hyrule Field's music
+  plays its random parts in a fixed order; music has no reverb.
 - GoldenEye: portals and visibility are ignored (all rooms are drawn), so a few distant Dam mountain tops show above
   the cliffs and rooms the game never shows together can overlap (Aztec rooms 18 and 44); translucent surfaces are
   sorted per room, not per triangle; animated textures, the water ripple and the

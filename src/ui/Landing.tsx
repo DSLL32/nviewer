@@ -30,6 +30,8 @@ export function Landing({ busy, error, onPick }: LandingProps) {
             <li>Yoshi's Story (J)</li>
             <li>Star Fox 64 (U) (V1.0, V1.1)</li>
             <li>GoldenEye 007 (U)</li>
+            <li>Perfect Dark (U) (V1.0)</li>
+            <li>The Legend of Zelda: Ocarina of Time, Majora's Mask (retail and debug)</li>
           </ul>
         </div>
         <div className="dropzone" aria-busy={busy !== null}>
