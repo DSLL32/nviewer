@@ -335,6 +335,7 @@ const DEFS: LevelDef[] = [
 
 // Corneria's ground surface per path progress on the main route (event command SET_SURFACE): 0 grass, 1 rock, 2 water.
 const CORNERIA_SURFACES: [number, number][] = [[0, 2], [41181.4, 0], [141510.3, 2], [163464.2, 0]];
+const CORNERIA_SURFACES_WATERFALL: [number, number][] = [[174929.4, 1], [191164, 2]];
 
 const rgba5551 = (c: number): [number, number, number] => [((c >> 11) & 31) * 8, ((c >> 6) & 31) * 8, ((c >> 1) & 31) * 8];
 
@@ -480,25 +481,35 @@ function loadLevel(files: Sf64Files, def: LevelDef, levelInfo: LevelInfo): Level
 
   // ---- grounds ----
   const groundLayer = 'ground';
-  const railsStrip = (dlWords: W[], name: string, stepInfo: DebugInfo, from: number, to: number, surfaceAt?: (z: number) => W[] | null) => {
+  const railsStrip = (dlWords: W[], name: string, stepInfo: DebugInfo, from: number, to: number, surfaceAt?: (z: number) => W[] | null, x = 0, y = -3) => {
     for (let z = from; z > to; z -= 6000) {
       const words = surfaceAt ? surfaceAt(z) : dlWords;
       if (!words) continue;
       const m = ident();
       scale(m, 1, 1, 0.5);
-      place(groundLayer, 'background', meshOf(name, [{ words, m }], stepInfo, '', true), name, [0, -3, z - 3000], { ground: name });
+      place(groundLayer, 'background', meshOf(name, [{ words, m }], stepInfo, '', true), name, [x, y, z - 3000], { ground: name, ...(x ? { x } : {}) });
     }
   };
   const g = def.ground;
   if (g?.kind === 'corneria') {
     const tiles: [number, number, string][] = [[0x0601b6c0, 20, 'grass'], [0x06028260, 20, 'rock'], [0x06028a60, 45, 'water']];
-    railsStrip([], 'ground', {}, 2000, -length - 12000, (z) => {
-      const progress = 3000 - z;
-      let surface = 0;
-      for (const [p0, s] of CORNERIA_SURFACES) if (progress >= p0) surface = s;
+    const surfaceWords = (surface: number): W[] => {
       const [tex, preset] = tiles[surface];
       return [P(preset), ...(surface === 2 ? [prim(255, 255, 255, 128)] : []), ...tileTexture(tex, 32, 32, 0, 0, 0), G_DL(0x0601b640)];
-    });
+    };
+    const surfaceAt = (sections: [number, number][]) => (z: number) => {
+      let surface = 0;
+      for (const [p0, s] of sections) if (3000 - z >= p0) surface = s;
+      return surfaceWords(surface);
+    };
+    railsStrip([], 'ground', {}, 2000, -length - 12000, surfaceAt(CORNERIA_SURFACES));
+    // The waterfall route: ITEM_PATH_TURN_RIGHT moves the path rot.z * 100 to the right, and that route has its own
+    // surfaces. Its strip starts at the tile holding the turn and lies just below the main strip where they overlap.
+    const turn = objs.find((o) => o.id === 330);
+    if (turn) {
+      const from = 2000 - 6000 * Math.floor((2000 - zOf(turn)) / 6000);
+      railsStrip([], 'ground', {}, from, -length - 12000, surfaceAt([[0, 0], ...CORNERIA_SURFACES_WATERFALL]), turn.x + turn.rz * 100, -4);
+    }
   } else if (g?.kind === 'rails') {
     railsStrip([P(g.preset), ...(g.tex ? tileTexture(g.tex, 32, 32, 0, 0, 0) : []), G_DL(g.dl)], 'ground', { list: hex(g.dl) }, 2000, -length - 12000);
   } else if (g?.kind === 'aquas') {
