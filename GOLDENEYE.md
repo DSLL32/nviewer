@@ -877,14 +877,28 @@ Contact sheets: `sheet_props.png` (340), `sheet_chrs.png`, `sheet_chrs_posed.png
 Coordinates are **s16 BG units**.
 ```
 +00 u32 0
-+04 u32 sectionOffset[] … u32 0      1..31 section starts; tiles run contiguously from the first to the file end
++04 u32 sectionOffset[] … u32 0      1..31 section starts, each on a tile boundary; tiles run contiguously from the first
 tile (8 + 8n bytes):
-  +0 u32  id << 8 | room             ids descend; room = BG room number
-  +4 u16  flags                      0x0FFF most common; 0x0888, 0x0444 … (hypothesis: surface type)
+  +0 u32  id << 8 | room             ids mostly descend (not strictly); room = BG room number
+  +4 u16  flags                      low 12 bits: three 4-bit values; top 4 bits rarely set (see below)
   +6 u16  n << 12 | i0 << 8 | i1 << 4 | i2    n = 3..9 points; i0, i1, i2 define the plane
-  n × {s16 x, y, z; u16 link}       link = neighbour tile's file offset / 8 across edge k → k+1; < 16 = none
-end: an all-zero 8-byte record, then padding
+  n × {s16 x, y, z; u16 link}       link × 8 + first section offset = neighbour tile across edge k → k+1; < 16 = none
+end: an all-zero 8-byte record, then 24-36 bytes of padding to the file end
 ```
+- **Tile list** (verified over all 25 regular files, 33,138 tiles): every section start is a tile start, and the tiles
+  run without gaps to the zero record. 95.2% of tiles are triangles (n = 3: 31,551; 4: 1,136; 5: 375; 6-9: 76).
+- **Links** (verified in part): `link × 8 + sectionOffset[0]` is the file offset of a tile for 84.5% of the 79,792 links
+  (89% on Dam, 99% on Jungle and Caves, 60% on Streets). The earlier "file offset / 8" holds only where the first section
+  starts near 0. The other links point inside tiles (12,118) or past the list (218); their encoding is not known.
+- **Flags** (hypothesis, medium): the low 12 bits look like three 4-bit brightness values, one per plane point. 32% of
+  tiles have `0xFFF`, and most others three equal nibbles (`0x333`, `0x777` …). Jungle, Caves and Cuba have graded ones
+  (`0x132`, `0x764` …). On triangle tiles with unequal nibbles, the nibbles correlate 0.45-0.80 with the brightness of the
+  nearest room vertices (Dam, Facility, Jungle, Streets, Caves). That would be the lighting the game applies to guards and
+  objects standing on the tile; not traced in code. The top four bits are set on 170 tiles (`0x1FFF`, `0x3EEE` …): meaning
+  unknown.
+- **Viewer overlay**: `stan.ts collisionBatch` draws every tile as a translucent decal lifted 2 world units, in the hidden
+  "collision" layer. Colours: green floor (|normal y| ≥ 0.7), orange slope (≥ 0.3), magenta steep, cyan when a top flag
+  bit is set; shaded by room. `triSource` is the tile's file offset.
 - The game keeps the file as loaded (the RAM copy equals the file apart from the relocated section list) and multiplies
   world coordinates by the level scale (`0x80040F44`) to get tile units.
 - **Floor height** `0x7F0B2970(tile, x, z)`: the plane through points i0, i1, i2 evaluated at (x, z) (16-bit deltas,

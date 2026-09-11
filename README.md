@@ -357,6 +357,8 @@ Textures are uploaded with the RDP tile commands, not read in place.
 - **Objects.** Setup files place doors, props, glass, pickups and guards on pads; models are built at rest, guards in
   a sampled standing pose with heads, and placed as the game does (checked against RAM). The start camera stands on
   the first spawn pad over the clipping-file floor.
+- **Layers.** One layer per room (grouped), backdrop rooms the game can show, and the clipping tiles as a hidden
+  collision overlay coloured by slope.
 - **Music.** 63 compressed-MIDI sequences for libultra's player, rendered by `libultra.ts` with GoldenEye's per-track
   loop rules.
 

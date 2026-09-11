@@ -14,7 +14,7 @@ import { goldeneyeMusic } from './music';
 import { padCentre, placeDoor, placeGuard, placeObject } from './place';
 import { GeRom } from './rom';
 import { type Guard, OBJECT_TYPE_NAME, padFor, parseSetup, type Setup, spawns, type Vec3 } from './setup';
-import { floorAt, parseStan, type Stan } from './stan';
+import { collisionBatch, floorAt, parseStan, type Stan } from './stan';
 import { GeTextures } from './textures';
 
 // The player's eye above the floor, world units (§4.11).
@@ -282,8 +282,7 @@ function loadLevel(r: GeRom, def: StageDef): Level {
   // together with the rest (a few Dam mountain tops above the cliffs at the spawn, visible to the player from the dam).
   const bg: BgFile = parseBg(r.load(stageBg.bg));
   const rooms = buildRooms(bg, textures, scale);
-  const roomLayer: LevelLayer = { name: 'rooms', kind: 'main', instances: [] };
-  const backdropLayer: LevelLayer = { name: 'backdrops', kind: 'background', instances: [] };
+  const backdropLayer: LevelLayer = { name: 'backdrops', kind: 'background', instances: [], group: 'backdrops' };
   // Each room mesh is centred on its room, so the renderer's back-to-front sort of translucent batches orders rooms.
   const place = (layer: LevelLayer, mesh: Mesh | null, g: (typeof rooms)[number]) => {
     if (!mesh) return;
@@ -296,12 +295,19 @@ function loadLevel(r: GeRom, def: StageDef): Level {
   const stan = r.hasFile(stageBg.stan) ? parseStan(r.load(stageBg.stan)) : null;
   const playable = new Set(stan?.tiles.map((t) => t.room) ?? []);
   const shown = playable.size ? roomsVisibleFrom(bg, playable) : null;
-  const unseenLayer: LevelLayer = { name: 'backdrops (never visible from play)', kind: 'background', instances: [], visibleByDefault: false };
+  const unseenLayer: LevelLayer = { name: 'backdrops (never visible from play)', kind: 'background', instances: [], visibleByDefault: false, group: 'backdrops' };
   for (const g of rooms) place(!shown || shown.has(g.room) ? backdropLayer : unseenLayer, g.backdrop, g);
-  for (const g of rooms) place(roomLayer, g.mesh, g);
+  // One toggle per room.
+  const roomLayers: LevelLayer[] = [];
+  for (const g of rooms) {
+    if (!g.mesh) continue;
+    const layer: LevelLayer = { name: `room ${g.room}`, kind: 'main', instances: [], group: 'rooms' };
+    place(layer, g.mesh, g);
+    roomLayers.push(layer);
+  }
   if (backdropLayer.instances.length) layers.push(backdropLayer);
   if (unseenLayer.instances.length) layers.push(unseenLayer);
-  layers.push(roomLayer);
+  layers.push(...roomLayers);
   const roomMeshes = rooms.flatMap((g) => [g.mesh, g.backdrop].flatMap((mesh) => (mesh ? [{ mesh, at: g.center }] : [])));
 
   // ---- setup and clipping (spawn camera; objects use the same files) ----
@@ -315,9 +321,25 @@ function loadLevel(r: GeRom, def: StageDef): Level {
   const env = levelEnvironment(findEnvironment(r, def.stage, def.players), stageBg.renderScale, textures);
   const camera = setup ? spawnCamera(setup, stan, scale, roomMeshes, def.players > 1) : undefined;
 
-  return buildLevel(def.info, def.code, textures.textures, meshes, instances, {
+  const level = buildLevel(def.info, def.code, textures.textures, meshes, instances, {
     layers, ...(objects?.markers.length ? { markers: objects.markers } : {}), ...env, ...(camera ? { camera } : {}),
   });
+
+  // ---- collision: the clipping tiles as a hidden overlay (stan.ts collisionBatch), appended after assembly so the
+  // level's bounds and every other index stay as they are ----
+  const collision = stan ? collisionBatch(stan, scale) : null;
+  if (collision) {
+    let radius = 0;
+    for (let k = 0; k < collision.positions.length; k += 3) radius = Math.max(radius, Math.hypot(collision.positions[k], collision.positions[k + 1], collision.positions[k + 2]));
+    const mesh = level.meshes.push({
+      name: 'collision', radius, batches: [collision],
+      info: { stan: stageBg.stan, tiles: stan!.tiles.length, triSource: 'offset of the clipping tile in the inflated stan file',
+        colour: 'green floor, orange slope, magenta steep, cyan flag bits 0xF000; shaded by room' },
+    }) - 1;
+    const instance = level.instances.push({ name: 'collision', mesh, matrix: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]), info: { stan: stageBg.stan } }) - 1;
+    level.layers!.push({ name: 'collision', kind: 'collision', instances: [instance], visibleByDefault: false });
+  }
+  return level;
 }
 
 export function openGoldenEye(rom: Uint8Array): Game {

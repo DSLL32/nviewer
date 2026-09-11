@@ -6,6 +6,8 @@
 //                        n x {s16 x, y, z; u16 link}   (link = neighbour tile offset / 8, < 16 = none)
 //   an all-zero 8-byte record ends the list
 // The Citadel's file is an older format this layout reads as no tiles.
+import type { Batch } from '../types';
+
 const CELL = 256; // lookup grid, BG units
 
 export interface StanPoint { x: number; y: number; z: number; link: number }
@@ -104,4 +106,43 @@ export function floorAt(s: Stan, x: number, z: number, yRef: number, above = 10)
     }
   }
   return best ?? fallback;
+}
+
+// ---- collision overlay ----
+// Tile kinds by the steepness of their floor plane: floor (|normal y| ≥ 0.7), slope (≥ 0.3), steep; tiles with any of
+// the flag word's top four bits set (170 over all files, meaning unknown) are drawn cyan. Shaded per room so the tiles
+// of neighbouring rooms stay distinguishable.
+const KIND_COLORS: [number, number, number][] = [[90, 200, 90], [200, 150, 80], [200, 90, 200]];
+const FLAGGED_COLOR: [number, number, number] = [80, 190, 255];
+
+/**
+ * Every tile as one translucent batch in world units (BG units / scale), lifted `lift` world units and marked decal so
+ * it lies over the room floors it matches; triSource is the tile's offset in the inflated file.
+ */
+export function collisionBatch(s: Stan, scale: number, lift = 2): Batch | null {
+  const pos: number[] = [], col: number[] = [], src: number[] = [];
+  for (const t of s.tiles) {
+    const p = t.points, a = p[t.plane[0]], b = p[t.plane[1]], c = p[t.plane[2]];
+    let kind = 0;
+    if (a && b && c) {
+      const ux = b.x - a.x, uy = b.y - a.y, uz = b.z - a.z, vx = c.x - a.x, vy = c.y - a.y, vz = c.z - a.z;
+      const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      const up = Math.abs(ny) / (Math.hypot(nx, ny, nz) || 1);
+      kind = up >= 0.7 ? 0 : up >= 0.3 ? 1 : 2;
+    }
+    const shade = 0.7 + (0.3 * (Math.imul(t.room + 1, 2654435761) >>> 24)) / 255;
+    const rgb = (t.flags & 0xf000 ? FLAGGED_COLOR : KIND_COLORS[kind]).map((x) => Math.round(x * shade));
+    for (let i = 1; i + 1 < p.length; i++) {
+      for (const q of [p[0], p[i], p[i + 1]]) {
+        pos.push(q.x / scale, q.y / scale + lift, q.z / scale);
+        col.push(rgb[0], rgb[1], rgb[2], 150);
+      }
+      src.push(t.offset);
+    }
+  }
+  if (!pos.length) return null;
+  return {
+    texture: -1, blend: 'blend', depthTest: true, depthWrite: false, cullBack: false, decal: true,
+    positions: new Float32Array(pos), uvs: new Float32Array((pos.length / 3) * 2), colors: new Uint8Array(col), triSource: new Uint32Array(src),
+  };
 }
