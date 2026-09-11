@@ -2,6 +2,7 @@
 // (characters: per body, head and stand pose), one instance per placed record, in the layers props, doors, glass, weapons,
 // vehicles and characters; spawn and multiplayer pads, pad effects, cutscene cameras and records that can't be drawn as
 // markers in hidden layers. Difficulty Agent.
+import { mergeBatches } from '../bomberman/common';
 import type { DebugInfo, Instance, LevelLayer, Marker, Mesh } from '../types';
 import { poseModel, standAnimation } from './anim';
 import type { RoomMesh } from './bg';
@@ -31,8 +32,9 @@ const MARKER_LAYERS = ['spawn pads', 'multiplayer pads', 'pad effects', 'cutscen
 
 const T_DOORSCALE = 0x02, T_WEAPON = 0x08, T_CHR = 0x09, T_MULTIAMMOCRATE = 0x14, T_SHIELD = 0x15, T_CAMERAPOS = 0x2e;
 const T_PADEFFECT = 0x38, T_MINE = 0x3a;
-/** Hovercars and choppers follow AI paths: shown at their pad. */
-const PATH_VEHICLES = new Set([0x37, 0x39]);
+/** Objects that move at run time, shown where the setup puts them: lifts (at their first stop), hovercars and choppers (AI paths). */
+const T_LIFT = 0x30;
+const MOVING = new Set([T_LIFT, 0x37, 0x39]);
 const EXCLUDED_ON_AGENT = 0x10; // flags2: the setup loop skips the record on Agent
 const FLAG_HELD = 0x4000; // held by the character whose number is in the pad field
 const FLAG_NOT_PLACED = 0x8000;
@@ -212,6 +214,8 @@ export function addObjects(r: PdRom, input: ObjectsInput): Objects {
   };
 
   const objects = new Map(setup.objects.map((o) => [o.index, o]));
+  const lifts: { record: number; instance: number }[] = [];
+  const riders: { instance: number; centre: readonly number[] }[] = [];
   let doorScale = 1;
   let lastSlot: MpWeapon | null = null;
   for (const rec of setup.records) {
@@ -295,9 +299,34 @@ export function addObjects(r: PdRom, input: ObjectsInput): Objects {
     }
     Object.assign(info, { modelFile: m.name, modelScale: +placed.modelScale.toFixed(5), ...(type === 0x01 && doorScale !== 1 ? { doorScale } : {}) });
     const layerName = type === T_SHIELD ? 'weapons' : layer;
-    layerInstances.get(layerName)!.push(instances.push({ name: m.name, mesh, matrix: placed.matrix, ...(PATH_VEHICLES.has(type) ? { animated: true } : {}), info }) - 1);
+    const instance = instances.push({ name: m.name, mesh, matrix: placed.matrix, ...(MOVING.has(type) ? { animated: true } : {}), info }) - 1;
+    layerInstances.get(layerName)!.push(instance);
     if (layerName === 'props' && m.box) addTop(rec.index, placed.matrix, m.box);
+    if (type === T_LIFT) lifts.push({ record: rec.index, instance });
+    else if (type !== 0x01) riders.push({ instance, centre: placementCentre(pad) });
     stats.placed++;
+  }
+
+  // Objects inside a lift's box ride it: Defection's tinted lift windows move with their lifts in RAM. Doors aren't riders:
+  // lift doors are landing doors (LINKLIFTDOOR, one per stop) and Air Force One's grate in a lift shaft opens in place.
+  for (const lift of lifts) {
+    const { matrix: m, mesh } = instances[lift.instance];
+    const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+    for (const b of meshes[mesh].batches) {
+      const p = b.positions;
+      for (let k = 0; k < p.length; k += 3) {
+        for (let c = 0; c < 3; c++) {
+          const v = m[c] * p[k] + m[4 + c] * p[k + 1] + m[8 + c] * p[k + 2] + m[12 + c];
+          min[c] = Math.min(min[c], v);
+          max[c] = Math.max(max[c], v);
+        }
+      }
+    }
+    for (const rider of riders) {
+      if (![0, 1, 2].every((c) => rider.centre[c] >= min[c] && rider.centre[c] <= max[c])) continue;
+      const inst = instances[rider.instance];
+      instances[rider.instance] = { ...inst, animated: true, info: { ...inst.info, ridesLift: `record ${lift.record}` } };
+    }
   }
 
   // ---- characters ----
@@ -337,12 +366,13 @@ export function addObjects(r: PdRom, input: ObjectsInput): Objects {
       const built = modelBatches(bodyModel, pose.slots, textures);
       const spot = headSpot(bodyModel);
       const headBuilt = headModel && spot && pose.nodes.get(spot) ? modelBatches(headModel, restSlots(headModel, false), textures, pose.nodes.get(spot)) : null;
-      return meshOf(name, [...built.batches, ...(headBuilt?.batches ?? [])], {
+      // Body and head batches with the same texture and render state are drawn as one.
+      return meshOf(name, mergeBatches([...built.batches, ...(headBuilt?.batches ?? [])]), {
         ...modelInfo(bodyModel), body: c.body, bodyScale: +body.scale.toFixed(4), animScale: +body.animScale.toFixed(4),
         pose: `stand animation ${stand.anim} frame 0${stand.flip ? ' flipped' : ''} (${stand.rule})`,
         rootHeight: +((pose.rootMotion?.pos[1] ?? 0) * body.animScale).toFixed(1),
-        ...(headBuilt ? { head: headIndex, headFile: headModel!.name, headRom: hex(r.fileRom(headModel!.file)), headBatches: `${built.batches.length}..` } : {}),
-        triSource: headBuilt ? 'offset in the inflated body file (head batches: in the head file)' : 'offset in the inflated model file',
+        ...(headBuilt ? { head: headIndex, headFile: headModel!.name, headRom: hex(r.fileRom(headModel!.file)), headTriangles: headBuilt.triangles } : {}),
+        triSource: headBuilt ? 'offset in the inflated body file; within a batch the head file\'s triangles follow the body\'s' : 'offset in the inflated model file',
       });
     });
     if (mesh < 0) {
