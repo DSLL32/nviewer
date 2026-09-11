@@ -170,7 +170,7 @@ export interface DecodedMusic {
 
 // A loaded ROM of one supported game.
 export interface Game {
-  id: 'rush2049' | 'rush1' | 'bm64' | 'bm64sa' | 'bmhero' | 'battletanx' | 'battletanxga' | 'gex64' | 'gex3' | 'yoshistory';
+  id: 'rush2049' | 'rush1' | 'bm64' | 'bm64sa' | 'bmhero' | 'battletanx' | 'battletanxga' | 'gex64' | 'gex3' | 'yoshistory' | 'sf64';
   title: string;
   levels: LevelInfo[];
   loadLevel(index: number): Level;

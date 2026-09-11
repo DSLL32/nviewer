@@ -3,7 +3,7 @@
 A browser viewer for the levels of these N64 games (USA versions): *San Francisco Rush 2049*,
 *San Francisco Rush: Extreme Racing*, *Bomberman 64*, *Bomberman 64: The Second Attack!*,
 *Bomberman Hero*, *BattleTanx*, *BattleTanx: Global Assault*, *Gex 64: Enter the Gecko*,
-*Gex 3: Deep Cover Gecko*, and *Yoshi's Story* (Japan). Load one or more ROMs, pick a level in the sidebar, and fly around freely, with
+*Gex 3: Deep Cover Gecko*, *Yoshi's Story* (Japan) and *Star Fox 64* (V1.0 and V1.1). Load one or more ROMs, pick a level in the sidebar, and fly around freely, with
 each game's soundtrack in the music box. ROMs are parsed entirely in the browser (in a Web Worker)
 and cached in IndexedDB; nothing is uploaded anywhere.
 
@@ -47,6 +47,10 @@ filtering · H help · Esc releases the mouse.
     - `slide.ts`: the CMPR/SMSR00 slide-LZ codec
     - `yoshi.ts`: world list, tile layers at parallax depths, collision overlay, sprites and markers
     - `yoshicell.ts`: Yoshi's animation cells; `music.ts`: song table; `names.ts`: leak cast and world names
+  - `sf64/`: Star Fox 64 (format notes in `STARFOX.md`)
+    - `fs.ts`: DMA file table, MIO0, scene segment maps, per-version tables, the display-list address space
+    - `sf64.ts`: level list, placement lists, render-preset recipes, skeletons, event actors, grounds, Titania
+      terrain, environment; `names.ts`: object and event-actor names from the decompilation
   - `music/`: `musyx.ts`, `rush2049.ts` (Rush 2049), `libultra.ts` (libultra bank/sequence
     synthesizer shared by Rush 1, the Bomberman games and BattleTanx), `rush1.ts`, `libmus.ts`
     (Software Creations' libmus as used by Global Assault and Gex 3), `libmus64.ts` (the older libmus
@@ -265,6 +269,23 @@ Textures are uploaded with the RDP tile commands, not read in place.
 - **Music.** Nintendo EAD's "Nas" driver (sequence, channel and layer scripts, instrument banks and drum kits,
   VADPCM, envelopes, vibrato) rendered at 32 kHz; tempo and loop points follow the game.
 
+### Star Fox 64
+
+`STARFOX.md` documents the formats in full; in short:
+- **Files.** A DMA table (found by content) lists 64 files, 51 of them MIO0-compressed. A level is a scene: up
+  to 15 asset files loaded into RSP segments, whose pointers are segment-relative.
+- **Levels.** Placement lists of 0x14-byte records place scenery, sprites, actors, items and event actors
+  (whose scripts name the model). On-rails levels lie along −Z (`z = −zPos1 − 3000 + zPos2`); all-range levels
+  and Versus stages are absolute. Alternative lists (boss arenas, warp zones, the Venom escapes, Versus stages,
+  the unused level 4 and the Venom 1 beta layout) are listed too.
+- **Drawing.** Object display lists carry no render state: each draw is a synthesised list of one of the game's
+  88 render presets, the per-object recipe (culling, scale, prim colour) and the object list. Skeleton models
+  show frame 0 of their animation. Lit presets shade normals with the environment record's light, baked in.
+- **Grounds.** The game draws the ground attached to the camera; the viewer tiles it along the level (Corneria's
+  grass, rock and water sections follow the event scripts), and Titania's terrain is simulated from its records.
+- **Environment.** Fog, clear colour and the planet backdrop window come from the environment record and the
+  game's start camera.
+
 ## Known gaps
 
 - Rush 2049: scripted objects are shown frozen at the start of their paths.
@@ -286,3 +307,7 @@ Textures are uploaded with the RDP tile commands, not read in place.
 - Yoshi's Story: sprites show one frame; actors drawn by code or meshes (lifts, the Bowser
   room arena, bosses) are markers; menu worlds are not listed; music plays Yoshi's normal mood (the game's
   per-song channel mute masks), without the happy, sad and "super" variants, and reverb is not modelled.
+- Star Fox 64: enemies and props drawn by code without a plain model (fish, birds, Titania rovers, Bolse
+  cannons, Sector Y robots) are markers; moving event actors stand at their spawn point (the "scripted"
+  toggle hides them); space backdrops, the starfield, water reflections, Solar and Zoness waves and Bolse's
+  dynamic ground are not shown; the ground is tiled statically, so its texture seams may not line up.
