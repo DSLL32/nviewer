@@ -627,7 +627,8 @@ export class LevelRenderer {
     if (opacity) {
       for (const item of scene.items) {
         const alpha = opacity.get(item.index);
-        if (alpha === undefined || (item.animated && !showAnimated) || hidden?.has(item.index)) continue;
+        // Fully faded: nothing to draw.
+        if (alpha === undefined || alpha <= 0 || (item.animated && !showAnimated) || hidden?.has(item.index)) continue;
         fogFor(item);
         gl.uniform1f(this.uOpacity, alpha);
         for (const b of item.mesh.solid) draw(b, item.model, b.depthTest, false, item.mirrored, 'toggle', true);

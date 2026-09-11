@@ -20,7 +20,7 @@ const MARKER_PICK_RADIUS = 10; // CSS px around a marker dot
 const MAX_MARKER_LABELS = 150; // more markers on screen than this: dots only
 const LABEL_CELL_W = 40; // label de-cluttering grid, CSS px
 const LABEL_CELL_H = 14;
-const FADED_OPACITY = 0.2; // fadeOnHover layers under the pointer
+const FADED_OPACITY = 0; // fadeOnHover layers under the pointer vanish completely, as in the game
 const FADE_SECONDS = 0.15;
 
 interface ViewportProps {
