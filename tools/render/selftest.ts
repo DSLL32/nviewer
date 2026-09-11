@@ -1,4 +1,4 @@
-// Numeric self-checks for png.ts and raster.ts. Run: npx tsx selftest.ts  (exits 1 on failure)
+// Numeric self-checks for png.ts and raster.ts. Run: npm run check:render  (exits 1 on failure)
 import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Batch, Texture } from '../../src/rom/types';

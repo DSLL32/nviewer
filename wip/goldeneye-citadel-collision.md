@@ -48,8 +48,8 @@ but doesn't describe the name table.
   - Script: `/home/n64/.ai-tmp/r49/impl/ge_core/gehash3.ts <src root>`.
   - Outputs: `gehash3_head.txt` and `gehash3_now.txt`.
 - **structuredClone:** every GoldenEye level loaded twice (66 loads), each with all whole-buffer typed arrays transferred:
-  OK. Script: `/home/n64/.ai-tmp/r49/impl/ge_core/transfer2.ts`.
-- **layeraudit:** `npx tsx /home/n64/.ai-tmp/r49/impl/layeraudit.ts goldeneye` exit 0, "collision in 33".
+  OK. Script: `/home/n64/.ai-tmp/r49/impl/ge_core/transfer2.ts` (now `npm run check:transfer -- goldeneye`).
+- **layeraudit:** exit 0, "collision in 33" (now `npm run check:layers -- goldeneye`).
 - **Render:** offline raster overhead view of Citadel rooms | rooms + collision; the tiles lie on the quadrant and corridor
   floors.
   - Image: `/home/n64/.ai-tmp/r49/impl/ge_core/renders/citadel_collision_top.png`.
@@ -77,7 +77,7 @@ but doesn't describe the name table.
 ## Next steps
 
 1. `git diff src/rom/goldeneye/stan.ts GOLDENEYE.md` and review.
-2. Re-run the checks: `npx tsc --noEmit -p .`; `npx tsx /home/n64/.ai-tmp/r49/impl/layeraudit.ts goldeneye`; `npx tsx
-   /home/n64/.ai-tmp/r49/impl/ge_core/transfer2.ts`; and, if the tree moved, `gehash3.ts` against a fresh `git archive
-   HEAD src` copy plus hashall for the other games.
-3. Commit the two files (main session).
+2. Re-run the checks, now all in the repo: `npm run typecheck`; `npm run check:layers -- goldeneye`;
+   `npm run check:transfer -- goldeneye`; and `npm run check:hashes` against a baseline from a worktree of HEAD
+   (`npx tsx tools/hashall.ts --src <worktree>`).
+3. Done: committed as dcabac1.
