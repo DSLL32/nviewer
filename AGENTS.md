@@ -75,6 +75,52 @@ repo root (or `$NVIEWER_REPORTS_DIR`), ignored by git:
  - When the fix is committed, write `NNNN.done` containing the commit hash and a
    one-line note (or "no change needed: <reason>"). Never delete reports.
 
+# Scratch directories
+
+`~/.ai-tmp/r49` is a symlink to `~/.ai-tmp/4e5bcc90-63d3-4729-b96c-d3f32b8822ea`;
+either path works. Each research directory holds the lead's working copy of the
+spec (the repo copy is authoritative once committed), extracted files, notes,
+tools, emulator run directories and captures.
+
+Implemented (spec in the repo):
+
+| Game | Research | Other |
+|---|---|---|
+| San Francisco Rush 2049, Rush 1 | `r49/` root files (`rush.z64`, `rush1.z64`, disassembly, probe scripts), `files/` (2049 filesystem), `r1files/` (Rush 1), `sheets/`, `sheets2/`, `sheets_r1/` (texture sheets), `e1/`..`e5/` (emulator sessions: DMA traces, frames, audio), `music1/`, `music2049/`, `dbg/`, `dbg2/` | collision: `~/.ai-tmp/rushcol/` |
+| Bomberman 64, Second Attack, Hero | `r49/bm/` | collision: `~/.ai-tmp/bmcol/` |
+| BattleTanx, Global Assault | `r49/btx/` | collision and layers: `~/.ai-tmp/btxcol/` |
+| Gex 64, Gex 3 | `r49/gex/` | collision: `~/.ai-tmp/gexcoll/` |
+| Yoshi's Story | `r49/ys/` | |
+| Star Fox 64 | `r49/sf/` | |
+| GoldenEye 007 | `r49/ge/` (unused content in `ge/unused/`, including the Citadel stan decoder) | |
+| Perfect Dark | `r49/pd/` | |
+| Zelda 64 (OoT, MM, 1997 alpha) | `r49/zelda/` (alpha in `zelda/alpha/`) | |
+
+Research in progress (spec not yet in the repo):
+
+| Game | Research |
+|---|---|
+| The World Is Not Enough | `r49/twine/` |
+| Banjo-Kazooie | `r49/banjo/` |
+| Glover | `r49/glover/` |
+| Pokémon Snap | `r49/snap/` |
+| Mario Party (J) | `r49/mparty/` |
+| Mario Kart 64 | `r49/mk64/` |
+| Pilotwings 64 | `r49/pilotwings/` |
+
+Shared:
+ - `r49/impl/`: implementation verification (`hashall.ts`, `layeraudit.ts`),
+   per-agent check directories (`ge_core`, `pd_obj`, `zelda_mus`, `fe_*` …) and
+   the clean-worktree scripts in `impl/ge/`.
+ - `r49/bm/tools/`: offline renderer (`raster.ts`, `compare.ts`).
+ - `r49/pw/`: the Playwright install used for in-app checks.
+ - `r49/fe/`, `r49/buildtest/`, `r49/headrom/`: early frontend screenshots, a
+   build output and an old copy of `src/rom`.
+ - `r49/yoshicol/`: abandoned (Yoshi's Story collision gaps, not pursued).
+
+New research goes in `r49/<game>/`; add it to this list when it starts, and move
+it to the implemented table when its loader lands.
+
 # Techniques
 
 ## Level loads
