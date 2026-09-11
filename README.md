@@ -3,7 +3,7 @@
 A browser viewer for the levels of these N64 games (USA versions): *San Francisco Rush 2049*,
 *San Francisco Rush: Extreme Racing*, *Bomberman 64*, *Bomberman 64: The Second Attack!*,
 *Bomberman Hero*, *BattleTanx*, *BattleTanx: Global Assault*, *Gex 64: Enter the Gecko*,
-*Gex 3: Deep Cover Gecko*, *Yoshi's Story* (Japan) and *Star Fox 64* (V1.0 and V1.1). Load one or more ROMs, pick a level in the sidebar, and fly around freely, with
+*Gex 3: Deep Cover Gecko*, *Yoshi's Story* (Japan), *Star Fox 64* (V1.0 and V1.1) and *GoldenEye 007*. Load one or more ROMs, pick a level in the sidebar, and fly around freely, with
 each game's soundtrack in the music box. ROMs are parsed entirely in the browser (in a Web Worker)
 and cached in IndexedDB; nothing is uploaded anywhere.
 
@@ -51,6 +51,11 @@ filtering · H help · Esc releases the mouse.
     - `fs.ts`: DMA file table, MIO0, scene segment maps, per-version tables, the display-list address space
     - `sf64.ts`: level list, placement lists, render-preset recipes, skeletons, event actors, grounds, Titania
       terrain, environment; `names.ts`: object and event-actor names from the decompilation
+  - `goldeneye/`: GoldenEye 007 (format notes in `GOLDENEYE.md`)
+    - `rom.ts`: data segment, file table, text banks, stage tables; `textures.ts`: the zlib and bit-packed texture codecs
+    - `bg.ts`: BG rooms; `environment.ts`: fog, clear colour, sky planes; `setup.ts`, `stan.ts`: setup files, floors
+    - `models.ts`, `place.ts`: prop and character models at rest, object placement; `goldeneye.ts`: levels;
+      `music.ts`: songs and their loop rules
   - `music/`: `musyx.ts`, `rush2049.ts` (Rush 2049), `libultra.ts` (libultra bank/sequence
     synthesizer shared by Rush 1, the Bomberman games and BattleTanx), `rush1.ts`, `libmus.ts`
     (Software Creations' libmus as used by Global Assault and Gex 3), `libmus64.ts` (the older libmus
@@ -290,6 +295,24 @@ Textures are uploaded with the RDP tile commands, not read in place.
 - **Music.** Nintendo EAD's sequence driver (the Mario 64 / Ocarina lineage, with its note pool, integer mixer
   and per-song reverb) rendered at 32 kHz at the game's own level; loops follow the sequences' jumps.
 
+### GoldenEye 007
+
+`GOLDENEYE.md` documents the formats in full; in short:
+- **Files.** The game code is uncompressed; a compressed data segment holds the tables. Files, rooms, textures and
+  songs are "1172" streams: two tag bytes and raw DEFLATE.
+- **Levels.** A BG file is a set of rooms with room-relative vertices and Fast3D display lists with two Rare commands
+  (`B1` four triangles, `C0` texture number; `displaylist.ts` ucode `'f3d'`). Textures come from a global table of 2,698
+  in two codec families. The viewer works in world units (BG units ÷ the stage scale, about 1 cm), draws rooms
+  without back-face culling as the game effectively does, and alpha comes from the lists' environment alpha.
+- **Environment.** Fog and clear colour come from per-stage records; the sky is a cloud plane at a world height (and
+  Frigate's water plane) the game projects per pixel (`Level.skyPlanes`). Backdrop pieces the game shows only
+  through portals are a hidden layer.
+- **Objects.** Setup files place doors, props, glass, pickups and guards on pads; models are built at rest, guards in
+  a sampled standing pose with heads, and placed as the game does (checked against RAM). The start camera stands on
+  the first spawn pad over the clipping-file floor.
+- **Music.** 63 compressed-MIDI sequences for libultra's player, rendered by `libultra.ts` with GoldenEye's per-track
+  loop rules.
+
 ## Known gaps
 
 - Rush 2049: scripted objects are shown frozen at the start of their paths.
@@ -316,3 +339,12 @@ Textures are uploaded with the RDP tile commands, not read in place.
   toggle hides them); water reflections, Solar and Zoness waves and Bolse's dynamic ground are not shown; the
   ground is tiled statically, so its texture seams may not line up; space backdrops are placed for the start view
   (Area 6's planet at its starting size, Meteo's planet where it rises at the end).
+- GoldenEye: portals and visibility are ignored (all rooms are drawn), so a few distant Dam mountain tops show above
+  the cliffs and rooms the game never shows together can overlap (Aztec rooms 18 and 44); translucent surfaces are
+  sorted per room, not per triangle; animated textures, the water ripple and the
+  sky's scroll are static; environment-mapped surfaces use plain UVs and objects get no room lighting; guards stand in
+  one sampled pose at their pads; doors are closed, stacked objects sit on the floor, vehicles stay at their pads, and
+  objects spawned by AI scripts or held by characters are not shown; multiplayer weapon slots show weapon set 11, not
+  the set chosen in the menu; grenade records flagged 0x100000, which the game creates but never draws, are hidden;
+  static-pose guards show small gaps at some joints; the Bunker monitors whose setup records have no pad are not shown;
+  music has no reverb.

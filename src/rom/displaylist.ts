@@ -527,6 +527,12 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
           }
           break;
         case 0xc0: st.rare = ctx.rareTexture ? ctx.rareTexture(w0, w1) : null; break;
+        // G_MTX, as in F3DEX (GoldenEye's models load their matrix slots); applied only when ctx.matrix is given.
+        case F3DEX.MTX: {
+          const p = (w0 >>> 16) & 0xff;
+          loadMatrix(w1, (p & 1) !== 0, (p & 2) !== 0, (p & 4) !== 0);
+          break;
+        }
         case F3DEX.TEXTURE:
           st.textureOn = (w0 & 1) !== 0;
           st.scaleS = (w1 >>> 16) / 65536;
