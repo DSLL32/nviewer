@@ -13,6 +13,7 @@ and cached in IndexedDB; nothing is uploaded anywhere.
 
     npm install
     npm run dev          # or: npm run build && npm run preview
+    npm run build:single # one self-contained dist/nviewer.html: open it from the filesystem, no server
 
 Open the page, then choose or drop ROM files such as `San Francisco Rush 2049 (U) [!].z64` or
 `Bomberman Hero (U) [!].z64` (`.v64`/`.n64` byte orders work too).

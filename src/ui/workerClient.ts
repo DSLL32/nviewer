@@ -1,4 +1,6 @@
-// Promise wrapper around the parser worker.
+// Promise wrapper around the parser worker. The worker is imported with Vite's `?worker&inline`, so the built app is
+// one script: `npm run build:single` (tools/bundle.ts) can then put the whole viewer in a single HTML file.
+import ParserWorker from '../worker?worker&inline';
 import type { RomSummary, WorkerRequest, WorkerResponse } from '../protocol';
 import type { DecodedMusic, Level } from '../rom';
 
@@ -11,7 +13,7 @@ export class ParserClient {
   private pending = new Map<number, Pending>();
 
   constructor() {
-    this.worker = new Worker(new URL('../worker.ts', import.meta.url), { type: 'module' });
+    this.worker = new ParserWorker();
     this.worker.onmessage = (e: MessageEvent<WorkerResponse>) => {
       const p = this.pending.get(e.data.id);
       if (!p) return;
