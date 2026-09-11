@@ -11,6 +11,7 @@ import {
   actorTransform, categoryLayer, mmHalfDayBit, mmRecipe, ootRecipe, placeRoomActor, placeTransitionActor, type ActorDraw, type PlacedActor,
 } from './actors';
 import { collisionBatch, floorBgCam, segmentHit, waterBoxBatch } from './collision';
+import { resolveCoplanar } from './coplanar';
 import { mmAnimatedMaterials, ootDrawConfig, type BufferState, type DrawConfig } from './drawconfig';
 import { CLOCK, currentLights, mmSky, mmSkyConfig, ootSky, readMmSkyTables, type MmSkyTables } from './env';
 import { type ZeldaBuild, type ZeldaFile, ZeldaFs } from './fs';
@@ -546,19 +547,41 @@ function loadLevel(z: Zelda, def: LevelDef, info: LevelInfo): Level {
   }
 
   // ---- rooms ----
+  // Coplanar surfaces are resolved over all rooms in the game's draw order: every room's opaque lists, then every
+  // room's translucent lists (coplanar.ts).
+  const XLU_ORDER = 0x100000;
+  const all: Batch[] = [], order: number[] = [], owner: { room: number; xlu: boolean }[] = [];
+  let opaRuns = 0, xluRuns = 0;
+  for (const r of rooms) {
+    if (!r || !r.header.mesh) continue;
+    for (const e of r.header.mesh.entries) {
+      if (e.opa) {
+        for (const b of run(e.opa, 'opa', r.index, areaBase)) { all.push(b); order.push(opaRuns); owner.push({ room: r.index, xlu: false }); }
+        opaRuns++;
+      }
+      if (e.xlu) {
+        for (const b of run(e.xlu, 'xlu', r.index, areaBase)) { all.push(b); order.push(XLU_ORDER + xluRuns); owner.push({ room: r.index, xlu: true }); }
+        xluRuns++;
+      }
+    }
+  }
+  const resolved = resolveCoplanar(all, order);
+  const roomBatches = new Map<number, { opa: Batch[]; xlu: Batch[] }>();
+  resolved.batches.forEach((b, j) => {
+    const o = owner[resolved.origin[j]];
+    const rb = roomBatches.get(o.room) ?? roomBatches.set(o.room, { opa: [], xlu: [] }).get(o.room)!;
+    (o.xlu ? rb.xlu : rb.opa).push(b);
+  });
   let roomTris = 0;
   for (const r of rooms) {
     if (!r || !r.header.mesh) continue;
-    const opa: Batch[] = [], xlu: Batch[] = [];
-    for (const e of r.header.mesh.entries) {
-      if (e.opa) opa.push(...run(e.opa, 'opa', r.index, areaBase));
-      if (e.xlu) xlu.push(...run(e.xlu, 'xlu', r.index, areaBase));
-    }
+    const { opa, xlu } = roomBatches.get(r.index) ?? { opa: [], xlu: [] };
     // The prerendered background and the 256 skies are drawn over the room's opaque lists, which only leave depth.
     const covered = (backdrop && r.header.mesh.type === 1) || sky256Shown;
     const roomInfo: DebugInfo = {
       scene: `${hex(def.scene)} ${sceneName}`, layer: def.layer, room: r.index, roomFile: `${r.file.index} ${r.name}`, vrom: hex(r.file.vromStart),
       meshType: r.header.mesh.type, entries: r.header.mesh.entries.length, buffer: layout,
+      ...(resolved.lifted || resolved.newDecals ? { coplanar: `scene: ${resolved.lifted} decal vertices lifted, ${resolved.newDecals} coplanar triangles made decals` } : {}),
     };
     const visible = covered ? xlu : [...opa, ...xlu];
     for (const b of [...opa, ...xlu]) roomTris += b.positions.length / 9;

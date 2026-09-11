@@ -8,6 +8,7 @@ import { runDisplayList, type DisplayListContext, type DlLighting } from '../dis
 import { decodeRows, ImFmt, ImSiz, Tlut } from '../texture';
 import type { Backdrop, Batch, CameraView, DebugInfo, Game, Instance, Level, LevelInfo, LevelKind, LevelLayer, Marker, Mesh, Texture } from '../types';
 import { collisionBatch, floorBgCam, waterBoxBatch } from './collision';
+import { resolveCoplanar } from './coplanar';
 import { currentLights } from './env';
 import { OOT_ACTORS } from './names';
 import {
@@ -328,14 +329,34 @@ function loadAlphaLevel(rom: Uint8Array, def: AlphaDef, info: LevelInfo): Level 
     }
   }
 
-  // Rooms: one mesh each; the opaque lists of an image room only leave depth under the background.
+  // Rooms: one mesh each; the opaque lists of an image room only leave depth under the background. Coplanar surfaces
+  // are resolved over all rooms in draw order (all opaque lists, then all translucent lists; coplanar.ts).
+  const all: Batch[] = [], order: number[] = [], owner: { room: number; xlu: boolean }[] = [];
+  let opaRuns = 0, xluRuns = 0;
   for (const r of rooms) {
     if (!r?.header.mesh) continue;
-    const opa: Batch[] = [], xlu: Batch[] = [];
     for (const e of r.header.mesh.entries) {
-      if (e.opa) opa.push(...run(e.opa, false, r.index));
-      if (e.xlu) xlu.push(...run(e.xlu, true, r.index));
+      if (e.opa) {
+        for (const b of run(e.opa, false, r.index)) { all.push(b); order.push(opaRuns); owner.push({ room: r.index, xlu: false }); }
+        opaRuns++;
+      }
+      if (e.xlu) {
+        for (const b of run(e.xlu, true, r.index)) { all.push(b); order.push(0x100000 + xluRuns); owner.push({ room: r.index, xlu: true }); }
+        xluRuns++;
+      }
     }
+  }
+  const resolved = resolveCoplanar(all, order);
+  if (resolved.lifted || resolved.newDecals) levelInfo.coplanar = `${resolved.lifted} decal vertices lifted, ${resolved.newDecals} coplanar triangles made decals`;
+  const roomBatches = new Map<number, { opa: Batch[]; xlu: Batch[] }>();
+  resolved.batches.forEach((b, j) => {
+    const o = owner[resolved.origin[j]];
+    const rb = roomBatches.get(o.room) ?? roomBatches.set(o.room, { opa: [], xlu: [] }).get(o.room)!;
+    (o.xlu ? rb.xlu : rb.opa).push(b);
+  });
+  for (const r of rooms) {
+    if (!r?.header.mesh) continue;
+    const { opa, xlu } = roomBatches.get(r.index) ?? { opa: [], xlu: [] };
     const roomInfo: DebugInfo = { ...levelInfo, room: r.index, roomRange: `${hex(r.start)}-${hex(r.start + r.data.length)}`, meshType: r.header.mesh.type, entries: r.header.mesh.entries.length, buffer: `scene 0x0, room ${r.index} ${hex(roomBase[r.index])}` };
     const covered = backdrop && r.header.mesh.type === 1;
     const visible = covered ? xlu : [...opa, ...xlu];
