@@ -8,6 +8,7 @@ import type { CameraView, Game, Instance, Level, LevelInfo, LevelLayer, Mesh, Sk
 import { buildRooms, isStubBg, parseBg, type RoomMesh } from './bg';
 import { findEnvironment, levelEnvironment } from './environment';
 import { perfectDarkMusic } from './music';
+import { addObjects } from './objects';
 import { parsePads, readSpawnPads } from './pads';
 import { PdRom, type StageRecord } from './rom';
 import { PdTextures } from './texture';
@@ -140,8 +141,11 @@ function loadLevel(r: PdRom, def: StageDef): Level {
   layers.push(roomLayer);
 
   // ---- objects ----
-  // Setup props, doors, glass, weapons, characters and markers (§5, §7.4 step 3) go here: meshes and instances appended
-  // to `meshes`/`instances`, each group as its own entry in `layers`, textures through `textures`.
+  // Setup props, doors, glass, weapons, vehicles and characters, and marker layers (§5, §7.4 step 3; objects.ts).
+  const objects = def.setup && r.hasFile(stage.pads)
+    ? addObjects(r, { setupFile: def.setup, padsFile: stage.pads, multiplayer: def.multiplayer, textures, meshes, instances, rooms, firstLayer: layers.length })
+    : null;
+  if (objects) layers.push(...objects.layers);
 
   // ---- environment: fog, clear colour, cloud and water planes ----
   const environment = levelEnvironment(env, stage.worldScale, textures);
@@ -150,7 +154,7 @@ function loadLevel(r: PdRom, def: StageDef): Level {
   const camera = spawnCamera(r, def, rooms);
 
   return buildLevel(def.info, `${def.code}-${stage.id.toString(16)}`, textures.textures, meshes, instances, {
-    layers, ...(skies.length ? { skies } : {}), ...environment, ...(camera ? { camera } : {}),
+    layers, ...(objects?.markers.length ? { markers: objects.markers } : {}), ...(skies.length ? { skies } : {}), ...environment, ...(camera ? { camera } : {}),
   });
 }
 

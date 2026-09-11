@@ -233,19 +233,21 @@ export function runPdDisplayList(ctx: PdDlContext, start: number, out: PdBatches
     if (tileTex !== undefined) return tileTex;
     const t = tiles[0];
     if (image < 0 || t.width <= 0 || t.height <= 0) return (tileTex = null);
-    const ci = t.fmt === 2 && palette >= 0;
+    // Colour-indexed: the RDP ignores the tile's format and uses the TLUT mode for 4/8-bit texels (model lists load CI4
+    // tiles with format 0, e.g. Pcidoor1_refZ).
+    const ci = palette >= 0 && (t.fmt === 2 || (textLut >= 2 && t.siz <= 1));
     const line = t.siz === 3 ? t.line * 2 : t.line;
     const wrap = (cm: number) => (cm & 2 ? 'clamp' : cm & 1 ? 'mirror' : 'repeat');
     const key = `${ctx.keyPrefix ?? ''}E${loadKey}/${t.tmem}/${line}/${ci ? palette : -1}/${t.fmt}/${t.siz}/${t.width}x${t.height}/${textLut}/${t.cms}/${t.cmt}`;
     const index = ctx.textures.addRaw(key, () => {
       const desc: TextureDesc = {
-        fmt: t.fmt as TextureDesc['fmt'], siz: t.siz as TextureDesc['siz'], width: t.width, height: t.height, mem, tmem: t.tmem, line,
+        fmt: (ci ? 2 : t.fmt) as TextureDesc['fmt'], siz: t.siz as TextureDesc['siz'], width: t.width, height: t.height, mem, tmem: t.tmem, line,
         palette: ci ? buf.subarray(palette, palette + 512) : null, tlut: textLut as TextureDesc['tlut'],
       };
-      const name = ['RGBA', 'YUV', 'CI', 'IA', 'I'][t.fmt] + [4, 8, 16, 32][t.siz];
+      const name = ['RGBA', 'YUV', 'CI', 'IA', 'I'][ci ? 2 : t.fmt] + [4, 8, 16, 32][t.siz];
       return {
         width: t.width, height: t.height, rgba: decodeTexture(desc), wrapS: wrap(t.cms), wrapT: wrap(t.cmt),
-        format: t.fmt === 2 ? `${name}/${textLut === 3 ? 'IA16' : 'RGBA16'}` : name,
+        format: ci ? `${name}/${textLut === 3 ? 'IA16' : 'RGBA16'}` : name,
         source: `${ctx.keyPrefix ?? ''}image 0x${image.toString(16)}${ci ? ` palette 0x${palette.toString(16)}` : ''}`,
       };
     });

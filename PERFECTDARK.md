@@ -1453,6 +1453,24 @@ in `music/wav/index.json`.
 | music | low | existing libultra renderer + one volume option; verified against game audio |
 | animated textures, env-mapped chrome, portals, dynamic lights | not planned | cosmetic; see §9 |
 
+### 7.8 Corrections found during implementation
+
+Found while implementing objects and characters (checked against the research RAM captures and frames):
+1. **Stand animations:** the labels are swapped. Anim 1 is the two-handed-gun stand; 106 is one-handed, two guns or
+   unarmed. Weapon definition +0x4C & 8 means one-handed (Crash Site guards with Avengers run anim 1, Villa's unarmed
+   secretary 106).
+2. **Display-list node colour table:** it starts at `vertices + align8(vertexCount × 12)`, not right after the
+   vertices. All 2,867 nodes then end exactly at their rodata; the old reading shifted colours for 816 nodes (the
+   black Attack Ship door).
+3. **Floor snap:** objects snap to collision and to the top of objects below them, not to pad height; objects on
+   objects get no +4 (room floors +4, weapons +0).
+4. **Heads and difficulty:** heads attach only to skeleton-9 bodies; random heads come from 0x80062B68 (male) and
+   0x80062C58 (female), body 104 from 0x80062C8C. Character spawn flags 0xE0 list the allowed difficulties.
+5. **Toggle nodes** are switched by code; the first sibling matches 5 of 6 toggle models seen in frames.
+6. Multiplayer ammo crates after a no-ammo slot are not created; object records with pad < 0 are AI-moved cutscene
+   props.
+7. **Music loops:** see §6.5 (tracks loop independently).
+
 ## 8. Verification evidence
 
 The headless mupen64plus from `/home/n64/nviewer/EMULATOR.md` (debugger build, 8 MiB) was used for every check on the

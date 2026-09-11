@@ -61,7 +61,8 @@ filtering · H help · Esc releases the mouse.
   - `perfectdark/`: Perfect Dark (format notes in `PERFECTDARK.md`)
     - `rom.ts`: data segment, file and stage tables, text; `texture.ts`: the global texture store and its two decoders
     - `gbi.ts`: Perfect Dark's display-list microcode; `bg.ts`: rooms and sky rooms; `environment.ts`: fog, sky planes;
-      `pads.ts`: pads and spawns; `perfectdark.ts`: levels; `music.ts`: songs
+      `pads.ts`: pads and spawns; `setup.ts`, `models.ts`, `anim.ts`, `place.ts`, `objects.ts`: setup records, model
+      files, animations (standing poses), placement and object layers; `perfectdark.ts`: levels; `music.ts`: songs
   - `zelda/`: Ocarina of Time and Majora's Mask (format notes in `ZELDA64.md`)
     - `fs.ts`, `tables.ts`: build detection, Yaz0 filesystem, code tables; `scene.ts`: scene and room headers
     - `drawconfig.ts`: animated materials at frame 0; `env.ts`, `sky.ts`, `jpeg.ts`: lights, fog, skyboxes, prerendered
@@ -318,6 +319,9 @@ Textures are uploaded with the RDP tile commands, not read in place.
   special assignments, Carrington Institute and the Combat Simulator arenas are listed.
 - **Environment.** Fog and sky colour from the environment tables; clouds and water as sky planes; sky rooms drawn
   around the camera. The start camera stands on a spawn pad.
+- **Objects.** Setup records place props, doors, glass, weapons, vehicles and characters (difficulty Agent), snapped
+  to the floor or the prop below as the game does and checked against RAM; characters stand in the first frame of
+  their stand animation with heads attached.
 - **Music.** 119 sequences for libultra's n_audio player with linear voice volume; every track loops on its own
   (`music/cseq.ts`, shared with GoldenEye).
 
@@ -382,7 +386,10 @@ Textures are uploaded with the RDP tile commands, not read in place.
   toggle hides them); water reflections, Solar and Zoness waves and Bolse's dynamic ground are not shown; the
   ground is tiled statically, so its texture seams may not line up; space backdrops are placed for the start view
   (Area 6's planet at its starting size, Meteo's planet where it rises at the end).
-- Perfect Dark: objects and characters are not shown yet; Defection's star field, suns and lens flares and cloud
+- Perfect Dark: characters hold no weapons, stand at their pads in a stand-in random head, at the nearest LOD and
+  unflipped; vehicles and lifts are at their pads, doors closed; monitor screens show a placeholder and CI's light beam
+  is missing; toggled model parts show the first variant; multiplayer weapon slots use one captured weapon set and
+  there are no simulants; Defection's star field, suns and lens flares and cloud
   scrolling are not drawn; some city backdrop rooms the game hides are drawn; environment-mapped surfaces use an
   approximation; music has no reverb.
 - Zelda 64: skeletal actors (people, enemies, animated objects), torch flames and the sun and moon are markers or not
