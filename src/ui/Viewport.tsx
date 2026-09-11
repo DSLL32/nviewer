@@ -591,7 +591,7 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
                 disabled={!hasFog}
                 onChange={(e) => setFogOn(e.target.checked)}
               />
-              Authentic fog{!hasFog && level ? <span className="small muted"> (no fog in this game)</span> : null}
+              Authentic fog{!hasFog && level ? <span className="small muted"> (no fog in this level)</span> : null}
             </label>
             {skies.length > 0 && (
               <label className="check select-row" title="The game picks one of these at random per race">
