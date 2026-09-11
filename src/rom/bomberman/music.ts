@@ -16,7 +16,8 @@ export type BombermanGame = 'bm64' | 'bm64sa' | 'bmhero';
 const OUTPUT_RATE = 32000;
 
 // gain: sequence volume = song volume byte / 127 * 0x7FFF * gain, measured against captured game
-// audio (Hero title song: render/capture loudness 0.97 at gain 1; SA intro: 1.8 at gain 1).
+// audio. The mixer squares the volume, so loudness scales with gain^2. Render/capture loudness at
+// gain 1: BM64 songs 1, 26, 29 at 0.995-1.015, Hero song 24 at 0.97, SA songs 1 and 3 at 1.72-1.80.
 const GAMES: Record<BombermanGame, { s2: number; eqpower: number; voices: number; gain: number; names: Record<number, string>; skip: Set<number> }> = {
   bm64: {
     s2: 0x30a898, eqpower: 0x1bfe0, voices: 16, gain: 1,
@@ -26,7 +27,7 @@ const GAMES: Record<BombermanGame, { s2: number; eqpower: number; voices: number
       7: 'Black Fortress', 8: 'Rainbow Palace', 10: 'Rival Battle', 11: 'Boss (Blue Resort to White Glacier)',
       12: 'Boss (Black Fortress) A', 13: 'Boss (Black Fortress) B', 14: 'Boss (Green Garden)', 15: 'Boss (Rainbow Palace) A',
       16: 'Boss (Rainbow Palace) B', 17: 'Unused Song A', 18: 'Rival Battle Cue', 19: 'Boss Arena Cue', 22: 'Story Cutscene',
-      26: 'Title', 27: 'Battle', 29: 'Battle Menu', 31: 'Battle Menu Cue A', 32: 'Battle Menu Cue B', 35: 'Final Battles',
+      26: 'Attract Intro', 27: 'Battle', 29: 'Battle Menu', 31: 'Battle Menu Cue A', 32: 'Battle Menu Cue B', 35: 'Final Battles',
       39: 'Unused Song B', 40: 'Unused Song C', 42: 'Boss Arena', 44: 'VS Altair',
     },
     // Identical one-track cues with no reference in the code.
@@ -45,7 +46,7 @@ const GAMES: Record<BombermanGame, { s2: number; eqpower: number; voices: number
     skip: new Set([0, 1]),
   },
   bm64sa: {
-    s2: 0x2a8008, eqpower: 0x953d0, voices: 22, gain: 0.555,
+    s2: 0x2a8008, eqpower: 0x953d0, voices: 22, gain: 0.75,
     names: {
       1: 'Main Menu', 2: 'Menu B', 3: 'Intro', 4: 'World Select', 5: 'Character Select', 7: 'Menu C',
       8: 'Lost Planet Alcatraz', 9: 'Lost Planet Alcatraz (event)', 10: 'Ocean Planet Aquanet', 11: 'Ocean Planet Aquanet (event)',

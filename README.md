@@ -180,8 +180,8 @@ Textures are uploaded with the RDP tile commands, not read in place.
 - **Backdrops.** Skies are 2D pictures drawn across the screen before the 3D pass
   (`Level.backdrop`).
 - **Music.** libultra's compressed-MIDI player (alCSPlayer) with ALBankFile banks and VADPCM, read
-  uncompressed from one "S2" blob per game, output at 32 kHz. Hero's loudness matches captured game
-  audio; The Second Attack's needed a gain of 0.555 against its capture.
+  uncompressed from one "S2" blob per game, output at 32 kHz. Bomberman 64 and Hero loudness match
+  captured game audio as is; The Second Attack's sequence volume needs a factor of 0.75.
 
 ## Known gaps
 
