@@ -118,6 +118,10 @@ export interface Backdrop {
   u1: number;
   v1: number;
   tint?: [number, number, number]; // multiplies the texture, 0..255
+  // Set when the picture is a prerendered view of the level from a fixed game camera (Zelda 64's prerendered
+  // backgrounds): its width / height. While it is shown, the viewer keeps this aspect for the 3D view (letterbox or
+  // pillarbox) so the picture and the level geometry keep the same proportions at the game's camera.
+  aspect?: number;
 }
 
 // A camera the game itself uses for the level, as a starting view.
