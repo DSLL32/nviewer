@@ -91,5 +91,19 @@ export function decodeYoshiMusic(rom: Uint8Array, index: number): DecodedMusic {
   if (index < 0 || index >= SONGS.length) throw new Error(`No music track ${index}`);
   let render = renderers.get(rom);
   if (!render) renderers.set(rom, (render = nasRenderer(rom, CONFIG)));
-  return render(index + 1, { maxSeconds: 600, tailSeconds: 3 });
+  return render(index + 1, { maxSeconds: 600, tailSeconds: 3, muteMask: normalMoodMuteMask(rom, index + 1) });
+}
+
+// Na_YoshiStatusChange (ROM 0x18A38) sets per-song channel mute masks from Yoshi's mood. For the normal mood
+// it jumps through a table of 53 entries (ROM 0xB336C, seq n at entry n - 1) to `Nai_BgmSetMuteMask(bgm,
+// mask)` calls (mask in the delay slot, `li a1, mask`); later songs get 0x4000. Channels 11-14 carry the happy
+// and "super" variants. The Minobon room song picks its mask elsewhere and is left unmuted.
+const NORMAL_MOOD_TABLE = 0xb336c;
+
+function normalMoodMuteMask(rom: Uint8Array, seq: number): number {
+  if (seq < 1 || seq > 53) return 0x4000;
+  const dv = new DataView(rom.buffer, rom.byteOffset, rom.byteLength);
+  const target = dv.getUint32(NORMAL_MOOD_TABLE + 4 * (seq - 1)) - 0x80000400 + 0x1000;
+  const slot = target + 4 >= 0 && target + 8 <= rom.length ? dv.getUint32(target + 4) : 0;
+  return slot >>> 16 === 0x2405 ? slot & 0xffff : 0; // li a1, mask
 }

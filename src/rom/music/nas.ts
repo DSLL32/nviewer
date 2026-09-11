@@ -19,7 +19,11 @@ export interface NasConfig {
   gain: number; // output scale applied to the mixed 16-bit samples
 }
 
-export interface NasRenderOptions { maxSeconds: number; tailSeconds: number }
+export interface NasRenderOptions {
+  maxSeconds: number;
+  tailSeconds: number;
+  muteMask?: number; // channels the game mutes (bit n = channel n), handled by each channel's mute behaviour
+}
 
 export function nasRenderer(rom: Uint8Array, cfg: NasConfig) {
   const dv = view(rom);
@@ -394,6 +398,7 @@ export function nasRenderer(rom: Uint8Array, cfg: NasConfig) {
     }
     startVoice(note: number, p: Player): boolean {
       const ch = this.chan, g = ch.group;
+      if (ch.muted && ch.muteBhv & 0x40) { this.stopSomething = true; return false; }
       let inst = this.inst, instPtr = this.instPtr;
       if (inst === 0xff) {
         if (!ch.hasInst) { this.stopSomething = true; return false; }
@@ -437,7 +442,9 @@ export function nasRenderer(rom: Uint8Array, cfg: NasConfig) {
     vibRateStart = 2048; vibRateTarget = 2048; vibRateDelay = 0; vibExtentStart = 0; vibExtentTarget = 0; vibExtentDelay = 0; vibDelay = 0;
     changesVol = true; changesPan = true; changesFreq = true;
     io = new Int8Array(8).fill(-1); dynTable = 0;
-    constructor(public group: Group) { this.script = new Script(group.data); }
+    muteBhv = 0x60; // 0x40 stop notes, 0x20 soften volume while muted
+    constructor(public group: Group, public index: number) { this.script = new Script(group.data); }
+    get muted() { return ((this.group.muteMask >> this.index) & 1) === 1; }
     open(pc: number) {
       this.enabled = true;
       this.halted = false;
@@ -518,11 +525,13 @@ export function nasRenderer(rom: Uint8Array, cfg: NasConfig) {
             case 0xe4:
               if (s.value !== -1) { const t = table(s.value); s.stack[s.depth++] = s.pc; s.pc = t; }
               break;
+            case 0xca: this.muteBhv = a0; break;
             case 0xe8: // 3 arguments read above, 5 more bytes
+              this.muteBhv = a0;
               this.transpose = s.rs8(); this.newPan = s.rb(); this.panWeight = s.rb(); this.reverb = s.rb(); s.rb();
               this.changesPan = true;
               break;
-            case 0xe7: this.transpose = (d[a0 + 3] << 24) >> 24; this.newPan = d[a0 + 4]; this.panWeight = d[a0 + 5]; this.reverb = d[a0 + 6]; this.changesPan = true; break;
+            case 0xe7: this.muteBhv = d[a0]; this.transpose = (d[a0 + 3] << 24) >> 24; this.newPan = d[a0 + 4]; this.panWeight = d[a0 + 5]; this.reverb = d[a0 + 6]; this.changesPan = true; break;
             case 0xea: this.halted = true; return;
             case 0xeb: this.setInstrument(a[1]); break;
             case 0xec:
@@ -565,6 +574,7 @@ export function nasRenderer(rom: Uint8Array, cfg: NasConfig) {
     tempo = 5760; tempoChange = 0; tempoAcc = 0; transpose = 0;
     fadeVolume = 1; fadeScale = 1; appliedVolume = 1; volState = 1; fadeTimer = 0; fadeInTime = 0; fadeVel = 0; recalc = true;
     velTable = 0; gateTable = 0; io = new Int8Array(8).fill(-1);
+    muteMask = 0; muteBhv = 0x60; muteScale = 0.5;
     constructor(seq: number) {
       const e = seqTable[seq];
       // Scripts address the sequence relative to its start; a copy keeps their writes local. The default
@@ -578,7 +588,7 @@ export function nasRenderer(rom: Uint8Array, cfg: NasConfig) {
       const banks = seqBanks(seq);
       this.bank = loadBank(banks[banks.length - 1]);
       this.script = new Script(this.data);
-      for (let i = 0; i < 16; i++) this.channels.push(new Channel(this));
+      for (let i = 0; i < 16; i++) this.channels.push(new Channel(this, i));
     }
     update(p: Player) {
       if (!this.enabled) return false;
@@ -614,10 +624,17 @@ export function nasRenderer(rom: Uint8Array, cfg: NasConfig) {
             case 0xcc: s.value = s.rs8(); break;
             case 0xcd: s.rw(); break;
             case 0xce: s.rb(); break;
-            case 0xd0: case 0xd3: case 0xd5: case 0xf1: s.rb(); break;
+            case 0xd0: case 0xf1: s.rb(); break;
+            case 0xd3: this.muteBhv = s.rb(); break;
+            case 0xd5: this.muteScale = s.rs8() / 127; break;
             case 0xd1: this.gateTable = s.rw(); break;
             case 0xd2: this.velTable = s.rw(); break;
-            case 0xd6: case 0xd7: s.rw(); break;
+            case 0xd6: s.rw(); break;
+            case 0xd7: { // allocate channels: they take the player's mute behaviour
+              const mask = s.rw();
+              for (let i = 0; i < 16; i++) if (mask & (1 << i)) this.channels[i].muteBhv = this.muteBhv;
+              break;
+            }
             case 0xd9: this.fadeScale = s.rs8() / 127; break;
             case 0xda: {
               const mode = s.rb(), t = s.rw();
@@ -671,7 +688,10 @@ export function nasRenderer(rom: Uint8Array, cfg: NasConfig) {
       if (this.recalc) this.appliedVolume = this.fadeVolume * this.fadeScale;
       for (const c of this.channels) {
         if (!c.enabled && !c.layers.some((l) => l && l.voice)) continue;
-        if (c.changesVol || this.recalc) { const v = c.volume * c.volumeScale * this.appliedVolume; c.appliedVolume = v * v; }
+        if (c.changesVol || this.recalc) {
+          const v = c.volume * c.volumeScale * this.appliedVolume * (c.muted && c.muteBhv & 0x20 ? this.muteScale : 1);
+          c.appliedVolume = v * v;
+        }
         const chPan = c.newPan * c.panWeight;
         for (const l of c.layers) {
           if (!l || !l.voice) continue;
@@ -705,7 +725,10 @@ export function nasRenderer(rom: Uint8Array, cfg: NasConfig) {
   class Player {
     voices: Voice[] = [];
     group: Group;
-    constructor(seq: number) { this.group = new Group(seq); }
+    constructor(seq: number, muteMask: number) {
+      this.group = new Group(seq);
+      this.group.muteMask = muteMask;
+    }
     updateVoices() {
       this.voices = this.voices.filter((v) => {
         const e = envProcess(v.env);
@@ -755,7 +778,7 @@ export function nasRenderer(rom: Uint8Array, cfg: NasConfig) {
   return (seq: number, opts: NasRenderOptions): DecodedMusic => {
     if (seq < 0 || seq >= seqTable.length) throw new Error(`No sequence ${seq}`);
     const rate = cfg.outputRate;
-    const p = new Player(seq);
+    const p = new Player(seq, opts.muteMask ?? 0);
     const spu = rate / (60 * UPDATES);
     const maxSamples = Math.ceil(opts.maxSeconds * rate);
     const L = new Float32Array(maxSamples), R = new Float32Array(maxSamples);
