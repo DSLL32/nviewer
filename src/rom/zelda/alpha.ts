@@ -227,7 +227,7 @@ function loadAlphaLevel(rom: Uint8Array, def: AlphaDef, info: LevelInfo): Level 
   const clearColor = (lights?.fogColor ?? [0, 0, 0]) as [number, number, number];
 
   // Address space: scene, rooms, an end-of-list stub for the lost dynamic segments.
-  const size = sceneData.length + rooms.reduce((n, r) => n + (r ? r.data.length : 0), 0) + 8;
+  const size = sceneData.length + rooms.reduce((n, r) => n + (r ? r.data.length : 0), 0) + 8 + 64;
   const buf = new Uint8Array(size);
   buf.set(sceneData, 0);
   const roomBase: number[] = [];
@@ -241,6 +241,9 @@ function loadAlphaLevel(rom: Uint8Array, def: AlphaDef, info: LevelInfo): Level 
   }
   const stub = at;
   buf[stub] = 0xb8; // F3DEX G_ENDDL
+  // An identity matrix (16.16) for room G_MTX commands whose matrix segment (the lost draw config's 0xD) is not in the ROM.
+  const identityMtx = stub + 8;
+  for (const i of [0, 5, 10, 15]) buf[identityMtx + i * 2 + 1] = 1;
   const resolver = (room: number, images: boolean) => (addr: number): number => {
     const seg = addr >>> 24, off = addr & 0xffffff;
     if (seg === 2) return off < sceneData.length ? off : -1;
@@ -258,6 +261,8 @@ function loadAlphaLevel(rom: Uint8Array, def: AlphaDef, info: LevelInfo): Level 
       vertexScale: 1, mirrorX: false, geometryMode: SETUP_GEOMETRY, renderMode: (xlu ? SETUP_RENDERMODE_XLU : SETUP_RENDERMODE) & ~7,
       alphaCompare: 0, combineMode: SETUP_COMBINE, otherModeH: SETUP_OTHERMODE_H, primColor: 0xffffffff, envColor: 0x80808080,
       lighting, directImages: true, secondTexture: true, decals: true, combiner: true, textureGen: true,
+      matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+      resolveMatrix: (addr) => (addr >>> 24 === 2 || addr >>> 24 === 3 ? resolver(room, false)(addr) : identityMtx),
     };
     try {
       const out = runDisplayList(ctx, dl);
@@ -308,7 +313,7 @@ function loadAlphaLevel(rom: Uint8Array, def: AlphaDef, info: LevelInfo): Level 
       const rgba = decodeRows(imageRoom.data, off, ImFmt.RGBA, ImSiz.B16, w, h, null, Tlut.None);
       for (let k = 3; k < rgba.length; k += 4) rgba[k] = 255;
       const texture = textures.push({ width: w, height: h, rgba, wrapS: 'clamp', wrapT: 'clamp', format: 'RGBA16', source: `room ${imageRoom.index} ${hex(img.source)}` }) - 1;
-      backdrop = { texture, u0: 0, v0: 0, u1: 1, v1: 1 };
+      backdrop = { texture, u0: 0, v0: 0, u1: 1, v1: 1, aspect: w / h }; // the game's 320x240 view from the fixed camera
       // The fixed bg camera of the spawn floor, else the first camera with position data.
       const cams = collision?.bgCams ?? [];
       const order = [floorCam, ...cams.map((c, i) => (c.setting === PREREND_FIXED ? i : -1)), ...cams.map((_, i) => i)].filter((i) => i >= 0);

@@ -94,6 +94,9 @@ export interface DisplayListContext {
   // F3DEX2 G_RDPHALF_1 (0xE1) + G_BRANCH_Z (0x04), a depth-based detail switch: 'near' always branches to the
   // detailed list. Without it the lists continue with their far version (usually nothing).
   branchZ?: 'near';
+  // Resolves G_MTX matrix addresses (default: resolve). Lets a loader map matrices in segments that hold display lists
+  // otherwise, or RAM addresses, to matrix data.
+  resolveMatrix?: (addr: number) => number;
   // With directImages: for combiners that blend TEXEL0 and TEXEL1 by a constant (PRIM or ENV alpha, PRIM_LOD_FRAC)
   // in the first colour cycle, emit Batch.texture1, uvs1 and texMix. The folded vertex colour takes both texels as 1.
   secondTexture?: boolean;
@@ -303,24 +306,28 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
   let cmdAddr = 0; // buffer offset of the command being interpreted (Batch.triSource)
   const wrapMode = (cm: number): WrapMode => (cm & 2 ? 'clamp' : cm & 1 ? 'mirror' : 'repeat');
 
-  // directImages: the texture render tile k shows, decoded from its whole image.
-  const directTexture = (k: number): number => {
+  // directImages: the texture render tile k shows, decoded from its whole image. opaqueAlpha: alpha forced to 255, for
+  // translucent or alpha-tested batches whose combiner alpha does not read the texels (intensity textures would
+  // otherwise cut holes by their intensity).
+  const directTexture = (k: number, opaqueAlpha = false): number => {
     const t = st.tiles[k];
     if (t.image < 0 || t.texW <= 0 || t.texH <= 0) return -1;
     const ci = t.fmt === ImFmt.CI;
     const pal = t.pal * 16;
     const tlutKey = ci ? [...st.zTlutLoads.entries()].map(([i, s]) => `${i}:${s}`).join(',') : '';
-    const key = `${ctx.keyPrefix}D${t.image}/${t.fmt}/${t.siz}/${t.texW}x${t.texH}/${ci ? `${pal}/${tlutKey}/${st.textLut}` : ''}/${t.cms}/${t.cmt}`;
+    const key = `${ctx.keyPrefix}D${t.image}/${t.fmt}/${t.siz}/${t.texW}x${t.texH}/${ci ? `${pal}/${tlutKey}/${st.textLut}` : ''}/${t.cms}/${t.cmt}${opaqueAlpha ? '/A1' : ''}`;
     let idx = ctx.textureKeys.get(key);
     if (idx === undefined) {
       idx = ctx.textures.length;
       const fmtName = ['RGBA', 'YUV', 'CI', 'IA', 'I'][t.fmt] + [4, 8, 16, 32][t.siz];
+      const rgba = decodeRows(buf, t.image, t.fmt as ImFmt, t.siz as ImSiz, t.texW, t.texH, ci ? st.zTlut.subarray(pal * 2) : null, st.textLut as Tlut);
+      if (opaqueAlpha) for (let q = 3; q < rgba.length; q += 4) rgba[q] = 255;
       ctx.textures.push({
         width: t.texW, height: t.texH,
-        rgba: decodeRows(buf, t.image, t.fmt as ImFmt, t.siz as ImSiz, t.texW, t.texH, ci ? st.zTlut.subarray(pal * 2) : null, st.textLut as Tlut),
+        rgba,
         wrapS: wrapMode(t.cms), wrapT: wrapMode(t.cmt),
         format: ci ? `${fmtName}/${st.textLut === Tlut.Ia16 ? 'IA16' : 'RGBA16'}` : fmtName,
-        source: `image 0x${t.image.toString(16)}${ci ? ` tlut ${pal ? `${pal} ` : ''}${tlutKey}` : ''}`,
+        source: `image 0x${t.image.toString(16)}${ci ? ` tlut ${pal ? `${pal} ` : ''}${tlutKey}` : ''}${opaqueAlpha ? ' (alpha 1: the combiner alpha does not use it)' : ''}`,
       });
       ctx.textureKeys.set(key, idx);
     }
@@ -346,9 +353,11 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
     return null;
   };
 
-  const currentTexture = (): number => {
+  const combineAlphaUsesTexel = () => [4, 5, 6, 7, 12, 13, 14, 15].some((i) => st.combine[i] === 1 || st.combine[i] === 2);
+
+  const currentTexture = (opaqueAlpha = false): number => {
     if (ctx.ucode === 'f3d') return st.textureOn && st.combineUsesTexel && st.rare ? st.rare.texture : -1;
-    if (direct) return st.textureOn && st.combineUsesTexel ? directTexture(0) : -1;
+    if (direct) return st.textureOn && st.combineUsesTexel ? directTexture(0, opaqueAlpha) : -1;
     if (!st.textureOn || !st.combineUsesTexel || st.image < 0) return -1;
     const t = st.tiles[0];
     if (t.width <= 0 || t.height <= 0) return -1;
@@ -379,11 +388,13 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
 
   const triangle = (a: number, b: number, c: number) => {
     if (!st.vtx[a] || !st.vtx[b] || !st.vtx[c]) return;
-    const texture = currentTexture();
     const rm = st.renderMode;
     const blend: BlendMode = rm & RM_FORCE_BL && ((rm & RM_ZMODE_MASK) === RM_ZMODE_XLU || !(rm & RM_Z_UPD))
       ? 'blend'
       : rm & RM_CVG_X_ALPHA || st.alphaCompare ? 'cutout' : 'opaque';
+    // directImages: texel alpha only counts when the combiner's alpha reads a texel.
+    const opaqueAlpha = direct && blend !== 'opaque' && !combineAlphaUsesTexel();
+    const texture = currentTexture(opaqueAlpha);
     const zbuf = (st.geometryMode & G_ZBUFFER) !== 0;
     const depthTest = zbuf && (rm & RM_Z_CMP) !== 0;
     const depthWrite = zbuf && (rm & RM_Z_UPD) !== 0 && blend !== 'blend';
@@ -391,7 +402,7 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
     const decal = ctx.decals === true && depthTest && (rm & RM_ZMODE_MASK) === RM_ZMODE_DEC;
     // secondTexture: TEXEL1 of a constant TEXEL0 -> TEXEL1 blend.
     const tb = direct && ctx.secondTexture && texture >= 0 && st.combineUsesTexel1 ? texelBlend() : null;
-    const texture1 = tb !== null ? directTexture(1) : -1;
+    const texture1 = tb !== null ? directTexture(1, opaqueAlpha) : -1;
     const key = `${texture}/${blend}/${depthTest}/${depthWrite}/${cullBack}${decal ? '/decal' : ''}${texture1 >= 0 ? `/${texture1}/${tb!.blend}/${tb!.mix}` : ''}`;
     let bb = builders.get(key);
     if (!bb) {
@@ -494,7 +505,7 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
 
   const loadMatrix = (addr: number, projection: boolean, load: boolean, push: boolean) => {
     if (!st.mtx || projection) return;
-    const o = resolve(addr);
+    const o = (ctx.resolveMatrix ?? resolve)(addr);
     if (o < 0 || o + 64 > buf.length) return;
     const m: Mtx = [];
     for (let i = 0; i < 16; i++) m.push((dv.getInt16(o + i * 2) * 65536 + dv.getUint16(o + 32 + i * 2)) / 65536);

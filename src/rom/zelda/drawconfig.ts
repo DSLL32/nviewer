@@ -7,7 +7,8 @@ import { u16, u32 } from './scene';
 // A segment's contents: a synthesised display list, or an address (a texture) in another segment.
 export type SegmentValue = { kind: 'dl'; words: number[] } | { kind: 'addr'; addr: number };
 export interface BufferState { segments: Map<number, SegmentValue>; env?: number; prim?: number }
-export interface DrawConfig { opa: BufferState; xlu: BufferState; notes: string[] }
+// roomMatrix: the matrix segment 0xD holds for the opaque lists of a room (row-major, the N64's v' = v M), if set.
+export interface DrawConfig { opa: BufferState; xlu: BufferState; notes: string[]; roomMatrix?: (room: number) => number[] }
 
 export interface DrawParams {
   frame: number; // gameplayFrames (0 for the static view)
@@ -48,6 +49,7 @@ const SCENE_JABU_JABU = 0x02, SCENE_SHADOW_TEMPLE_BOSS = 0x18, SCENE_CASTLE_COUR
 export function ootDrawConfig(sdc: number, p: DrawParams): DrawConfig {
   const opa: BufferState = { segments: new Map() }, xlu: BufferState = { segments: new Map() };
   const notes: string[] = [];
+  let roomMatrix: DrawConfig['roomMatrix'];
   const f = p.frame >>> 0;
   const night = p.night ? 1 : 0;
   const dp0 = 0, dp1 = 0; // roomCtx.drawParams: 0 until actors set them
@@ -172,7 +174,13 @@ export function ootDrawConfig(sdc: number, p: DrawParams): DrawConfig {
         opa.segments.set(8, texScroll((127 - f) % 128, f % 128, 32, 32));
       }
       env128();
-      notes.push('segment 0xD matrix (pulsing walls): identity');
+      // Segment 0xD: Matrix_Scale(1.005, sin(t) * 0.8, 1.005) (x/z 1.0 in room 2) for the pulsing wall parts, which
+      // the room lists place with their own matrices. t runs continuously; the static frame is the pulse's peak.
+      roomMatrix = (room) => {
+        const xz = room === 2 ? 1 : 1.005;
+        return [xz, 0, 0, 0, 0, 0.8, 0, 0, 0, 0, xz, 0, 0, 0, 0, 1];
+      };
+      notes.push('segment 0xD: wall pulse scale at its peak (y 0.8)');
       break;
     case 22: setTex(xlu, 8, 26 + night); xlu.segments.set(9, water(1)); opa.segments.set(10, water(1)); env128(); break; // Forest Temple
     case 23: { // Water Temple (drawParams[1] = water level state, 0 at scene start)
@@ -309,7 +317,7 @@ export function ootDrawConfig(sdc: number, p: DrawParams): DrawConfig {
     default:
       break; // 51, 52: screen shake only
   }
-  return { opa, xlu, notes };
+  return { opa, xlu, notes, ...(roomMatrix ? { roomMatrix } : {}) };
 }
 
 // MM AnimatedMaterial list at frame `step` (AnimatedMat_DrawMain): 8-byte entries {s8 segment (the list ends after a

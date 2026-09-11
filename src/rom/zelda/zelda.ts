@@ -374,6 +374,17 @@ function loadLevel(z: Zelda, def: LevelDef, info: LevelInfo): Level {
   const subKeepBase = sh.keepObject ? objectBase(sh.keepObject) : null;
   for (const p of placed) if (p.draw) objectBase(p.draw.object);
   const stub = space.words([0xdf000000, 0]);
+  // Matrices for room G_MTX commands (16.16 fixed point): identity, and the draw config's segment 0xD per room.
+  const mtxWords = (m: number[]) => {
+    const fixed = m.map((v) => Math.round(v * 65536) | 0);
+    const w: number[] = [];
+    for (let i = 0; i < 16; i += 2) w.push(((((fixed[i] >> 16) & 0xffff) << 16) | ((fixed[i + 1] >> 16) & 0xffff)) >>> 0);
+    for (let i = 0; i < 16; i += 2) w.push((((fixed[i] & 0xffff) << 16) | (fixed[i + 1] & 0xffff)) >>> 0);
+    return w;
+  };
+  const IDENTITY_MTX = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
+  const identityMtx = space.words(mtxWords(IDENTITY_MTX));
+  const roomMatrix = rooms.map((r) => (r && cfg.roomMatrix ? space.words(mtxWords(cfg.roomMatrix(r.index))) : -1));
   const synth = { opa: new Map<number, number>(), xlu: new Map<number, number>() };
   for (const kind of ['opa', 'xlu'] as const) {
     for (const [s, v] of cfg[kind].segments) if (v.kind === 'dl') synth[kind].set(s, space.words(v.words));
@@ -418,6 +429,24 @@ function loadLevel(z: Zelda, def: LevelDef, info: LevelInfo): Level {
     return resolve;
   };
 
+  // G_MTX in room lists (placement matrices in the room file, Jabu-Jabu's segment 0xD scale, MM's segment 1 billboard
+  // and code's identity matrix at a RAM address); other addresses as for display lists.
+  const codeIdentity = (addr: number) => {
+    const o = addr - t.codeVram;
+    if (o < 0 || o + 64 > t.codeData.length) return false;
+    const dv = new DataView(t.codeData.buffer, t.codeData.byteOffset + o, 64);
+    return IDENTITY_MTX.every((v, i) => dv.getInt16(i * 2) + dv.getUint16(32 + i * 2) / 65536 === v);
+  };
+  const matrixResolver = (kind: 'opa' | 'xlu', room: number, seg6: [number, number] | null) => {
+    const base = resolver(kind, room, seg6, false);
+    return (addr: number): number => {
+      const seg = addr >>> 24;
+      if (seg === 0x0d) return kind === 'opa' && roomMatrix[room] >= 0 ? roomMatrix[room] : identityMtx; // no draw-config matrix: identity
+      if (seg === 0x01) return identityMtx; // MM's billboard matrix (camera facing): identity in a free-camera view
+      if (seg >= 0x80) return codeIdentity(addr) ? identityMtx : -1;
+      return base(addr);
+    };
+  };
   const textures: Texture[] = [];
   const textureKeys = new Map<string, number>();
   let listErrors = 0;
@@ -428,6 +457,7 @@ function loadLevel(z: Zelda, def: LevelDef, info: LevelInfo): Level {
       geometryMode: SETUP_GEOMETRY, renderMode: (kind === 'xlu' ? SETUP_RENDERMODE_XLU : SETUP_RENDERMODE) & ~7, alphaCompare: 0,
       combineMode: SETUP_COMBINE, otherModeH: SETUP_OTHERMODE_H, primColor: cfg[kind].prim ?? 0xffffffff, envColor: cfg[kind].env ?? 0x80808080,
       lighting, directImages: true, secondTexture: true, decals: true, combiner: true, textureGen: true, branchZ: 'near',
+      matrix: IDENTITY_MTX, resolveMatrix: matrixResolver(kind, room, seg6),
       ...extra,
     };
     try {
@@ -538,7 +568,8 @@ function loadLevel(z: Zelda, def: LevelDef, info: LevelInfo): Level {
           ? decodeJpeg(imageRoom.data, off)
           : { width: img.width, height: img.height, rgba: decodeRows(imageRoom.data, off, ImFmt.RGBA, ImSiz.B16, img.width, img.height, null, Tlut.None) };
         const texture = skyTextures.push({ width: pic.width, height: pic.height, rgba: pic.rgba, wrapS: 'clamp', wrapT: 'clamp', format: 'JPEG', source: `${imageRoom.name} ${hex(img.source)}` }) - 1;
-        backdrop = { texture, u0: 0, v0: 0, u1: 1, v1: 1 };
+        // The picture is the game's 320x240 view from the fixed camera: the viewer keeps its aspect.
+        backdrop = { texture, u0: 0, v0: 0, u1: 1, v1: 1, aspect: pic.width / pic.height };
         if (cam >= 0) fixedCamera = bgCamView(cam);
       }
     } catch {
