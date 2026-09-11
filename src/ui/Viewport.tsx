@@ -78,6 +78,8 @@ declare global {
 
 export function Viewport({ level, gameId, gameTitle, loadingName, error, children }: ViewportProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const viewportRef = useRef<HTMLElement>(null);
+  const [viewportSize, setViewportSize] = useState<{ width: number; height: number } | null>(null);
   const posRef = useRef<HTMLSpanElement>(null);
   const markerHostRef = useRef<HTMLDivElement>(null);
   const markerEntriesRef = useRef<MarkerEntry[]>([]);
@@ -114,6 +116,15 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
 
   const sideView = level?.sideView ?? null;
   const sideActive = !!sideView && flyLevel !== level;
+
+  // A prerendered picture from a fixed game camera (Backdrop.aspect) keeps its proportions: while it is shown, the 3D
+  // view (canvas and marker overlay) is a centred rectangle of that aspect. Picking, markers and the renderer all work
+  // from the canvas, so they follow the rectangle.
+  const lockedAspect = showBackdrop && level?.backdrop?.aspect && level.backdrop.aspect > 0 ? level.backdrop.aspect : null;
+  const viewRect = lockedAspect && viewportSize ? fitAspect(viewportSize.width, viewportSize.height, lockedAspect) : null;
+  const viewRectStyle = viewRect
+    ? { position: 'absolute' as const, left: viewRect.left, top: viewRect.top, width: viewRect.width, height: viewRect.height, right: 'auto', bottom: 'auto' }
+    : undefined;
 
   // Layer visibility: checkboxes from Level.layers; `visibleByDefault: false` layers start hidden.
   const defaultHiddenLayers = useMemo(
@@ -260,6 +271,11 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
     const observer = new ResizeObserver(resize);
     observer.observe(canvas);
     resize();
+    const host = viewportRef.current;
+    const hostObserver = new ResizeObserver(() => {
+      if (host) setViewportSize({ width: host.clientWidth, height: host.clientHeight });
+    });
+    if (host) hostObserver.observe(host);
 
     // Pointer position for hover effects (fading overlays).
     const pointer: PointerState = { x: 0, y: 0, inside: false, moved: false, locked: false };
@@ -331,6 +347,7 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
       window.removeEventListener('beforeunload', saveView);
       cancelAnimationFrame(raf);
       observer.disconnect();
+      hostObserver.disconnect();
       canvas.removeEventListener('webglcontextlost', onLost);
       canvas.removeEventListener('pointermove', onPointerMove);
       canvas.removeEventListener('pointerleave', onPointerLeave);
@@ -361,7 +378,9 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
       engine.camera.fovY = (sv.fovY * Math.PI) / 180;
       view = { position: [sv.start[0], sv.start[1], sv.distance], yaw: 0, pitch: 0, speed: Math.min(5000, Math.max(50, sv.distance)), groundY: 0 };
     } else {
-      engine.camera.fovY = FREE_FLY_FOV_Y;
+      // A prerendered picture only lines up through the game camera's own lens.
+      const gameFov = level.backdrop?.aspect && level.camera?.fovY && level.camera.fovY > 0 && level.camera.fovY < 179 ? level.camera.fovY : null;
+      engine.camera.fovY = gameFov ? (gameFov * Math.PI) / 180 : FREE_FLY_FOV_Y;
       const canvas = engine.renderer.gl.canvas as HTMLCanvasElement;
       view = computeStartView(level, canvas.width / Math.max(1, canvas.height), engine.camera.fovY);
     }
@@ -541,10 +560,11 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
   const layers = level?.layers ?? [];
 
   return (
-    <main className="viewport">
+    <main ref={viewportRef} className={`viewport${viewRect ? ' letterboxed' : ''}`}>
       <canvas
         ref={canvasRef}
         className={`gl-canvas${pickMode ? ` pick-${pickMode}` : ''}${sideActive ? ' side-view' : ''}`}
+        style={viewRectStyle}
         tabIndex={0}
         aria-label={
           sideActive
@@ -552,7 +572,7 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
             : 'Level view. Click to fly, Ctrl+click selects an object, Alt+click a face.'
         }
       />
-      <div ref={markerHostRef} className="marker-layer" aria-hidden="true" />
+      <div ref={markerHostRef} className="marker-layer" aria-hidden="true" style={viewRectStyle} />
 
       {loadingName && (
         <div className="overlay center" role="status">
@@ -723,6 +743,13 @@ const CULL_KEY = 'nviewer.backfaceCulling.v2';
 const SKY_KEY = 'nviewer.sky';
 const BACKDROP_KEY = 'nviewer.showBackdrop';
 const SKY_NONE = '__none__';
+
+/** The largest rectangle of this aspect (width / height) centred in a width x height box, in whole CSS pixels. */
+function fitAspect(width: number, height: number, aspect: number) {
+  const w = Math.max(1, Math.min(width, Math.round(height * aspect)));
+  const h = Math.max(1, Math.min(height, Math.round(w / aspect)));
+  return { left: Math.floor((width - w) / 2), top: Math.floor((height - h) / 2), width: w, height: h };
+}
 
 function sideLimits(sv: SideView, level: Level): SideViewLimits {
   const min: [number, number] = [sv.bounds.min[0], sv.bounds.min[1]];
