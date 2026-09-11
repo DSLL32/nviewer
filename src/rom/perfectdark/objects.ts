@@ -10,7 +10,7 @@ import {
   bodyEntry, bodyHasHead, type Box, headSpot, loadModel, meshOf, modelBatches, modelState, type PdModel, randomHead, restSlots,
 } from './models';
 import { parsePads, type Pad } from './pads';
-import { type Floor, placeChr, placeDoor, placeObject, placementCentre, standsOnFloor } from './place';
+import { type Floor, placeChr, placeDoor, placeEscalatorStep, placeObject, placementCentre, standsOnFloor } from './place';
 import type { PdRom } from './rom';
 import { OBJECT_TYPE_NAME, parseSetup, type SetupObject } from './setup';
 import type { PdTextures } from './texture';
@@ -34,7 +34,29 @@ const T_DOORSCALE = 0x02, T_WEAPON = 0x08, T_CHR = 0x09, T_MULTIAMMOCRATE = 0x14
 const T_PADEFFECT = 0x38, T_MINE = 0x3a;
 /** Objects that move at run time, shown where the setup puts them: lifts (at their first stop), hovercars and choppers (AI paths). */
 const T_LIFT = 0x30;
-const MOVING = new Set([T_LIFT, 0x37, 0x39]);
+const T_ESCASTEP = 0x3b;
+const MOVING = new Set([T_LIFT, 0x37, 0x39, T_ESCASTEP]);
+// Escalator steps: every step record of an escalator names the same pad; the setup handler (0x7F00FBBC) gives the steps
+// frames 0, 40, 80 … in record order (one counter per path) and the tick (0x7F078094) advances the frame and puts the step
+// at that frame of its path. Paths: {s32 frame; f32 x, y, z} until frame -1, the last frame is the loop length. Shown: the
+// steps at their start frames (verified: path positions = 80/80 live steps in the Air Base captures).
+const ESCALATOR_PATHS = [0x80069bd8, 0x80069c48]; // steps without / with flag 0x10000000
+const ESCASTEP_TURNED = 0x10000000;
+const ESCASTEP_SPACING = 40;
+
+/** The point of escalator path `path` at `frame`, or null. */
+function escalatorPoint(r: PdRom, path: number, frame: number): number[] | null {
+  const points: { frame: number; p: number[] }[] = [];
+  for (let a = ESCALATOR_PATHS[path]; points.length < 64 && r.s32(a) >= 0; a += 16) points.push({ frame: r.s32(a), p: [r.f32(a + 4), r.f32(a + 8), r.f32(a + 12)] });
+  const cycle = points.length >= 2 ? points[points.length - 1].frame : 0;
+  if (cycle <= 0) return null;
+  const f = frame % cycle;
+  for (let i = 0; i + 1 < points.length; i++) {
+    const a = points[i], b = points[i + 1];
+    if (f < b.frame) return a.p.map((v, k) => v + ((b.p[k] - v) * (f - a.frame)) / (b.frame - a.frame));
+  }
+  return null;
+}
 const EXCLUDED_ON_AGENT = 0x10; // flags2: the setup loop skips the record on Agent
 const FLAG_HELD = 0x4000; // held by the character whose number is in the pad field
 const FLAG_NOT_PLACED = 0x8000;
@@ -216,6 +238,7 @@ export function addObjects(r: PdRom, input: ObjectsInput): Objects {
   const objects = new Map(setup.objects.map((o) => [o.index, o]));
   const lifts: { record: number; instance: number }[] = [];
   const riders: { instance: number; centre: readonly number[] }[] = [];
+  const escalatorSteps = [0, 0]; // steps placed so far per escalator path
   let doorScale = 1;
   let lastSlot: MpWeapon | null = null;
   for (const rec of setup.records) {
@@ -292,6 +315,16 @@ export function addObjects(r: PdRom, input: ObjectsInput): Objects {
       if (snap) info.floor = snap.source;
       placed = placeObject(obj, type, pad, state.scale, extraScale / 256, m.box, snap?.floor);
     }
+    if (type === T_ESCASTEP) {
+      const path = flags & ESCASTEP_TURNED ? 1 : 0;
+      const frame = ESCASTEP_SPACING * escalatorSteps[path]++;
+      const at = escalatorPoint(r, path, frame);
+      if (at) {
+        placed = placeEscalatorStep(placed, path === 1, at);
+        delete info.floor;
+        Object.assign(info, { escalatorPath: hex(ESCALATOR_PATHS[path]), escalatorFrame: frame });
+      }
+    }
     const mesh = propMesh(m);
     if (mesh < 0) {
       marker('objects not shown', `${label} (nothing drawn)`, placed.position, info);
@@ -301,7 +334,7 @@ export function addObjects(r: PdRom, input: ObjectsInput): Objects {
     const layerName = type === T_SHIELD ? 'weapons' : layer;
     const instance = instances.push({ name: m.name, mesh, matrix: placed.matrix, ...(MOVING.has(type) ? { animated: true } : {}), info }) - 1;
     layerInstances.get(layerName)!.push(instance);
-    if (layerName === 'props' && m.box) addTop(rec.index, placed.matrix, m.box);
+    if (layerName === 'props' && m.box && type !== T_ESCASTEP) addTop(rec.index, placed.matrix, m.box);
     if (type === T_LIFT) lifts.push({ record: rec.index, instance });
     else if (type !== 0x01) riders.push({ instance, centre: placementCentre(pad) });
     stats.placed++;

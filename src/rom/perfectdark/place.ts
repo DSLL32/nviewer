@@ -146,6 +146,14 @@ export function placeDoor(pad: Pad, box: Box | null, doorScale: number): Placeme
   return placement(m, padCentre({ ...pad, bbox: bb }), Math.max(...f));
 }
 
+/**
+ * Escalator steps (setup 0x7F00FBBC): the generic placement's rotation × rotY(π), or rotY(3π/2) for steps with flag
+ * 0x10000000; the tick (0x7F078094) moves the step to its path position (verified: 80/80 steps in two Air Base captures).
+ */
+export function placeEscalatorStep(step: Placement, turned: boolean, position: readonly number[]): Placement {
+  return placement(mul4(step.matrix, rotY(turned ? THREE_HALF_PI : PI)), [...position], step.modelScale);
+}
+
 /** Characters: at (x, floor, z), turned to atan2(look.x, look.z), scaled 0.1 × the body scale. */
 export function placeChr(pad: Pad, floorY: number, scale: number): Placement {
   const m = rotY(Math.atan2(pad.look[0], pad.look[2]));
