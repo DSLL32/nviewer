@@ -26,6 +26,9 @@ const SHAPE_TABLE = 0xa5eb4; // 128 RAM pointers to u16[16] collision masks
 const FOV_Y = 40;
 const K = 120 / Math.tan((FOV_Y / 2) * (Math.PI / 180)); // eye distance from the main plane (329.7)
 const PLAYER_START = 0x4001;
+// Actors whose art the game assembles in code from pieces (pipes stacked from rim and body strips, the ring of
+// a 3D pipe): their unit data holds only the pieces, so they are shown as markers.
+const ASSEMBLED = new Set(['pipelift', 'pipeliftLR', 'pipelift3D', 'pipenear']);
 
 const US_TITLES = [
   'Treasure Hunt', 'Surprise!!', 'Rail Lift', 'Tower Climb', 'Bone Dragon Pit', "Blargg's Boiler", 'Jelly Pipe',
@@ -449,7 +452,7 @@ function loadLevel(y: YoshiRom, def: LevelDef): Level {
         yoshiMesh = cell ? meshes.push(cell) - 1 : null;
       }
       mesh = yoshiMesh;
-    } else if (cast) {
+    } else if (cast && !ASSEMBLED.has(name)) {
       mesh = sprite(a.id, cast.castdt);
     }
     if (mesh !== null) {
