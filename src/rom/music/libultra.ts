@@ -385,6 +385,9 @@ export interface RenderOptions {
   extra?: number; // samples rendered past the loop end (for verifying the loop seam)
   // Factor applied to every voice's pitch ratio; default bank sample rate / output rate.
   pitchScale?: number;
+  // The envelope mixer takes the square of the voice volume (libultra's mixer, the default); false takes it linearly
+  // (n_audio, as in Perfect Dark).
+  squareVolume?: boolean;
 }
 
 export function renderSequence(bytes: Uint8Array, bank: Bank, seq: Sequence, opts: RenderOptions) {
@@ -407,6 +410,7 @@ export function renderSequence(bytes: Uint8Array, bank: Bank, seq: Sequence, opt
   const right = new Float32Array(limit + extra);
   const eqpower = bank.eqpower;
   const pitchScale = opts.pitchScale ?? bank.sampleRate / rate;
+  const squareVolume = opts.squareVolume ?? true;
 
   // __initFromBank: every channel gets the first instrument, channel 9 the percussion
   // instrument.
@@ -457,7 +461,7 @@ export function renderSequence(bytes: Uint8Array, bank: Bank, seq: Sequence, opt
     v.tr = (v.vol * eqpower[127 - v.pan]) >> 15;
   };
   const setVolume = (v: Voice, vol: number, n: number) => {
-    v.vol = (vol * vol) >> 15;
+    v.vol = squareVolume ? (vol * vol) >> 15 : vol;
     setTargets(v);
     beginRamp(v, n);
   };
