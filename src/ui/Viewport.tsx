@@ -8,6 +8,7 @@ import { CUTAWAY_EPSILON, LevelRenderer } from '../render/renderer';
 import { computeStartView, type StartView } from '../render/startView';
 import { SelectionPanel } from './SelectionPanel';
 import { describeSelection, type Selection } from './selectionInfo';
+import { loadViewState, saveViewState, viewStateKey, type ViewState } from './viewState';
 
 const OBJECT_HIGHLIGHT: [number, number, number] = [1, 0.2, 0.95]; // magenta
 const FACE_HIGHLIGHT: [number, number, number] = [1, 0.9, 0.1]; // yellow
@@ -22,6 +23,7 @@ const LABEL_CELL_W = 40; // label de-cluttering grid, CSS px
 const LABEL_CELL_H = 14;
 const FADED_OPACITY = 0; // fadeOnHover layers under the pointer vanish completely, as in the game
 const FADE_SECONDS = 0.15;
+const VIEW_SAVE_MS = 400; // at most this often while the view changes
 
 interface ViewportProps {
   level: Level | null;
@@ -102,6 +104,13 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
   const pickRef = useRef<(mode: PickMode, clientX: number, clientY: number) => void>(() => {});
   const pixelArtRef = useRef(false);
   const fadeRef = useRef<FadeState | null>(null);
+  // The view (camera, speed, side view or free fly) is saved per tab (viewState.ts) so a reload or hot update returns to
+  // it: it is restored only for the first level an engine shows, and only if the saved view belongs to that level.
+  // A later level switch or a different ROM starts from the level's start view as before.
+  const viewKeyRef = useRef<string | null>(null); // key of the shown level once its view is applied (null: don't save)
+  const viewPersistRef = useRef({ stale: false, last: 0 });
+  const levelSeenRef = useRef(false); // the current engine has shown a level
+  const restoredViewRef = useRef<{ level: Level; state: ViewState } | null>(null);
 
   const sideView = level?.sideView ?? null;
   const sideActive = !!sideView && flyLevel !== level;
@@ -196,6 +205,7 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
 
   const toggleView = () => {
     if (!level?.sideView) return;
+    restoredViewRef.current = null;
     setFlyLevel(sideActive ? level : null);
   };
 
@@ -206,6 +216,7 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
     else if (a === 'toggle-view') toggleView();
     else if (a === 'toggle-cutaway') setCutaway((v) => !v);
     else if (a === 'reset' && engine && startViewRef.current) {
+      restoredViewRef.current = null;
       applyView(engine, startViewRef.current.view);
       if (sideActive && sideView && level) engine.controls.setSideView(sideLimits(sideView, level));
     }
@@ -221,8 +232,12 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
       return;
     }
     const camera = new FlyCamera();
+    levelSeenRef.current = false;
     const controls = new FlyControls(canvas, camera, {
-      onSpeedChange: setSpeed,
+      onSpeedChange: (s) => {
+        setSpeed(s);
+        viewPersistRef.current.stale = true;
+      },
       onLockChange: setLocked,
       onAction: (a) => actionRef.current(a),
       onPickModeChange: setPickMode,
@@ -262,6 +277,15 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
     canvas.addEventListener('pointermove', onPointerMove);
     canvas.addEventListener('pointerleave', onPointerLeave);
 
+    const saveView = () => {
+      const key = viewKeyRef.current;
+      if (!key) return;
+      viewPersistRef.current.stale = false;
+      saveViewState({ key, position: [...camera.position], yaw: camera.yaw, pitch: camera.pitch, speed: camera.speed, sideView: controls.sideView });
+    };
+    window.addEventListener('pagehide', saveView);
+    window.addEventListener('beforeunload', saveView);
+
     let raf = 0;
     let last = performance.now();
     let lastReadout = 0;
@@ -277,6 +301,12 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
         renderer.render(camera);
         layoutMarkers(markerEntriesRef.current, camera, canvas, markerMatrix);
         readoutStale = true;
+      }
+      const persist = viewPersistRef.current;
+      if (moved) persist.stale = true;
+      if (persist.stale && t - persist.last > VIEW_SAVE_MS) {
+        persist.last = t;
+        saveView();
       }
       // Throttled, but always catches up once the camera stops.
       if (readoutStale && posRef.current && t - lastReadout > 100) {
@@ -295,6 +325,10 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
     canvas.addEventListener('webglcontextlost', onLost);
 
     return () => {
+      // Unmount or hot update: keep the view for the next engine.
+      saveView();
+      window.removeEventListener('pagehide', saveView);
+      window.removeEventListener('beforeunload', saveView);
       cancelAnimationFrame(raf);
       observer.disconnect();
       canvas.removeEventListener('webglcontextlost', onLost);
@@ -311,6 +345,8 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
     const engine = engineRef.current;
     if (!engine) return;
     engine.renderer.setLevel(level);
+    viewKeyRef.current = null;
+    restoredViewRef.current = null;
     if (!level) return;
     // Far plane from the level size (the logarithmic depth buffer keeps precision across the whole range).
     const { min, max } = level.bounds;
@@ -332,6 +368,17 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
     startViewRef.current = { level, view };
     engine.renderer.setSkyGroundHeight(view.groundY);
     applyView(engine, view);
+    // After a reload or hot update: the saved view, if it belongs to this level.
+    const key = viewStateKey(gameId, gameTitle, level);
+    const saved = levelSeenRef.current ? null : loadViewState(key);
+    levelSeenRef.current = true;
+    if (saved) {
+      placeView(engine, saved);
+      restoredViewRef.current = { level, state: saved };
+      if (sv) setFlyLevel(saved.sideView ? null : level);
+    }
+    viewKeyRef.current = key;
+    viewPersistRef.current.stale = true;
   }, [level]);
 
   // Side view on or off; free fly starts from wherever the side-view eye is.
@@ -339,12 +386,19 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
     const engine = engineRef.current;
     if (!engine) return;
     const sv = level?.sideView;
+    // A restored view is placed again once its mode is active: entering the side view levels and clamps the camera,
+    // and leaving it resets the speed.
+    const restored = restoredViewRef.current?.level === level ? restoredViewRef.current.state : null;
+    const restoreNow = restored !== null && restored.sideView === sideActive;
+    if (restoreNow) placeView(engine, restored);
     if (sv && level && sideActive) {
       engine.controls.setSideView(sideLimits(sv, level));
     } else {
       engine.controls.setSideView(null);
       if (sv) engine.controls.setSpeed(Math.min(5000, Math.max(50, engine.camera.position[2])));
     }
+    if (restoreNow) engine.controls.setSpeed(restored.speed);
+    viewPersistRef.current.stale = true;
   }, [level, sideActive]);
 
   // Pixel-art levels default to nearest filtering (F still toggles); leaving them restores linear filtering.
@@ -809,6 +863,17 @@ function readFogSetting(): boolean {
   } catch {
     return false;
   }
+}
+
+/** Put the camera where a saved view was (position, look direction, speed). */
+function placeView(engine: Engine, view: ViewState) {
+  const cam = engine.camera;
+  cam.position = [...view.position];
+  cam.yaw = 0;
+  cam.pitch = 0;
+  cam.rotate(view.yaw, view.pitch);
+  engine.controls.setSpeed(view.speed);
+  engine.controls.invalidate();
 }
 
 function applyView(engine: Engine, view: StartView) {
