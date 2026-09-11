@@ -322,6 +322,9 @@ Textures are uploaded with the RDP tile commands, not read in place.
 - **Objects.** Setup records place props, doors, glass, weapons, vehicles and characters (difficulty Agent), snapped
   to the floor or the prop below as the game does and checked against RAM; characters stand in the first frame of
   their stand animation with heads attached.
+- **Layers.** One layer per room (grouped), rooms never visible from play hidden, and the collision tiles as a
+  hidden overlay coloured by what each tile does; coplanar double-modelled surfaces are resolved so they don't
+  z-fight.
 - **Music.** 119 sequences for libultra's n_audio player with linear voice volume; every track loops on its own
   (`music/cseq.ts`, shared with GoldenEye).
 

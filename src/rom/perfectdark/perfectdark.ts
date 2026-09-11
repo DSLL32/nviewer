@@ -6,12 +6,14 @@
 import { buildLevel } from '../bomberman/common';
 import type { CameraView, Game, Instance, Level, LevelInfo, LevelLayer, Mesh, Sky } from '../types';
 import { buildRooms, isStubBg, parseBg, type PdBg, type RoomMesh } from './bg';
+import { resolveCoplanar } from './coplanar';
 import { findEnvironment, levelEnvironment } from './environment';
 import { perfectDarkMusic } from './music';
 import { addObjects } from './objects';
 import { parsePads, readSpawnPads } from './pads';
 import { PdRom, type StageRecord } from './rom';
 import { PdTextures } from './texture';
+import { collisionMesh, parseTiles } from './tiles';
 import { PdVisibility, type PlayVisibility } from './visibility';
 
 // A standing player's eye is 159 units above the floor; spawn pads sit 47 above it (verified in the Defection capture).
@@ -149,8 +151,9 @@ function loadLevel(r: PdRom, def: StageDef): Level {
   // Rooms the game's portals and visibility script can never show from where the player can be (visibility.ts) go to a
   // hidden layer: scenery such as Defection's city towers, which the viewer would otherwise draw.
   const seen = playVisibility(r, def, bg);
-  const roomLayer: LevelLayer = { name: 'rooms', kind: 'main', instances: [] };
-  const hiddenLayer: LevelLayer = { name: 'rooms never visible from play', kind: 'background', instances: [], visibleByDefault: false };
+  // One layer per room, grouped, like Zelda's scenes; the hidden ones share a layer in the same group.
+  const roomLayers: LevelLayer[] = [];
+  const hiddenLayer: LevelLayer = { name: 'rooms never visible from play', kind: 'background', instances: [], visibleByDefault: false, group: 'rooms' };
   for (const g of rooms) {
     const mesh = meshes.push(g.mesh) - 1;
     if (g.sky) {
@@ -159,9 +162,11 @@ function loadLevel(r: PdRom, def: StageDef): Level {
     }
     const hidden = seen !== null && !seen.visible.has(g.room.index);
     const info = { room: g.room.index, bg: bgName, ...(hidden ? { visibility: 'no portal path or script shows this room from the playable area' } : {}) };
-    (hidden ? hiddenLayer : roomLayer).instances.push(instances.push({ name: g.mesh.name, mesh, matrix: translation(g.center), info }) - 1);
+    const instance = instances.push({ name: g.mesh.name, mesh, matrix: translation(g.center), info }) - 1;
+    if (hidden) hiddenLayer.instances.push(instance);
+    else roomLayers.push({ name: `room ${g.room.index}`, kind: 'main', instances: [instance], group: 'rooms' });
   }
-  layers.push(roomLayer);
+  layers.push(...roomLayers);
 
   // ---- objects ----
   // Setup props, doors, glass, weapons, vehicles and characters, and marker layers (§5, §7.4 step 3; objects.ts).
@@ -177,9 +182,22 @@ function loadLevel(r: PdRom, def: StageDef): Level {
   // ---- start camera ----
   const camera = spawnCamera(r, def, rooms);
 
-  return buildLevel(def.info, `${def.code}-${stage.id.toString(16)}`, textures.textures, meshes, instances, {
+  const level = buildLevel(def.info, `${def.code}-${stage.id.toString(16)}`, textures.textures, meshes, instances, {
     layers, ...(objects?.markers.length ? { markers: objects.markers } : {}), ...(skies.length ? { skies } : {}), ...environment, ...(camera ? { camera } : {}),
   });
+
+  // ---- coplanar room surfaces the viewer would z-fight (coplanar.ts), in the level's meshes; last, so object placement,
+  // cameras and bounds use the file's geometry ----
+  resolveCoplanar(rooms);
+
+  // ---- collision overlay (hidden): the tiles file's polygons; appended last, outside the level bounds ----
+  const collision = r.hasFile(stage.tiles) ? collisionMesh(parseTiles(r.file(stage.tiles)), r.names[stage.tiles]) : null;
+  if (collision) {
+    const mesh = level.meshes.push(collision) - 1;
+    const instance = level.instances.push({ name: 'collision', mesh, matrix: translation([0, 0, 0]), info: { tilesFile: r.names[stage.tiles] } }) - 1;
+    level.layers = [...(level.layers ?? []), { name: 'collision', kind: 'collision', instances: [instance], visibleByDefault: false }];
+  }
+  return level;
 }
 
 export function openPerfectDark(rom: Uint8Array): Game {

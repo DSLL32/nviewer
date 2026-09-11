@@ -18,6 +18,7 @@
 // 90 IF, 92 ENDIF, 30 result true, 31 result if portal in view (portal argument), 32 show room if result (room argument),
 // 36/37 disable room / room range; arguments follow as entries of type 100 (portal) and 101 (room).
 import type { PdBg } from './bg';
+import { parseTiles } from './tiles';
 
 type Vec3 = [number, number, number];
 
@@ -42,42 +43,28 @@ interface FloorTile {
   max: [number, number];
 }
 
-/** The floor tiles of a collision file (§4.8: u32 room count; u32 offsets; per room records). */
+/** The floor tiles of a collision file (§4.8; tiles.ts), with their planes. */
 export function floorTiles(buf: Uint8Array): FloorTile[] {
-  const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const out: FloorTile[] = [];
-  if (buf.length < 8) return out;
-  const numRooms = dv.getUint32(0);
-  for (let room = 0; room < numRooms && 8 + room * 4 <= buf.length; room++) {
-    const end = Math.min(buf.length, dv.getUint32(8 + room * 4));
-    for (let o = dv.getUint32(4 + room * 4); o + 4 <= end;) {
-      const type = buf[o], n = buf[o + 1], flags = dv.getUint16(o + 2);
-      const size = type === 0 ? 14 + 6 * n : type === 1 ? 16 + 12 * n : type === 2 ? 12 + 8 * n : type === 3 ? 24 : 0;
-      if (!size || o + size > end) break;
-      if (type <= 1 && flags & 3 && n >= 3) {
-        const v: Vec3[] = [];
-        for (let i = 0; i < n; i++) {
-          v.push(type === 0 ? [dv.getInt16(o + 14 + i * 6), dv.getInt16(o + 16 + i * 6), dv.getInt16(o + 18 + i * 6)] : [dv.getFloat32(o + 16 + i * 12), dv.getFloat32(o + 20 + i * 12), dv.getFloat32(o + 24 + i * 12)]);
-        }
-        // plane through the polygon (Newell normal)
-        let nx = 0, ny = 0, nz = 0, cx = 0, cy = 0, cz = 0;
-        for (let i = 0; i < n; i++) {
-          const p = v[i], q = v[(i + 1) % n];
-          nx += (p[1] - q[1]) * (p[2] + q[2]);
-          ny += (p[2] - q[2]) * (p[0] + q[0]);
-          nz += (p[0] - q[0]) * (p[1] + q[1]);
-          cx += p[0]; cy += p[1]; cz += p[2];
-        }
-        cx /= n; cy /= n; cz /= n;
-        if (Math.abs(ny) > 1e-6 * Math.hypot(nx, ny, nz)) {
-          const a = -nx / ny, b = -nz / ny;
-          out.push({
-            index: out.length, room, v, a, b, c: cy - a * cx - b * cz,
-            min: [Math.min(...v.map((p) => p[0])), Math.min(...v.map((p) => p[2]))], max: [Math.max(...v.map((p) => p[0])), Math.max(...v.map((p) => p[2]))],
-          });
-        }
-      }
-      o += size;
+  for (const tile of parseTiles(buf)) {
+    const v = tile.vertices, n = v.length;
+    if (!(tile.flags & 3) || n < 3) continue;
+    // plane through the polygon (Newell normal)
+    let nx = 0, ny = 0, nz = 0, cx = 0, cy = 0, cz = 0;
+    for (let i = 0; i < n; i++) {
+      const p = v[i], q = v[(i + 1) % n];
+      nx += (p[1] - q[1]) * (p[2] + q[2]);
+      ny += (p[2] - q[2]) * (p[0] + q[0]);
+      nz += (p[0] - q[0]) * (p[1] + q[1]);
+      cx += p[0]; cy += p[1]; cz += p[2];
+    }
+    cx /= n; cy /= n; cz /= n;
+    if (Math.abs(ny) > 1e-6 * Math.hypot(nx, ny, nz)) {
+      const a = -nx / ny, b = -nz / ny;
+      out.push({
+        index: out.length, room: tile.room, v, a, b, c: cy - a * cx - b * cz,
+        min: [Math.min(...v.map((p) => p[0])), Math.min(...v.map((p) => p[2]))], max: [Math.max(...v.map((p) => p[0])), Math.max(...v.map((p) => p[2]))],
+      });
     }
   }
   return out;

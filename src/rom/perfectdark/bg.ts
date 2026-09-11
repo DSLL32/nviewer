@@ -155,6 +155,7 @@ export interface RoomBatches {
   room: PdBgRoom;
   batches: Batch[];
   leaves: number;
+  leafOffsets: number[]; // each leaf's display list in the inflated stream, in draw order (opaque list, then translucent)
   triangles: number;
   stats: PdDlStats;
 }
@@ -174,7 +175,7 @@ export function roomBatches(bg: PdBg, index: number, textures: PdTextures, opts:
     };
     runPdDisplayList({ buf: data, resolve, textures, keyPrefix: `room ${index} `, envAlpha: opts.envAlpha, offset: opts.offset, stats }, leaf.gdl, out);
   }
-  return { room, batches: out.batches(), leaves: leaves.length, triangles: stats.triangles, stats };
+  return { room, batches: out.batches(), leaves: leaves.length, leafOffsets: leaves.map((leaf) => leaf.gdl - room.ptr), triangles: stats.triangles, stats };
 }
 
 export interface RoomMesh {
@@ -185,6 +186,7 @@ export interface RoomMesh {
   center: Vec3;
   sky: boolean;
   triangles: number;
+  leafOffsets: number[]; // RoomBatches.leafOffsets: the draw order of triSource offsets
 }
 
 /** Every room with geometry as a mesh; `bgName` selects the sky rooms (SKY_ROOMS). */
@@ -208,7 +210,7 @@ export function buildRooms(bg: PdBg, bgName: string, textures: PdTextures, opts:
       triSource: `offset in the inflated room stream (linked at ${hex(room.ptr)})`,
       ...(sky ? { sky: 'sky room: drawn first around the camera, without depth or fog' } : {}),
     };
-    out.push({ room, mesh: { name: sky ? `sky room ${room.index}` : `room ${room.index}`, radius, batches: r.batches, info }, center, sky, triangles: r.triangles });
+    out.push({ room, mesh: { name: sky ? `sky room ${room.index}` : `room ${room.index}`, radius, batches: r.batches, info }, center, sky, triangles: r.triangles, leafOffsets: r.leafOffsets });
   }
   return out;
 }

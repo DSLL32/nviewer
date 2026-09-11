@@ -611,12 +611,36 @@ approach for the combiner fold).
 
 ### 4.8 Tiles (collision) and pads (verified: all 60 tiles files parse exactly)
 
-- **Tiles** (`bg_<code>_tilesZ`): `u32 numRooms; u32 offset[numRooms + 1]`, then per room records `{u8 type;
-  u8 numVertices; u16 flags; u16 floorType; u8 xmin, ymin, zmin, xmax, ymax, zmax (vertex indices); u16 floorColour;
-  numVertices × s16 xyz}` (14 + 6n bytes, absolute world units). Only type 0 occurs in retail. Flags (names from the
-  lead): 0x1/0x2 floor, 0x4 wall, 0x8 blocks sight, 0x10 blocks shots, 0x20 lift floor, 0x40 ladder, 0x100 slope,
-  0x200 underwater, 0x2000 step, 0x4000 death. Suitable as an optional collision layer
-  (`bg/renders/ame_tiles_over_bg.png`).
+- **Tiles** (`bg_<code>_tilesZ`, 1173-compressed): `u32 roomCount` (BG rooms + 1), `u32 offset[roomCount + 1]`
+  (file-relative; room r's records span `offset[r]..offset[r+1]`), then per room records `{u8 type; u8 numVertices;
+  u16 flags}`:
+  - type 0: `u16 floorType; u8 xmin, ymin, zmin, xmax, ymax, zmax; u16 floorColour; numVertices × s16 x, y, z` (14 + 6n
+    bytes, absolute world units). Types 1 (f32 vertices, +16), 2 (block) and 3 (cylinder) exist in the loader (lead)
+    but never in retail.
+  - **Survey of the 50 distinct non-empty files** (verified, `../impl/pd_col/explore.ts`):
+    - 119,842 tiles, all type 0: 77,104 quads, 42,267 triangles, a few 5–12-gons (convex polygons).
+    - The six index bytes name the vertex with the minimum / maximum x, y, z: true for every tile.
+    - Every tile lies inside its BG room's section-3 box, so the record's room is the BG room number.
+  - **Flags** (names from the lead; bits counted over all tiles):
+    - Combinations: 0x1C (83,385: 0x4 wall | 0x8 blocks sight | 0x10 blocks shots) and 0x1B (30,297: floor 0x1 | 0x2
+      | 0x8 | 0x10).
+    - Other bits: 0x2000 step (2,436), 0x100 slope (195, with 0x80 and wall), 0x40 ladder (127), 0x800 (67) and 0x1000 (4)
+      on floors (lead: AI crouch/duck), 0x4000 death (62), 0x200 underwater (38), 0x8000 player-only ladder (37).
+      0x20 (lift floor) never occurs.
+    - Floor and wall bits against the polygon normal (verified): floor-flagged tiles face up (31,348) or sideways
+      (1,722, ramps); wall-flagged ones are vertical (73,461) but also face up (6,867, unwalkable tops) or down (4,588,
+      ceilings). So "wall" means any surface that isn't walkable.
+  - **floorType**: 0–8 on floors and walls alike. Meaning hypothesis: surface material (footsteps, impacts).
+  - **floorColour**: 12-bit `0x0RGB`. It follows the baked vertex colours of the room floor under the tile (verified):
+    - brightness correlation 0.82–0.99 (Defection 0.82, Villa 0.95, Pelagic II 0.98, Air Base 0.92, Chicago 0.88, MP
+      Skedar 0.99);
+    - mean per-channel difference between colour × 17 and the vertex colour 8–24/255 (`../impl/pd_col/floorcolour.ts`).
+    - Its run-time use (shading characters standing on it) is a hypothesis (object struct field `floorcol`).
+  - **Viewer:** a hidden `collision` layer (`tiles.ts`). Tiles are translucent polygons drawn as decals:
+    - floor green, step floor yellow-green, wall orange, ceiling purple, unwalkable top yellow;
+    - sight/shot blocker grey-blue, ladder cyan, underwater blue, death red;
+    - darker for higher floor types.
+    - Overlay renders: `../impl/pd_col/renders/*_overlay.png`.
 - **Pads**: §5.
 
 ### 4.9 How the game draws a frame, environment, fog and sky (verified: 13 RDRAM captures with frame display lists, disassembly)
@@ -841,6 +865,13 @@ is unused and the last room entry is an end marker; (3) vertex colours are index
 (6) compare texture texels, not raw pool bytes (padding the game never writes); (7) some rooms are skies with their own
 projection; (8) the dataDyne Central overview looks exploded because its rooms really are spread out (tower floors,
 city backdrop boxes).
+(9) coplanar overlapping room triangles (verified by a scan of all 31 BGs, `../impl/pd_zf/scan.ts`):
+- The data has 2,627 triangles that can z-fight when BG is drawn double-sided: 1,276 surfaces modelled from both sides
+  (opposite-facing, usually in two rooms, with `G_CULL_BACK`), 899 same-side overlaps within a room, 309 across rooms, and
+  211 translucent triangles lying on solid ones.
+- The game hides them through back-face culling and draw order (the later draw passes the RDP depth test).
+- The viewer's `coplanar.ts` applies the same rules: a 1-unit nudge towards the front, decals for later draws, and hidden
+  triangles dropped. 311 remain, 291 of them same-side overlaps between rooms (portal order), 270 of which share a texture.
 
 ## 5. Objects and props
 
