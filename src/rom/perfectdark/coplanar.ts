@@ -11,7 +11,7 @@
 //     partly over earlier ones moves NUDGE towards its front.
 //   - Between different rooms the order and clipping follow the portal walk: given a DrawOrder (visibility.ts), the room
 //     that shows the surface from where the player sees it keeps it and the other room's copy moves NUDGE behind (so the
-//     winner's decals stay on it); overlaps with no clear answer are left.
+//     winner's decals stay on it); with no clear answer the lower room number keeps it.
 import { mergeBatches } from '../bomberman/common';
 import type { Batch } from '../types';
 import type { RoomMesh } from './bg';
@@ -183,21 +183,33 @@ export function resolveCoplanar(rooms: RoomMesh[], drawOrder?: DrawOrder): { mov
   const c = new Coplanar(rooms);
   const flags = new Map<Tri, number>();
   const set = (t: Tri, f: number) => flags.set(t, (flags.get(t) ?? 0) | f);
+  const decisions = new Map<string, number>();
+  const behindBy = new Map<Tri, number>();
   for (const a of c.tris) {
     const near = c.near(a);
     if (!near.length) continue;
     if (drawOrder && a.solid) {
+      // One decision per room couple and plane, shared by both copies: the vote at a point between the two first overlapping
+      // triangles; with no clear vote (nobody sees one copy over the other, e.g. surfaces only seen from outside the level)
+      // the lower room number keeps the surface, so the result is at least stable. A copy beaten by k rooms moves k × NUDGE
+      // behind, so three or more copies don't fight each other either.
       const roomA = rooms[a.room].room.index;
+      const beaten = new Set<number>();
       for (const b of near) {
         if (!b.solid || b.room === a.room || dot(a, b) <= 0 || coverage(a, [b]) === 0) continue;
         const roomB = rooms[b.room].room.index;
-        // decided at the triangle's centre: which copy shows depends on where the rooms' clip boxes fall
-        const centre = [0, 1, 2].map((k) => (a.p[k] + a.p[3 + k] + a.p[6 + k]) / 3);
-        const winner = drawOrder(roomA, roomB, centre, a.n);
-        if (winner === roomB) {
-          set(a, BEHIND);
-          break;
+        if (beaten.has(roomB)) continue;
+        const key = `${Math.min(roomA, roomB)}/${Math.max(roomA, roomB)}/${a.nk}/${roomA < roomB ? a.dk : b.dk}`;
+        let winner = decisions.get(key);
+        if (winner === undefined) {
+          const point = [0, 1, 2].map((k) => (a.p[k] + a.p[3 + k] + a.p[6 + k] + b.p[k] + b.p[3 + k] + b.p[6 + k]) / 6);
+          decisions.set(key, (winner = drawOrder(roomA, roomB, point, a.n) ?? Math.min(roomA, roomB)));
         }
+        if (winner === roomB) beaten.add(roomB);
+      }
+      if (beaten.size) {
+        set(a, BEHIND);
+        behindBy.set(a, beaten.size);
       }
     }
     const opposite = near.filter((b) => b.solid && dot(a, b) < 0);
@@ -227,7 +239,7 @@ export function resolveCoplanar(rooms: RoomMesh[], drawOrder?: DrawOrder): { mov
       }
       if (f & BEHIND) {
         counts.behind++;
-        for (let k = 0; k < 9; k++) a.b.positions[a.t * 9 + k] -= a.n[k % 3] * NUDGE;
+        for (let k = 0; k < 9; k++) a.b.positions[a.t * 9 + k] -= a.n[k % 3] * NUDGE * (behindBy.get(a) ?? 1);
       }
       if (f & DECAL) counts.decals++;
     }

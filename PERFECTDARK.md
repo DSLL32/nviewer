@@ -878,10 +878,12 @@ city backdrop boxes).
   one (drawn later) gets the vote.
   - Chicago rooms 73/77: from the stairs landing, room 73's copy (vertex colours black at two corners) is drawn later but
     clipped away, so room 77's lit grate shows. Viewer bug report 0001: ignoring the clipping had made the black copy win.
+- With no clear vote (e.g. a surface nobody sees from play, like Air Base's roof parapet in viewer bug report 0002) the
+  data gives no order: the viewer keeps the lower room number's copy. A copy beaten by k rooms moves k units behind, so
+  three or more copies of one surface don't fight either.
 - The viewer's `coplanar.ts` applies these rules: a 1-unit nudge towards the front, decals for later draws, hidden
-  triangles dropped, and the losing cross-room copy moved behind.
-- 289 triangles remain: 269 cross-room overlaps without a clear answer (neither copy inside a clip box, equal depth, or
-  no eye sees both rooms; 245 of them with the same texture), 11 same-room and 9 other.
+  triangles dropped, and losing cross-room copies moved behind.
+- 25 triangles remain: 6 opposite-facing, 11 same-room, 5 cross-room and 3 translucent.
 
 ## 5. Objects and props
 
