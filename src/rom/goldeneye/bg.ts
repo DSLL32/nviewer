@@ -397,6 +397,85 @@ export function buildRooms(bg: BgFile, textures: GeTextures, scale: number): Roo
   return rooms.map(toGeometry);
 }
 
+// ---- room visibility (§3.2) ----
+// Visibility commands: 8-byte records {u8 op; u8 words; u16; u32 param} walked to op 0; a command's arguments are the
+// `words - 1` records after it (65 = a value, a room number; 64 = a portal, by polygon pointer). Only Dam has any. The
+// grammar is inferred from Dam's 388 commands and its captured frame, not from the game's interpreter:
+//   14 a b      camera in rooms a..b          04          or (joins the conditions before it)
+//   5A … 5C     a block holding a gate         1E / 1F p   always / when portal p is on screen
+//   20 r        draw room r                   21          starts a group: its blocks share the room list after them
+//   24 r, 26 r, 25 a b, 27 a b                name rooms and ranges for cameras in rooms 121-123 (meaning unknown;
+//                                              treated as drawing them)
+
+export interface VisibilityRule {
+  cameraRooms: [number, number][]; // inclusive ranges; any of them enables the rule
+  rooms: number[]; // rooms the rule draws
+}
+
+export function parseVisibility(bg: BgFile): VisibilityRule[] {
+  const { data } = bg;
+  const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const rules: VisibilityRule[] = [];
+  let cameraRooms: [number, number][] = [], rooms: number[] = [], drew = false;
+  const flush = () => {
+    if (rooms.length) rules.push({ cameraRooms, rooms });
+    cameraRooms = [];
+    rooms = [];
+    drew = false;
+  };
+  for (let o = bg.visibility; bg.visibility && o + 8 <= data.length; ) {
+    const op = data[o], words = Math.max(1, data[o + 1]);
+    if (op === 0) break;
+    const arg = (k: number) => (o + 8 * k + 8 <= data.length ? dv.getUint32(o + 8 * k + 4) : 0);
+    switch (op) {
+      case 0x21: flush(); break;
+      case 0x14:
+        if (drew) flush();
+        cameraRooms.push([arg(1), arg(2)]);
+        break;
+      case 0x20: case 0x24: case 0x26: rooms.push(arg(1)); drew = true; break;
+      case 0x25: case 0x27:
+        for (let r = arg(1); r <= arg(2) && r < 256; r++) rooms.push(r);
+        drew = true;
+        break;
+    }
+    o += 8 * words;
+  }
+  flush();
+  return rules;
+}
+
+/**
+ * Rooms the game can draw while the camera is in one of `from`: rooms reached through the portals, rooms the visibility
+ * commands draw for those camera rooms (portal gates taken as open), and, in BGs without commands, every room without
+ * portals, or every room when the camera is in one (captured frames: Aztec draws its portal-less rooms 3-4 from room 2;
+ * Frigate draws portal rooms from its portal-less deck room 57; Dam, which has commands, draws none of its portal-less
+ * backdrop rooms from room 135 though room 5 is on screen).
+ */
+export function roomsVisibleFrom(bg: BgFile, from: Set<number>): Set<number> {
+  const adj = new Map<number, number[]>();
+  for (const p of bg.portals) {
+    for (const [a, b] of [[p.roomA, p.roomB], [p.roomB, p.roomA]]) {
+      const list = adj.get(a);
+      if (list) list.push(b);
+      else adj.set(a, [b]);
+    }
+  }
+  const out = new Set(from);
+  const queue = [...from];
+  while (queue.length) for (const next of adj.get(queue.shift()!) ?? []) if (!out.has(next)) out.add(next), queue.push(next);
+  const rules = parseVisibility(bg);
+  for (const rule of rules) {
+    if (rule.cameraRooms.some(([a, b]) => [...from].some((r) => r >= a && r <= b))) for (const r of rule.rooms) out.add(r);
+  }
+  if (!rules.length) {
+    const portalLess = bg.rooms.filter((room) => room.index > 0 && room.vertices && !adj.has(room.index)).map((room) => room.index);
+    const everything = portalLess.some((r) => from.has(r));
+    for (const room of bg.rooms) if (room.index > 0 && room.vertices && (everything || portalLess.includes(room.index))) out.add(room.index);
+  }
+  return out;
+}
+
 /** One room on its own (coplanar overlaps resolved within the room only; buildRooms resolves them across rooms). */
 export function buildRoom(bg: BgFile, index: number, textures: GeTextures, scale: number): RoomGeometry {
   const room = roomBatches(bg, index, textures, scale);

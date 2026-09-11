@@ -5,7 +5,7 @@
 import { buildLevel } from '../bomberman/common';
 import type { CameraView, DebugInfo, Game, Instance, Level, LevelInfo, LevelLayer, Marker, Mesh } from '../types';
 import { view } from '../util';
-import { type BgFile, buildRooms, parseBg } from './bg';
+import { type BgFile, buildRooms, parseBg, roomsVisibleFrom } from './bg';
 import { findEnvironment, levelEnvironment } from './environment';
 import {
   characterBatches, chrRef, hasHeadSpot, isHead, loadModel, type ModelFile, modelBatches, modelMesh, propRef, randomHead, slotsOffset, walkModel,
@@ -277,8 +277,9 @@ function loadLevel(r: GeRom, def: StageDef): Level {
 
   // ---- BG rooms ----
   // Pieces the game draws without a depth test (Dam's surrounding mountains and reservoir water, Cuba's jungle wall)
-  // are depth-tested like the rest (bg.ts RoomGeometry.backdrop) and get their own layer: the game only shows them
-  // through portals, so free views can show some where the player never sees them (above the Dam's cliffs at the spawn).
+  // are depth-tested like the rest (bg.ts RoomGeometry.backdrop) and get their own layer: the game only shows them when
+  // its portals or visibility commands select their room, so free views can still show pieces the player never sees
+  // together with the rest (a few Dam mountain tops above the cliffs at the spawn, visible to the player from the dam).
   const bg: BgFile = parseBg(r.load(stageBg.bg));
   const rooms = buildRooms(bg, textures, scale);
   const roomLayer: LevelLayer = { name: 'rooms', kind: 'main', instances: [] };
@@ -290,15 +291,21 @@ function loadLevel(r: GeRom, def: StageDef): Level {
     const index = instances.push({ name: mesh.name, mesh: meshes.push(mesh) - 1, matrix: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x, y, z, 1]), info: { room: g.room } }) - 1;
     layer.instances.push(index);
   };
-  for (const g of rooms) place(backdropLayer, g.backdrop, g);
+  // Backdrop rooms the game can't show while the player is anywhere on the clipping floor (drawn by no visibility command
+  // for those rooms and reached by no portal, e.g. Dam rooms 3, 5 and 24) go to a hidden layer (bg.ts roomsVisibleFrom).
+  const stan = r.hasFile(stageBg.stan) ? parseStan(r.load(stageBg.stan)) : null;
+  const playable = new Set(stan?.tiles.map((t) => t.room) ?? []);
+  const shown = playable.size ? roomsVisibleFrom(bg, playable) : null;
+  const unseenLayer: LevelLayer = { name: 'backdrops (never visible from play)', kind: 'background', instances: [], visibleByDefault: false };
+  for (const g of rooms) place(!shown || shown.has(g.room) ? backdropLayer : unseenLayer, g.backdrop, g);
   for (const g of rooms) place(roomLayer, g.mesh, g);
   if (backdropLayer.instances.length) layers.push(backdropLayer);
+  if (unseenLayer.instances.length) layers.push(unseenLayer);
   layers.push(roomLayer);
   const roomMeshes = rooms.flatMap((g) => [g.mesh, g.backdrop].flatMap((mesh) => (mesh ? [{ mesh, at: g.center }] : [])));
 
   // ---- setup and clipping (spawn camera; objects use the same files) ----
   const setup = def.setup ? parseSetup(r.load(def.setup)) : null;
-  const stan = r.hasFile(stageBg.stan) ? parseStan(r.load(stageBg.stan)) : null;
 
   // ---- objects: setup records (props, doors, pickups, guards, markers) ----
   const objects = setup ? addObjects(r, def.setup!, setup, stan, scale, textures, meshes, instances, layers.length) : null;
