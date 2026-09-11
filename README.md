@@ -283,6 +283,6 @@ Textures are uploaded with the RDP tile commands, not read in place.
   level scripts spawn are not shown; invisible volumes and marker boxes (Gex 3 sound emitters) are
   hidden by class or by their all-black placeholder texture. Vertex-colour animation (flickering
   lights) shows the file's colours.
-- Yoshi's Story: animated tiles and sprites show one frame; actors drawn by code or meshes (lifts, the Bowser
+- Yoshi's Story: sprites show one frame; actors drawn by code or meshes (lifts, the Bowser
   room arena, bosses) are markers; menu worlds are not listed; music plays Yoshi's normal mood (the game's
   per-song channel mute masks), without the happy, sad and "super" variants, and reverb is not modelled.

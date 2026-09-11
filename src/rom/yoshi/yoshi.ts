@@ -306,13 +306,10 @@ function loadLevel(y: YoshiRom, def: LevelDef): Level {
     const add = y.record(y.slot(castdt, 5));
     const npx = layer.unitW * layer.unitH, nTiles = Math.floor(ut.length / npx);
     const pv = view(pal);
-    // Switchable units: record {u16 tile[5]} ending at 0x8000, swapped by the level's switches (a bush covering a
-    // hidden room turns into platforms, a hut wall opens onto the jungle). Each connected region of switchable
-    // units is scored by how well its first and last tiles' edges match the fixed units around it. Where the
-    // first tile fits (a bush or wall that later opens), all its tiles are painted into one atlas cell in order,
-    // so platforms and their trunks show over an intact bush; otherwise the last tile is drawn alone (edges that
-    // replace fill tiles) and the earlier ones go to an optional layer.
-    const frames = (v: number): number[] => {
+    // Composite units (bit 15): record {u16 tile[5]} ending at 0x8000. make_addUtImg builds one image per record
+    // when the layer loads: the first tile copied whole, then each later tile's opaque texels painted over it
+    // (platforms over a bush, a branch behind terrain).
+    const stackOf = (v: number): number[] => {
       if (!(v & 0x8000)) return [v];
       const o = (v & 0x7fff) * 10;
       const out: number[] = [];
@@ -320,82 +317,21 @@ function loadLevel(y: YoshiRom, def: LevelDef): Level {
       return out;
     };
     const atlas = new TileAtlas(layer.unitW, layer.unitH);
-    // One atlas cell per tile, or per stack of tiles painted in order (opaque texels of later tiles over earlier).
     const cellOf = (tiles: number[]) => atlas.cell(tiles.join(','), () => {
       const rgba = new Uint8Array(npx * 4);
-      for (const t of tiles) {
+      tiles.forEach((t, k) => {
         for (let i = 0; i < npx; i++) {
           const c = pv.getUint16(ut[t * npx + i] * 2);
-          if (c & 1 || t === tiles[0]) rgba5551(c, rgba, i * 4);
+          if (k === 0 || c & 1) rgba5551(c, rgba, i * 4);
         }
-      }
+      });
       return rgba;
     });
-    const { unitW, unitH } = layer;
-    const grid = new Map<number, number[]>(); // uy * 65536 + ux -> tiles
-    layer.units('tiles', (px, py, v) => {
-      const f = frames(v).filter((t) => t > 0 && t < nTiles);
-      if (f.length) grid.set((py / unitH) * 65536 + px / unitW, f);
-    });
-    const switchable = (f: number[] | undefined) => !!f && f.length > 1 && f[0] !== f[f.length - 1];
-    const texel = (t: number, x: number, y: number) => pv.getUint16(ut[t * npx + y * unitW + x] * 2);
-    // Mismatch along the shared edge of tile a (left or above) and tile b (-1 = empty unit): colour difference
-    // for opaque pairs, and a fixed penalty where only one side is opaque (a gap or an overhang).
-    const seam = (a: number, b: number, horizontal: boolean, acc: [number, number]) => {
-      for (let k = 0; k < (horizontal ? unitH : unitW); k++) {
-        const p = a < 0 ? 0 : horizontal ? texel(a, unitW - 1, k) : texel(a, k, unitH - 1);
-        const q = b < 0 ? 0 : horizontal ? texel(b, 0, k) : texel(b, k, 0);
-        if (!(p & 1) && !(q & 1)) continue;
-        acc[1]++;
-        if ((p & 1) !== (q & 1)) acc[0] += 45;
-        else acc[0] += Math.abs(((p >> 11) & 31) - ((q >> 11) & 31)) + Math.abs(((p >> 6) & 31) - ((q >> 6) & 31)) + Math.abs(((p >> 1) & 31) - ((q >> 1) & 31));
-      }
-    };
-    const firstState = new Set<number>(); // switchable units showing their first tile
-    const visited = new Set<number>();
-    const neighbours = (k: number): [number, number, number][] => {
-      const ux = k % 65536, out: [number, number, number][] = [[k + 1, 1, 0], [k + 65536, 0, 1]];
-      if (ux > 0) out.push([k - 1, -1, 0]);
-      if (k >= 65536) out.push([k - 65536, 0, -1]);
-      return out;
-    };
-    for (const [key, f] of grid) {
-      if (!switchable(f) || visited.has(key)) continue;
-      const region: number[] = [];
-      const stack = [key];
-      visited.add(key);
-      while (stack.length) {
-        const k = stack.pop()!;
-        region.push(k);
-        for (const [n] of neighbours(k)) if (switchable(grid.get(n)) && !visited.has(n)) { visited.add(n); stack.push(n); }
-      }
-      const score = (pick: (f: number[]) => number) => {
-        const acc: [number, number] = [0, 0];
-        for (const k of region) {
-          const t = pick(grid.get(k)!);
-          for (const [n, dx, dy] of neighbours(k)) {
-            const nf = grid.get(n);
-            if (switchable(nf)) continue;
-            const nt = nf ? nf[nf.length - 1] : -1;
-            if (dx) seam(dx < 0 ? nt : t, dx < 0 ? t : nt, true, acc);
-            else seam(dy < 0 ? nt : t, dy < 0 ? t : nt, false, acc);
-          }
-        }
-        return acc[1] ? acc[0] / acc[1] : Infinity;
-      };
-      if (score((s) => s[0]) < score((s) => s[s.length - 1])) for (const k of region) firstState.add(k);
-    }
     const placed: [number, number, number][] = [];
-    const other: [number, number, number][] = [];
-    for (const [key, f] of grid) {
-      const px = (key % 65536) * unitW, py = Math.floor(key / 65536) * unitH;
-      if (firstState.has(key)) {
-        placed.push([px, py, cellOf(f)]); // every state, later ones painted over earlier
-      } else {
-        placed.push([px, py, cellOf([f[f.length - 1]])]);
-        if (switchable(f)) other.push([px, py, cellOf(f.slice(0, -1))]);
-      }
-    }
+    layer.units('tiles', (px, py, v) => {
+      const tiles = stackOf(v).filter((t) => t > 0 && t < nTiles);
+      if (tiles.length) placed.push([px, py, cellOf(tiles)]);
+    });
     if (!placed.length) continue;
     const { texture, uv } = atlas.build('CI8/RGBA16 tiles', `cast ${hex(a.id)} ut 0x${y.u32(y.slot(castdt, 1) + 8).toString(16)}`);
     const tex = textures.push(texture) - 1;
@@ -411,19 +347,11 @@ function loadLevel(y: YoshiRom, def: LevelDef): Level {
     const X0 = 160 - (160 + c[0]) / r, Y0 = 120 - (120 + c[1]) / r;
     const s = 1 / r;
     extents.push([X0, Y0, layer.worldW * s, layer.worldH * s]);
-    const mesh ={ ...meshFromBatches(name, [q.batch(tex, 'cutout')]), info: { cast: hex(a.id), castdt: `0x${castdt.toString(16)}`, tiles: atlas.size } };
+    const mesh = { ...meshFromBatches(name, [q.batch(tex, 'cutout')]), info: { cast: hex(a.id), castdt: `0x${castdt.toString(16)}`, tiles: atlas.size } };
     const instance = push(mesh, new Float32Array([s, 0, 0, 0, 0, s, 0, 0, 0, 0, 1, 0, X0, -Y0, depthOf(a.z), 1]), {
       actor: a.index, cast: hex(a.id), record: `0x${a.record.toString(16)}`, z: +a.z.toFixed(3), parallax: +r.toFixed(5), anchor: anchor.join(', '),
     });
     layers.push({ name: `${kind === 'main' ? 'main' : kind === 'background' ? 'far' : 'near'} (${name})`, kind, instances: [instance], depth: +a.z.toFixed(3), parallax: +r.toFixed(4), ...(/_mask/.test(name) ? { fadeOnHover: true } : {}) });
-    if (other.length) {
-      // The other state of the switchable units, just in front of the layer.
-      const qo = new QuadBuilder();
-      for (const [px, py, cell] of other) qo.quad(px, -py, layer.unitW, layer.unitH, uv(cell));
-      const om = { ...meshFromBatches(`${name} other state`, [qo.batch(tex, 'cutout')]), info: { cast: hex(a.id), units: other.length, state: 'other state of switch tiles' } };
-      const oi = push(om, new Float32Array([s, 0, 0, 0, 0, s, 0, 0, 0, 0, 1, 0, X0, -Y0, depthOf(a.z) + 0.001, 1]), { actor: a.index, cast: hex(a.id), state: 'other' });
-      layers.push({ name: `switch tiles, other state (${name})`, kind, instances: [oi], depth: +a.z.toFixed(3), parallax: +r.toFixed(4), visibleByDefault: false });
-    }
     if (clearColor === undefined) {
       const bg = new Uint8Array(4);
       rgba5551(pv.getUint16(0), bg, 0);
