@@ -60,6 +60,7 @@ export class FlyControls {
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', this.onKeyUp);
     window.addEventListener('blur', this.onBlur);
+    document.addEventListener('visibilitychange', this.onBlur);
   }
 
   dispose() {
@@ -74,6 +75,7 @@ export class FlyControls {
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('keyup', this.onKeyUp);
     window.removeEventListener('blur', this.onBlur);
+    document.removeEventListener('visibilitychange', this.onBlur);
     if (document.pointerLockElement === c) document.exitPointerLock();
   }
 
@@ -147,7 +149,9 @@ export class FlyControls {
   private onMouseDown = (e: MouseEvent) => {
     if (e.button !== 0) return;
     this.canvas.focus();
-    const mode: PickMode | null = e.altKey ? 'face' : e.ctrlKey ? 'object' : this.mode;
+    // Only the click's own modifiers decide: a plain click never picks, even if a key-up was missed.
+    const mode: PickMode | null = e.altKey ? 'face' : e.ctrlKey ? 'object' : null;
+    if (!mode && this.mode) this.resetModifiers();
     if (mode) {
       e.preventDefault();
       if (this.locked) document.exitPointerLock(); // no meaningful cursor position while captured
@@ -244,11 +248,16 @@ export class FlyControls {
     }
   };
 
-  private onBlur = () => {
-    this.keys.clear();
-    this.dragging = false;
+  private resetModifiers() {
     this.ctrlHeld = false;
     this.altHeld = false;
     this.updatePickMode();
+  }
+
+  // Key-ups are not delivered while the window is in the background: drop held keys and any pick mode.
+  private onBlur = () => {
+    this.keys.clear();
+    this.dragging = false;
+    this.resetModifiers();
   };
 }
