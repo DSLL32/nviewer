@@ -1,6 +1,6 @@
 // Render-ready level data shared by all supported games.
 
-export type LevelKind = 'race' | 'battle' | 'stunt' | 'obstacle' | 'adventure' | 'campaign' | 'other';
+export type LevelKind = 'race' | 'battle' | 'stunt' | 'obstacle' | 'adventure' | 'campaign' | 'hub' | 'bonus' | 'boss' | 'other';
 
 export interface LevelInfo {
   index: number;
@@ -20,7 +20,11 @@ export interface Texture {
   wrapS: WrapMode;
   wrapT: WrapMode;
   format: string; // e.g. "CI4/RGBA16", for diagnostics
+  source?: string; // where the texels come from (image/palette addresses), for bug reports
 }
+
+// Loader-specific identity for bug reports (record indices, names, file offsets as hex strings).
+export type DebugInfo = Record<string, string | number>;
 
 export interface Batch {
   texture: number; // index into Level.textures, -1 for untextured
@@ -37,12 +41,16 @@ export interface Batch {
   positions: Float32Array;
   uvs: Float32Array;
   colors: Uint8Array;
+  // Per triangle: the address of the display-list command that drew it (in the loader's buffer, see
+  // Mesh.info), for bug reports.
+  triSource?: Uint32Array;
 }
 
 export interface Mesh {
   name: string;
   radius: number;
   batches: Batch[];
+  info?: DebugInfo;
 }
 
 export interface Instance {
@@ -51,6 +59,7 @@ export interface Instance {
   matrix: Float32Array; // 4x4 column-major, object -> world
   animated?: boolean; // scripted object, shown at the start of its motion path
   noFog?: boolean; // the game draws this instance without fog, even when the level has fog
+  info?: DebugInfo;
 }
 
 // N64 RSP fog as the game sets it (gSPFogFactor / G_SETFOGCOLOR). Per vertex the RSP
@@ -127,7 +136,7 @@ export interface DecodedMusic {
 
 // A loaded ROM of one supported game.
 export interface Game {
-  id: 'rush2049' | 'rush1' | 'bm64' | 'bm64sa' | 'bmhero' | 'battletanx' | 'battletanxga';
+  id: 'rush2049' | 'rush1' | 'bm64' | 'bm64sa' | 'bmhero' | 'battletanx' | 'battletanxga' | 'gex64' | 'gex3';
   title: string;
   levels: LevelInfo[];
   loadLevel(index: number): Level;

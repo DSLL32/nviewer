@@ -4,6 +4,8 @@ import { openBattleTanxGA } from './battletanxga';
 import { openBomberman64 } from './bomberman/bm64';
 import { openBomberman64SA } from './bomberman/bm64sa';
 import { openBombermanHero } from './bomberman/bmhero';
+import { openGex3 } from './gex/gex3';
+import { openGex64 } from './gex/gex64';
 import { LEVELS, loadLevel } from './level';
 import { decodeRush2049Music, listRush2049Music } from './music/rush2049';
 import { normalizeByteOrder, RushRom } from './rom';
@@ -39,9 +41,14 @@ export function openRom(bytes: Uint8Array): Game {
       return openBattleTanx(rom);
     case 'NBQE':
       return openBattleTanxGA(rom);
+    case 'NX2E':
+      return openGex64(rom);
+    case 'NX3E':
+      return openGex3(rom);
     default:
       throw new Error(`Unsupported ROM (game code "${code.replace(/[^\x20-\x7e]/g, '?')}"). ` +
         'Supported: San Francisco Rush 2049 (U), San Francisco Rush: Extreme Racing (U), Bomberman 64 (U), ' +
-        'Bomberman 64: The Second Attack! (U), Bomberman Hero (U), BattleTanx (U), BattleTanx: Global Assault (U).');
+        'Bomberman 64: The Second Attack! (U), Bomberman Hero (U), BattleTanx (U), BattleTanx: Global Assault (U), ' +
+        'Gex 64: Enter the Gecko (U), Gex 3: Deep Cover Gecko (U).');
   }
 }

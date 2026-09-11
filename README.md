@@ -2,7 +2,8 @@
 
 A browser viewer for the levels of these N64 games (USA versions): *San Francisco Rush 2049*,
 *San Francisco Rush: Extreme Racing*, *Bomberman 64*, *Bomberman 64: The Second Attack!*,
-*Bomberman Hero*, *BattleTanx* and *BattleTanx: Global Assault*. Load one or more ROMs, pick a level in the sidebar, and fly around freely, with
+*Bomberman Hero*, *BattleTanx*, *BattleTanx: Global Assault*, *Gex 64: Enter the Gecko* and
+*Gex 3: Deep Cover Gecko*. Load one or more ROMs, pick a level in the sidebar, and fly around freely, with
 each game's soundtrack in the music box. ROMs are parsed entirely in the browser (in a Web Worker)
 and cached in IndexedDB; nothing is uploaded anywhere.
 
@@ -35,9 +36,13 @@ filtering · H help · Esc releases the mouse.
     - `music.ts`: song tables and compressed MIDI
   - `lzari.ts`, `battletanx.ts`, `battletanxga.ts`: BattleTanx and Global Assault (format notes
     in `BATTLETANX.md`)
+  - `gex/`: Gex 64 and Gex 3 (format notes in `GEX.md`)
+    - `common.ts`: object table, synthetic display lists, Z-up transform, object meshes
+    - `gex64.ts`, `gex3.ts`: level tables, render trees, skies, placements
   - `music/`: `musyx.ts`, `rush2049.ts` (Rush 2049), `libultra.ts` (libultra bank/sequence
     synthesizer shared by Rush 1, the Bomberman games and BattleTanx), `rush1.ts`, `libmus.ts`
-    (Global Assault's libmus player)
+    (Software Creations' libmus as used by Global Assault and Gex 3), `libmus64.ts` (the older libmus
+    revision in Gex 64)
 - `src/worker.ts`: parses the ROM and levels off the main thread
 - `src/render/`: WebGL2 renderer, free-fly camera and controls
 - `src/ui/`: React UI (landing page, sidebar, viewport)
@@ -206,6 +211,34 @@ Textures are uploaded with the RDP tile commands, not read in place.
   Software Creations' libmus, emulated tick by tick with BIGROOM reverb. Both at 22047 Hz; loudness
   and loop lengths checked against captured game audio.
 
+### Gex 64: Enter the Gecko, Gex 3: Deep Cover Gecko
+
+`GEX.md` documents the formats in full; in short:
+- **Files.** Every compressed file is raw DEFLATE. A level inflates to one image linked at 0x8024B000
+  (absolute pointers); objects are relocatable files named in an 8-character object table.
+- **Space.** World units, right-handed with Z up, no mirroring; the viewer turns Z up into Y up.
+- **World geometry.** A render tree whose leaves hold small display-list fragments.
+  - Gex 64 (F3DEX 1.x): the fragments of a leaf share the RSP vertex buffer, so each leaf runs in
+    order. Chunk flags select translucency, a flipbook material (frame 0 shown) or an animated-texture
+    record, whose frame 0 the loader loads with the same commands as the game's material lists.
+  - Gex 3 (F3DEX2): fragments carry only vertices and triangles; the game draws them grouped by
+    material, after its world render state. The loader rebuilds those lists.
+- **Skies.** Patches drawn around the camera (`Level.skies`).
+- **Fog.** Colour and start come from the level header (fog position about 994–1000); the sky is
+  cleared to the fog colour.
+- **Objects.** Placements use angles of 4096 per turn (T · Rx · Ry · Rz). Gex 64 objects are face
+  lists or display-list meshes, skeletal ones built in the rest pose; Gex 3 rigid meshes are drawn,
+  skinned ones are skipped.
+- **Levels.** Gex 64: the Media Dimension hub, the 14 channel levels, bonus and boss levels, the intro
+  and logo scenes. Gex 3: the four hub areas, 11 TV levels, bonus and Secret TV levels, bosses, the
+  title screen and intros. Names come from the games' own tables.
+- **Music.** Software Creations' libmus at 22050 Hz, one tick per video frame.
+  - Gex 64 uses an older player revision with per-level banks. Its list includes the four jingles and
+    an unused Pre-History Channel song that no table references.
+  - Gex 3 shares Global Assault's revision, without reverb.
+  - Both games play music quietly (about −33 dBFS; renders match captured game audio within about
+    1 dB and without drift). The viewer boosts them for playback (Gex 64 ×2.25, Gex 3 ×6).
+
 ## Known gaps
 
 - Rush 2049: scripted objects are shown frozen at the start of their paths.
@@ -219,3 +252,8 @@ Textures are uploaded with the RDP tile commands, not read in place.
 - BattleTanx: tanks, pickups and destructible states other than the intact one are not shown; team
   colour palette animations show a fixed frame; only the most detailed LOD is used. BattleTanx music
   runs about 0.05% fast (the game's 16 ms audio poll rounding is not modelled).
+- Gex: animated materials (flipbooks, scrolling water and lava) show their first frame; characters
+  and enemies stand in their rest pose, and skinned Gex 3 objects are not shown. Objects that the
+  level scripts spawn are not shown; invisible volumes and marker boxes (Gex 3 sound emitters) are
+  hidden by class or by their all-black placeholder texture. Vertex-colour animation (flickering
+  lights) shows the file's colours.

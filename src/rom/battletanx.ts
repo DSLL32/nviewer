@@ -213,14 +213,21 @@ function loadLevel(rom: Uint8Array, index: number): Level {
     fog: { color, multiplier: 25600, offset: -25344, near: 16, far: dv.getInt16(FAR_TABLE - RAM + id * 2) },
     clearColor: color,
   };
+  if (!start && h[0] + 0x30 <= a.length) {
+    // No player-start object (The Arena): the first entry of the level header's spawn table
+    // {f32 x, f32 z, f32 heading}, spawn yaw = heading * 0x2000.
+    const s = h[0] + 0x24;
+    start = { x: adv.getFloat32(s), z: adv.getFloat32(s + 4), yaw: (Math.round(adv.getFloat32(s + 8) * 0x2000) & 0xffff) };
+  }
   if (start) extra.camera = chaseCamera(start.x, 0, start.z, start.yaw);
   return buildLevel(BATTLETANX_LEVELS[index], `battletanx-${index}`, textures, meshes, instances, extra);
 }
 
-// The game's chase camera: about 170 units behind the tank and 74 above it. A tank faces model -Z.
+// The game's chase camera: about 170 units behind the tank and 74 above it, looking along the
+// start heading (world (sin, cos) of the yaw; checked against start screenshots of both games).
 export function chaseCamera(x: number, y: number, z: number, yaw: number): CameraView {
   const ang = (yaw / 65536) * 2 * Math.PI;
-  const fx = -Math.sin(ang), fz = -Math.cos(ang);
+  const fx = Math.sin(ang), fz = Math.cos(ang);
   return { eye: [x - fx * 170, y + 74, z - fz * 170], target: [x + fx * 400, y + 20, z + fz * 400] };
 }
 

@@ -66,7 +66,7 @@ function musPow2(x: number): number {
   return f32(neg ? 1 / s : s);
 }
 
-interface Wave {
+export interface Wave {
   base: number; // ROM offset of the samples
   len: number;
   type: number;
@@ -87,7 +87,9 @@ interface WaveInput {
   end: number; // input index past the last sample
 }
 
-function parseBank(rom: Uint8Array, bank: number, samples: number): Wave[] {
+// Pointer bank at `bank` for the sample file ("N64 WaveTables") at `samples`. Wave offsets count
+// from the start of the sample file (its 16-byte header included).
+export function parseLibmusBank(rom: Uint8Array, bank: number, samples: number): Wave[] {
   const dv = view(rom);
   if (String.fromCharCode(...rom.subarray(bank, bank + 15)) !== 'N64 PtrTablesV2') throw new Error('Music bank not found');
   const count = dv.getUint32(bank + 0x20);
@@ -100,6 +102,7 @@ function parseBank(rom: Uint8Array, bank: number, samples: number): Wave[] {
     const loop = dv.getUint32(w + 12), book = dv.getUint32(w + 16), type = rom[w + 8];
     const wave: Wave = {
       base: samples + dv.getUint32(w), len: dv.getUint32(w + 4), type, book: null, loopStart: 0, loopEnd: 0, loopCount: 0,
+      // (MusPtrBankInitialize leaves bases whose top byte is 0xFF unrelocated; no music bank has one.)
       // MusPtrBankInitialize: (s8)(basenote - 48) semitones + (s8)detune / 100.
       detune: s8(rom[detune + i * 4]) / 100 + s8(rom[basenote + i] - 48),
     };
@@ -355,7 +358,7 @@ class Player {
   readonly channels: Channel[] = [];
   private rng = 0x12345678;
 
-  constructor(private readonly rom: Uint8Array, private readonly waves: Wave[], private readonly song: Song) {
+  constructor(private readonly rom: Uint8Array, private readonly waves: Wave[], private readonly song: Song, private readonly masterVolume: number) {
     const make = (pdata: number, vol: number, bend: number) => {
       const c = new Channel();
       c.tempoInc = Math.trunc(24576 / FPS);
@@ -650,7 +653,7 @@ class Player {
   private volumePan(c: Channel) {
     let v = Number((BigInt(c.volume * c.envVol * c.velocity) * BigInt(s16(c.chanVol))) & 0xffffffffn) >>> 13;
     if (v > 32767) v = 32767;
-    v = (v * SONG_MASTER_VOLUME) >>> 15;
+    v = (v * this.masterVolume) >>> 15;
     if (v !== c.lastVol) {
       c.lastVol = v;
       this.synVol(c, v);
@@ -843,16 +846,26 @@ export function decodeGaMusic(rom: Uint8Array, index: number): DecodedMusic {
   if (index < 0 || index >= SONG_NAMES.length) throw new Error(`No music track ${index}`);
   let waves = bankCache.get(rom);
   if (!waves) {
-    // Wave offsets count from the start of the sample file (its 16-byte header included).
-    waves = parseBank(rom, fileRange(rom, BANK_FILE)[0], fileRange(rom, SAMPLE_FILE)[0]);
+    waves = parseLibmusBank(rom, fileRange(rom, BANK_FILE)[0], fileRange(rom, SAMPLE_FILE)[0]);
     bankCache.set(rom, waves);
   }
   const [start, len] = fileRange(rom, FIRST_SONG_FILE + index);
-  const song = parseSong(rom.slice(start, start + len));
+  // Global Assault: song master volume 12603 (MusSetMasterVolume at boot), BIGROOM reverb.
+  return renderLibmusSong(rom, waves, rom.slice(start, start + len), { masterVolume: SONG_MASTER_VOLUME, reverb: true });
+}
+
+export interface LibmusOptions {
+  masterVolume: number; // song master volume, 0..0x7FFF
+  reverb: boolean; // mix the effect sends through libultra's BIGROOM reverb
+}
+
+// Renders a libmus song (version 0x215) to PCM at 22047 Hz, with its loop region.
+export function renderLibmusSong(rom: Uint8Array, waves: Wave[], songData: Uint8Array, opts: LibmusOptions): DecodedMusic {
+  const song = parseSong(songData);
 
   // Dry run without mixing: every looping channel wraps its bytecode in `for 255 ... next`, all with
   // the same length; the loop region is known once each has reached its `next`.
-  const probe = new Player(rom, waves, song);
+  const probe = new Player(rom, waves, song, opts.masterVolume);
   let ticks = 0;
   for (; ticks < FPS * 60 * 15; ticks++) {
     probe.tick();
@@ -866,13 +879,15 @@ export function decodeGaMusic(rom: Uint8Array, index: number): DecodedMusic {
   let total = ticks + TAIL_TICKS;
   if (live.length && live.every((c) => c.loopLen >= 0) && inc > 0) {
     const startTicks = Math.max(...live.map((c) => c.loopStart)) / inc;
-    const lenTicks = Math.max(...live.map((c) => c.loopLen)) / inc;
+    // Notes start on whole ticks, so the output repeats after a whole number of ticks (Gex 3's title
+    // song loops every 1130 ticks in game audio; the exact 1129.93 drifts 25 samples per pass).
+    const lenTicks = Math.round(Math.max(...live.map((c) => c.loopLen)) / inc);
     loopStart = Math.round(startTicks * TICK_SAMPLES);
     loopEnd = Math.round((startTicks + lenTicks) * TICK_SAMPLES);
     total = Math.ceil(startTicks + lenTicks) + TAIL_TICKS;
   }
 
-  const player = new Player(rom, waves, song);
+  const player = new Player(rom, waves, song, opts.masterVolume);
   const n = total * TICK_SAMPLES;
   const left = new Float32Array(n);
   const right = new Float32Array(n);
@@ -888,7 +903,7 @@ export function decodeGaMusic(rom: Uint8Array, index: number): DecodedMusic {
     for (const c of player.channels) c.voice.render(TICK_SAMPLES, dl, dr, wl, wr);
     const o = t * TICK_SAMPLES;
     for (let k = 0; k < TICK_SAMPLES; k++) {
-      const y = reverb.process(wl[k], wr[k]);
+      const y = opts.reverb ? reverb.process(wl[k], wr[k]) : 0;
       left[o + k] = clamp16(dl[k] + ((y * 0x7fff) >> 15)) / 32768;
       right[o + k] = clamp16(dr[k] + ((y * 0x7fff) >> 15)) / 32768;
     }
@@ -896,12 +911,13 @@ export function decodeGaMusic(rom: Uint8Array, index: number): DecodedMusic {
   if (loopStart === undefined || loopEnd === undefined) {
     return { sampleRate: OUTPUT_RATE, channels: [left, right] };
   }
-  // Fold what rings past the loop end back onto the loop start, so the region repeats seamlessly.
+  // On repeats, the start of the loop sounds like the render past the loop end (the next pass plus what
+  // still rings from the previous one), so that continuation replaces the start of the region.
   const end = Math.min(n, loopEnd);
   const outL = left.slice(0, end), outR = right.slice(0, end);
   for (let k = end; k < n && loopStart + (k - end) < end; k++) {
-    outL[loopStart + (k - end)] += left[k];
-    outR[loopStart + (k - end)] += right[k];
+    outL[loopStart + (k - end)] = left[k];
+    outR[loopStart + (k - end)] = right[k];
   }
   return { sampleRate: OUTPUT_RATE, channels: [outL, outR], loopStart, loopEnd };
 }

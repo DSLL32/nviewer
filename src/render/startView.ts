@@ -130,7 +130,9 @@ export function computeStartView(level: Level, aspect: number, fovY: number): St
   const gameView = level.camera ? fromGameCamera(level.camera, fovY) : null;
   if (gameView) return { ...gameView, speed, groundY };
 
-  if (level.info.kind === 'battle' || level.info.kind === 'stunt' || level.info.kind === 'adventure') {
+  // Kinds that are often enclosed: try an interior start first (falls back to the overview when there's no roof).
+  const interiorKinds: Level['info']['kind'][] = ['battle', 'stunt', 'adventure', 'hub', 'campaign', 'bonus', 'boss'];
+  if (interiorKinds.includes(level.info.kind)) {
     const interior = findInterior(g, min, max);
     if (interior) return { ...interior, speed, groundY };
   }
