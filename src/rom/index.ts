@@ -15,6 +15,8 @@ import { normalizeByteOrder, RushRom } from './rom';
 import { openRush1 } from './rush1';
 import { openStarFox64 } from './sf64/sf64';
 import type { Game } from './types';
+import { findZeldaBuild } from './zelda/fs';
+import { openZelda64 } from './zelda/zelda';
 
 export type * from './types';
 
@@ -61,10 +63,15 @@ export function openRom(bytes: Uint8Array): Game {
     case 'NPDP':
     case 'NPDJ':
       throw new Error(`Perfect Dark (${code === 'NPDP' ? 'E' : 'J'}) is not supported: only Perfect Dark (U) (V1.0) is.`);
-    default:
+    default: {
+      // Zelda 64 (Ocarina of Time, Majora's Mask; retail and debug builds): by structure, not by game code.
+      const zelda = findZeldaBuild(rom);
+      if (zelda) return openZelda64(rom, zelda);
       throw new Error(`Unsupported ROM (game code "${code.replace(/[^\x20-\x7e]/g, '?')}"). ` +
         'Supported: San Francisco Rush 2049 (U), San Francisco Rush: Extreme Racing (U), Bomberman 64 (U), ' +
         'Bomberman 64: The Second Attack! (U), Bomberman Hero (U), BattleTanx (U), BattleTanx: Global Assault (U), ' +
-        'Gex 64: Enter the Gecko (U), Gex 3: Deep Cover Gecko (U), Yoshi\'s Story (J), Star Fox 64 (U), GoldenEye 007 (U), Perfect Dark (U) (V1.0).');
+        'Gex 64: Enter the Gecko (U), Gex 3: Deep Cover Gecko (U), Yoshi\'s Story (J), Star Fox 64 (U), GoldenEye 007 (U), Perfect Dark (U) (V1.0), ' +
+        'The Legend of Zelda: Ocarina of Time and Majora\'s Mask.');
+    }
   }
 }

@@ -44,6 +44,15 @@ export interface Batch {
   // Per triangle: the address of the display-list command that drew it (in the loader's buffer, see
   // Mesh.info), for bug reports.
   triSource?: Uint32Array;
+  // A second texture the game combines with `texture` (the RDP combiner's TEXEL1, e.g. Zelda 64's detail
+  // textures and light maps). The sampled texel, before it is multiplied by the vertex colour, is
+  //   texBlend 'lerp':     mix(texture(uvs), texture1(uvs1), texMix) in colour and alpha
+  //   texBlend 'multiply': rgb = texture(uvs).rgb x texture1(uvs1).rgb, alpha = texture(uvs).a
+  // Renderers without two-texture support draw `texture` alone.
+  texture1?: number; // index into Level.textures
+  uvs1?: Float32Array; // 2 per vertex, like uvs
+  texBlend?: 'lerp' | 'multiply';
+  texMix?: number; // 0..1, for 'lerp'
 }
 
 export interface Mesh {
@@ -188,7 +197,7 @@ export interface DecodedMusic {
 
 // A loaded ROM of one supported game.
 export interface Game {
-  id: 'rush2049' | 'rush1' | 'bm64' | 'bm64sa' | 'bmhero' | 'battletanx' | 'battletanxga' | 'gex64' | 'gex3' | 'yoshistory' | 'sf64' | 'goldeneye' | 'perfectdark';
+  id: 'rush2049' | 'rush1' | 'bm64' | 'bm64sa' | 'bmhero' | 'battletanx' | 'battletanxga' | 'gex64' | 'gex3' | 'yoshistory' | 'sf64' | 'goldeneye' | 'perfectdark' | 'oot' | 'mm';
   title: string;
   levels: LevelInfo[];
   loadLevel(index: number): Level;

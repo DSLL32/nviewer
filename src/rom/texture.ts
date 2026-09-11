@@ -125,3 +125,68 @@ export function decodeTexture(t: TextureDesc): Uint8Array {
   }
   return out;
 }
+
+// A plain image as games store it (rows of whole texels, no RDP texture memory), of any size. `palette` holds the
+// 16-bit TLUT entries the texels index from entry 0 (CI formats); texels outside `buf` read as 0.
+export function decodeRows(
+  buf: Uint8Array, offset: number, fmt: ImFmt, siz: ImSiz, w: number, h: number, palette: Uint8Array | null, tlut: Tlut,
+): Uint8Array {
+  const out = new Uint8Array(w * h * 4);
+  const bits = BITS[siz];
+  const line = Math.ceil((w * bits) / 8);
+  const byte = (x: number, y: number, k = 0) => {
+    const o = offset + y * line + ((x * bits) >> 3) + k;
+    return o >= 0 && o < buf.length ? buf[o] : 0;
+  };
+  const word = (x: number, y: number) => (byte(x, y) << 8) | byte(x, y, 1);
+  const entry = (i: number) => (palette && i * 2 + 1 < palette.length ? (palette[i * 2] << 8) | palette[i * 2 + 1] : 0);
+  const nibble = (x: number, y: number) => (byte(x, y) >> (x & 1 ? 0 : 4)) & 0xf;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const d = (y * w + x) * 4;
+      switch ((fmt << 4) | siz) {
+        case (ImFmt.CI << 4) | ImSiz.B4:
+        case (ImFmt.CI << 4) | ImSiz.B8: {
+          const v = entry(siz === ImSiz.B4 ? nibble(x, y) : byte(x, y));
+          if (tlut === Tlut.Ia16) ia16(v, out, d);
+          else rgba16(v, out, d);
+          break;
+        }
+        case (ImFmt.RGBA << 4) | ImSiz.B16:
+          rgba16(word(x, y), out, d);
+          break;
+        case (ImFmt.RGBA << 4) | ImSiz.B32:
+          for (let c = 0; c < 4; c++) out[d + c] = byte(x, y, c);
+          break;
+        case (ImFmt.IA << 4) | ImSiz.B4: {
+          const v = nibble(x, y);
+          out[d] = out[d + 1] = out[d + 2] = (v >> 1) * 0x24 + (v >> 1 ? 3 : 0);
+          out[d + 3] = v & 1 ? 255 : 0;
+          break;
+        }
+        case (ImFmt.IA << 4) | ImSiz.B8: {
+          const v = byte(x, y);
+          out[d] = out[d + 1] = out[d + 2] = (v >> 4) * 0x11;
+          out[d + 3] = (v & 0xf) * 0x11;
+          break;
+        }
+        case (ImFmt.IA << 4) | ImSiz.B16:
+          ia16(word(x, y), out, d);
+          break;
+        case (ImFmt.I << 4) | ImSiz.B4: {
+          const v = nibble(x, y) * 0x11;
+          out[d] = out[d + 1] = out[d + 2] = out[d + 3] = v;
+          break;
+        }
+        case (ImFmt.I << 4) | ImSiz.B8: {
+          const v = byte(x, y);
+          out[d] = out[d + 1] = out[d + 2] = out[d + 3] = v;
+          break;
+        }
+        default:
+          out[d] = 255; out[d + 1] = 0; out[d + 2] = 255; out[d + 3] = 255;
+      }
+    }
+  }
+  return out;
+}

@@ -1,6 +1,6 @@
 // N64 display-list interpretation (F3DEX 1.x, F3DEX2 and Fast3D microcode) into
 // render-ready triangle batches.
-import { decodeTexture, ImFmt, ImSiz, loadBlock, Tlut, TMEM_SIZE, type TextureDesc } from './texture';
+import { decodeRows, decodeTexture, ImFmt, ImSiz, loadBlock, Tlut, TMEM_SIZE, type TextureDesc } from './texture';
 import type { Batch, BlendMode, Texture, WrapMode } from './types';
 import { view } from './util';
 
@@ -77,6 +77,26 @@ export interface DisplayListContext {
   rareTexture?: (w0: number, w1: number) => RareTexture | null;
   // Added to every vertex position before scaling (GoldenEye's room position).
   vertexOffset?: [number, number, number];
+
+  // Zelda 64 (ZELDA64.md §5.3.3): textures are the whole images G_SETTIMG points at instead of the 4 KB RDP texture
+  // memory. The G_SETTILE of render tile 0 or 1 after a G_LOADBLOCK shows that load's image with its format, wrap and
+  // shifts; the first G_SETTILESIZE after it gives the image size, later ones only move the window (texture scroll).
+  // Texture coordinates are normalised by the image size. G_LOADTLUT writes its entries into a 256-entry TLUT memory
+  // at index (tmem field - 0x100), and CI texels index TLUT[pal * 16 + texel] (pal = G_SETTILE w1 bits 20-23).
+  // TEXEL0 in the alpha inputs and TEXEL0_ALPHA as a colour multiplier also count as texture use (alpha decals).
+  directImages?: boolean;
+  // Render state the game leaves before calling the lists: combiner words (G_SETCOMBINE w0, w1), othermode H,
+  // primitive and environment colour (RGBA). Defaults: a modulate combiner, othermode H 0, white.
+  combineMode?: [number, number];
+  otherModeH?: number;
+  primColor?: number;
+  envColor?: number;
+  // F3DEX2 G_RDPHALF_1 (0xE1) + G_BRANCH_Z (0x04), a depth-based detail switch: 'near' always branches to the
+  // detailed list. Without it the lists continue with their far version (usually nothing).
+  branchZ?: 'near';
+  // With directImages: for combiners that blend TEXEL0 and TEXEL1 by a constant (PRIM or ENV alpha, PRIM_LOD_FRAC)
+  // in the first colour cycle, emit Batch.texture1, uvs1 and texMix. The folded vertex colour takes both texels as 1.
+  secondTexture?: boolean;
 }
 
 // Vertex coordinates are 1/16 of a world unit in both Rush games.
@@ -85,7 +105,7 @@ const VERTEX_SCALE = 1 / 16;
 // RSP commands whose opcodes differ between the microcodes.
 const F3DEX2 = {
   VTX: 0x01, TRI1: 0x05, TRI2: 0x06, QUAD: 0x07, POPMTX: 0xd8, MTX: 0xda, TEXTURE: 0xd7, GEOMETRYMODE: 0xd9,
-  DL: 0xde, ENDDL: 0xdf, SETOTHERMODE_L: 0xe2, SETOTHERMODE_H: 0xe3,
+  DL: 0xde, ENDDL: 0xdf, SETOTHERMODE_L: 0xe2, SETOTHERMODE_H: 0xe3, BRANCH_Z: 0x04, RDPHALF_1: 0xe1,
 };
 const F3DEX = {
   MTX: 0x01, VTX: 0x04, DL: 0x06, BRANCH_Z: 0xb0, TRI2: 0xb1, QUAD: 0xb5, RDPHALF_1: 0xb4,
@@ -111,6 +131,9 @@ interface Tile {
   uls: number; ult: number; // upper-left texel of the tile, subtracted from texture coordinates
   line: number; tmem: number; // bytes per texel row, offset into texture memory
   pal: number; // palette field of G_SETTILE
+  // directImages: the image shown by this render tile (buffer offset, -1 none) and its size (0 until the
+  // G_SETTILESIZE after the binding G_SETTILE).
+  image: number; texW: number; texH: number; sizePending: boolean;
 }
 
 interface Vertex {
@@ -148,9 +171,19 @@ interface State {
   mtx: Mtx | null;
   mtxStack: Mtx[];
   lighting: DlLighting | null;
+  // directImages
+  combineUsesTexel1: boolean; // the colour or alpha cycles read TEXEL1
+  otherModeH: number;
+  primLod: number; // PRIM_LOD_FRAC: low byte of G_SETPRIMCOLOR w0
+  zTlut: Uint8Array; // 256 RGBA16/IA16 entries
+  zTlutLoads: Map<number, string>; // first entry -> palette address and count, for texture keys
+  lastLoad: number; // image of the last G_LOADBLOCK
 }
 
-interface BatchBuilder { batch: Omit<Batch, 'positions' | 'uvs' | 'colors' | 'triSource'>; pos: number[]; uv: number[]; col: number[]; src: number[] }
+interface BatchBuilder {
+  batch: Omit<Batch, 'positions' | 'uvs' | 'colors' | 'triSource' | 'uvs1'>;
+  pos: number[]; uv: number[]; uv1: number[]; col: number[]; src: number[];
+}
 
 // G_SETCOMBINE fields per cycle: color a, b, c, d then alpha a, b, c, d
 // (output = (a - b) * c + d).
@@ -234,7 +267,10 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
     textureOn: true, scaleS: 1, scaleT: 1, timg: -1, timgSiz: 0, timgWidth: 0, image: -1, palette: -1,
     palettes: new Map(), tlut: new Uint8Array(512), tlutKey: '',
     mem: new Uint8Array(TMEM_SIZE), loadKey: '',
-    tiles: Array.from({ length: 8 }, () => ({ fmt: 0, siz: 0, width: 0, height: 0, cms: 0, cmt: 0, shiftS: 0, shiftT: 0, uls: 0, ult: 0, line: 0, tmem: 0, pal: 0 })),
+    tiles: Array.from({ length: 8 }, () => ({
+      fmt: 0, siz: 0, width: 0, height: 0, cms: 0, cmt: 0, shiftS: 0, shiftT: 0, uls: 0, ult: 0, line: 0, tmem: 0, pal: 0,
+      image: -1, texW: 0, texH: 0, sizePending: false,
+    })),
     rare: null,
     rdpHalf1: 0,
     mtx: ctx.matrix ? ctx.matrix.slice() : null,
@@ -242,12 +278,77 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
     lighting: ctx.lighting
       ? { lights: ctx.lighting.lights.map((l) => ({ color: [...l.color], dir: [...l.dir] }) as DlLight), ambient: [...ctx.lighting.ambient] }
       : null,
+    combineUsesTexel1: false, otherModeH: 0, primLod: 0, zTlut: new Uint8Array(512), zTlutLoads: new Map(), lastLoad: -1,
   };
+  const direct = ctx.directImages === true;
+  const setCombine = (w0: number, w1: number) => {
+    const c = decodeCombine(w0, w1);
+    const colorInputs = [c[0], c[1], c[2], c[3], c[8], c[9], c[10], c[11]];
+    st.combine = c;
+    st.combineUsesTexel = colorInputs.some((v) => v === 1 || v === 2);
+    if (direct) {
+      const alphaInputs = [c[4], c[5], c[6], c[7], c[12], c[13], c[14], c[15]];
+      st.combineUsesTexel ||= alphaInputs.some((v) => v === 1) || c[2] === 8 || c[10] === 8;
+      st.combineUsesTexel1 = colorInputs.some((v) => v === 2) || c[2] === 9 || c[10] === 9 || alphaInputs.some((v) => v === 2);
+    }
+  };
+  if (ctx.combineMode) setCombine(ctx.combineMode[0], ctx.combineMode[1]);
+  if (ctx.otherModeH !== undefined) {
+    st.otherModeH = ctx.otherModeH >>> 0;
+    st.textLut = (ctx.otherModeH >>> 14) & 3;
+  }
+  if (ctx.primColor !== undefined) st.prim = ctx.primColor >>> 0;
+  if (ctx.envColor !== undefined) st.env = ctx.envColor >>> 0;
   const builders = new Map<string, BatchBuilder>();
   let cmdAddr = 0; // buffer offset of the command being interpreted (Batch.triSource)
+  const wrapMode = (cm: number): WrapMode => (cm & 2 ? 'clamp' : cm & 1 ? 'mirror' : 'repeat');
+
+  // directImages: the texture render tile k shows, decoded from its whole image.
+  const directTexture = (k: number): number => {
+    const t = st.tiles[k];
+    if (t.image < 0 || t.texW <= 0 || t.texH <= 0) return -1;
+    const ci = t.fmt === ImFmt.CI;
+    const pal = t.pal * 16;
+    const tlutKey = ci ? [...st.zTlutLoads.entries()].map(([i, s]) => `${i}:${s}`).join(',') : '';
+    const key = `${ctx.keyPrefix}D${t.image}/${t.fmt}/${t.siz}/${t.texW}x${t.texH}/${ci ? `${pal}/${tlutKey}/${st.textLut}` : ''}/${t.cms}/${t.cmt}`;
+    let idx = ctx.textureKeys.get(key);
+    if (idx === undefined) {
+      idx = ctx.textures.length;
+      const fmtName = ['RGBA', 'YUV', 'CI', 'IA', 'I'][t.fmt] + [4, 8, 16, 32][t.siz];
+      ctx.textures.push({
+        width: t.texW, height: t.texH,
+        rgba: decodeRows(buf, t.image, t.fmt as ImFmt, t.siz as ImSiz, t.texW, t.texH, ci ? st.zTlut.subarray(pal * 2) : null, st.textLut as Tlut),
+        wrapS: wrapMode(t.cms), wrapT: wrapMode(t.cmt),
+        format: ci ? `${fmtName}/${st.textLut === Tlut.Ia16 ? 'IA16' : 'RGBA16'}` : fmtName,
+        source: `image 0x${t.image.toString(16)}${ci ? ` tlut ${pal ? `${pal} ` : ''}${tlutKey}` : ''}`,
+      });
+      ctx.textureKeys.set(key, idx);
+    }
+    return idx;
+  };
+
+  // secondTexture: how the first colour cycle combines TEXEL0 and TEXEL1, null for other combiners:
+  // (T1 - T0) x k + T0 with a constant k (PRIM or ENV alpha, PRIM_LOD_FRAC), or T0 x T1.
+  const texelBlend = (): { blend: 'lerp' | 'multiply'; mix: number } | null => {
+    const [a, b, c, d] = st.combine;
+    const factor = (code: number) =>
+      code === 10 ? (st.prim & 0xff) / 255 : code === 12 ? (st.env & 0xff) / 255 : code === 14 ? st.primLod / 255 : null;
+    if (a === 2 && b === 1 && d === 1) {
+      const k = factor(c);
+      return k === null ? null : { blend: 'lerp', mix: k };
+    }
+    if (a === 1 && b === 2 && d === 2) {
+      const k = factor(c);
+      return k === null ? null : { blend: 'lerp', mix: 1 - k };
+    }
+    // b >= 8 and d = 7 read as 0.
+    if (((a === 2 && c === 1) || (a === 1 && c === 2)) && b >= 8 && d === 7) return { blend: 'multiply', mix: 1 };
+    return null;
+  };
 
   const currentTexture = (): number => {
     if (ctx.ucode === 'f3d') return st.textureOn && st.combineUsesTexel && st.rare ? st.rare.texture : -1;
+    if (direct) return st.textureOn && st.combineUsesTexel ? directTexture(0) : -1;
     if (!st.textureOn || !st.combineUsesTexel || st.image < 0) return -1;
     const t = st.tiles[0];
     if (t.width <= 0 || t.height <= 0) return -1;
@@ -288,18 +389,31 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
     const depthWrite = zbuf && (rm & RM_Z_UPD) !== 0 && blend !== 'blend';
     const cullBack = (st.geometryMode & G_CULL_BACK[ctx.ucode]) !== 0;
     const decal = ctx.decals === true && depthTest && (rm & RM_ZMODE_MASK) === RM_ZMODE_DEC;
-    const key = `${texture}/${blend}/${depthTest}/${depthWrite}/${cullBack}${decal ? '/decal' : ''}`;
+    // secondTexture: TEXEL1 of a constant TEXEL0 -> TEXEL1 blend.
+    const tb = direct && ctx.secondTexture && texture >= 0 && st.combineUsesTexel1 ? texelBlend() : null;
+    const texture1 = tb !== null ? directTexture(1) : -1;
+    const key = `${texture}/${blend}/${depthTest}/${depthWrite}/${cullBack}${decal ? '/decal' : ''}${texture1 >= 0 ? `/${texture1}/${tb!.blend}/${tb!.mix}` : ''}`;
     let bb = builders.get(key);
     if (!bb) {
-      bb = { batch: { texture, blend, depthTest, depthWrite, cullBack, ...(decal ? { decal } : {}) }, pos: [], uv: [], col: [], src: [] };
+      bb = {
+        batch: {
+          texture, blend, depthTest, depthWrite, cullBack, ...(decal ? { decal } : {}),
+          ...(texture1 >= 0 ? { texture1, texBlend: tb!.blend, ...(tb!.blend === 'lerp' ? { texMix: tb!.mix } : {}) } : {}),
+        },
+        pos: [], uv: [], uv1: [], col: [], src: [],
+      };
       builders.set(key, bb);
     }
     bb.src.push(cmdAddr);
     const rt = ctx.ucode === 'f3d' ? st.rare : null;
-    const tile = rt ? { width: rt.width, height: rt.height, uls: rt.uls, ult: rt.ult, shiftS: 0, shiftT: 0 } : st.tiles[0];
+    const tile = rt ? { width: rt.width, height: rt.height, uls: rt.uls, ult: rt.ult, shiftS: 0, shiftT: 0 }
+      : direct ? { ...st.tiles[0], width: st.tiles[0].texW, height: st.tiles[0].texH } : st.tiles[0];
     const shift = (s: number) => (s > 10 ? 1 << (16 - s) : 1 / (1 << s));
     const su = texture >= 0 ? (st.scaleS * shift(tile.shiftS)) / (32 * tile.width) : 0;
     const sv = texture >= 0 ? (st.scaleT * shift(tile.shiftT)) / (32 * tile.height) : 0;
+    const tile1 = st.tiles[1];
+    const su1 = texture1 >= 0 ? (st.scaleS * shift(tile1.shiftS)) / (32 * tile1.texW) : 0;
+    const sv1 = texture1 >= 0 ? (st.scaleT * shift(tile1.shiftT)) / (32 * tile1.texH) : 0;
     const fold = ctx.combiner ? { prim: rgbaUnit(st.prim), env: rgbaUnit(st.env) } : null;
     // The Rush worlds are mirrored relative to a right-handed, Y-up frame: negate X
     // (see mirrorPlacementX). The winding then follows OpenGL (counter-clockwise front).
@@ -312,6 +426,10 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
       else if (v.gen) bb.uv.push(v.gen[0], v.gen[1]);
       // The RDP samples texel (s - uls, t - ult) of the tile.
       else bb.uv.push(v.s * su - tile.uls / tile.width, v.t * sv - tile.ult / tile.height);
+      if (texture1 >= 0) {
+        if (v.gen) bb.uv1.push(v.gen[0], v.gen[1]);
+        else bb.uv1.push(v.s * su1 - tile1.uls / tile1.texW, v.t * sv1 - tile1.ult / tile1.texH);
+      }
       if (fold) {
         const out = evalCombine(st.combine, rgbaUnit(v.c), fold.prim, fold.env);
         bb.col.push(...out.map((q) => Math.round(q * 255)));
@@ -389,24 +507,20 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
     if (low) {
       if (shift === 0) st.alphaCompare = w1 & 3;
       if (shift <= 3 && shift + len > 3) st.renderMode = ((st.renderMode & ~mask) | (w1 & mask)) >>> 0;
-    } else if (shift <= 14 && shift + len >= 16) {
-      st.textLut = (w1 >>> 14) & 3;
+    } else {
+      st.otherModeH = ((st.otherModeH & ~mask) | (w1 & mask)) >>> 0;
+      if (shift <= 14 && shift + len >= 16) st.textLut = (w1 >>> 14) & 3;
     }
   };
 
   const rdp = (w0: number, w1: number) => {
     switch (w0 >>> 24) {
-      case Rdp.SETCOMBINE: {
-        const colorInputs = [
-          (w0 >>> 20) & 0xf, (w1 >>> 28) & 0xf, (w0 >>> 15) & 0x1f, (w1 >>> 15) & 0x7,
-          (w0 >>> 5) & 0xf, (w1 >>> 24) & 0xf, w0 & 0x1f, (w1 >>> 6) & 0x7,
-        ];
-        st.combineUsesTexel = colorInputs.some((v) => v === 1 || v === 2);
-        st.combine = decodeCombine(w0, w1);
+      case Rdp.SETCOMBINE:
+        setCombine(w0, w1);
         break;
-      }
       case Rdp.SETPRIMCOLOR:
         st.prim = w1 >>> 0;
+        st.primLod = w0 & 0xff;
         break;
       case Rdp.SETENVCOLOR:
         st.env = w1 >>> 0;
@@ -417,6 +531,10 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
         st.timgWidth = (w0 & 0x3ff) + 1;
         break;
       case Rdp.LOADBLOCK: {
+        if (direct) {
+          st.lastLoad = st.timg;
+          break;
+        }
         if (st.timg < 0) break;
         const tile = st.tiles[(w1 >>> 24) & 7];
         const bytes = ((((w1 >>> 12) & 0xfff) - ((w0 >>> 12) & 0xfff) + 1) << st.timgSiz) >> 1;
@@ -454,6 +572,18 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
       }
       case Rdp.LOADTLUT: {
         const tile = st.tiles[(w1 >>> 24) & 7];
+        if (direct) {
+          if (st.timg < 0) break;
+          const first = (tile.tmem >> 3) - 0x100;
+          const count = ((w1 >>> 14) & 0x3ff) + 1;
+          for (let i = 0; i < count && first + i >= 0 && first + i < 256; i++) {
+            st.zTlut[(first + i) * 2] = buf[st.timg + i * 2] ?? 0;
+            st.zTlut[(first + i) * 2 + 1] = buf[st.timg + i * 2 + 1] ?? 0;
+          }
+          for (const k of [...st.zTlutLoads.keys()]) if (k >= first && k < first + count) st.zTlutLoads.delete(k);
+          st.zTlutLoads.set(first, `${st.timg.toString(16)}+${count}`);
+          break;
+        }
         if (ctx.tlutMode === 'merged') {
           if (st.timg < 0) break;
           const first = (tile.tmem - 0x800) >> 3;
@@ -473,7 +603,8 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
         if (ctx.tlutMode === 'merged') st.tlutKey = '';
         break;
       case Rdp.SETTILE: {
-        const t = st.tiles[(w1 >>> 24) & 7];
+        const k = (w1 >>> 24) & 7;
+        const t = st.tiles[k];
         t.fmt = (w0 >>> 21) & 7;
         t.siz = (w0 >>> 19) & 3;
         t.line = ((w0 >>> 9) & 0x1ff) * 8;
@@ -483,6 +614,12 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
         t.shiftT = (w1 >>> 10) & 0xf;
         t.cms = (w1 >>> 8) & 3;
         t.shiftS = w1 & 0xf;
+        // directImages: a render tile shows the image of the preceding load (tile 7 is the load tile).
+        if (direct && k !== 7) {
+          t.image = st.lastLoad;
+          t.texW = t.texH = 0;
+          t.sizePending = true;
+        }
         break;
       }
       case Rdp.SETTILESIZE: {
@@ -491,6 +628,12 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
         t.ult = (w0 & 0xfff) / 4;
         t.width = (((w1 >>> 12) & 0xfff) >> 2) - (((w0 >>> 12) & 0xfff) >> 2) + 1;
         t.height = ((w1 & 0xfff) >> 2) - ((w0 & 0xfff) >> 2) + 1;
+        if (direct && t.sizePending) {
+          // gsDPLoadTextureBlock sets the true image size here; later commands move the window only.
+          t.sizePending = false;
+          t.texW = t.width;
+          t.texH = t.height;
+        }
         break;
       }
       default:
@@ -579,6 +722,8 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
           break;
         case F3DEX2.DL: call = w1; push = ((w0 >>> 16) & 0xff) === 0; break;
         case F3DEX2.ENDDL: end = true; break;
+        case F3DEX2.RDPHALF_1: st.rdpHalf1 = w1; break;
+        case F3DEX2.BRANCH_Z: if (ctx.branchZ === 'near') call = st.rdpHalf1; break;
         default: rdp(w0, w1);
       }
     } else {
@@ -645,5 +790,6 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
     uvs: new Float32Array(b.uv),
     colors: new Uint8Array(b.col),
     triSource: new Uint32Array(b.src),
+    ...(b.batch.texture1 !== undefined ? { uvs1: new Float32Array(b.uv1) } : {}),
   }));
 }
