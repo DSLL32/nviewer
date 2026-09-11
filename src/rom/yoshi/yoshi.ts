@@ -303,7 +303,17 @@ function loadLevel(y: YoshiRom, def: LevelDef): Level {
     const add = y.record(y.slot(castdt, 5));
     const npx = layer.unitW * layer.unitH, nTiles = Math.floor(ut.length / npx);
     const pv = view(pal);
-    const tileOf = (v: number) => (v & 0x8000 ? (add && (v & 0x7fff) * 10 + 2 <= add.length ? view(add).getUint16((v & 0x7fff) * 10) : 0) : v);
+    // Animated units: record {u16 tile[5]} ending at 0x8000. The last listed tile is the one that joins its
+    // neighbours (over all layers it matches the surrounding tiles' edges in ~94% of units; frame 0 is often
+    // the plain fill tile).
+    const tileOf = (v: number) => {
+      if (!(v & 0x8000)) return v;
+      const o = (v & 0x7fff) * 10;
+      if (!add || o + 10 > add.length) return 0;
+      let t = 0;
+      for (let k = 0; k < 5 && view(add).getUint16(o + 2 * k) !== 0x8000; k++) t = view(add).getUint16(o + 2 * k);
+      return t;
+    };
     const atlas = new TileAtlas(layer.unitW, layer.unitH);
     const placed: [number, number, number][] = [];
     layer.units('tiles', (px, py, v) => {
