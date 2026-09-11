@@ -256,6 +256,12 @@ Textures are uploaded with the RDP tile commands, not read in place.
 - **Music.** BattleTanx: Standard MIDI files on libultra's sequence player; Global Assault:
   Software Creations' libmus, emulated tick by tick with BIGROOM reverb. Both at 22047 Hz; loudness
   and loop lengths checked against captured game audio.
+- **Collision (hidden layers).** BattleTanx has no collision mesh: each collidable object's model footprint is a 2D
+  rotated rectangle, drawn as a prism coloured by class (static, destructible, low destructible, tank-only,
+  passable, player-setup-dependent). Global Assault uses boxes: solid and see-through walls, invisible solids,
+  5000-high boundary walls, the platform/ramp/mound boxes that give ground height, and destructibles, with kind-30
+  zones (no-spawn, shell blocker, trigger, play area) in a separate "collision zones" layer. Both were checked against
+  the games' live collision tables in RAM dumps.
 
 ### Gex 64: Enter the Gecko, Gex 3: Deep Cover Gecko
 
@@ -397,7 +403,10 @@ Textures are uploaded with the RDP tile commands, not read in place.
   translucent effects that blend by fog alpha are not modelled.
 - BattleTanx: tanks, pickups and destructible states other than the intact one are not shown; team
   colour palette animations show a fixed frame; only the most detailed LOD is used. BattleTanx music
-  runs about 0.05% fast (the game's 16 ms audio poll rounding is not modelled).
+  runs about 0.05% fast (the game's 16 ms audio poll rounding is not modelled). BattleTanx collision has no heights (prisms
+  reach the model top) and shows every player-setup-gated object; Global Assault's collision leaves out kinds
+  24/28/32/36 (registered in code but not seen in dumps; probably moving vehicles) and the fixed boxes of kinds 4 and
+  8, and the meanings of the kind-30 zone flags are hypotheses.
 - Gex: animated materials (flipbooks, scrolling water and lava) show their first frame; characters
   and enemies stand in their rest pose, and skinned Gex 3 objects are not shown. Objects that the
   level scripts spawn are not shown; invisible volumes and marker boxes (Gex 3 sound emitters) are

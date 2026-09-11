@@ -9,11 +9,12 @@
 // F3DEX 1.x geometry at 0x3EA970) with chunk-relative addresses. At load the game relocates
 // them, replaces render modes and combiners by their fog versions (table 0x80125860 ->
 // 0x801258D8) and scales vertex colours by 1.92. Objects are placed at (x, 0, z) turned about Y.
+// Collision is a 2D grid of oriented rectangles built at load: the footprints of the collidable objects' models.
 import { runDisplayList } from './displaylist';
 import { lzariDecode } from './lzari';
 import { parseBank, renderSequence } from './music/libultra';
 import { parseSequence } from './music/rush1';
-import type { Batch, CameraView, DecodedMusic, Game, Instance, Level, LevelInfo, Mesh, MusicTrack, Texture } from './types';
+import type { Batch, CameraView, DebugInfo, DecodedMusic, Game, Instance, Level, LevelInfo, Mesh, MusicTrack, Texture } from './types';
 import { buildLevel, meshFromBatches } from './bomberman/common';
 import { view } from './util';
 
@@ -66,6 +67,31 @@ export const BATTLETANX_LEVELS: LevelInfo[] = DEFS.map((d, index) => ({ index, n
 // Marker kinds (pickup spawns, AI markers, player starts) are never drawn.
 const MARKER_KINDS = new Set([10, 21, 22, 23, 24, 25]);
 const PLAYER_START = 25;
+
+// Collision (BATTLETANX.md 5.1.3). At load the object handlers (table 0x800718D8) insert one entry per collidable
+// object into the grid (0x80106D18; 1300 entries at 0x803B8248): the hdr3 footprint of its model, grown by `margin`,
+// at the truncated (x, z), turned by the yaw like the draw matrix. Tanks query entries with grid flag 0x10, shells 0x04.
+type CollisionClass = 'static' | 'destructible' | 'low' | 'tankOnly' | 'passable' | 'conditional';
+const COLLISION_KINDS: Record<number, { margin: number; flags: number; cls: CollisionClass }> = {
+  1: { margin: 1, flags: 0xf85f, cls: 'static' }, 26: { margin: 0, flags: 0xf85f, cls: 'static' }, 30: { margin: 0, flags: 0xf85f, cls: 'static' },
+  19: { margin: 1, flags: 0x1a, cls: 'tankOnly' }, 27: { margin: 1, flags: 0x1a, cls: 'tankOnly' },
+  5: { margin: 0, flags: 0xf85f, cls: 'destructible' }, 8: { margin: 1, flags: 0xf85f, cls: 'destructible' },
+  9: { margin: 0, flags: 0xf95f, cls: 'destructible' }, 11: { margin: 0, flags: 0xf85f, cls: 'destructible' },
+  12: { margin: 0, flags: 0xf85f, cls: 'destructible' }, 13: { margin: 0, flags: 0xf85f, cls: 'destructible' },
+  14: { margin: 0, flags: 0xf85f, cls: 'destructible' }, 20: { margin: 0, flags: 0xf85f, cls: 'destructible' },
+  31: { margin: 0, flags: 0xf85f, cls: 'destructible' },
+  6: { margin: 0, flags: 0x56, cls: 'low' }, 15: { margin: 0, flags: 0x20, cls: 'passable' },
+};
+const COLLISION_CLASSES: { cls: CollisionClass; label: string; color: [number, number, number] }[] = [
+  { cls: 'static', label: 'static: blocks tanks and shells', color: [205, 150, 80] },
+  { cls: 'destructible', label: 'destructible: blocks tanks and shells until destroyed', color: [225, 75, 65] },
+  { cls: 'low', label: 'low destructible (grid flags 0x56): blocks tanks and shells until destroyed', color: [230, 205, 60] },
+  { cls: 'tankOnly', label: 'blocks tanks, shells pass (grid flags 0x1A)', color: [80, 145, 235] },
+  { cls: 'passable', label: 'registered but blocks nothing (grid flags 0x20)', color: [165, 165, 165] },
+  { cls: 'conditional', label: 'object flag 0x02: exists only with some player setups (never in campaign)', color: [200, 90, 210] },
+];
+// Overlay prisms stand this far outside the footprint and above the model, so they do not z-fight with its faces.
+const COLLISION_GROW = 1;
 
 const G_VTX = 0x04;
 const G_DL = 0x06;
@@ -205,6 +231,7 @@ function loadLevel(rom: Uint8Array, index: number): Level {
   };
 
   const instances: Instance[] = [];
+  const objectMesh = new Map<number, number>(); // hdr2 object -> its drawn mesh
   let start: { x: number; z: number; yaw: number } | undefined;
   for (let i = 0; i < count(2, 28); i++) {
     const o = h[2] + i * 28;
@@ -222,6 +249,7 @@ function loadLevel(rom: Uint8Array, index: number): Level {
     if (mesh < 0 || !meshes[mesh].batches.length) continue;
     const ang = (yaw / 65536) * 2 * Math.PI;
     const c = Math.cos(ang), s = Math.sin(ang);
+    objectMesh.set(i, mesh);
     instances.push({
       name: meshes[mesh].name, mesh, matrix: new Float32Array([c, 0, -s, 0, 0, 1, 0, 0, s, 0, c, 0, x, 0, z, 1]),
       info: { file: `0x${LEVEL_FILES[id].toString(16)}`, object: i, record: `0x${o.toString(16)}`, kind, flags: `0x${flags.toString(16)}` },
@@ -242,7 +270,117 @@ function loadLevel(rom: Uint8Array, index: number): Level {
     start = { x: adv.getFloat32(s), z: adv.getFloat32(s + 4), yaw: (Math.round(adv.getFloat32(s + 8) * 0x2000) & 0xffff) };
   }
   if (start) extra.camera = chaseCamera(start.x, 0, start.z, start.yaw);
-  return buildLevel(BATTLETANX_LEVELS[index], `battletanx-${index}`, textures, meshes, instances, extra);
+  const level = buildLevel(BATTLETANX_LEVELS[index], `battletanx-${index}`, textures, meshes, instances, extra);
+
+  // Collision overlay, added after the level bounds: one world-space mesh per class of grid entry. The grid is 2D;
+  // each prism reaches the top of the object's drawn model.
+  const prisms = new Map<CollisionClass, { faces: Face[]; count: number; kinds: Map<number, number> }>();
+  for (let i = 0; i < count(2, 28); i++) {
+    const o = h[2] + i * 28;
+    const flags = a[o];
+    const rule = COLLISION_KINDS[adv.getUint32(o + 8)];
+    // The loader's mode filter (0x80089A7C) applies before the handlers.
+    if (!rule || (def.mode === 'campaign' ? flags & 0x40 : flags & 0x10)) continue;
+    const model = adv.getInt16(o + 24);
+    if (model < 0 || model >= models.length) continue;
+    const m = h[3] + model * 12, g = rule.margin + COLLISION_GROW;
+    const x0 = adv.getInt16(m + 4) - g, z0 = adv.getInt16(m + 6) - g, x1 = adv.getInt16(m + 8) + g, z1 = adv.getInt16(m + 10) + g;
+    const x = Math.trunc(adv.getFloat32(o + 12)), z = Math.trunc(adv.getFloat32(o + 16));
+    const ang = (adv.getUint16(o + 20) / 65536) * 2 * Math.PI, c = Math.cos(ang), s = Math.sin(ang);
+    const at = (lx: number, lz: number): [number, number] => [x + c * lx + s * lz, z - s * lx + c * lz];
+    const mesh = objectMesh.get(i);
+    let top = 48;
+    if (mesh !== undefined) {
+      top = 0;
+      for (const b of meshes[mesh].batches) for (let k = 1; k < b.positions.length; k += 3) top = Math.max(top, b.positions[k]);
+    }
+    const cls = flags & 0x02 ? 'conditional' : rule.cls;
+    const entry = prisms.get(cls) ?? { faces: [] as Face[], count: 0, kinds: new Map<number, number>() };
+    prisms.set(cls, entry);
+    entry.kinds.set(adv.getUint32(o + 8), (entry.kinds.get(adv.getUint32(o + 8)) ?? 0) + 1);
+    entry.count++;
+    entry.faces.push(...prismFaces([at(x0, z0), at(x1, z0), at(x1, z1), at(x0, z1)], 0, Math.max(top, 8) + COLLISION_GROW, o));
+  }
+  const file = `0x${LEVEL_FILES[id].toString(16)}`;
+  addCollisionLayer(level, COLLISION_CLASSES.flatMap(({ cls, label, color }) => {
+    const entry = prisms.get(cls);
+    if (!entry) return [];
+    return [{
+      name: `collision: ${cls}`, color, faces: entry.faces,
+      info: {
+        source: `level file A ${file}: hdr2 objects (28 B) with the hdr3 footprint of their model (i16 xmin, zmin, xmax, zmax at +4)`,
+        class: label, rectangles: entry.count,
+        kinds: [...entry.kinds].sort((p, q) => p[0] - q[0]).map(([k, n]) => `${k} x${n}`).join(', '),
+        margin: 'kinds 1, 8, 19, 27 grown by 1 (0x80071894); drawn 1 unit further out and above the model',
+        height: 'none in the game (2D grid); prisms reach the top of the object model',
+        triSource: `offset of the hdr2 object record in decoded level file A ${file}`,
+      },
+    }];
+  }));
+  return level;
+}
+
+// A convex planar polygon of a collision overlay (world space) and the record it comes from (Batch.triSource).
+export interface Face { points: [number, number, number][]; source: number }
+
+// The faces of a solid over a convex outline (world x, z): sides from y0 up to the top heights (one per corner, or y1),
+// the top, and the bottom where asked. Sides whose top meets y0 (a ramp's low edge) collapse to nothing.
+export function prismFaces(corners: [number, number][], y0: number, y1: number | number[], source: number, bottom = false): Face[] {
+  const n = corners.length, top = (k: number) => (typeof y1 === 'number' ? y1 : y1[k]);
+  const faces: Face[] = [];
+  for (let k = 0; k < n; k++) {
+    const j = (k + 1) % n, [ax, az] = corners[k], [bx, bz] = corners[j];
+    if (top(k) === y0 && top(j) === y0) continue;
+    faces.push({ points: [[ax, y0, az], [bx, y0, bz], [bx, top(j), bz], [ax, top(k), az]], source });
+  }
+  faces.push({ points: corners.map(([x, z], k) => [x, top(k), z]), source });
+  if (bottom) faces.push({ points: corners.map(([x, z]): [number, number, number] => [x, y0, z]).reverse(), source });
+  return faces;
+}
+
+// Translucent faces as one world-space batch, shaded by their normal (tops light, sides by direction, bottoms dark);
+// both sides visible, depth-tested without depth writes. triSource holds each face's `source`.
+export function faceBatch(faces: Face[], color: [number, number, number], alpha = 140): Batch {
+  let tris = 0;
+  for (const f of faces) tris += f.points.length - 2;
+  const positions = new Float32Array(tris * 9), colors = new Uint8Array(tris * 12), triSource = new Uint32Array(tris);
+  let t = 0;
+  for (const f of faces) {
+    // Newell normal of the polygon.
+    let nx = 0, ny = 0, nz = 0;
+    f.points.forEach((p, k) => {
+      const q = f.points[(k + 1) % f.points.length];
+      nx += (p[1] - q[1]) * (p[2] + q[2]);
+      ny += (p[2] - q[2]) * (p[0] + q[0]);
+      nz += (p[0] - q[0]) * (p[1] + q[1]);
+    });
+    const len = Math.hypot(nx, ny, nz) || 1;
+    const shade = ny / len > 0.7 ? 1 : ny / len < -0.7 ? 0.5 : 0.62 + 0.25 * Math.abs(nx) / (Math.hypot(nx, nz) || 1);
+    const rgba = [Math.round(color[0] * shade), Math.round(color[1] * shade), Math.round(color[2] * shade), alpha];
+    for (let k = 1; k + 1 < f.points.length; k++) {
+      for (const [v, p] of [f.points[0], f.points[k], f.points[k + 1]].entries()) {
+        positions.set(p, t * 9 + v * 3);
+        colors.set(rgba, t * 12 + v * 4);
+      }
+      triSource[t++] = f.source;
+    }
+  }
+  return { texture: -1, blend: 'blend', depthTest: true, depthWrite: false, cullBack: false, positions, uvs: new Float32Array(tris * 6), colors, triSource };
+}
+
+// Appends collision meshes after the level is built (bounds and unplaced meshes stay those of the level itself) with
+// one identity instance each, in a hidden layer of kind 'collision'.
+export function addCollisionLayer(level: Level, groups: { name: string; color: [number, number, number]; faces: Face[]; info: DebugInfo; alpha?: number }[], layerName = 'collision') {
+  const instances: number[] = [];
+  for (const g of groups) {
+    if (!g.faces.length) continue;
+    const batch = faceBatch(g.faces, g.color, g.alpha);
+    let radius = 0;
+    for (let k = 0; k < batch.positions.length; k += 3) radius = Math.max(radius, Math.hypot(batch.positions[k], batch.positions[k + 1], batch.positions[k + 2]));
+    const mesh = level.meshes.push({ name: g.name, radius, batches: [batch], info: g.info }) - 1;
+    instances.push(level.instances.push({ name: g.name, mesh, matrix: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]), info: { layer: layerName } }) - 1);
+  }
+  if (instances.length) (level.layers ??= []).push({ name: layerName, kind: 'collision', instances, visibleByDefault: false });
 }
 
 // The game's chase camera: about 170 units behind the tank and 74 above it, looking along the

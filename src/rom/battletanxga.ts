@@ -13,7 +13,7 @@ import { type DlLighting, type Mtx, runDisplayList } from './displaylist';
 import { lzariDecode } from './lzari';
 import { decodeGaMusic, listGaMusic } from './music/libmus';
 import type { Game, Instance, Level, LevelInfo, Mesh, Texture } from './types';
-import { chaseCamera } from './battletanx';
+import { addCollisionLayer, chaseCamera, type Face, prismFaces } from './battletanx';
 import { buildLevel, lighting, meshFromBatches, translation } from './bomberman/common';
 import { view } from './util';
 
@@ -301,6 +301,7 @@ function loadLevel(rom: Uint8Array, index: number): Level {
 
   // Resolve placements first, so the level memory holds exactly the chunks of placed models.
   const placed: { wi: number; pi: number; def: number; mi: number; kind: number; x: number; y: number; z: number; yaw: number }[] = [];
+  const resolved: Resolved[] = []; // every placement after conditional includes, for collision
   let startView: Level['camera'];
   worlds.forEach((w, wi) => {
     for (const [pi, p] of w.placements.entries()) {
@@ -318,6 +319,7 @@ function loadLevel(rom: Uint8Array, index: number): Level {
         kind = w.data[o];
       }
       if (skip || o >= w.data.length) continue;
+      resolved.push({ wi, pi, def: o, kind });
       if (kind === PLAYER_START && !startView && w.data[o + 1] === 0) startView = chaseCamera(p.x, p.y, p.z, p.yaw);
       const field = MODEL_FIELD[kind];
       if (field === undefined) continue;
@@ -348,7 +350,172 @@ function loadLevel(rom: Uint8Array, index: number): Level {
     extra.clearColor = fogColor;
   }
   if (startView) extra.camera = startView;
-  return buildLevel(GA_LEVELS[index], `battletanxga-${index}`, textures, meshes, instances, extra);
+  const level = buildLevel(GA_LEVELS[index], `battletanxga-${index}`, textures, meshes, instances, extra);
+  addCollision(level, worlds, files, resolved);
+  return level;
+}
+
+// Collision (BATTLETANX.md 5.1.4): a flat list of boxes (40-byte entries at 0x803978E0), added by the spawn switch
+// through 0x800B1898. Model-based entries take the model's bounds at the placement (vertical span y + minY .. y + maxY),
+// kind 30 its own box relative to the placement. No triangle collision or heightfield: platform, mound and ramp boxes
+// give the ground height.
+interface Resolved { wi: number; pi: number; def: number; kind: number }
+type GaCollision = 'solid' | 'seeThrough' | 'invisible' | 'tallWall' | 'platform' | 'ramp' | 'mound' | 'destructible' | 'noSpawn' | 'shotBlocker' | 'trigger' | 'playArea';
+const GA_COLLISION: { cls: GaCollision; zone: boolean; label: string; color: [number, number, number]; alpha?: number }[] = [
+  { cls: 'solid', zone: false, label: 'solid (flag 0x1): kinds 1, 35', color: [205, 150, 80] },
+  { cls: 'seeThrough', zone: false, label: 'solid, see-through (flag 0x4000, e.g. fences; missing from the AI sight masks): kind 14', color: [235, 200, 125] },
+  { cls: 'invisible', zone: false, label: 'invisible solid (kind 42: flag 0x1 with a model\'s bounds, not drawn)', color: [200, 90, 210] },
+  { cls: 'tallWall', zone: false, label: 'kind 43 wall: top fixed at 5000 (flag 0x1, or 0x4000 when def+5 is set)', color: [175, 135, 95], alpha: 45 },
+  { cls: 'platform', zone: false, label: 'platform (flag 0x20, ground height y + top): kind 2 with model maxY >= 2, kind 35 with def+6 set', color: [90, 200, 90] },
+  { cls: 'ramp', zone: false, label: 'ramp (flag 0x80, kind 22): height rises linearly from bottom to top along local +Z', color: [60, 195, 175] },
+  { cls: 'mound', zone: false, label: 'mound (flag 0x40, kind 11): flat top with edges sloping over max(width, depth) / 4', color: [155, 205, 60] },
+  { cls: 'destructible', zone: false, label: 'destructible, initial state (kinds 3, 21: 0x2; 5: 0x400 or 0x800000; 10: 0x100000; 15: 0x2 or 0x8000)', color: [225, 75, 65] },
+  { cls: 'noSpawn', zone: true, label: 'kind 30 sub 1 (flag 0x01000000): only in the clearance queries for random spawn and destination points (hypothesis)', color: [125, 125, 225], alpha: 100 },
+  { cls: 'shotBlocker', zone: true, label: 'kind 30 sub 2 (flag 0x80000): only in the shot segment queries (hypothesis: blocks shells)', color: [60, 200, 235], alpha: 110 },
+  { cls: 'trigger', zone: true, label: 'kind 30 sub 3/4 (flag 0x10000): trigger volume (hypothesis: level exit)', color: [235, 210, 60], alpha: 110 },
+  { cls: 'playArea', zone: true, label: 'kind 30 sub 0 play-area rectangle per group (random points are picked inside it; the group bounds if none); not a wall, drawn 150 high', color: [235, 235, 235], alpha: 90 },
+];
+// Kinds 24 (0x8000), 28 (0x2), 32 (0x40000) and 36 (0x100000) also register according to the code, but no dump shows
+// them where the world files place them (kind 24 look like vehicles that move): left out.
+const DESTRUCTIBLE_FLAGS: Record<number, number> = { 3: 0x2, 21: 0x2, 10: 0x100000 };
+const SNAPPED = 0x039bef67; // entries with any of these flags snap their yaw to a quadrant and bake it into the box
+const GROW = 1; // overlay faces stand this far outside the box and above its top, off the model's own faces
+
+function addCollision(level: Level, worlds: World[], files: number[], resolved: Resolved[]) {
+  // Per-group grids (0x800B06E0 / 0x800B07D4): origin at the union of the files' group minima, (size >> 10) + 3 cells of
+  // 1024 units; an entry whose box misses its group's grid is freed. Default play area: the group bounds.
+  const union: number[][] = [];
+  const groupOf = worlds.map((w) => {
+    const of = new Int32Array(w.placements.length).fill(-1);
+    for (let g = 0; g < w.dv.getUint32(w.h[0]); g++) {
+      const o = w.h[1] + g * 16, s = (k: number) => w.dv.getInt16(o + k);
+      const [x0, z0, x1, z1] = [s(4), s(8), s(10), s(14)];
+      const u = union[g];
+      union[g] = u ? [Math.min(u[0], x0), Math.min(u[1], z0), Math.max(u[2], x1), Math.max(u[3], z1)] : [x0, z0, x1, z1];
+      for (let p = w.dv.getUint16(o + 2); p < w.dv.getUint16(o + 2) + w.dv.getUint16(o) && p < of.length; p++) of[p] = g;
+    }
+    return of;
+  });
+  const grids = union.map(([x0, z0, x1, z1]) => ({ ox: x0, oz: z0, w: ((((x1 - x0) & 0xffff) >> 10) + 3) << 10, h: ((((z1 - z0) & 0xffff) >> 10) + 3) << 10 }));
+  const playArea: { rect: number[]; source: number }[] = union.map((rect) => ({ rect, source: 0xffffffff }));
+
+  const out = new Map<GaCollision, { faces: Face[]; count: number; kinds: Map<string, number> }>();
+  let dropped = 0;
+  const add = (cls: GaCollision, kind: string, faces: Face[]) => {
+    const e = out.get(cls) ?? { faces: [] as Face[], count: 0, kinds: new Map<string, number>() };
+    out.set(cls, e);
+    e.faces.push(...faces);
+    e.count++;
+    e.kinds.set(kind, (e.kinds.get(kind) ?? 0) + 1);
+  };
+  const s16 = (v: number) => (v << 16) >> 16;
+
+  for (const { wi, pi, def: o, kind } of resolved) {
+    const w = worlds[wi], d = w.data, p = w.placements[pi], g = groupOf[wi][pi];
+    if (g < 0) continue; // the spawner walks groups only
+    const source = ((wi << 24) | (w.h[2] + pi * 12)) >>> 0;
+    const mi = w.dv.getUint16(o + 2);
+    const model = mi < w.models.length ? w.h[4] + mi * 16 : -1;
+    const mb = (k: number) => w.dv.getInt16(model + k); // +4 minX, +6 minY, +8 minZ, +10 maxX, +12 maxY, +14 maxZ
+    let flags = 0, cls: GaCollision | undefined, box: number[] | undefined, ybase = 0; // box: minX, minZ, maxX, maxZ, bottom, top
+    const fromModel = (f: number, c: GaCollision, top?: number) => {
+      if (model < 0) return;
+      flags = f;
+      cls = c;
+      box = [mb(4), mb(8), mb(10), mb(14), s16(mb(6) + p.y), top ?? s16(mb(12) + p.y)];
+    };
+    switch (kind) {
+      case 1: fromModel(0x1, 'solid'); break; // 0x800E03BC
+      case 14: fromModel(0x4000, 'seeThrough'); break;
+      case 2: if (model >= 0 && mb(12) >= 2) fromModel(0x20, 'platform'); break; // 0x800DFD44
+      case 11: fromModel(0x40, 'mound'); break; // 0x800E017C
+      case 22: fromModel(0x80, 'ramp'); break; // 0x800DFFEC
+      case 35: fromModel(d[o + 6] ? 0x20 : 0x1, d[o + 6] ? 'platform' : 'solid'); break; // 0x800E0940
+      case 42: fromModel(0x1, 'invisible'); break; // 0x800E030C
+      case 43: fromModel(d[o + 5] ? 0x4000 : 0x1, 'tallWall', 5000); break; // 0x800E0690
+      case 5: if (model >= 0) fromModel(mb(12) === 36 ? 0x800000 : 0x400, 'destructible'); break; // 0x800E1674
+      case 15: fromModel([2, 3, 6].includes(d[o + 8]) ? 0x2 : 0x8000, 'destructible'); break; // 0x800EAD84
+      case 30: { // 0x800E11EC, sub jump table 0x80075A18: {u8 30, u8 sub, s16 minX, minY, minZ, maxX, maxY, maxZ}
+        const b = (k: number) => w.dv.getInt16(o + k);
+        const sub = d[o + 1];
+        if (sub === 0) playArea[g] = { rect: [p.x + b(2), p.z + b(6), p.x + b(8), p.z + b(12)], source };
+        else if (sub <= 4) {
+          flags = sub === 1 ? 0x1000000 : sub === 2 ? 0x80000 : 0x10000;
+          cls = sub === 1 ? 'noSpawn' : sub === 2 ? 'shotBlocker' : 'trigger';
+          box = [b(2), b(6), b(8), b(12), b(4), b(10)];
+          ybase = p.y;
+        }
+        break;
+      }
+      default: if (DESTRUCTIBLE_FLAGS[kind]) fromModel(DESTRUCTIBLE_FLAGS[kind], 'destructible');
+    }
+    if (!cls || !box) continue;
+    // 0x800B19BC: snap the yaw to a quadrant if it lies at most 22.5 degrees below one, and bake quadrants into the box.
+    let [x0, z0, x1, z1] = box;
+    let yaw = p.yaw, x = p.x, z = p.z;
+    if (flags & SNAPPED) {
+      for (const t of [0, 0x4000, 0x8000, 0xc000]) if (((t - yaw) & 0xffff) <= 4096) { yaw = t; break; }
+      if (yaw === 0x4000) [x0, x1, z0, z1] = [z0, z1, -x1, -x0];
+      else if (yaw === 0x8000) [x0, x1, z0, z1] = [-x1, -x0, -z1, -z0];
+      else if (yaw === 0xc000) [x0, x1, z0, z1] = [-z1, -z0, x0, x1];
+      if ((yaw & 0x3fff) === 0) yaw = 0;
+    }
+    // Grid overlap (0x800B1898): drop, or clamp a centre left of / below the grid onto its edge (0x800B14A8).
+    const grid = grids[g], rx = x - grid.ox, rz = z - grid.oz;
+    if (!(rx >= 0 && rz >= 0 && rx < grid.w && rz < grid.h)) {
+      if (!(rx + x1 >= 0 && rz + z1 >= 0 && rx + x0 < grid.w && rz + z0 < grid.h)) {
+        dropped++;
+        continue;
+      }
+      if (rx < 0) [x0, x1, x] = [s16(x0 + rx), s16(x1 + rx), grid.ox];
+      if (rz < 0) [z0, z1, z] = [s16(z0 + rz), s16(z1 + rz), grid.oz];
+    }
+    const a = (yaw / 65536) * 2 * Math.PI, c = Math.cos(a), s = Math.sin(a);
+    const at = (lx: number, lz: number): [number, number] => [x + c * lx + s * lz, z - s * lx + c * lz];
+    const X0 = x0 - GROW, X1 = x1 + GROW, Z0 = z0 - GROW, Z1 = z1 + GROW;
+    const corners = [at(X0, Z0), at(X1, Z0), at(X1, Z1), at(X0, Z1)];
+    const y0 = ybase + box[4], y1 = ybase + box[5] + GROW;
+    if (cls === 'ramp') {
+      // 0x800B2364: h = y + bottom + (top - bottom)(lz - minZ) / (maxZ - minZ).
+      add(cls, String(kind), prismFaces(corners, y0, [y0 + GROW, y0 + GROW, y1, y1], source));
+    } else if (cls === 'mound') {
+      // 0x800B83A8: the edges slope over max(width, depth) / 4 up to the flat top.
+      const slope = Math.max(x1 - x0, z1 - z0) / 4;
+      const ix = Math.min(slope, (X1 - X0) / 2), iz = Math.min(slope, (Z1 - Z0) / 2);
+      const inner = [at(X0 + ix, Z0 + iz), at(X1 - ix, Z0 + iz), at(X1 - ix, Z1 - iz), at(X0 + ix, Z1 - iz)];
+      const faces: Face[] = corners.map((q, k) => ({
+        points: [[q[0], y0, q[1]], [corners[(k + 1) % 4][0], y0, corners[(k + 1) % 4][1]], [inner[(k + 1) % 4][0], y1, inner[(k + 1) % 4][1]], [inner[k][0], y1, inner[k][1]]],
+        source,
+      }));
+      faces.push({ points: inner.map(([px, pz]): [number, number, number] => [px, y1, pz]), source });
+      add(cls, String(kind), faces);
+    } else {
+      add(cls, kind === 30 ? `30.${d[o + 1]}` : String(kind), prismFaces(corners, y0 > 0 ? y0 - GROW : y0, y1, source, y0 > 0));
+    }
+  }
+  for (const { rect: [x0, z0, x1, z1], source } of playArea) {
+    add('playArea', source === 0xffffffff ? 'group bounds' : '30.0', prismFaces([[x0, z0], [x1, z0], [x1, z1], [x0, z1]], 0, 150, source).slice(0, -1));
+  }
+
+  const fileList = files.map((f, k) => `slot ${k} 0x${f.toString(16)}`).join(', ');
+  const groups = (zone: boolean) => GA_COLLISION.filter((k) => k.zone === zone).flatMap(({ cls, label, color, alpha }) => {
+    const e = out.get(cls);
+    if (!e) return [];
+    return [{
+      name: `collision: ${cls}`, color, alpha, faces: e.faces,
+      info: {
+        source: `world files ${fileList}: placements (12 B) and their kind definitions; model-based boxes use the model bounds (h4 +4..+14)`,
+        class: label, entries: e.count,
+        kinds: [...e.kinds].map(([k, n]) => `${k} x${n}`).join(', '),
+        transform: 'box centred on the placement (x, z); yaw snapped to a quadrant for most flags (0x039BEF67), else an oriented box',
+        grid: `${dropped} entries of the level miss their group grid and are dropped`,
+        drawn: `${GROW} unit outside the box and above its top`,
+        triSource: 'slot << 24 | offset of the placement record in the decoded world file (kind 30 sub 0 defaults: 0xFFFFFFFF)',
+      },
+    }];
+  });
+  addCollisionLayer(level, groups(false));
+  addCollisionLayer(level, groups(true), 'collision zones');
 }
 
 export function openBattleTanxGA(rom: Uint8Array): Game {

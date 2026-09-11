@@ -680,8 +680,8 @@ Loaders: 0x800BA6C0 per file, 0x800BB53C for the common file.
 | 6 | waypoint {06, u8 chain, u8 index, 00} | none |
 | 7 | pickup (u8 +1 = type) | none |
 | 17 | player start {u8 17, u8 slot, u16 value}. Stored at *(0x80219498)+500+24·slot as f32 x, z, sin, cos, value. Campaign variants have none. | none |
-| 30 | collision / box (sub-switch on +1, 0x800B1898) | none |
-| 42 | collision only | none |
+| 30 | collision box, trigger or play-area rectangle (16 B, sub-switch on +1; 5.1.4) | none |
+| 42 | invisible solid with a model's bounds (4 B {42, 0, u16 model}; 5.1.4) | model u16 at +2, collision only |
 | 37 | fog and lights, 24 B (below) | none |
 | 38 | group ambient light, 4 B {38, r, g, b} | none |
 | 33 | global model list (common file) | none |
@@ -858,6 +858,157 @@ Loaders: 0x800BA6C0 per file, 0x800BB53C for the common file.
 | 9 | Chicago Bonus | 218 | 2960 | 27 | 27 | Test4 | 267 | 1078 | 44 |
 | 10 | Desert | 1930 | 9830 | 43 | | | | | |
 | 11 | Area 51 | 1605 | 15701 | 67 | | | | | |
+
+#### 5.1.3 BTX1 collision (verified)
+BTX1 stores **no collision mesh, heightfield or collision section**. At load, the object handlers insert one **2D oriented rectangle** per collidable object into a spatial grid, and all tank and shell collision queries that grid. The ground (kind 0) never collides, and the world has no heights: ground vertices lie at y 0..49 in levels 1, 2, 4, 14 and 24, bridges and the tunnel included, and the tank's modelview translation has y = 0.
+
+**Shape of an entry** (from level file A):
+- Local box: the hdr3 footprint of the object's model (i16 xmin +4, zmin +6, xmax +8, zmax +10), grown by a margin m on every side. m = 1 (f32 1.0 at 0x80071894) for kinds 1, 8, 19 and 27, otherwise 0.
+- Position: the hdr2 x and z, **truncated to integers**; yaw from hdr2 +20.
+- World corners (0x80108E74, the same rotation as the draw matrix): with c = cos(yaw·2π/65536) and s = sin(...), `X = x + c·lx + s·lz`, `Z = z − s·lx + c·lz`. The footprints are therefore oriented rectangles, not axis-aligned boxes.
+- The loader's mode filter applies first (0x80089A7C: flag 0x10 campaign only, 0x40 non-campaign only).
+
+**Which kinds register** (handler table 0x800718D8, indexed by kind − 1; insert 0x80106D18(owner, x, z, xmin, xmax, zmin, zmax, flags, yaw)):
+
+| Kind | Handler | Grid flags | Owner (+8) | Margin | Class |
+|---|---|---|---|---|---|
+| 1 | 0x80089D5C | 0xF85F | 0 | 1 | static |
+| 26 | 0x80089EA0 | 0xF85F | 1 | 0 | static |
+| 30 | 0x80089E10 | 0xF85F | 2 | 0 | static |
+| 19, 27 | 0x80089F30 | 0x001A | 0 | 1 | blocks tanks, shells pass |
+| 5, 11-14, 20, 31 | entity 0x80091E98 | 0xF85F | entity pointer | 0 | destructible |
+| 8 | entity 0x800ECC1C | 0xF85F | pointer | 1 | destructible |
+| 9 | 0x800907CC | 0xF95F | pointer | 0 | destructible |
+| 6 | 0x80091D6C / 0x800F05F4 | 0x0056 | pointer | 0 | low destructible |
+| 15 | 0x800907CC | 0x0020 | pointer | 0 | registered, blocks nothing |
+
+- **Never registered:** kind 0 (ground), 7, the marker kinds 10 and 21-25, 28 and 29.
+- **Kind 3** registers through 0x800EF984 with flags 0x52 and an inverted ±10 box, so it blocks nothing. The viewer leaves it out.
+- **Flag 0x02** (player-count gate): the object is kept only if the mode is 0, 3, 4 or 6 (or 0x800EC644() is true) and `u8 0x801260A4[(flags >> 2) & 3] < *0x801B4AB8`. The table is runtime state ([0,1,2,3] in ROM, [3,2,1,0] with count 2 in the Arena dump), so these objects (base walls and bases) depend on the player setup. In campaign (mode 5) none exist.
+- **3-4 viewports:** kinds 3, 6, 9, 15 and 18 become kind 7 (table 0x80071898, at 0x80089BEC) and lose collision.
+- Every collidable object has a non-zero visibility nibble, so BTX1 has **no invisible collision-only objects**.
+
+**Runtime grid:**
+- Entry pool: 1300 × 40 B at 0x803B8248. Cell heads: 4 layers × 20×20 u16 at 0x803B75B0; cell = (coord + origin + {0 or 1024}) >> 11 (2048-unit cells). List heads: oversize 0x803B8230, free 0x803B8234, used 0x803B8240.
+- Entry: +0 u16 grid flags, +2/+4 next/prev, +8 owner, +14/+16 s16 x, z, +18/+20/+22/+24 s16 xmin, xmax, zmin, zmax (margin included), +26 bounding radius, +28 u16 yaw, +30..+37 per-layer links.
+- Grid init 0x80106B60 takes the hdr0 +0x10 outer rectangle (the +0x00 inner rectangle grown by 100) negated; origin = −outer min + 500 (globals 0x803B8238 / 0x803B823C). Insert rejects positions beyond ±origin.
+- Other functions: remove 0x80107170, move 0x801074AC, set / clear flag bits 0x80106C9C / 0x80106CCC.
+- **Queries.** Tank movement 0x80108B68(box, self, mask, velocity) sweeps the mover in each candidate's local frame (pair test 0x8010B9C8, then 0x8010B740 / 0x8010AC90), i.e. an oriented-box test. Tanks use mask 0x10 (tank byte +0x40A, set at 0x800979CC). The segment query 0x8010874C(start, end, mask, ...) is used by shells with mask 0x04 (0x8008D030).
+- **After destruction** an entry's flags become 0xF802 (a kind 8 in Times Square) or 0x42 (kind 6): it no longer blocks tanks or shells.
+- On a shell hit, owner 1 (kind 26) skips the effect call 0x80093D50 (branch at 0x8008D29C), while owner 2 (kind 30) calls 0x800A6688 / 0x800A51E8(..., 37). **Hypothesis:** different impact effects.
+
+**Not collision:** 0x800962B4 is viewport frustum culling (via 0x80094C58); hdr1 groups only cull drawing; no collision code reads level B.
+
+**Verification against RAM dumps** (walking the used list of the live grid and matching x, z, yaw, footprint, flags and owner; script `/home/n64/.ai-tmp/btxcol/r1/btxcol.ts <id> [campaign|battle] --ram dump.bin`):
+
+| Dump | Level | Decoded entries matched | Left over |
+|---|---|---|---|
+| `ref1/arena1.bin` | 24, Battlelord | 268 of 277 | 9 flag-0x02 objects the gate removed (6 kind 1, kinds 11, 12, 14) |
+| `ref1/queens1.bin` | 1, campaign | 458 of 493 | 24 flag-0x02 objects (absent in campaign), 5 kind 6 and 6 kind 9 (**hypothesis:** destroyed during play) |
+| `lvl1/dumps/ts1.bin` | 3, campaign | 522 of 523 | 1 kind 6; 3 more matched with rubble flags |
+| `ref1/bonus1.bin` | 9 | 40 of 40 | none |
+
+- The static kinds 1, 19, 26 and 27 match exactly in every dump. The flag-0x02 gate is confirmed in the Arena: entries with object flags 0x0A, 0x0B, 0x0E and 0x0F are present, those with 0x02, 0x03, 0x06 and 0x07 absent.
+- **Unverified (static evidence only):** kind 30 (in no dump), kinds 20 and 31, and any use of the hdr0 inner rectangle (no reader found; **hypothesis:** the drivable edge).
+
+**Viewer overlay** (`src/rom/battletanx.ts`, hidden layer "collision"): one world-space mesh per class (static, destructible, low destructible, tank-only, passable, and flag-0x02 "conditional"), each rectangle drawn as a prism from y = 0 to the top of the object's model (the game has no heights), 1 unit outside the footprint and above the model so it does not z-fight. Batch.triSource holds the hdr2 record offset in decoded file A. Offline renders with the collision layer over the level: `/home/n64/.ai-tmp/btxcol/img1/` (`*_cmp.png`: level, level + collision, difference).
+
+#### 5.1.4 GA collision (verified)
+GA has **no triangle collision against the level geometry and no heightfield**. The spawn switch 0x800DFA5C adds a flat list of **boxes** through 0x800B1898 while it spawns each placement. Walls are boxes, and the ground height comes from three kinds of "surface" box (platform, ramp, mound). Only the slot files (base and variant) register collision, not the common world file.
+
+**Collision entry** (40 B; 1400 slots at 0x803978E0; free-list head u16 at 0x803977E8; s16 unless noted):
+
+| Offset | Field |
+|---|---|
+| +0 | u32 flags |
+| +4 | owner pointer (0 for level statics) |
+| +8 | u16[4] grid-cell next links |
+| +16 / +18 / +20 | x / z / y base |
+| +22 / +24 / +26 / +28 | minX / maxX / minZ / maxZ |
+| +30 / +32 | bottom / top (world span: y base + bottom .. y base + top) |
+| +34 | radius = max + 3·min/8 of the half extents |
+| +36 | u16 residual yaw |
+| +38 | u16 group |
+
+**Entry from a placement:**
+- **Centre:** the placement (x, z).
+- **Model-based entries:** the model record's bounds (h4 +4..+14). y base = 0, bottom = s16(placement y + model minY), top = s16(placement y + model maxY). Kind 43 is the exception: its top is the constant 5000.
+- **Kind 30 entries:** y base = placement y; bottom/top are the definition's minY/maxY.
+- **Yaw** (only if `flags & 0x039BEF67`):
+  - Flag exactly 0x800 forces yaw 0.
+  - A yaw snaps to quadrant t if `(t − yaw) & 0xFFFF <= 4096` (0x8009D6DC). This is asymmetric: only yaws up to 22.5° *below* a quadrant snap; e.g. 0x0CCC stays unsnapped (seen in the dumps).
+  - 90°, 180° and 270° are then baked into the extents with the placement's RotY (at 90°: x ∈ [minZ, maxZ], z ∈ [−maxX, −minX]), and the residual yaw becomes 0.
+  - Any other yaw is kept as an oriented box. Ramps (0x80) are outside the mask and always keep their full yaw.
+- **Oriented-box corners** (0x800B2BE4): `X = x + c·lx + s·lz`, `Z = z − s·lx + c·lz`, the same rotation as the model matrix.
+- **Per-group grids** (24 B each at 0x803977F0; built by 0x800B06E0 / 0x800B07D4): origin at the group's minX/minZ (the union of the slot files' group bounds), `(size >> 10) + 3` cells of 1024 units per axis. An entry whose box does not overlap its group's grid is freed (4 fences in SF Airport are never registered). If only the centre is outside, 0x800B14A8 moves the centre onto the grid's min edge and keeps the absolute extents. Only placements listed in a group spawn.
+
+**Kind 30** (16 B, spawn case 0x800E11EC, sub jump table 0x80075A18): `{u8 30, u8 sub, s16 minX, minY, minZ, maxX, maxY, maxZ, u16 0}`, extents relative to the placement.
+
+| sub | Effect | Count (all world files) |
+|---|---|---|
+| 0 | writes the rectangle `[x+minX, z+minZ, x+maxX, z+maxZ]` into the group's runtime record +12..+18 (default: the group bounds); heights ignored. Its readers (0x800857F0, 0x8008FA6C, 0x800E7174) pick random points inside it, so it is a play area, not a wall | 23 (one per base file) |
+| 1 | box, flag 0x01000000 | 31 |
+| 2 | box, flag 0x00080000 (call at 0x800E13C8) | 45 |
+| 3, 4 | trigger object (0x800E9990) with a box, flag 0x10000 | 11 / 0 |
+
+**Kind 42** (4 B): `{42, 0, u16 model}`, an invisible solid (flag 0x1) with that model's bounds; nothing is drawn. 18 in all files (DC Mall 3, Shore Patrol 14, SF Airport 1).
+
+**What registers** (all inside the spawn switch, so excluded kind-39 includes and the multi-player skips of kinds 10, 4 and 15 register nothing):
+
+| Kind | Flag | Rule | Code |
+|---|---|---|---|
+| 1 | 0x1 | model +2 | 0x800E03BC |
+| 14 | 0x4000 | model +2 | 0x800E03BC |
+| 2 | 0x20 | only if the model exists and its maxY >= 2 (flat ground tiles have no entry) | 0x800DFD44 |
+| 11 | 0x40 | model +2 | 0x800E017C |
+| 22 | 0x80 | model +2 | 0x800DFFEC |
+| 35 | def+6 = 0: 0x1, else 0x20 | model +2 | 0x800E0940 |
+| 42 | 0x1 | model +2, not drawn | 0x800E030C |
+| 43 | def+5 = 0: 0x1, else 0x4000 | model +2, top 5000 | 0x800E0690 |
+| 3, 21 | 0x2 | model +2 at spawn | 0x800DD554, 0x800EA044 |
+| 5 | model maxY = 36: 0x800000, else 0x400 | model +2 | 0x800E1674 |
+| 15 | def+8 ∈ {2, 3, 6}: 0x2, else 0x8000 | model +2 | 0x800EAD84 |
+| 10 | 0x100000 (a 0x100002 variant exists; its condition is not pinned) | model +2 | 0x800ED460 |
+| 0, 34, 44 | none (drawn only) | | |
+
+- **Hypothesis (code only, not seen in any dump):** kind 24 registers 0x8000, kind 28 0x2, kind 32 0x40000 and kind 36 0x100000 with model +2. Adding them does not raise the dump matches (SF Airport 57, SF Breakout 76); the kind 24 boxes (car-sized, odd yaws) are probably vehicles that move. The viewer leaves all four out.
+- **Kinds 4 and 8** use fixed boxes instead of model bounds: kind 4 is ±10 wide and 0..199 high with flag 0x800; kind 8 has flag 0x2000 (box not decoded). Not drawn by the viewer.
+
+**Flags:**
+
+| Flag | Meaning | Status |
+|---|---|---|
+| 0x1 | solid wall | verified: in the tank-movement mask 0x00E4540F (callers 0x800B78F8...) and the shot masks |
+| 0x4000 | solid but see-through (fences) | **Hypothesis:** in the movement and shot masks, absent from the AI sight masks 0x64940B and 0x241009 |
+| 0x20 / 0x40 / 0x80 | platform / mound / ramp | only in mask 0xE0, the ground-height query; they do not stop tanks sideways |
+| 0x80000 (kind 30 sub 2) | blocks shells | **Hypothesis:** only in the segment-query masks 0x87007 and 0x2C700F; a hit spawns an effect at 0x8007EA48 |
+| 0x01000000 (sub 1) | excluded from random spawn/destination picks | **Hypothesis:** only in the clearance masks 0x0104700F (0x80085954, 0x800E7234) |
+| 0x10000 (sub 3/4) | trigger volume | **Hypothesis:** a level exit; queried by 0x800F5470, which calls the handler of whatever touched it |
+| 0x2, 0x400, 0x8000, 0x100000, 0x800000 | destructibles | from the spawner call sites |
+
+**Ground height** (0x800B9094 at spawn, 0x800B88DC per frame): for each of the object's four corners, the first surface box containing the corner (0x800B2890) gives its height.
+- **Platform (0x20):** y + top, or y + bottom when |bottom| is larger.
+- **Ramp (0x80):** the point in box-local space (0x800B2364) gets `h = y + bottom + (top − bottom)·(lz − minZ)/(maxZ − minZ)`, rising toward local +Z.
+- **Mound (0x40, 0x800B83A8):** a flat top at P with edges sloping over max(width, depth)/4; within the slope the height is P·(distance to edge)/(slope width).
+- **No surface:** the base height at object +40 (**hypothesis:** the ground plane, 0).
+
+**Other queries:** object-vs-object tests use a circle pre-test on the radius, then an oriented-box separating-axis test (0x800B3018 / 0x800B2DF4). The vertical overlap test runs only when u16 0x80397650 is non-zero, which most callers clear, so most tests are 2D. The shell segment query 0x800B49E0 walks the grid cells along the segment; its per-entry test 0x800B4684 is not fully decoded.
+
+**Verification against RAM dumps** (`/home/n64/.ai-tmp/btxcol/r2/btxcollision.ts <id> <variant> --dump ram.bin`, comparing all 13 fields of every live entry; the dump's kind-39 inputs match the viewer's default rule):
+
+| Dump | Level | Static and zone entries | Destructibles (initial) | Live entries not predicted |
+|---|---|---|---|---|
+| `ref2/air1.bin` | 26 SF Airport, campaign | 229 of 229 | 57 of 68 | 3 ownerless flag-0x40 entries with odd yaws (runtime debris) |
+| `ref2/brk1.bin` | 0 SF Breakout, campaign | 359 of 359 | 76 of 86 | 1 (debris) |
+| `ref2/pan1.bin` | 18 Panhandle, battle | 483 of 483 | 68 of 72 | none |
+
+Unmatched destructibles were destroyed or moved before the dump. The grid origin, cell counts and the kind-30 sub-0 rectangle match in every dump, including SF Breakout's second group.
+
+**Viewer overlay** (`src/rom/battletanxga.ts`):
+- Hidden layer **"collision"**: solid, see-through, invisible (kind 42), kind-43 walls to 5000 (faint), platform, ramp (a wedge rising along local +Z), mound (a frustum with the max(width, depth)/4 slope) and destructible meshes.
+- Hidden layer **"collision zones"**: kind 30 subs 1, 2 and 3/4 as boxes, and each group's play-area rectangle as a 150-unit fence.
+- The per-class counts equal the reference decoder for SF Airport, SF Breakout and Panhandle. Boxes are drawn 1 unit outside their extents and above their tops. Batch.triSource is `slot << 24 | placement record offset` in the decoded world file.
+- Offline renders: `/home/n64/.ai-tmp/btxcol/img2/` (`*_cmp.png`).
 
 
 ## 6. Music
@@ -1584,7 +1735,7 @@ Every item in this section is a **hypothesis** or an open question, not a verifi
 - **hdr0 spawn groups:** probably per-team spawn sets, with the high nibble of the kind-25 param = team.
 - **Palette animation rate:** the frame counter 0x801B4AA0 is assumed to advance once per rendered frame.
 - **Draw passes 1, 3, 4, 5:** probably dynamic objects and effects; not identified.
-- **Kinds 11-17, 20, 26, 30, 31:** treated as static by the dispatcher but never seen in view. Their behaviour (e.g. bases for 11-14) is unknown.
+- **Kinds 11-17, 20, 26, 30, 31:** treated as static by the dispatcher but never seen in view. Their behaviour (e.g. bases for 11-14) is unknown. Verified: their collision registration (5.1.3): 11-14, 20 and 31 are destructible entities, 26 and 30 static entries, 15 a non-blocking one.
 - **Queens white kerb edge:** unexplained difference in the render comparison (8.5).
 - **0x801191E0:** probably osPiRawReadIo.
 - **Campaign order:** internal ids 1..17 (4.2.4). Only level 1 was verified; the mission titles come from briefing texts.
