@@ -38,7 +38,10 @@ void main() {
   vLogW = 1.0 + gl_Position.w;
 }`;
 
-const FS = `#version 300 es
+// Main fragment shader. The cutaway variant is a separate program (compiled on first use), so the normal path's shader
+// is unchanged by it.
+const mainFs = (cutaway: boolean) => `#version 300 es
+${cutaway ? '#define CUTAWAY' : ''}
 precision highp float;
 uniform sampler2D uTexture;
 uniform bool uTextured;
@@ -51,13 +54,36 @@ uniform vec3 uFogColor;
 uniform highp float uLogDepthCoef;
 // Pulls decal batches (coplanar markings) towards the camera in log-depth space; 0 for everything else.
 uniform highp float uDepthBias;
+// Cutaway variant (depth peeling): drop fragments that are not behind the nearest opaque/cutout surface found by the first
+// pass (its log depth per pixel; 1 where it found none). The comparison uses the unbiased depth, so decals go with the
+// surface they lie on. The first pass is single-sampled but this one is antialiased: a surface's edge fragment can
+// cover samples of a pixel whose centre the first pass saw as empty or as another surface, so the threshold is the
+// farthest nearest-surface depth over the pixel and its four neighbours (otherwise peeled surfaces leave outlines).
+#ifdef CUTAWAY
+uniform highp sampler2D uPeelDepth;
+uniform highp float uPeelEpsilon;
+const ivec2 PEEL_TAPS[5] = ivec2[5](ivec2(0, 0), ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1));
+#endif
 in vec2 vUv;
 in vec4 vColor;
 in highp float vFog;
 in highp float vLogW;
 out vec4 outColor;
 void main() {
+#ifdef CUTAWAY
+  highp float depth = log2(max(vLogW, 1e-6)) * uLogDepthCoef;
+  ivec2 pixel = ivec2(gl_FragCoord.xy);
+  ivec2 last = textureSize(uPeelDepth, 0) - 1;
+  highp float first = -1.0;
+  for (int k = 0; k < 5; k++) {
+    highp float d = texelFetch(uPeelDepth, clamp(pixel + PEEL_TAPS[k], ivec2(0), last), 0).r;
+    if (d < 1.0) first = max(first, d);
+  }
+  if (first >= 0.0 && depth <= first + uPeelEpsilon) discard;
+  gl_FragDepth = max(0.0, depth - uDepthBias);
+#else
   gl_FragDepth = max(0.0, log2(max(vLogW, 1e-6)) * uLogDepthCoef - uDepthBias);
+#endif
   vec4 c = vColor;
   if (uTextured) c *= texture(uTexture, vUv);
   if (uMode == 1 && c.a < 0.5) discard;
@@ -171,6 +197,44 @@ const CORE_OFFSETS = [[0, 0], [1, 0], [0, 1], [1, 1]];
 
 const enum Mode { Opaque = 0, Cutout = 1, Blend = 2 }
 
+/** The main level program (or its cutaway variant) and its uniform locations. */
+interface MainProgram {
+  program: WebGLProgram;
+  uViewProj: WebGLUniformLocation | null;
+  uView: WebGLUniformLocation | null;
+  uModel: WebGLUniformLocation | null;
+  uTextured: WebGLUniformLocation | null;
+  uMode: WebGLUniformLocation | null;
+  uFog: WebGLUniformLocation | null;
+  uFogColor: WebGLUniformLocation | null;
+  uFogNear: WebGLUniformLocation | null;
+  uFogFar: WebGLUniformLocation | null;
+  uFogMul: WebGLUniformLocation | null;
+  uFogOffset: WebGLUniformLocation | null;
+  uLogDepthCoef: WebGLUniformLocation | null;
+  uDepthBias: WebGLUniformLocation | null;
+  uOpacity: WebGLUniformLocation | null;
+  uPeelEpsilon: WebGLUniformLocation | null; // cutaway variant only
+}
+
+function createMainProgram(gl: WebGL2RenderingContext, cutaway: boolean): MainProgram {
+  const program = createProgram(gl, VS, mainFs(cutaway));
+  const loc = (name: string) => gl.getUniformLocation(program, name);
+  gl.useProgram(program);
+  gl.uniform1i(loc('uTexture'), 0);
+  if (cutaway) gl.uniform1i(loc('uPeelDepth'), 1);
+  return {
+    program,
+    uViewProj: loc('uViewProj'), uView: loc('uView'), uModel: loc('uModel'), uTextured: loc('uTextured'), uMode: loc('uMode'),
+    uFog: loc('uFog'), uFogColor: loc('uFogColor'), uFogNear: loc('uFogNear'), uFogFar: loc('uFogFar'), uFogMul: loc('uFogMul'),
+    uFogOffset: loc('uFogOffset'), uLogDepthCoef: loc('uLogDepthCoef'), uDepthBias: loc('uDepthBias'), uOpacity: loc('uOpacity'),
+    uPeelEpsilon: loc('uPeelEpsilon'),
+  };
+}
+
+/** Cutaway: surfaces within this fraction of the view distance of the nearest one are removed with it. */
+export const CUTAWAY_EPSILON = 2e-3;
+
 // Log-depth bias for decals: about 2e-4 of the view distance (0.2 units at 1000, 1 unit at 5000 with far 80000),
 // roughly 300 steps of a 24-bit depth buffer.
 const DECAL_DEPTH_BIAS = 2e-5;
@@ -266,21 +330,11 @@ export class LevelRenderer {
   /** Selected Level.skies entry by name; undefined = first sky, null = none. */
   private skySelection: string | null | undefined = undefined;
 
-  private readonly program: WebGLProgram;
-  private readonly uViewProj: WebGLUniformLocation | null;
-  private readonly uModel: WebGLUniformLocation | null;
-  private readonly uTextured: WebGLUniformLocation | null;
-  private readonly uMode: WebGLUniformLocation | null;
-  private readonly uView: WebGLUniformLocation | null;
-  private readonly uFog: WebGLUniformLocation | null;
-  private readonly uFogColor: WebGLUniformLocation | null;
-  private readonly uFogNear: WebGLUniformLocation | null;
-  private readonly uFogFar: WebGLUniformLocation | null;
-  private readonly uFogMul: WebGLUniformLocation | null;
-  private readonly uFogOffset: WebGLUniformLocation | null;
-  private readonly uLogDepthCoef: WebGLUniformLocation | null;
-  private readonly uDepthBias: WebGLUniformLocation | null;
-  private readonly uOpacity: WebGLUniformLocation | null;
+  private readonly main: MainProgram;
+  private cutawayProgram: MainProgram | null = null;
+  private cutaway = false;
+  /** Cutaway first pass target: a depth texture the size of the canvas. */
+  private peel: { fbo: WebGLFramebuffer; depth: WebGLTexture; width: number; height: number } | null = null;
   private readonly backdropProgram: WebGLProgram;
   private readonly uBackdropWindow: WebGLUniformLocation | null;
   private readonly uBackdropTint: WebGLUniformLocation | null;
@@ -316,21 +370,7 @@ export class LevelRenderer {
     const gl = canvas.getContext('webgl2', { antialias: true, alpha: false, powerPreference: 'high-performance' });
     if (!gl) throw new Error('WebGL2 is not available in this browser.');
     this.gl = gl;
-    this.program = createProgram(gl, VS, FS);
-    this.uViewProj = gl.getUniformLocation(this.program, 'uViewProj');
-    this.uModel = gl.getUniformLocation(this.program, 'uModel');
-    this.uTextured = gl.getUniformLocation(this.program, 'uTextured');
-    this.uMode = gl.getUniformLocation(this.program, 'uMode');
-    this.uView = gl.getUniformLocation(this.program, 'uView');
-    this.uFog = gl.getUniformLocation(this.program, 'uFog');
-    this.uFogColor = gl.getUniformLocation(this.program, 'uFogColor');
-    this.uFogNear = gl.getUniformLocation(this.program, 'uFogNear');
-    this.uFogFar = gl.getUniformLocation(this.program, 'uFogFar');
-    this.uFogMul = gl.getUniformLocation(this.program, 'uFogMul');
-    this.uFogOffset = gl.getUniformLocation(this.program, 'uFogOffset');
-    this.uLogDepthCoef = gl.getUniformLocation(this.program, 'uLogDepthCoef');
-    this.uDepthBias = gl.getUniformLocation(this.program, 'uDepthBias');
-    this.uOpacity = gl.getUniformLocation(this.program, 'uOpacity');
+    this.main = createMainProgram(gl, false);
     this.backdropProgram = createProgram(gl, BACKDROP_VS, BACKDROP_FS);
     this.uBackdropWindow = gl.getUniformLocation(this.backdropProgram, 'uWindow');
     this.uBackdropTint = gl.getUniformLocation(this.backdropProgram, 'uTint');
@@ -373,8 +413,6 @@ export class LevelRenderer {
     gl.bindVertexArray(null);
     this.highlightVao = hlVao;
     this.highlightBuffer = hlBuffer;
-    gl.useProgram(this.program);
-    gl.uniform1i(gl.getUniformLocation(this.program, 'uTexture'), 0);
     this.anisoExt = gl.getExtension('EXT_texture_filter_anisotropic');
     const maxAniso = this.anisoExt ? (gl.getParameter(this.anisoExt.MAX_TEXTURE_MAX_ANISOTROPY_EXT) as number) : 1;
     this.filter = { nearest: false, anisotropy: Math.min(8, maxAniso) };
@@ -418,6 +456,18 @@ export class LevelRenderer {
   setSkyPlanesVisible(visible: boolean) {
     if (this.skyPlanesVisible === visible) return;
     this.skyPlanesVisible = visible;
+    this.dirty = true;
+  }
+
+  /**
+   * Cutaway: hide the nearest opaque or cutout surface under each pixel and show what lies behind it (e.g. the inside of
+   * an enclosed room seen from outside). Two passes: the nearest surfaces' depth into a texture, then the scene with
+   * everything not behind that depth discarded. Sky, sky planes and backdrops are unaffected.
+   */
+  setCutaway(enabled: boolean) {
+    if (this.cutaway === enabled) return;
+    this.cutaway = enabled;
+    if (!enabled) this.freePeel();
     this.dirty = true;
   }
 
@@ -622,36 +672,47 @@ export class LevelRenderer {
       drawCalls++;
     }
 
-    gl.useProgram(this.program);
     const logDepthCoef = 1 / Math.log2(camera.far + 1);
-    gl.uniform1f(this.uLogDepthCoef, logDepthCoef);
-    gl.uniform1f(this.uDepthBias, 0);
-    gl.uniform1f(this.uOpacity, 1);
     camera.viewProjection(this.viewProj, canvas.width / Math.max(1, canvas.height));
-    gl.uniformMatrix4fv(this.uViewProj, false, this.viewProj);
-    gl.uniformMatrix4fv(this.uView, false, camera.viewMatrix(this.view));
+    camera.viewMatrix(this.view);
+    let P = this.main;
     let boundFog = 0;
-    gl.uniform1i(this.uFog, 0);
+    let boundModel: Mat4 | null = null;
+    let boundMode = -1;
+    let boundTextured = -1;
+    // Switch to the main program or its cutaway variant: frame uniforms, and the per-draw uniform caches start over.
+    const useMain = (next: MainProgram) => {
+      P = next;
+      gl.useProgram(P.program);
+      gl.uniform1f(P.uLogDepthCoef, logDepthCoef);
+      gl.uniform1f(P.uDepthBias, 0);
+      gl.uniform1f(P.uOpacity, 1);
+      gl.uniformMatrix4fv(P.uViewProj, false, this.viewProj);
+      gl.uniformMatrix4fv(P.uView, false, this.view);
+      gl.uniform1i(P.uFog, 0);
+      if (fog) {
+        gl.uniform3f(P.uFogColor, fog.color[0] / 255, fog.color[1] / 255, fog.color[2] / 255);
+        gl.uniform1f(P.uFogNear, fog.near);
+        gl.uniform1f(P.uFogFar, fog.far);
+        gl.uniform1f(P.uFogMul, fog.multiplier);
+        gl.uniform1f(P.uFogOffset, fog.offset);
+      }
+      boundFog = 0;
+      boundModel = null;
+      boundMode = -1;
+      boundTextured = -1;
+    };
+    useMain(this.main);
     // Per-instance fog switch: instances the game draws unfogged keep fog factor 0.
     const fogFor = (item: DrawItem) => {
       const want = fog && !item.noFog ? 1 : 0;
       if (want !== boundFog) {
-        gl.uniform1i(this.uFog, want);
+        gl.uniform1i(P.uFog, want);
         boundFog = want;
       }
     };
-    if (fog) {
-      gl.uniform3f(this.uFogColor, fog.color[0] / 255, fog.color[1] / 255, fog.color[2] / 255);
-      gl.uniform1f(this.uFogNear, fog.near);
-      gl.uniform1f(this.uFogFar, fog.far);
-      gl.uniform1f(this.uFogMul, fog.multiplier);
-      gl.uniform1f(this.uFogOffset, fog.offset);
-    }
     gl.activeTexture(gl.TEXTURE0);
 
-    let boundModel: Mat4 | null = null;
-    let boundMode = -1;
-    let boundTextured = -1;
     let boundTexture: WebGLTexture | null = null;
     // Culling: 'toggle' = level geometry (the user's setting), 'game' = always as the batch says, 'never'.
     type CullPolicy = 'toggle' | 'game' | 'never';
@@ -663,16 +724,16 @@ export class LevelRenderer {
       this.setCull(cull);
       if (cull) this.setMirroredWinding(mirrored);
       if (model !== boundModel) {
-        gl.uniformMatrix4fv(this.uModel, false, model);
+        gl.uniformMatrix4fv(P.uModel, false, model);
         boundModel = model;
       }
       if (b.mode !== boundMode) {
-        gl.uniform1i(this.uMode, b.mode);
+        gl.uniform1i(P.uMode, b.mode);
         boundMode = b.mode;
       }
       const textured = b.texture ? 1 : 0;
       if (textured !== boundTextured) {
-        gl.uniform1i(this.uTextured, textured);
+        gl.uniform1i(P.uTextured, textured);
         boundTextured = textured;
       }
       if (b.texture && b.texture !== boundTexture) {
@@ -683,6 +744,24 @@ export class LevelRenderer {
       gl.drawArrays(gl.TRIANGLES, 0, b.count);
       drawCalls++;
     };
+
+    const showAnimated = this.showAnimated;
+    const hidden = this.hiddenInstances;
+    const opacity = this.instanceOpacity;
+
+    // Cutaway, first pass (normal program): the depth of the nearest opaque/cutout surface per pixel (the surfaces that
+    // write depth; faded instances are see-through and take no part).
+    const peel = this.cutaway ? this.peelTarget(canvas.width, canvas.height) : null;
+    if (peel) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, peel.fbo);
+      this.setDepthWrite(true);
+      gl.clear(gl.DEPTH_BUFFER_BIT);
+      for (const item of scene.items) {
+        if ((item.animated && !showAnimated) || hidden?.has(item.index) || opacity?.has(item.index)) continue;
+        for (const b of item.mesh.tested) draw(b, item.model, true, true, item.mirrored);
+      }
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    }
 
     // Sky: drawn first around the camera, without depth, fog or culling.
     const [cx, cy, cz] = camera.position;
@@ -703,11 +782,18 @@ export class LevelRenderer {
       }
     }
 
+    // Cutaway, second pass: everything from here on keeps only what lies behind the first pass's surfaces.
+    if (peel) {
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, peel.depth);
+      gl.activeTexture(gl.TEXTURE0);
+      this.cutawayProgram ??= createMainProgram(gl, true);
+      useMain(this.cutawayProgram);
+      gl.uniform1f(P.uPeelEpsilon, (CUTAWAY_EPSILON / Math.LN2) * logDepthCoef);
+    }
+
     // Opaque and cutout geometry: first the batches without depth test or write (backdrops: drawn in instance order
     // they would paint over nearer geometry), then the depth-tested ones.
-    const showAnimated = this.showAnimated;
-    const hidden = this.hiddenInstances;
-    const opacity = this.instanceOpacity;
     if (scene.hasBackground) {
       for (const item of scene.items) {
         if ((item.animated && !showAnimated) || hidden?.has(item.index) || opacity?.has(item.index)) continue;
@@ -723,13 +809,13 @@ export class LevelRenderer {
 
     // Decals (RDP decal depth mode, e.g. floor markings): after the surfaces they lie on, pulled towards the camera.
     if (scene.hasDecals) {
-      gl.uniform1f(this.uDepthBias, DECAL_DEPTH_BIAS);
+      gl.uniform1f(P.uDepthBias, DECAL_DEPTH_BIAS);
       for (const item of scene.items) {
         if ((item.animated && !showAnimated) || hidden?.has(item.index) || opacity?.has(item.index)) continue;
         fogFor(item);
         for (const b of item.mesh.decal) draw(b, item.model, b.depthTest, false, item.mirrored);
       }
-      gl.uniform1f(this.uDepthBias, 0);
+      gl.uniform1f(P.uDepthBias, 0);
     }
 
     // Blended geometry, back to front by instance origin.
@@ -751,16 +837,23 @@ export class LevelRenderer {
         // Fully faded: nothing to draw.
         if (alpha === undefined || alpha <= 0 || (item.animated && !showAnimated) || hidden?.has(item.index)) continue;
         fogFor(item);
-        gl.uniform1f(this.uOpacity, alpha);
+        gl.uniform1f(P.uOpacity, alpha);
         for (const b of item.mesh.solid) draw(b, item.model, b.depthTest, false, item.mirrored, 'toggle', true);
         if (item.mesh.decal.length > 0) {
-          gl.uniform1f(this.uDepthBias, DECAL_DEPTH_BIAS);
+          gl.uniform1f(P.uDepthBias, DECAL_DEPTH_BIAS);
           for (const b of item.mesh.decal) draw(b, item.model, b.depthTest, false, item.mirrored, 'toggle', true);
-          gl.uniform1f(this.uDepthBias, 0);
+          gl.uniform1f(P.uDepthBias, 0);
         }
         for (const b of item.mesh.blended) draw(b, item.model, b.depthTest, false, item.mirrored, 'toggle', true);
       }
-      gl.uniform1f(this.uOpacity, 1);
+      gl.uniform1f(P.uOpacity, 1);
+    }
+
+    if (peel) {
+      // Unbind the depth texture: the next first pass renders into it.
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      gl.activeTexture(gl.TEXTURE0);
     }
 
     drawCalls += this.drawHighlight(logDepthCoef);
@@ -771,14 +864,58 @@ export class LevelRenderer {
 
   dispose() {
     this.freeScene();
+    this.freePeel();
     this.gl.deleteProgram(this.highlightProgram);
     this.gl.deleteVertexArray(this.highlightVao);
     this.gl.deleteBuffer(this.highlightBuffer);
-    this.gl.deleteProgram(this.program);
+    this.gl.deleteProgram(this.main.program);
+    if (this.cutawayProgram) this.gl.deleteProgram(this.cutawayProgram.program);
     this.gl.deleteProgram(this.backdropProgram);
     this.gl.deleteVertexArray(this.quadVao);
     this.gl.deleteBuffer(this.quadBuffer);
     this.gl.deleteProgram(this.skyPlaneProgram);
+  }
+
+  /** The cutaway first-pass target at the canvas size (created or resized on demand); null if unsupported. */
+  private peelTarget(width: number, height: number): NonNullable<LevelRenderer['peel']> | null {
+    const gl = this.gl;
+    let p = this.peel;
+    if (p && p.width === width && p.height === height) return p;
+    if (!p) {
+      const fbo = gl.createFramebuffer();
+      const depth = gl.createTexture();
+      if (!fbo || !depth) return null;
+      p = { fbo, depth, width: 0, height: 0 };
+      this.peel = p;
+    }
+    // On unit 1, so the level texture bound to unit 0 stays as the draw loop expects.
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, p.depth);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.DEPTH_COMPONENT32F, width, height, 0, gl.DEPTH_COMPONENT, gl.FLOAT, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, p.fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, p.depth, 0);
+    const complete = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    if (!complete) {
+      this.freePeel();
+      return null;
+    }
+    p.width = width;
+    p.height = height;
+    return p;
+  }
+
+  private freePeel() {
+    if (!this.peel) return;
+    this.gl.deleteFramebuffer(this.peel.fbo);
+    this.gl.deleteTexture(this.peel.depth);
+    this.peel = null;
   }
 
   /** Level.skyPlanes as full-screen passes, without depth, blending, culling or fog. Returns the number of draw calls. */

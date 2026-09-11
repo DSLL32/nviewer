@@ -4,7 +4,7 @@ import { FlyCamera } from '../render/camera';
 import { FlyControls, type ControlAction, type PickMode, type SideViewLimits } from '../render/controls';
 import { mat4, type Mat4 } from '../render/math';
 import { LevelPicker, orientedBoxLines, triangleWorld } from '../render/picking';
-import { LevelRenderer } from '../render/renderer';
+import { CUTAWAY_EPSILON, LevelRenderer } from '../render/renderer';
 import { computeStartView, type StartView } from '../render/startView';
 import { SelectionPanel } from './SelectionPanel';
 import { describeSelection, type Selection } from './selectionInfo';
@@ -87,6 +87,7 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
   const [showScripted, setShowScripted] = useState(true);
   const [fogOn, setFogOn] = useState(readFogSetting);
   const [cullOn, setCullOn] = useState(() => readFlag(CULL_KEY));
+  const [cutaway, setCutaway] = useState(false);
   const [skyPref, setSkyPref] = useState<string>(() => readString(SKY_KEY) ?? '');
   const [showBackdrop, setShowBackdrop] = useState(() => readString(BACKDROP_KEY) !== '0');
   const [helpOpen, setHelpOpen] = useState(true);
@@ -180,11 +181,14 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
     const ndcX = ((clientX - rect.left) / rect.width) * 2 - 1;
     const ndcY = 1 - ((clientY - rect.top) / rect.height) * 2;
     const dir = cam.rayThrough(ndcX, ndcY, aspect);
-    const hit = pickerFor(level).pick(cam.position, dir, {
-      include: (i) => instanceVisible(level, i) && !isFaded(level, i),
-      cullBackFaces: cullOn,
-      minT: cam.near,
-    });
+    const picker = pickerFor(level);
+    const pickOptions = { include: (i: number) => instanceVisible(level, i) && !isFaded(level, i), cullBackFaces: cullOn, minT: cam.near };
+    if (cutaway) {
+      // Pick what the cutaway shows: the nearest hit behind the nearest opaque/cutout surface (the renderer's first pass).
+      const first = picker.pick(cam.position, dir, { ...pickOptions, batch: (b) => b.blend !== 'blend' && !b.decal && (b.depthTest || b.depthWrite) });
+      if (first) pickOptions.minT = first.t * (1 + CUTAWAY_EPSILON);
+    }
+    const hit = picker.pick(cam.position, dir, pickOptions);
     if (!hit) setPicked(null);
     else if (mode === 'object') setPicked({ level, sel: { kind: 'object', instance: hit.instance, point: hit.point } });
     else setPicked({ level, sel: { kind: 'face', instance: hit.instance, batch: hit.batch, tri: hit.tri, point: hit.point } });
@@ -200,6 +204,7 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
     if (a === 'toggle-filter') setNearest((v) => !v);
     else if (a === 'toggle-help') setHelpOpen((v) => !v);
     else if (a === 'toggle-view') toggleView();
+    else if (a === 'toggle-cutaway') setCutaway((v) => !v);
     else if (a === 'reset' && engine && startViewRef.current) {
       applyView(engine, startViewRef.current.view);
       if (sideActive && sideView && level) engine.controls.setSideView(sideLimits(sideView, level));
@@ -353,6 +358,7 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
 
   useEffect(() => engineRef.current?.renderer.setNearestFiltering(nearest), [nearest]);
   useEffect(() => engineRef.current?.renderer.setShowAnimated(showScripted), [showScripted]);
+  useEffect(() => engineRef.current?.renderer.setCutaway(cutaway), [cutaway]);
   useEffect(() => engineRef.current?.renderer.setHiddenInstances(hiddenInstances), [hiddenInstances]);
   useEffect(() => {
     engineRef.current?.renderer.setFogEnabled(fogOn);
@@ -553,6 +559,7 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
                 <dt>V</dt><dd>Free fly</dd>
                 <dt>R</dt><dd>Reset view</dd>
                 <dt>F</dt><dd>Toggle nearest filtering</dd>
+                <dt>X</dt><dd>Cutaway (hide the nearest surface)</dd>
                 <dt>Ctrl + click</dt><dd>Select object or marker</dd>
                 <dt>Alt + click</dt><dd>Select face</dd>
               </dl>
@@ -568,6 +575,7 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
                 {sideView && (<><dt>V</dt><dd>Side view</dd></>)}
                 <dt>R</dt><dd>Reset view</dd>
                 <dt>F</dt><dd>Toggle nearest filtering</dd>
+                <dt>X</dt><dd>Cutaway (hide the nearest surface)</dd>
                 <dt>Ctrl + click</dt><dd>Select {level?.markers?.length ? 'object or marker' : 'object'}</dd>
                 <dt>Alt + click</dt><dd>Select face</dd>
               </dl>
@@ -616,6 +624,10 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
                 Show backdrop
               </label>
             )}
+            <label className="check" title="Hide the nearest surface under each pixel to look inside enclosed areas from outside (X)">
+              <input id="cutaway-toggle" type="checkbox" checked={cutaway} onChange={(e) => setCutaway(e.target.checked)} />
+              Cutaway (X)
+            </label>
             <label className="check" title="Hide the back sides of single-sided polygons, as the game does">
               <input id="cull-toggle" type="checkbox" checked={cullOn} onChange={(e) => setCullOn(e.target.checked)} />
               Back-face culling

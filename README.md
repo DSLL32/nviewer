@@ -20,7 +20,7 @@ pan, the wheel (or Space/E, C/Q) zooms, V switches to free fly, and the Layers p
 layers, objects, collision and markers.
 
 **Controls:** click the view to capture the mouse, then look around with the mouse · arrow keys look around · W A S D move ·
-Space/E up · C/Q down · Ctrl+click selects an object and Alt+click a face (details and a Copy button for bug reports) · Shift faster · mouse wheel changes speed · R reset view · F nearest
+Space/E up · C/Q down · Ctrl+click selects an object and Alt+click a face (details and a Copy button for bug reports) · Shift faster · mouse wheel changes speed · R reset view · X cutaway (hides the nearest surface, to look into enclosed areas) · F nearest
 filtering · H help · Esc releases the mouse.
 
 ## Layout

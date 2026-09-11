@@ -17,6 +17,8 @@ export interface PickOptions {
   cullBackFaces: boolean;
   /** Ignore hits closer than this (the camera's near plane). */
   minT: number;
+  /** Only test batches this accepts (default: all). */
+  batch?(batch: Batch): boolean;
 }
 
 export interface Aabb {
@@ -90,6 +92,7 @@ export class LevelPicker {
         const bb = bounds.batches[bi];
         if (!bb || !rayHitsBox(lo, ld, bb, opts.minT, bestT)) continue;
         const batch = mesh.batches[bi];
+        if (opts.batch && !opts.batch(batch)) continue;
         const cull = opts.cullBackFaces && batch.cullBack === true;
         const hit = rayBatch(lo, ld, batch, level.textures, cull, mirrored, opts.minT, bestT);
         if (hit) {
