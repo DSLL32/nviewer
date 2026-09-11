@@ -383,23 +383,37 @@ function loadLevel(y: YoshiRom, def: LevelDef): Level {
     let m = spriteMesh.get(id);
     if (m !== undefined) return m;
     m = null;
+    // Size record {u16 frame width, height; u16 unit width, height; u16 sheet width, height}: a frame is a
+    // grid of units taken row-major from the unit table (slot 3), stored bottom row first like the texels.
     const dims = y.slot(castdt, 0);
     const W = y.u16(dims), H = y.u16(dims + 2);
-    const ut = W > 0 && H > 0 && W <= 512 && H <= 512 ? y.record(y.slot(castdt, 1)) : null;
-    const pal = ut && ut.length >= W * H && ut.length % (W * H) === 0 ? y.record(y.slot(castdt, 2)) : null;
+    const UW = y.u16(dims + 4) || W, UH = y.u16(dims + 6) || H;
+    const cols = W / UW, rows = H / UH;
+    const valid = W > 0 && H > 0 && W <= 512 && H <= 512 && Number.isInteger(cols) && Number.isInteger(rows);
+    const ut = valid ? y.record(y.slot(castdt, 1)) : null;
+    const pal = ut && ut.length >= UW * UH && ut.length % (UW * UH) === 0 ? y.record(y.slot(castdt, 2)) : null;
     if (ut && pal && pal.length >= 512) {
-      const frames = y.record(y.slot(castdt, 3));
-      let frame = frames && frames.length >= 2 ? view(frames).getUint16(0) : 0;
-      if ((frame + 1) * W * H > ut.length) frame = 0;
+      const table = y.record(y.slot(castdt, 3));
+      const nUnits = ut.length / (UW * UH);
+      const units = Array.from({ length: cols * rows }, (_, k) => {
+        const u = table && table.length >= 2 * k + 2 ? view(table).getUint16(2 * k) : k;
+        return u < nUnits ? u : 0;
+      });
       const rgba = new Uint8Array(W * H * 4);
       const pv = view(pal);
-      for (let i = 0; i < W * H; i++) rgba5551(pv.getUint16(ut[frame * W * H + i] * 2), rgba, i * 4);
+      units.forEach((u, k) => {
+        const ox = (k % cols) * UW, oy = Math.floor(k / cols) * UH;
+        for (let yy = 0; yy < UH; yy++) {
+          for (let xx = 0; xx < UW; xx++) rgba5551(pv.getUint16(ut[u * UW * UH + yy * UW + xx] * 2), rgba, ((oy + yy) * W + ox + xx) * 4);
+        }
+      });
+      const frame = units.join(',');
       if (rgba.some((v, i) => i % 4 === 3 && v)) {
-        const tex = textures.push({ width: W, height: H, rgba, wrapS: 'clamp', wrapT: 'clamp', format: 'CI8/RGBA16', source: `cast ${hex(id)} frame ${frame}` }) - 1;
+        const tex = textures.push({ width: W, height: H, rgba, wrapS: 'clamp', wrapT: 'clamp', format: 'CI8/RGBA16', source: `cast ${hex(id)} units ${frame}` }) - 1;
         const q = new QuadBuilder();
         // Unit frames are stored bottom row first: the game draws them with a y-up object matrix (D = -1).
         q.quad(-W / 2, H, W, H, [0, 1, 1, 0]);
-        m = meshes.push({ ...meshFromBatches(CAST_NAMES.get(id) ?? hex(id), [q.batch(tex, 'cutout')]), info: { cast: hex(id), castdt: `0x${castdt.toString(16)}`, frame, size: `${W}x${H}` } }) - 1;
+        m = meshes.push({ ...meshFromBatches(CAST_NAMES.get(id) ?? hex(id), [q.batch(tex, 'cutout')]), info: { cast: hex(id), castdt: `0x${castdt.toString(16)}`, units: frame, size: `${W}x${H}` } }) - 1;
       }
     }
     spriteMesh.set(id, m);
