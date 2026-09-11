@@ -1220,7 +1220,7 @@ in `music/wav/index.json`.
 | 2 | 0xE826BA | 180 | 5.333–135.991 | 135.991 | dD Extraction | primary dataDyne Central - Extraction (0x22); Soundtrack #11 (120 s) |
 | 3 | 0xE83BB0 | 125 | 0.000–46.080 | 46.080 | – | menu track (0x7F0FC9D4 fallback) |
 | 4 | 0xE8415C | 152 | 9.465–170.367 | 170.367 | Institute Defense | primary Carrington Institute - Defense (0x2D); Soundtrack #35 (120 s) |
-| 5 | 0xE84F7C | 110 | 2.181–4.362 | 4.362 | – | ambient dataDyne Research - Investigation (0x33) |
+| 5 | 0xE84F7C | 110 | 198.48–394.78 | 398.5 | – | ambient dataDyne Research - Investigation (0x33) |
 | 6 | 0xE851D2 | 135 | 0.000–167.052 | 167.052 | A51 Escape | primary Area 51 - Escape (0x19); Soundtrack #23 (120 s) |
 | 7 | 0xE863A6 | 113/120 | 57.594–251.581 | 251.581 | Deep Sea | primary Deep Sea - Nullify Threat (0x38); Soundtrack #33 (120 s) |
 | 8 | 0xE86F34 | 140 | 5.143–113.136 | 113.136 | – | ambient dataDyne Central - Defection (0x30); ambient dataDyne Central - Extraction (0x22); ambient Mr. Blonde's Revenge (special) (0x37) |
@@ -1242,7 +1242,7 @@ in `music/wav/index.json`.
 | 24 | 0xE940FE | 140 | 5.143–176.560 | 176.560 | Air Force One | primary Air Force One - Antiterrorism (0x31); Soundtrack #27 (120 s) |
 | 25 | 0xE94D04 | 140 | one-shot | 5.384 | – | tracktype 4 sting with 1200-frame timer (0x7F16DAD4; hypothesis: player death) |
 | 26 | 0xE94E50 | 120 | one-shot | 45.968 | – | setup AI: ark 0x412/0xC01 (temporary) (decomp name EXTRACTION_OUTRO_SFX) |
-| 27 | 0xE95176 | 90 | 0.009–21.332 | 21.332 | – | menu track (0x7F0FC9D4 default, state 7) |
+| 27 | 0xE95176 | 90 | 0.0017–21.332 | 21.332 | – | menu track (0x7F0FC9D4 default, state 7) |
 | 28 | 0xE95330 | 140 | 13.713–185.131 | 185.131 | Pelagic II | primary Pelagic II - Exploration (0x21); Soundtrack #31 (120 s) |
 | 29 | 0xE95FDE | 132 | 18.171–159.904 | 159.904 | Crash Site | primary Crash Site - Confrontation (0x1C); Soundtrack #29 (120 s) |
 | 30 | 0xE97492 | 181 | 0.005–58.325 | 58.325 | Crash Site X | X Crash Site - Confrontation (0x1C); Soundtrack #30 (120 s) |
@@ -1324,8 +1324,8 @@ in `music/wav/index.json`.
 | 106 | 0xED6198 | 140 | 5.143–113.136 | 113.136 | – | ambient Chicago - Stealth (0x1D); ambient G5 Building - Reconnaissance (0x1E) |
 | 107 | 0xED6982 | 120 | one-shot | 26.001 | – | boot/attract: logos (RAM title2, capture 4-24 s) |
 | 108 | 0xED6DE0 | 120 | one-shot | 8.009 | – | file-select screen primary (RAM menu3) |
-| 109 | 0xED6EF4 | 100 | 0.008–2.499 | 2.499 | – | ambient Area 51 - Infiltration (0x2F) |
-| 110 | 0xED6F50 | 100 | 0.006–19.194 | 19.194 | – | ambient Deep Sea - Nullify Threat (0x38) |
+| 109 | 0xED6EF4 | 100 | 0.008–8.397 | 8.397 | – | ambient Area 51 - Infiltration (0x2F) |
+| 110 | 0xED6F50 | 100 | 0.008–91.171 | 91.171 | – | ambient Deep Sea - Nullify Threat (0x38) |
 | 111 | 0xED700E | 100 | 0.006–19.194 | 19.194 | – | ambient Air Force One - Antiterrorism (0x31) |
 | 112 | 0xED7066 | 120 | 2.000–4.000 | 4.000 | – | ambient Attack Ship - Covert Assault (0x34) |
 | 113 | 0xED70B2 | 120 | 0.007–43.997 | 43.997 | – | ambient Skedar Ruins - Battle Shrine (0x2A); ambient WAR! (special) (0x16) |
@@ -1337,7 +1337,12 @@ in `music/wav/index.json`.
 
 ### 6.5 Rendering offline (prototype verified against game audio)
 
-1. Read sequence `n` from the table and inflate it; parse it with `parseCompressedMidi`.
+1. Read sequence `n` from the table and inflate it; parse it with a per-track loop parser (`src/rom/music/cseq.ts`
+   `parseCompressedSequence`, shared with GoldenEye). **Correction (implementation):** the prototype used Bomberman's
+   `parseCompressedMidi`, which takes the loop of the first track to reach one; in n_audio every track loops on its own,
+   so that rule collapses the layered ambiences 5, 109 and 110 and silences layers of 8, 102 and 106. The per-track
+   rule fixes them (loops in §6.4 updated for 5, 27, 109, 110), with one addition: when the tracks' loops share no
+   common period but all end on the same tick, loop from the earliest start (only seq 27).
 2. Render with `renderSequence` from a copy of `libultra.ts` that adds one option, `squareVolume: false`
    (`music/naudio.ts`: `v.vol = opts.squareVolume === false ? vol : (vol * vol) >> 15`). Settings:
    - bank `parseBank(rom, 0xCFBF30, 0xD05F90, 0, null)`;
@@ -1384,7 +1389,7 @@ in `music/wav/index.json`.
 | `displaylist.ts` | only the combiner fold (`evalCombine`) and render-mode → Batch rules | PD's microcode differs (§4.5): write a PD interpreter instead of a third ucode |
 | `texture.ts` | the swizzle rule, formats and embedded model tiles (§5.4) | global textures need `TMEM` > 4 KiB or the PD decoder (`bg/lib/pdtex.ts`) producing RGBA directly |
 | `src/rom/music/libultra.ts` `parseBank`, `renderSequence` | music bank and sequences (§6) | add a `squareVolume?: boolean` render option (PD passes `false`) |
-| `src/rom/bomberman/music.ts` `parseCompressedMidi` | all 119 sequences | move to a shared module (e.g. `src/rom/music/cseq.ts`) |
+| `src/rom/music/cseq.ts` `parseCompressedSequence` (per-track loops) | all 119 sequences | none; Bomberman's `parseCompressedMidi` loop rule is wrong for Perfect Dark (§6.5) |
 | `util.ts` `pruneUnused`, `emptyBounds` | level assembly | none |
 
 ### 7.3 New modules (suggested)
