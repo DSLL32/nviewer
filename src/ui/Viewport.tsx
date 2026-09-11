@@ -140,13 +140,29 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
     [level],
   );
   const hiddenLayers = layerState && layerState.level === level ? layerState.hidden : defaultHiddenLayers;
+  // Instances in no layer, when the level has layers: the Layers panel adds an "other geometry" entry for them so they
+  // can be hidden too (a viewer-only entry, not a Level layer). Visible by default, remembered per level like layers.
+  const unlayeredInstances = useMemo(() => {
+    const levelLayers = level?.layers;
+    if (!level || !levelLayers || levelLayers.length === 0) return [];
+    const inLayer = new Set<number>();
+    for (const l of levelLayers) for (const i of l.instances) inLayer.add(i);
+    const out: number[] = [];
+    level.instances.forEach((inst, i) => {
+      if (inst.mesh >= 0 && !inLayer.has(i)) out.push(i);
+    });
+    return out;
+  }, [level]);
+  const [otherGeometryState, setOtherGeometryState] = useState<{ level: Level; hidden: boolean } | null>(null);
+  const otherGeometryHidden = !!otherGeometryState && otherGeometryState.level === level && otherGeometryState.hidden;
   const hiddenInstances = useMemo(() => {
     const out = new Set<number>();
     level?.layers?.forEach((l, i) => {
       if (hiddenLayers.has(i)) for (const inst of l.instances) out.add(inst);
     });
+    if (otherGeometryHidden) for (const inst of unlayeredInstances) out.add(inst);
     return out;
-  }, [level, hiddenLayers]);
+  }, [level, hiddenLayers, otherGeometryHidden, unlayeredInstances]);
 
   // Layers panel entries in level order: an ungrouped layer, or a group (LevelLayer.group) placed where its first layer is.
   const layerEntries = useMemo(() => {
@@ -694,7 +710,10 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
       canvas: { width: canvas.width, height: canvas.height, cssWidth: canvas.clientWidth, cssHeight: canvas.clientHeight, devicePixelRatio: window.devicePixelRatio },
       viewport: viewportSize,
       aspectRect: viewRect && lockedAspect ? { ...viewRect, aspect: lockedAspect } : null,
-      layers: layers.map((l, i) => ({ name: l.name, kind: l.kind, ...(l.group ? { group: l.group } : {}), visible: !hiddenLayers.has(i) })),
+      layers: [
+        ...layers.map((l, i) => ({ name: l.name, kind: l.kind, ...(l.group ? { group: l.group } : {}), visible: !hiddenLayers.has(i) })),
+        ...(unlayeredInstances.length > 0 ? [{ name: 'other geometry', kind: 'viewer (instances in no layer)', instances: unlayeredInstances.length, visible: !otherGeometryHidden }] : []),
+      ],
       layerGroups: groups,
       toggles: {
         cutaway,
@@ -938,7 +957,10 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
         <div className="hud layer-panel" id="layer-panel">
           <div className="hud-row">
             <strong>Layers</strong>
-            <span className="small muted">{layers.length - layers.filter((_, i) => hiddenLayers.has(i)).length} of {layers.length} shown</span>
+            <span className="small muted">
+              {layers.length - layers.filter((_, i) => hiddenLayers.has(i)).length + (unlayeredInstances.length > 0 && !otherGeometryHidden ? 1 : 0)} of{' '}
+              {layers.length + (unlayeredInstances.length > 0 ? 1 : 0)} shown
+            </span>
           </div>
           {layerEntries.map((entry) => {
             if (entry.group === null) return layerRow(layers[entry.index], entry.index);
@@ -976,6 +998,21 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
               </div>
             );
           })}
+          {unlayeredInstances.length > 0 && (
+            <label
+              className="check layer-row"
+              title={`Geometry in no layer of this level: ${unlayeredInstances.length} instance${unlayeredInstances.length === 1 ? '' : 's'}`}
+            >
+              <input
+                type="checkbox"
+                id="other-geometry-toggle"
+                checked={!otherGeometryHidden}
+                onChange={(e) => level && setOtherGeometryState({ level, hidden: !e.target.checked })}
+              />
+              <span className="layer-name">other geometry</span>
+              <span className="layer-meta small muted" />
+            </label>
+          )}
         </div>
       )}
       {children}
