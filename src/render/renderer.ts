@@ -657,7 +657,8 @@ export class LevelRenderer {
     };
   }
 
-  render(camera: FlyCamera) {
+  /** Draw a frame. `highlight: false` leaves out the selection overlay (e.g. for a bug report's plain view). */
+  render(camera: FlyCamera, options: { highlight?: boolean } = {}) {
     const gl = this.gl;
     const canvas = gl.canvas as HTMLCanvasElement;
     this.dirty = false;
@@ -901,7 +902,7 @@ export class LevelRenderer {
       gl.activeTexture(gl.TEXTURE0);
     }
 
-    drawCalls += this.drawHighlight(logDepthCoef);
+    if (options.highlight !== false) drawCalls += this.drawHighlight(logDepthCoef);
 
     gl.bindVertexArray(null);
     this.lastFrame = { drawCalls };

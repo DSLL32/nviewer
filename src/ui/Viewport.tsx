@@ -8,6 +8,7 @@ import { CUTAWAY_EPSILON, LevelRenderer } from '../render/renderer';
 import { computeStartView, type StartView } from '../render/startView';
 import { SelectionPanel } from './SelectionPanel';
 import { describeSelection, type Selection } from './selectionInfo';
+import { BUILD_TIME, captureFrame, reportEndpointAvailable, sendReport } from './report';
 import { loadViewState, saveViewState, viewStateKey, type ViewState } from './viewState';
 
 const OBJECT_HIGHLIGHT: [number, number, number] = [1, 0.2, 0.95]; // magenta
@@ -96,6 +97,9 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
   const [skyPref, setSkyPref] = useState<string>(() => readString(SKY_KEY) ?? '');
   const [showBackdrop, setShowBackdrop] = useState(() => readString(BACKDROP_KEY) !== '0');
   const [helpOpen, setHelpOpen] = useState(true);
+  // Bug reports (report.ts): offered when the dev server's endpoint answers; the last outcome is shown briefly.
+  const [reportAvailable, setReportAvailable] = useState(false);
+  const [reportStatus, setReportStatus] = useState<{ kind: 'busy' | 'ok' | 'error'; text: string } | null>(null);
   const actionRef = useRef<(a: ControlAction) => void>(() => {});
   const startViewRef = useRef<{ level: Level; view: StartView } | null>(null);
   const [pickMode, setPickMode] = useState<PickMode | null>(null);
@@ -553,6 +557,21 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
     }
   }, [level, selection]);
 
+  useEffect(() => {
+    let alive = true;
+    void reportEndpointAvailable().then((ok) => {
+      if (alive) setReportAvailable(ok);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  useEffect(() => {
+    if (!reportStatus || reportStatus.kind === 'busy') return;
+    const timer = setTimeout(() => setReportStatus(null), 8000);
+    return () => clearTimeout(timer);
+  }, [reportStatus]);
+
   // Esc clears the selection (while the mouse is captured, the browser uses Esc to release it instead).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -601,6 +620,75 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
       </span>
     </label>
   );
+
+  // Everything a report needs to reproduce the view (details.json).
+  const reportDetails = (description: string, withSelection: boolean) => {
+    const engine = engineRef.current!;
+    const lv = level!;
+    const cam = engine.camera;
+    const canvas = engine.renderer.gl.canvas as HTMLCanvasElement;
+    const sel = withSelection ? selection : null;
+    const groups: Record<string, { layers: number; expanded: boolean }> = {};
+    for (const entry of layerEntries) if (entry.group !== null) groups[entry.group] = { layers: entry.indices.length, expanded: groupOpen(entry.group, entry.indices.length) };
+    return {
+      description,
+      timestamp: new Date().toISOString(),
+      kind: sel ? sel.kind : 'view',
+      copyText: sel && report ? report.copyText : null,
+      selection: sel,
+      highlightImage: sel && sel.kind !== 'marker' ? 'selection highlighted' : 'same as view.png',
+      game: { id: gameId ?? null, title: gameTitle ?? null },
+      level: { index: lv.info.index, id: lv.id, name: lv.info.name },
+      camera: {
+        mode: sideActive ? 'side view' : 'free fly',
+        eye: [...cam.position],
+        yaw: cam.yaw,
+        pitch: cam.pitch,
+        fovY: (cam.fovY * 180) / Math.PI,
+        speed: cam.speed,
+        near: cam.near,
+        far: cam.far,
+        ...(lv.sideView ? { sideView: { pan: [cam.position[0], cam.position[1]], distance: cam.position[2] } } : {}),
+      },
+      canvas: { width: canvas.width, height: canvas.height, cssWidth: canvas.clientWidth, cssHeight: canvas.clientHeight, devicePixelRatio: window.devicePixelRatio },
+      viewport: viewportSize,
+      aspectRect: viewRect && lockedAspect ? { ...viewRect, aspect: lockedAspect } : null,
+      layers: layers.map((l, i) => ({ name: l.name, kind: l.kind, ...(l.group ? { group: l.group } : {}), visible: !hiddenLayers.has(i) })),
+      layerGroups: groups,
+      toggles: {
+        cutaway,
+        nearestFiltering: nearest,
+        backfaceCulling: cullOn,
+        authenticFog: fogOn,
+        showScripted,
+        showBackdrop: lv.backdrop ? showBackdrop : null,
+        sky: skies.length > 0 ? activeSky : null,
+        showSky: hasSkyPlanes ? skyPlanesOn : null,
+      },
+      build: { time: BUILD_TIME, mode: import.meta.env.MODE, userAgent: navigator.userAgent },
+    };
+  };
+
+  // Report the selection (withSelection) or the plain view: describe, capture both frames, send.
+  const submitReport = async (withSelection: boolean) => {
+    const engine = engineRef.current;
+    if (!engine || !level || reportStatus?.kind === 'busy') return;
+    const answer = window.prompt('Describe the issue');
+    const description = answer?.trim() ?? '';
+    if (!description) return;
+    const sel = withSelection ? selection : null;
+    setReportStatus({ kind: 'busy', text: 'Sending report…' });
+    try {
+      const view = await captureFrame(engine.renderer, engine.camera, false);
+      const highlight = sel && sel.kind !== 'marker' ? await captureFrame(engine.renderer, engine.camera, true) : view;
+      engine.renderer.dirty = true;
+      const serial = await sendReport(view, highlight, reportDetails(description, withSelection));
+      setReportStatus({ kind: 'ok', text: `Saved report ${String(serial).padStart(4, '0')}` });
+    } catch (e) {
+      engine.renderer.dirty = true;
+      setReportStatus({ kind: 'error', text: `Report not saved: ${e instanceof Error ? e.message : String(e)}` });
+    }
+  };
 
   const hasScripted = level?.instances.some((i) => i.animated && i.mesh >= 0) ?? false;
   const hasFog = !!level?.fog;
@@ -661,6 +749,13 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
           )}
           <span ref={posRef} className="mono" />
         </div>
+        {reportAvailable && level && (
+          <div className="hud-row small">
+            <button type="button" className="link" id="report-view" onClick={() => void submitReport(false)} disabled={reportStatus?.kind === 'busy'} title="Describe an issue with this view and save a report with a screenshot">
+              Report view
+            </button>
+          </div>
+        )}
         {sideView && (
           <label className="check" title="The game's own side-scrolling camera, or free fly through the layers (V)">
             <input id="side-view-toggle" type="checkbox" checked={sideActive} onChange={toggleView} />
@@ -801,7 +896,19 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
         </div>
       )}
       {children}
-      {report && <SelectionPanel report={report} texture={reportTexture} onClear={() => setPicked(null)} />}
+      {reportStatus && (
+        <div className={`hud report-status small${reportStatus.kind === 'error' ? ' error' : ''}`} id="report-status" role="status">
+          {reportStatus.text}
+        </div>
+      )}
+      {report && (
+        <SelectionPanel
+          report={report}
+          texture={reportTexture}
+          onClear={() => setPicked(null)}
+          {...(reportAvailable ? { onReport: () => void submitReport(true), reportBusy: reportStatus?.kind === 'busy' } : {})}
+        />
+      )}
       </div>
     </main>
   );

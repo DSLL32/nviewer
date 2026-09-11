@@ -6,9 +6,12 @@ interface SelectionPanelProps {
   report: SelectionReport;
   texture: Texture | null;
   onClear: () => void;
+  /** Send a bug report for this selection (when the dev server's report endpoint is available); else Copy is offered. */
+  onReport?: () => void;
+  reportBusy?: boolean;
 }
 
-export function SelectionPanel({ report, texture, onClear }: SelectionPanelProps) {
+export function SelectionPanel({ report, texture, onClear, onReport, reportBusy }: SelectionPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
 
@@ -26,9 +29,15 @@ export function SelectionPanel({ report, texture, onClear }: SelectionPanelProps
       <div className="hud-row">
         <strong className="selection-title">{report.title}</strong>
         <span className="selection-actions">
-          <button type="button" id="selection-copy" onClick={() => void copy()}>
-            {copyState === 'copied' ? 'Copied' : 'Copy'}
-          </button>
+          {onReport ? (
+            <button type="button" id="selection-report" onClick={onReport} disabled={reportBusy} title="Describe the issue and save a report with screenshots">
+              Report
+            </button>
+          ) : (
+            <button type="button" id="selection-copy" onClick={() => void copy()}>
+              {copyState === 'copied' ? 'Copied' : 'Copy'}
+            </button>
+          )}
           <button type="button" className="link" id="selection-clear" onClick={onClear}>Clear</button>
         </span>
       </div>
