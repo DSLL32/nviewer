@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Texture } from '../rom';
-import { reportText, type SelectionReport } from './selectionInfo';
+import type { SelectionReport } from './selectionInfo';
 
 interface SelectionPanelProps {
   report: SelectionReport;
@@ -18,7 +18,7 @@ export function SelectionPanel({ report, texture, onClear }: SelectionPanelProps
   }, [report]);
 
   const copy = async () => {
-    setCopyState((await copyText(reportText(report))) ? 'copied' : 'failed');
+    setCopyState((await copyText(report.copyText)) ? 'copied' : 'failed');
   };
 
   return (

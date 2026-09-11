@@ -18,6 +18,8 @@ export interface SelectionReport {
   sections: InfoSection[];
   /** Texture of the selected face, for the thumbnail (null for objects and untextured faces). */
   texture: number | null;
+  /** What the Copy button puts on the clipboard: a few lines that identify the selection, for bug reports. */
+  copyText: string;
 }
 
 export interface GameIdentity {
@@ -74,6 +76,7 @@ export function describeSelection(level: Level, game: GameIdentity | null, sel: 
       title: `Marker: ${marker.label}`,
       sections: [levelSection(level, game), { title: 'Marker', rows }, ...infoSection('Marker.info', marker.info)],
       texture: null,
+      copyText: copyLines([copyHeader(level, game), `Marker: ${marker.label}`, infoLine('Info', marker.info)]),
     };
   }
 
@@ -109,10 +112,17 @@ export function describeSelection(level: Level, game: GameIdentity | null, sel: 
       ['Textures', textures.length ? textures.join(', ') : 'none'],
     ];
     if (untextured) rows.push(['Untextured batches', String(untextured)]);
+    const layerNames = (level.layers ?? []).filter((l) => l.instances.includes(sel.instance)).map((l) => l.name);
     return {
       title: `Object: ${inst.name}`,
       sections: [levelSection(level, game), { title: 'Object', rows }, ...infoSection('Instance.info', inst.info), ...infoSection('Mesh.info', mesh.info)],
       texture: null,
+      copyText: copyLines([
+        copyHeader(level, game),
+        [`Object: instance #${sel.instance} ${inst.name}`, `mesh #${inst.mesh}`, ...(layerNames.length ? [`layer ${layerNames.join(', ')}`] : [])].join(' · '),
+        infoLine('Instance', inst.info),
+        infoLine('Mesh', mesh.info, true),
+      ]),
     };
   }
 
@@ -176,6 +186,19 @@ export function describeSelection(level: Level, game: GameIdentity | null, sel: 
       ...infoSection('Mesh.info', mesh.info),
     ],
     texture: tex ? batch.texture : null,
+    copyText: copyLines([
+      copyHeader(level, game),
+      [
+        `Face: instance #${sel.instance} ${inst.name}`,
+        `mesh #${inst.mesh}`,
+        `batch ${sel.batch}`,
+        `tri ${sel.tri}`,
+        ...(batch.triSource && sel.tri < batch.triSource.length ? [`triSource 0x${batch.triSource[sel.tri].toString(16)}`] : []),
+      ].join(' · '),
+      tex ? [`Texture #${batch.texture}`, `${tex.width}×${tex.height} ${tex.format}`, ...(tex.source ? [tex.source] : [])].join(' · ') : null,
+      infoLine('Instance', inst.info),
+      infoLine('Mesh', mesh.info, true),
+    ]),
   };
 }
 
@@ -188,11 +211,20 @@ function normal([a, b, c]: Vec3[]): Vec3 {
   return l > 0 ? [n[0] / l, n[1] / l, n[2] / l] : [0, 0, 0];
 }
 
-export function reportText(report: SelectionReport): string {
-  const lines = [`N64 Level Viewer: ${report.title}`];
-  for (const s of report.sections) {
-    lines.push('', `[${s.title}]`);
-    for (const [label, value] of s.rows) lines.push(`${label}: ${value}`);
-  }
-  return lines.join('\n') + '\n';
+// Copied text: identity only (no geometry, render state or bounds), one fact group per line.
+function copyHeader(level: Level, game: GameIdentity | null): string {
+  return `${game ? game.title : 'unknown game'} · ${level.id} · #${level.info.index} ${level.info.name}`;
+}
+
+/** DebugInfo as "key value · key value". Mesh.info's triSource note describes the loader, not the mesh: left out. */
+function infoLine(prefix: string, info: DebugInfo | undefined, skipTriSourceNote = false): string | null {
+  if (!info) return null;
+  const pairs = Object.entries(info)
+    .filter(([k, v]) => !(skipTriSourceNote && k === 'triSource' && typeof v === 'string'))
+    .map(([k, v]) => `${k} ${v}`);
+  return pairs.length ? `${prefix}: ${pairs.join(' · ')}` : null;
+}
+
+function copyLines(lines: (string | null)[]): string {
+  return lines.filter((l): l is string => !!l).join('\n') + '\n';
 }

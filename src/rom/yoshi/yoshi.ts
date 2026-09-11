@@ -397,7 +397,8 @@ function loadLevel(y: YoshiRom, def: LevelDef): Level {
       if (rgba.some((v, i) => i % 4 === 3 && v)) {
         const tex = textures.push({ width: W, height: H, rgba, wrapS: 'clamp', wrapT: 'clamp', format: 'CI8/RGBA16', source: `cast ${hex(id)} frame ${frame}` }) - 1;
         const q = new QuadBuilder();
-        q.quad(-W / 2, H, W, H, [0, 0, 1, 1]);
+        // Unit frames are stored bottom row first: the game draws them with a y-up object matrix (D = -1).
+        q.quad(-W / 2, H, W, H, [0, 1, 1, 0]);
         m = meshes.push({ ...meshFromBatches(CAST_NAMES.get(id) ?? hex(id), [q.batch(tex, 'cutout')]), info: { cast: hex(id), castdt: `0x${castdt.toString(16)}`, frame, size: `${W}x${H}` } }) - 1;
       }
     }
