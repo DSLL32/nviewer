@@ -8,6 +8,7 @@ const VS = `#version 300 es
 layout(location = 0) in vec3 aPosition;
 layout(location = 1) in vec2 aUv;
 layout(location = 2) in vec4 aColor;
+layout(location = 3) in vec2 aUv1; // second texture's coordinates (Batch.uvs1)
 uniform mat4 uViewProj;
 uniform mat4 uView;
 uniform mat4 uModel;
@@ -19,11 +20,13 @@ uniform highp float uFogFar;
 uniform highp float uFogMul;
 uniform highp float uFogOffset;
 out vec2 vUv;
+out vec2 vUv1;
 out vec4 vColor;
 out highp float vFog;
 out highp float vLogW; // 1 + clip w, for the logarithmic depth buffer
 void main() {
   vUv = aUv;
+  vUv1 = aUv1;
   vColor = aColor;
   vec4 world = uModel * vec4(aPosition, 1.0);
   highp float depth = -(uView * world).z; // positive view-space depth along the view axis, world units
@@ -45,6 +48,10 @@ ${cutaway ? '#define CUTAWAY' : ''}
 precision highp float;
 uniform sampler2D uTexture;
 uniform bool uTextured;
+// Batch.texture1: 0 none, 1 lerp (mix by uTexMix, colour and alpha), 2 multiply (colour only; alpha from uTexture).
+uniform int uTex2;
+uniform sampler2D uTexture1;
+uniform float uTexMix;
 uniform int uMode; // 0 opaque, 1 cutout, 2 blend
 uniform float uOpacity; // fades whole instances (an overlay under the pointer); 1 otherwise
 uniform bool uFog;
@@ -65,6 +72,7 @@ uniform highp float uPeelEpsilon;
 const ivec2 PEEL_TAPS[5] = ivec2[5](ivec2(0, 0), ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1));
 #endif
 in vec2 vUv;
+in vec2 vUv1;
 in vec4 vColor;
 in highp float vFog;
 in highp float vLogW;
@@ -85,7 +93,12 @@ void main() {
   gl_FragDepth = max(0.0, log2(max(vLogW, 1e-6)) * uLogDepthCoef - uDepthBias);
 #endif
   vec4 c = vColor;
-  if (uTextured) c *= texture(uTexture, vUv);
+  if (uTextured) {
+    vec4 t = texture(uTexture, vUv);
+    if (uTex2 == 1) t = mix(t, texture(uTexture1, vUv1), uTexMix);
+    else if (uTex2 == 2) t.rgb *= texture(uTexture1, vUv1).rgb;
+    c *= t;
+  }
   if (uMode == 1 && c.a < 0.5) discard;
   if (uMode == 0) c.a = 1.0;
   c.a *= uOpacity; // after the cutout test: a faded cutout keeps its shape
@@ -204,6 +217,8 @@ interface MainProgram {
   uView: WebGLUniformLocation | null;
   uModel: WebGLUniformLocation | null;
   uTextured: WebGLUniformLocation | null;
+  uTex2: WebGLUniformLocation | null;
+  uTexMix: WebGLUniformLocation | null;
   uMode: WebGLUniformLocation | null;
   uFog: WebGLUniformLocation | null;
   uFogColor: WebGLUniformLocation | null;
@@ -217,15 +232,20 @@ interface MainProgram {
   uPeelEpsilon: WebGLUniformLocation | null; // cutaway variant only
 }
 
+/** Texture unit of Batch.texture1 (unit 0: the batch texture, unit 1: the cutaway depth). */
+const TEXTURE1_UNIT = 2;
+
 function createMainProgram(gl: WebGL2RenderingContext, cutaway: boolean): MainProgram {
   const program = createProgram(gl, VS, mainFs(cutaway));
   const loc = (name: string) => gl.getUniformLocation(program, name);
   gl.useProgram(program);
   gl.uniform1i(loc('uTexture'), 0);
+  gl.uniform1i(loc('uTexture1'), TEXTURE1_UNIT);
   if (cutaway) gl.uniform1i(loc('uPeelDepth'), 1);
   return {
     program,
     uViewProj: loc('uViewProj'), uView: loc('uView'), uModel: loc('uModel'), uTextured: loc('uTextured'), uMode: loc('uMode'),
+    uTex2: loc('uTex2'), uTexMix: loc('uTexMix'),
     uFog: loc('uFog'), uFogColor: loc('uFogColor'), uFogNear: loc('uFogNear'), uFogFar: loc('uFogFar'), uFogMul: loc('uFogMul'),
     uFogOffset: loc('uFogOffset'), uLogDepthCoef: loc('uLogDepthCoef'), uDepthBias: loc('uDepthBias'), uOpacity: loc('uOpacity'),
     uPeelEpsilon: loc('uPeelEpsilon'),
@@ -244,6 +264,10 @@ interface GpuBatch {
   buffers: WebGLBuffer[];
   count: number;
   texture: WebGLTexture | null;
+  // Batch.texture1: the second texture and how it combines (0 none, 1 lerp, 2 multiply).
+  texture1: WebGLTexture | null;
+  tex2: number;
+  texMix: number;
   mode: Mode;
   depthTest: boolean;
   depthWrite: boolean;
@@ -680,6 +704,8 @@ export class LevelRenderer {
     let boundModel: Mat4 | null = null;
     let boundMode = -1;
     let boundTextured = -1;
+    let boundTex2 = -1;
+    let boundTexMix = -1;
     // Switch to the main program or its cutaway variant: frame uniforms, and the per-draw uniform caches start over.
     const useMain = (next: MainProgram) => {
       P = next;
@@ -701,6 +727,8 @@ export class LevelRenderer {
       boundModel = null;
       boundMode = -1;
       boundTextured = -1;
+      boundTex2 = -1;
+      boundTexMix = -1;
     };
     useMain(this.main);
     // Per-instance fog switch: instances the game draws unfogged keep fog factor 0.
@@ -714,6 +742,7 @@ export class LevelRenderer {
     gl.activeTexture(gl.TEXTURE0);
 
     let boundTexture: WebGLTexture | null = null;
+    let boundTexture1: WebGLTexture | null = null;
     // Culling: 'toggle' = level geometry (the user's setting), 'game' = always as the batch says, 'never'.
     type CullPolicy = 'toggle' | 'game' | 'never';
     const draw = (b: GpuBatch, model: Mat4, depthTest: boolean, depthWrite: boolean, mirrored = false, policy: CullPolicy = 'toggle', forceBlend = false) => {
@@ -739,6 +768,22 @@ export class LevelRenderer {
       if (b.texture && b.texture !== boundTexture) {
         gl.bindTexture(gl.TEXTURE_2D, b.texture);
         boundTexture = b.texture;
+      }
+      if (b.tex2 !== boundTex2) {
+        gl.uniform1i(P.uTex2, b.tex2);
+        boundTex2 = b.tex2;
+      }
+      if (b.tex2 !== 0) {
+        if (b.texMix !== boundTexMix) {
+          gl.uniform1f(P.uTexMix, b.texMix);
+          boundTexMix = b.texMix;
+        }
+        if (b.texture1 !== boundTexture1) {
+          gl.activeTexture(gl.TEXTURE0 + TEXTURE1_UNIT);
+          gl.bindTexture(gl.TEXTURE_2D, b.texture1);
+          gl.activeTexture(gl.TEXTURE0);
+          boundTexture1 = b.texture1;
+        }
       }
       gl.bindVertexArray(b.vao);
       gl.drawArrays(gl.TRIANGLES, 0, b.count);
@@ -1030,12 +1075,17 @@ export class LevelRenderer {
     else gl.vertexAttrib2f(1, 0, 0);
     if (b.colors.length >= count * 4) attrib(2, b.colors, 4, gl.UNSIGNED_BYTE, true);
     else gl.vertexAttrib4f(2, 1, 1, 1, 1);
+    const texture1 = textured && b.texture1 !== undefined && b.texture1 >= 0 && b.texture1 < textures.length && (b.uvs1?.length ?? 0) >= count * 2 ? textures[b.texture1] : null;
+    if (texture1) attrib(3, b.uvs1!, 2, gl.FLOAT, false);
     gl.bindVertexArray(null);
     return {
       vao,
       buffers,
       count,
       texture: textured ? textures[b.texture] : null,
+      texture1,
+      tex2: texture1 ? (b.texBlend === 'multiply' ? 2 : 1) : 0,
+      texMix: texture1 && b.texBlend !== 'multiply' ? Math.min(1, Math.max(0, b.texMix ?? 0)) : 0,
       mode: b.blend === 'blend' ? Mode.Blend : b.blend === 'cutout' ? Mode.Cutout : Mode.Opaque,
       depthTest: b.depthTest,
       depthWrite: b.depthWrite,
