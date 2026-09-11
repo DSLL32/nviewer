@@ -735,6 +735,19 @@ Loaders: 0x800BA6C0 per file, 0x800BB53C for the common file.
 
 **Per-level examples** (fog RGB): DC MALL 797CA0, WHITE HOUSE 8C7F66, CHAMPS ELYSEE 11111E (night).
 
+**Scene split by kind** (viewer layers in `src/rom/battletanxga.ts`). The world file's groups are few (one per file in most levels), so drawn placements are grouped by kind along their collision registration (5.1.4). Content was identified from renders of each kind alone (SF Breakout, Tower Bridge); it is an observation, not a game-defined name.
+
+| Layer | Kinds | Content seen |
+|---|---|---|
+| terrain | 2, 11, 22, 34, 44 | ground tiles and platforms (2), rubble mounds (11), ramps (22), flat water and pavement tiles (34, height 0), arrow decals (44) |
+| scenery (no collision) | 0 | pieces that register no collision: cliff edges with trees, the Tower Bridge superstructure and parkland |
+| buildings and walls | 1, 35 | walls and building walls (solid) |
+| fences and tank traps | 14 | see-through solids: fences, rails, tank traps |
+| edge walls | 43 | long thin walls whose collision reaches y 5000 |
+| destructibles | 3, 4, 5, 10, 15, 21, 26, 28, 29, 31, 32, 36, 40 | buildings (3), trees (4), posts and rails (5), guard towers (10), drums (15), crates (21), a blimp (28) |
+| vehicles | 24 | parked cars |
+| other objects | the rest (12, 13) | small flat pads (12, player-count gated) and single items (13) |
+
 #### 5.1.2 BTX1 level files (verified)
 - **Loaders:** 0x80088CF0(internal id, world buffer, ...) decodes file A with LZARI (caller 0x800820CC, into 0x803DA800), fixes up its header and reads the pool chunks. File B is loaded by 0x800DDA08.
 - **Coverage:** all 22 ids with data (0-17, 24-27) load through the prototype `lvl1/loader.ts`, in 0.3-0.6 s each.
@@ -841,6 +854,18 @@ Loaders: 0x800BA6C0 per file, 0x800BB53C for the common file.
 - **img40** (records 0x80141308 + 40·k: +0 start, +4 end, +8 w, +12 h, +16 cx, +20 cy, +24/+28 f32, +32 u8 x 8; index 0x80141560[id]): **radar maps.** 16-entry RGBA16 palette (32 B), then CI4 w x h, padded to 16 bytes. All 14 record sizes fit, and the aspect ratios match the level shapes (`lvl1/img/img40_*.png`).
 
 **File B:** relocated fields at +4, +0xC..+0x1C; pointer global 0x80135834. Its meaning is a hypothesis (9.2).
+
+**Scene split by kind** (viewer layers in `src/rom/battletanx.ts`). The file has no other grouping to split along (hdr1 groups only cull), so drawn objects are grouped by kind, following the draw pass and the collision class (5.1.3). Content was identified from renders of each kind alone (Queens, Golden Gate Bridge); it is an observation, not a game-defined name.
+
+| Layer | Kinds | Content seen |
+|---|---|---|
+| ground | 0, 16, 17 | street and lot tiles (kind 0: draw pass 0, no collision, model height ≤ 8); flat pads (16, 17, height ≤ 6) |
+| buildings and walls | 1, 26, 30 | walls and building walls, curved bridge rails (26), small bunkers (30); static collision |
+| scenery (no collision) | 7 | large set pieces that register no collision: the crashed airliner, bridge cables and towers, distant blocks |
+| destructibles | 5, 6, 8, 9, 20, 31 | ruined building shells (5), cars (6), wall and fence segments (8), drums, crates and kiosks (9) |
+| bases | 11-14 | the four team bases |
+| kerbs and tank traps | 19, 27 | tank-only collision: kerbs and rails (19), tank traps (27) |
+| props | the rest (3, 15) | posts and small props that block nothing |
 
 **Per-level placed geometry** (prototype, campaign/all filter; instances / triangles / textures):
 

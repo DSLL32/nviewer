@@ -14,7 +14,7 @@ import { runDisplayList } from './displaylist';
 import { lzariDecode } from './lzari';
 import { parseBank, renderSequence } from './music/libultra';
 import { parseSequence } from './music/rush1';
-import type { Batch, CameraView, DebugInfo, DecodedMusic, Game, Instance, Level, LevelInfo, Mesh, MusicTrack, Texture } from './types';
+import type { Batch, CameraView, DebugInfo, DecodedMusic, Game, Instance, Level, LevelInfo, LevelLayer, Mesh, MusicTrack, Texture } from './types';
 import { buildLevel, meshFromBatches } from './bomberman/common';
 import { view } from './util';
 
@@ -92,6 +92,30 @@ const COLLISION_CLASSES: { cls: CollisionClass; label: string; color: [number, n
 ];
 // Overlay prisms stand this far outside the footprint and above the model, so they do not z-fight with its faces.
 const COLLISION_GROW = 1;
+
+// Layers of the drawn objects by kind (BATTLETANX.md 5.1.2), split along how the game treats them: the ground (draw
+// pass 0, never collides), static collision, scenery without collision, the destructible and tank-only kinds.
+const LAYERS: KindLayer[] = [
+  { name: 'ground', kind: 'main', kinds: [0, 16, 17] },
+  { name: 'buildings and walls', kind: 'main', kinds: [1, 26, 30] },
+  { name: 'scenery (no collision)', kind: 'main', kinds: [7] },
+  { name: 'destructibles', kind: 'objects', kinds: [5, 6, 8, 9, 20, 31] },
+  { name: 'bases', kind: 'objects', kinds: [11, 12, 13, 14] },
+  { name: 'kerbs and tank traps', kind: 'objects', kinds: [19, 27] },
+  { name: 'props', kind: 'objects', kinds: [] }, // the rest: posts and small props (kinds 3, 15)
+];
+
+export interface KindLayer { name: string; kind: LevelLayer['kind']; kinds: number[] }
+
+// Visible layers from the object kind of every instance (in instance order); kinds no layer lists go to the last one.
+export function kindLayers(kinds: number[], groups: KindLayer[]): LevelLayer[] {
+  const layers = groups.map((g): LevelLayer => ({ name: g.name, kind: g.kind, instances: [] }));
+  kinds.forEach((k, i) => {
+    const at = groups.findIndex((g) => g.kinds.includes(k));
+    layers[at < 0 ? groups.length - 1 : at].instances.push(i);
+  });
+  return layers.filter((l) => l.instances.length);
+}
 
 const G_VTX = 0x04;
 const G_DL = 0x06;
@@ -259,6 +283,7 @@ function loadLevel(rom: Uint8Array, index: number): Level {
   const rgb = RGB_TABLE - RAM + id * 3;
   const color: [number, number, number] = [rom[rgb], rom[rgb + 1], rom[rgb + 2]];
   const extra: Partial<Level> = {
+    layers: kindLayers(instances.map((q) => Number(q.info?.kind)), LAYERS),
     // gSPFogPosition(995, 1000) with the level's far plane (near 16); the sky is cleared to the fog colour.
     fog: { color, multiplier: 25600, offset: -25344, near: 16, far: dv.getInt16(FAR_TABLE - RAM + id * 2) },
     clearColor: color,

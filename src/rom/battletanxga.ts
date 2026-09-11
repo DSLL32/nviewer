@@ -13,7 +13,7 @@ import { type DlLighting, type Mtx, runDisplayList } from './displaylist';
 import { lzariDecode } from './lzari';
 import { decodeGaMusic, listGaMusic } from './music/libmus';
 import type { Game, Instance, Level, LevelInfo, Mesh, Texture } from './types';
-import { addCollisionLayer, chaseCamera, type Face, prismFaces } from './battletanx';
+import { addCollisionLayer, chaseCamera, type Face, type KindLayer, kindLayers, prismFaces } from './battletanx';
 import { buildLevel, lighting, meshFromBatches, translation } from './bomberman/common';
 import { view } from './util';
 
@@ -79,6 +79,18 @@ const MODEL_FIELD: Record<number, number> = {
   0: 2, 1: 2, 2: 2, 11: 2, 14: 2, 22: 2, 34: 2, 35: 2, 43: 2, 44: 2, 12: 4, 13: 12,
   3: 2, 4: 2, 5: 2, 10: 2, 15: 2, 21: 2, 24: 2, 26: 6, 28: 2, 29: 2, 31: 2, 32: 2, 36: 2, 40: 2,
 };
+// Layers of the drawn objects by kind, split along their collision (BATTLETANX.md 5.1.4): the surface boxes and flat
+// ground, scenery that registers nothing, walls, see-through fences, the 5000-high edge walls and the spawned objects.
+const LAYERS: KindLayer[] = [
+  { name: 'terrain', kind: 'main', kinds: [2, 11, 22, 34, 44] },
+  { name: 'scenery (no collision)', kind: 'main', kinds: [0] },
+  { name: 'buildings and walls', kind: 'main', kinds: [1, 35] },
+  { name: 'fences and tank traps', kind: 'main', kinds: [14] },
+  { name: 'edge walls', kind: 'main', kinds: [43] },
+  { name: 'destructibles', kind: 'objects', kinds: [3, 4, 5, 10, 15, 21, 26, 28, 29, 31, 32, 36, 40] },
+  { name: 'vehicles', kind: 'objects', kinds: [24] },
+  { name: 'other objects', kind: 'objects', kinds: [] }, // the rest (kinds 12, 13)
+];
 const INCLUDE = 39;
 const FOG_AND_LIGHTS = 37;
 const AMBIENT = 38;
@@ -343,7 +355,7 @@ function loadLevel(rom: Uint8Array, index: number): Level {
     });
   }
 
-  const extra: Partial<Level> = {};
+  const extra: Partial<Level> = { layers: kindLayers(instances.map((q) => Number(q.info?.kind)), LAYERS) };
   if (fogColor) {
     // gSPFogPosition(995, 1000); the game's far plane adapts between 1800 and 5000.
     extra.fog = { color: fogColor, multiplier: 25600, offset: -25344, near: 16, far: 5000 };
