@@ -6,6 +6,7 @@
 // with 1 vertex unit = 1 world unit; on-rails z = -zPos1 - 3000 + zPos2. Lit presets shade by vertex normals with
 // the environment record's light, baked into vertex colours.
 import { buildLevel, fogPosition, meshFromBatches } from '../bomberman/common';
+import { sf64Music } from '../music/sf64';
 import { type DlLighting, runDisplayList } from '../displaylist';
 import type { Backdrop, Batch, CameraView, DebugInfo, Game, Instance, Level, LevelInfo, LevelKind, LevelLayer, Marker, Mesh, Texture } from '../types';
 import { Sf64Files, Space } from './fs';
@@ -767,10 +768,13 @@ function loadLevel(files: Sf64Files, def: LevelDef, levelInfo: LevelInfo): Level
 export function openStarFox64(rom: Uint8Array): Game {
   const files = new Sf64Files(rom);
   const levels: LevelInfo[] = DEFS.map((d, index) => ({ index, name: d.name, kind: d.kind, group: d.group }));
+  const music = sf64Music(rom);
   return {
     id: 'sf64',
     title: files.layout.version === '1.1' ? 'Star Fox 64' : 'Star Fox 64 (V1.0)',
     levels,
     loadLevel: (i) => loadLevel(files, DEFS[i], levels[i]),
+    music: music.tracks,
+    decodeMusic: (i) => music.decode(i),
   };
 }

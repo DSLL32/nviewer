@@ -54,7 +54,8 @@ filtering · H help · Esc releases the mouse.
   - `music/`: `musyx.ts`, `rush2049.ts` (Rush 2049), `libultra.ts` (libultra bank/sequence
     synthesizer shared by Rush 1, the Bomberman games and BattleTanx), `rush1.ts`, `libmus.ts`
     (Software Creations' libmus as used by Global Assault and Gex 3), `libmus64.ts` (the older libmus
-    revision in Gex 64), `nas.ts` (Nintendo EAD's "Nas" sequence driver, used by Yoshi's Story)
+    revision in Gex 64), `nas.ts` (Nintendo EAD's "Nas" sequence driver, used by Yoshi's Story), `sf64.ts`
+    (Star Fox 64's EAD sequence driver)
 - `src/worker.ts`: parses the ROM and levels off the main thread
 - `src/render/`: WebGL2 renderer, free-fly camera and controls
 - `src/ui/`: React UI (landing page, sidebar, viewport)
@@ -285,6 +286,8 @@ Textures are uploaded with the RDP tile commands, not read in place.
   grass, rock and water sections follow the event scripts), and Titania's terrain is simulated from its records.
 - **Environment.** Fog, clear colour and the planet backdrop window come from the environment record and the
   game's start camera.
+- **Music.** Nintendo EAD's sequence driver (the Mario 64 / Ocarina lineage, with its note pool, integer mixer
+  and per-song reverb) rendered at 32 kHz at the game's own level; loops follow the sequences' jumps.
 
 ## Known gaps
 
