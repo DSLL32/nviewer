@@ -1,6 +1,7 @@
 // Perfect Dark (U V1.0) soundtrack: 117 of the 119 music sequences (0 is 400 s of silence, 95 a single test note),
 // rendered with libultra.ts. The game uses libultra's n_audio (PERFECTDARK.md §6.1): one ALBankFile instrument bank and
-// the compressed-MIDI player n_alCSPlayer, whose envelope mixer takes the voice volume linearly rather than squared.
+// the compressed-MIDI player n_alCSPlayer, whose envelope mixer takes the voice volume linearly rather than squared
+// and ramps it linearly (n_env.c _getRate), which keeps slow attacks and long releases audible.
 // Ported from the research prototype, whose renders match captured game audio in tempo, pitch and level (§6.5). Tracks
 // loop independently (music/cseq.ts); the prototype took the first track's loop, which cut the ambiences 5, 109 and 110
 // down to one layer and silenced layers of 8, 102 and 106 for part of each loop.
@@ -30,7 +31,7 @@ const MAX_VOICES = 44;
 // Combat Simulator Soundtrack names where they exist; otherwise where the game plays the song (§6.3, §6.4; the cutscene
 // names follow the decompilation's). "X" is the stage's alternate track.
 const SONGS: [number, string][] = [
-  [1, 'Title sting'], [2, 'dD Extraction'], [3, 'Menu'], [4, 'Institute Defense'], [5, 'dD Research ambience'],
+  [1, 'Title sting'], [2, 'dD Extraction'], [3, 'Pause menu'], [4, 'Institute Defense'], [5, 'dD Research ambience'],
   [6, 'A51 Escape'], [7, 'Deep Sea'], [8, 'dD Central ambience'], [9, 'dD Central'], [10, 'End sting'],
   [11, 'dD Central intro ambience'], [12, 'Carrington Villa'], [13, 'Carrington Institute'], [14, 'Chicago'],
   [15, 'G5 Building'], [16, 'dD Central X'], [17, 'dD Extraction X'], [18, 'dD Research'], [19, 'dD Research X'],
@@ -91,7 +92,7 @@ export function perfectDarkMusic(rom: Uint8Array): { tracks: MusicTrack[]; decod
       }
       // lib 0x7000FD9C: n_alCSPSetVol(player, (musicVolume * seqVolume[seq]) >> 15).
       const seqVol = (MUSIC_VOLUME * volumes[index]) >> 15;
-      return renderSequence(rom, bank, seq, { rate: RATE, maxVoices: MAX_VOICES, seqVol, loop, squareVolume: false }).music;
+      return renderSequence(rom, bank, seq, { rate: RATE, maxVoices: MAX_VOICES, seqVol, loop, squareVolume: false, linearRamps: true }).music;
     },
   };
 }

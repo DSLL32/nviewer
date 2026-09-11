@@ -331,7 +331,7 @@ interface Voice {
   rampLeft: number;
 }
 
-function mixVoice(v: Voice, left: Float32Array, right: Float32Array, from: number, to: number) {
+function mixVoice(v: Voice, left: Float32Array, right: Float32Array, from: number, to: number, linear: boolean) {
   const { buf, wrapAt, wrapLen, silentAt } = v.wave;
   const lut = RESAMPLE_LUT;
   const step = v.step;
@@ -356,8 +356,13 @@ function mixVoice(v: Voice, left: Float32Array, right: Float32Array, from: numbe
       else if (s < -32768) s = -32768;
     }
     if (rampLeft > 0) {
-      gl *= rl;
-      gr *= rr;
+      if (linear) {
+        gl += rl;
+        gr += rr;
+      } else {
+        gl *= rl;
+        gr *= rr;
+      }
       if (--rampLeft === 0) {
         gl = v.tl;
         gr = v.tr;
@@ -388,6 +393,9 @@ export interface RenderOptions {
   // The envelope mixer takes the square of the voice volume (libultra's mixer, the default); false takes it linearly
   // (n_audio, as in Perfect Dark).
   squareVolume?: boolean;
+  // Volume ramps (attack, decay, release, volume changes) are linear, as n_audio's envelope mixer makes them (n_env.c
+  // _getRate), instead of exponential.
+  linearRamps?: boolean;
 }
 
 export function renderSequence(bytes: Uint8Array, bank: Bank, seq: Sequence, opts: RenderOptions) {
@@ -411,6 +419,7 @@ export function renderSequence(bytes: Uint8Array, bank: Bank, seq: Sequence, opt
   const eqpower = bank.eqpower;
   const pitchScale = opts.pitchScale ?? bank.sampleRate / rate;
   const squareVolume = opts.squareVolume ?? true;
+  const linearRamps = opts.linearRamps ?? false;
 
   // __initFromBank: every channel gets the first instrument, channel 9 the percussion
   // instrument.
@@ -448,6 +457,11 @@ export function renderSequence(bytes: Uint8Array, bank: Bank, seq: Sequence, opt
       v.gl = v.tl;
       v.gr = v.tr;
       v.rampLeft = 0;
+    } else if (linearRamps) {
+      // rl/rr hold the per-sample step.
+      v.rl = (v.tl - v.gl) / n;
+      v.rr = (v.tr - v.gr) / n;
+      v.rampLeft = n;
     } else {
       v.gl = Math.max(v.gl, 1);
       v.gr = Math.max(v.gr, 1);
@@ -651,7 +665,7 @@ export function renderSequence(bytes: Uint8Array, bank: Bank, seq: Sequence, opt
     }
     for (const v of voices) next = Math.min(next, v.envAt, v.endAt, v.offAt);
     if (next <= now) next = now + 1;
-    for (const v of voices) mixVoice(v, left, right, now, next);
+    for (const v of voices) mixVoice(v, left, right, now, next, linearRamps);
     now = next;
   }
   if (finish < 0) finish = now;

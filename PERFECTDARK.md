@@ -1398,7 +1398,7 @@ in `music/wav/index.json`.
 - **Level:** the mean offset is −0.9 dB with a ±3 dB spread, which includes reverb, sound effects and ducking. No
   per-song gain is justified.
 - **Tempo:** RAM tempos agree with the sequence data (e.g. seq 9 at 117 BPM: 1335 µs per tick).
-- **Not modelled:** reverb (about 1–2 dB and the room sound), the linear envelope ramps of n_audio, and the 184-sample
+- **Not modelled:** reverb (about 1–2 dB and the room sound) and the 184-sample
   event quantisation.
 
 ## 7. Mapping onto the viewer
@@ -1485,6 +1485,11 @@ in `music/wav/index.json`.
 | animated textures, env-mapped chrome, portals, dynamic lights | not planned | cosmetic; see §9 |
 
 ### 7.8 Corrections found during implementation
+
+0. **Envelopes:** n_audio ramps voice volume linearly (`n_env.c` `_getRate`), starting a note's attack at volume 1;
+   the viewer renders with `linearRamps` (verified: capture correlation improves on the pause menu, seq 3, and the
+   Combat Simulator match, seq 62; slow attacks and long releases, e.g. the pause menu's pads, were too brief with
+   exponential ramps). Seq 3 is the pause-menu music (RAM while paused).
 
 Found while implementing objects and characters (checked against the research RAM captures and frames):
 1. **Stand animations:** the labels are swapped. Anim 1 is the two-handed-gun stand; 106 is one-handed, two guns or
@@ -1617,7 +1622,7 @@ Everything here is unverified.
 
 **Music**
 - What exactly triggers X music; the Combat Simulator track rotation timer.
-- The reverb (FX) parameters; the linear envelope ramps of n_audio (not modelled).
+- The reverb (FX) parameters.
 - The sound-effect bank beyond its header, and code-started sound effects (no unused-SFX list claimed).
 - Whether title sting seq 1 plays.
 
