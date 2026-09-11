@@ -90,13 +90,13 @@ function insideXZ(t: FloorTile, x: number, z: number): boolean {
 
 /** A view for the walk: forward, right and up unit vectors and the tangents of the half field of view. */
 export interface View { f: readonly number[]; s: readonly number[]; u: readonly number[]; tx: number; ty: number }
-const CUBE: View[] = [
+export const CUBE: View[] = [
   { f: [1, 0, 0], s: [0, 0, 1], u: [0, 1, 0] }, { f: [-1, 0, 0], s: [0, 0, 1], u: [0, 1, 0] },
   { f: [0, 0, 1], s: [1, 0, 0], u: [0, 1, 0] }, { f: [0, 0, -1], s: [1, 0, 0], u: [0, 1, 0] },
   { f: [0, 1, 0], s: [1, 0, 0], u: [0, 0, 1] }, { f: [0, -1, 0], s: [1, 0, 0], u: [0, 0, 1] },
 ].map((v) => ({ ...v, tx: 1, ty: 1 }));
 
-type Rect = [number, number, number, number]; // x0, y0, x1, y1 in the face's NDC
+export type Rect = [number, number, number, number]; // x0, y0, x1, y1 in the face's NDC
 
 /** Given two rooms showing a coplanar surface at point with normal: the room the game draws later, or null if unclear. */
 export type DrawOrder = (roomA: number, roomB: number, point: readonly number[], normal: readonly number[]) => number | null;
@@ -194,9 +194,9 @@ export class PdVisibility {
    * Rooms the portal walk reaches from an eye in the given start rooms, over the given views (default: the six cube faces),
    * added to `out`. A room reached again is walked on only with a clip box not already covered by one it was walked with.
    */
-  walk(eye: readonly number[], startRooms: readonly number[], out: Set<number>, views: readonly View[] = CUBE): void {
+  walk(eye: readonly number[], startRooms: readonly number[], out: Set<number>, views: readonly View[] = CUBE, clips?: Map<number, Rect[]>[]): void {
     const pts = this.portalPts;
-    for (const view of views) {
+    for (const [vi, view] of views.entries()) {
       const cache = new Map<number, Rect | null>();
       const project = (portal: number): Rect | null => {
         let r = cache.get(portal);
@@ -233,6 +233,7 @@ export class PdVisibility {
         return r;
       };
       const seen = new Map<number, Rect[]>();
+      if (clips) clips[vi] = seen; // each room's clip boxes in this view (the game scissors a room to them)
       const stack: [number, Rect][] = startRooms.map((room) => [room, [-1, -1, 1, 1]]);
       while (stack.length) {
         const [room, rect] = stack.pop()!;
@@ -352,15 +353,18 @@ export class PdVisibility {
   }
 
   /**
-   * Which of two rooms the game draws later where both show a coplanar surface (point, normal): the game draws rooms in
-   * portal order from the camera's room (the first BG calls of 10 of the 13 captured frames have non-decreasing portal-hop
-   * depth from the camera room; script-shown rooms come first), and a later coplanar draw passes the depth test. Votes of the
-   * playable eyes nearest in front of the surface (up to 48 within 2500 units) whose walk reaches both rooms: the deeper room
-   * wins; eyes at equal depth abstain. The winner needs three quarters of the votes, else null.
+   * Which of two rooms shows a coplanar surface at `point` (normal) where both have a copy. The game draws rooms in portal
+   * order from the camera's room (the first BG calls of 10 of the 12 captured gameplay frames have non-decreasing portal-hop
+   * depth from the camera room; script-shown rooms come first), scissors each room to the clip boxes of the portals it is
+   * reached through, and a later coplanar draw passes the depth test. Votes of the playable eyes nearest in front of the
+   * surface (up to 48 within 2500 units): a room counts where the point lies in one of its clip boxes; if both do, the
+   * deeper room (drawn later) gets the vote, if one does, that room; eyes where neither does or at equal depth abstain. The
+   * winner needs three quarters of the votes, else null. (Chicago rooms 73/77: from the stairs landing room 73's dark copy
+   * is drawn later but clipped away, so room 77's lit grate shows.)
    */
   drawOrder(seeds: readonly (readonly number[])[]): DrawOrder {
     let eyes: { eye: number[]; start: number[] }[] | null = null;
-    const walks = new Map<number, { seen: Set<number>; depth: Map<number, number> }>();
+    const walks = new Map<number, { seen: Set<number>; clips: Map<number, Rect[]>[]; depth: Map<number, number> }>();
     return (a, b, point, normal) => {
       eyes ??= this.eyeList(this.reachable(seeds));
       const candidates: [number, number][] = [];
@@ -374,14 +378,25 @@ export class PdVisibility {
       for (const [, i] of candidates.slice(0, 48)) {
         let w = walks.get(i);
         if (!w) {
-          const seen = new Set<number>();
-          this.walk(eyes[i].eye, eyes[i].start, seen);
-          walks.set(i, (w = { seen, depth: this.portalDepths(eyes[i].start) }));
+          const seen = new Set<number>(), clips: Map<number, Rect[]>[] = [];
+          this.walk(eyes[i].eye, eyes[i].start, seen, CUBE, clips);
+          walks.set(i, (w = { seen, clips, depth: this.portalDepths(eyes[i].start) }));
         }
         if (!w.seen.has(a) || !w.seen.has(b)) continue;
-        const da = w.depth.get(a) ?? 0, db = w.depth.get(b) ?? 0;
-        if (da > db) votesA++;
-        else if (db > da) votesB++;
+        const eye = eyes[i].eye, d = [point[0] - eye[0], point[1] - eye[1], point[2] - eye[2]];
+        const clipped = (room: number) => CUBE.some((v, vi) => {
+          const z = d[0] * v.f[0] + d[1] * v.f[1] + d[2] * v.f[2];
+          if (z < NEAR) return false;
+          const x = (d[0] * v.s[0] + d[1] * v.s[1] + d[2] * v.s[2]) / z, y = (d[0] * v.u[0] + d[1] * v.u[1] + d[2] * v.u[2]) / z;
+          return Math.abs(x) <= 1 && Math.abs(y) <= 1 && (w!.clips[vi].get(room) ?? []).some((q) => x >= q[0] && x <= q[2] && y >= q[1] && y <= q[3]);
+        });
+        const inA = clipped(a), inB = clipped(b);
+        if (inA && inB) {
+          const da = w.depth.get(a) ?? 0, db = w.depth.get(b) ?? 0;
+          if (da > db) votesA++;
+          else if (db > da) votesB++;
+        } else if (inA) votesA++;
+        else if (inB) votesB++;
       }
       const total = votesA + votesB;
       return total && votesA >= 0.75 * total ? a : total && votesB >= 0.75 * total ? b : null;

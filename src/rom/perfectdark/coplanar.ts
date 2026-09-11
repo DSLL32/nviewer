@@ -9,9 +9,9 @@
 //   - Within a room (opaque leaves, then translucent leaves; commands in list order), a solid triangle entirely covered by
 //     later opaque coplanar ones is dropped (never visible), one lying entirely on earlier ones becomes a decal, and one
 //     partly over earlier ones moves NUDGE towards its front.
-//   - Between different rooms the order follows the portal walk: given a DrawOrder (visibility.ts), the room the game draws
-//     later from where the player sees both keeps the surface and the other room's copy moves NUDGE behind it (so the
-//     winner's decals stay on it); overlaps with no clear order are left.
+//   - Between different rooms the order and clipping follow the portal walk: given a DrawOrder (visibility.ts), the room
+//     that shows the surface from where the player sees it keeps it and the other room's copy moves NUDGE behind (so the
+//     winner's decals stay on it); overlaps with no clear answer are left.
 import { mergeBatches } from '../bomberman/common';
 import type { Batch } from '../types';
 import type { RoomMesh } from './bg';
@@ -183,7 +183,6 @@ export function resolveCoplanar(rooms: RoomMesh[], drawOrder?: DrawOrder): { mov
   const c = new Coplanar(rooms);
   const flags = new Map<Tri, number>();
   const set = (t: Tri, f: number) => flags.set(t, (flags.get(t) ?? 0) | f);
-  const decisions = new Map<string, number | null>();
   for (const a of c.tris) {
     const near = c.near(a);
     if (!near.length) continue;
@@ -192,12 +191,9 @@ export function resolveCoplanar(rooms: RoomMesh[], drawOrder?: DrawOrder): { mov
       for (const b of near) {
         if (!b.solid || b.room === a.room || dot(a, b) <= 0 || coverage(a, [b]) === 0) continue;
         const roomB = rooms[b.room].room.index;
-        const key = `${Math.min(roomA, roomB)}/${Math.max(roomA, roomB)}/${a.nk}/${a.dk}`;
-        let winner = decisions.get(key);
-        if (winner === undefined) {
-          const centre = [0, 1, 2].map((k) => (a.p[k] + a.p[3 + k] + a.p[6 + k]) / 3);
-          decisions.set(key, (winner = drawOrder(roomA, roomB, centre, a.n)));
-        }
+        // decided at the triangle's centre: which copy shows depends on where the rooms' clip boxes fall
+        const centre = [0, 1, 2].map((k) => (a.p[k] + a.p[3 + k] + a.p[6 + k]) / 3);
+        const winner = drawOrder(roomA, roomB, centre, a.n);
         if (winner === roomB) {
           set(a, BEHIND);
           break;
