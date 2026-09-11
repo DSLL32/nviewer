@@ -14,7 +14,7 @@ import { OOT_ACTORS } from './names';
 import {
   alternateHeaders, headerForLayer, parseCollision, parseHeader, readRoomHeader, readSceneHeader, s16, u32, type Collision, type RoomHeader,
 } from './scene';
-import { halfTexel, meshOf, translation } from './zelda';
+import { halfTexel, layerGroup, meshOf, translation } from './zelda';
 
 export const ALPHA_MD5 = '95bf2153aaad6faff3fb42fecd2f0200';
 const DATA_START = 0x1000000, DATA_END = 0x19a4470;
@@ -282,7 +282,8 @@ function loadAlphaLevel(rom: Uint8Array, def: AlphaDef, info: LevelInfo): Level 
   const layer = (lname: string, kind: LevelLayer['kind'], visible = true) => {
     let i = layerIndex.get(lname);
     if (i === undefined) {
-      i = layers.push({ name: lname, kind, instances: [], ...(visible ? {} : { visibleByDefault: false }) }) - 1;
+      const group = layerGroup(lname, kind);
+      i = layers.push({ name: lname, kind, instances: [], ...(visible ? {} : { visibleByDefault: false }), ...(group ? { group } : {}) }) - 1;
       layerIndex.set(lname, i);
     }
     return i;

@@ -126,6 +126,16 @@ function mergeBatches(batches: Batch[]): Batch[] {
   });
 }
 
+// UI group of a scene layer: one layer per room under "rooms", the actor marker categories (transition actors
+// included) under "actors", collision, waterboxes and the room lists the prerendered background covers under
+// "collision and hidden". Spawns and the drawn static actors stay ungrouped.
+export function layerGroup(name: string, kind: LevelLayer['kind']): string | undefined {
+  if (kind === 'main' && /^room \d+$/.test(name)) return 'rooms';
+  if (kind === 'markers' && name !== 'spawns') return 'actors';
+  if (kind === 'collision' || name === 'opaque room lists under the background') return 'collision and hidden';
+  return undefined;
+}
+
 export function meshOf(name: string, batches: Batch[], info: DebugInfo): Mesh {
   const merged = mergeBatches(batches);
   let radius = 0;
@@ -478,7 +488,8 @@ function loadLevel(z: Zelda, def: LevelDef, info: LevelInfo): Level {
   const layer = (name: string, kind: LevelLayer['kind'], visible = true) => {
     let i = layerIndex.get(name);
     if (i === undefined) {
-      i = layers.push({ name, kind, instances: [], ...(visible ? {} : { visibleByDefault: false }) }) - 1;
+      const group = layerGroup(name, kind);
+      i = layers.push({ name, kind, instances: [], ...(visible ? {} : { visibleByDefault: false }), ...(group ? { group } : {}) }) - 1;
       layerIndex.set(name, i);
     }
     return i;
