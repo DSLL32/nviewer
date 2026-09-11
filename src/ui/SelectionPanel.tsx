@@ -9,9 +9,11 @@ interface SelectionPanelProps {
   /** Send a bug report for this selection (when the dev server's report endpoint is available); else Copy is offered. */
   onReport?: () => void;
   reportBusy?: boolean;
+  /** For a selection inside room layers (LevelLayer group 'rooms'): hide its room, show only it, or show all rooms. */
+  roomActions?: { rooms: string; hide?: () => void; only: () => void; showAll?: () => void };
 }
 
-export function SelectionPanel({ report, texture, onClear, onReport, reportBusy }: SelectionPanelProps) {
+export function SelectionPanel({ report, texture, onClear, onReport, reportBusy, roomActions }: SelectionPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
 
@@ -42,6 +44,18 @@ export function SelectionPanel({ report, texture, onClear, onReport, reportBusy 
         </span>
       </div>
       {copyState === 'failed' && <div className="small error">Could not access the clipboard.</div>}
+      {roomActions && (
+        <div className="selection-actions selection-room-actions" id="selection-room-actions">
+          <span className="small muted room-names">{roomActions.rooms}</span>
+          {roomActions.hide && (
+            <button type="button" id="selection-hide-room" onClick={roomActions.hide}>Hide room</button>
+          )}
+          <button type="button" id="selection-only-room" onClick={roomActions.only}>Show only this room</button>
+          {roomActions.showAll && (
+            <button type="button" id="selection-show-all-rooms" onClick={roomActions.showAll}>Show all rooms</button>
+          )}
+        </div>
+      )}
       {texture && <TextureThumb texture={texture} />}
       {report.sections.map((s) => (
         <section key={s.title} className="selection-section">

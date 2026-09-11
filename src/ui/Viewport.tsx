@@ -181,14 +181,16 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
     return picker;
   };
 
-  // Hidden things (scripted objects or layers switched off) cannot stay selected.
+  // A selected object or face whose instance gets hidden (a layer switched off, e.g. "Hide room", or scripted objects)
+  // keeps its info panel but loses the highlight; a hidden marker is deselected.
   const selection =
     picked &&
     level &&
     picked.level === level &&
-    (picked.sel.kind === 'marker' ? markerVisible(level.markers?.[picked.sel.marker]) : instanceVisible(level, picked.sel.instance))
+    (picked.sel.kind !== 'marker' || markerVisible(level.markers?.[picked.sel.marker]))
       ? picked.sel
       : null;
+  const selectionDrawn = !!selection && !!level && selection.kind !== 'marker' && instanceVisible(level, selection.instance);
   const selectedMarker = selection?.kind === 'marker' ? selection.marker : -1;
 
   // A faded overlay is see-through for picking as well.
@@ -538,7 +540,7 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
     const renderer = engineRef.current?.renderer;
     if (!renderer) return;
     const inst = level && selection && selection.kind !== 'marker' ? level.instances[selection.instance] : undefined;
-    if (!level || !selection || selection.kind === 'marker' || !inst) {
+    if (!level || !selection || selection.kind === 'marker' || !inst || !selectionDrawn) {
       renderer.setHighlight(null);
     } else if (selection.kind === 'object') {
       const bounds = pickerFor(level).bounds(inst.mesh);
@@ -555,7 +557,7 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
           : null,
       );
     }
-  }, [level, selection]);
+  }, [level, selection, selectionDrawn]);
 
   useEffect(() => {
     let alive = true;
@@ -602,6 +604,31 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
     setLayerState({ level, hidden: next });
   };
   const setLayerVisible = (index: number, visible: boolean) => setLayersVisible([index], visible);
+  // Rooms: the layers of the 'rooms' group, and which of them each instance belongs to.
+  const roomLayers = useMemo(() => {
+    const all: number[] = [];
+    const byInstance = new Map<number, number[]>();
+    (level?.layers ?? []).forEach((l, i) => {
+      if (l.group !== 'rooms') return;
+      all.push(i);
+      for (const inst of l.instances) {
+        const list = byInstance.get(inst);
+        if (list) list.push(i);
+        else byInstance.set(inst, [i]);
+      }
+    });
+    return { all, byInstance };
+  }, [level]);
+  /** Show these room layers and hide every other layer of the 'rooms' group; other layers stay as they are. */
+  const showOnlyRooms = (keep: readonly number[]) => {
+    if (!level) return;
+    const next = new Set(hiddenLayers);
+    for (const i of roomLayers.all) {
+      if (keep.includes(i)) next.delete(i);
+      else next.add(i);
+    }
+    setLayerState({ level, hidden: next });
+  };
   const toggleGroupOpen = (name: string, size: number) => {
     if (!level) return;
     const open = groupOpenState && groupOpenState.level === level ? groupOpenState.open : {};
@@ -689,6 +716,19 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
       setReportStatus({ kind: 'error', text: `Report not saved: ${e instanceof Error ? e.message : String(e)}` });
     }
   };
+
+  // Room actions for a selected face or object that belongs to room layers.
+  const selectedRooms = selection && selection.kind !== 'marker' ? (roomLayers.byInstance.get(selection.instance) ?? []) : [];
+  const anyRoomHidden = roomLayers.all.some((i) => hiddenLayers.has(i));
+  const roomActions =
+    selectedRooms.length > 0
+      ? {
+          rooms: selectedRooms.map((i) => level?.layers?.[i]?.name ?? `layer ${i}`).join(', '),
+          ...(selectedRooms.some((i) => !hiddenLayers.has(i)) ? { hide: () => setLayersVisible(selectedRooms, false) } : {}),
+          only: () => showOnlyRooms(selectedRooms),
+          ...(anyRoomHidden ? { showAll: () => setLayersVisible(roomLayers.all, true) } : {}),
+        }
+      : undefined;
 
   const hasScripted = level?.instances.some((i) => i.animated && i.mesh >= 0) ?? false;
   const hasFog = !!level?.fog;
@@ -906,6 +946,7 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
           report={report}
           texture={reportTexture}
           onClear={() => setPicked(null)}
+          roomActions={roomActions}
           {...(reportAvailable ? { onReport: () => void submitReport(true), reportBusy: reportStatus?.kind === 'busy' } : {})}
         />
       )}

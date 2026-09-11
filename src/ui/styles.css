@@ -200,3 +200,6 @@ button.link { background: none; border: none; padding: 0; color: var(--accent); 
   display: block; image-rendering: pixelated; border: 1px solid var(--border);
   background: repeating-conic-gradient(#5a5f69 0 25%, #353941 0 50%) 0 0 / 8px 8px;
 }
+/* Room actions in the selection panel (Hide room, Show only this room, Show all rooms). */
+.selection-room-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.selection-room-actions .room-names { flex: 1 0 100%; overflow-wrap: anywhere; }
