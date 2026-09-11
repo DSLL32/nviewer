@@ -180,10 +180,10 @@ class QuadBuilder {
   readonly uv: number[] = [];
   readonly col: number[] = [];
 
-  quad(x: number, y: number, w: number, h: number, [u0, v0, u1, v1]: [number, number, number, number], rgba = [255, 255, 255, 255]) {
+  quad(x: number, y: number, w: number, h: number, [u0, v0, u1, v1]: [number, number, number, number], rgba = [255, 255, 255, 255], z = 0) {
     const tl = [x, y], bl = [x, y - h], br = [x + w, y - h], tr = [x + w, y];
     for (const [p, t] of [[tl, [u0, v0]], [bl, [u0, v1]], [br, [u1, v1]], [tl, [u0, v0]], [br, [u1, v1]], [tr, [u1, v0]]]) {
-      this.pos.push(p[0], p[1], 0);
+      this.pos.push(p[0], p[1], z);
       this.uv.push(t[0], t[1]);
       this.col.push(...rgba);
     }
@@ -307,9 +307,11 @@ function loadLevel(y: YoshiRom, def: LevelDef): Level {
     const npx = layer.unitW * layer.unitH, nTiles = Math.floor(ut.length / npx);
     const pv = view(pal);
     // Switchable units: record {u16 tile[5]} ending at 0x8000, swapped by the level's switches (a bush covering a
-    // hidden room turns into platforms, a hut wall opens onto the jungle). Neither the first nor the last tile is
-    // always the state that fits: each connected region of switchable units shows the state whose edges match
-    // the fixed units around it best, and the other state goes to an optional layer.
+    // hidden room turns into platforms, a hut wall opens onto the jungle). Each connected region of switchable
+    // units is scored by how well its first and last tiles' edges match the fixed units around it. Where the
+    // first tile fits (a bush or wall that later opens), it is drawn with the last tile just in front, so the
+    // platforms show over an intact bush; otherwise the last tile is drawn alone (edges that replace fill
+    // tiles) and the first goes to an optional layer.
     const frames = (v: number): number[] => {
       if (!(v & 0x8000)) return [v];
       const o = (v & 0x7fff) * 10;
@@ -375,19 +377,23 @@ function loadLevel(y: YoshiRom, def: LevelDef): Level {
       };
       if (score((s) => s[0]) < score((s) => s[s.length - 1])) for (const k of region) firstState.add(k);
     }
-    const placed: [number, number, number][] = [];
+    const placed: [number, number, number, number][] = []; // px, py, cell, z offset
     const other: [number, number, number][] = [];
     for (const [key, f] of grid) {
       const px = (key % 65536) * unitW, py = Math.floor(key / 65536) * unitH;
-      const first = firstState.has(key);
-      placed.push([px, py, cellOf(first ? f[0] : f[f.length - 1])]);
-      if (switchable(f)) other.push([px, py, cellOf(first ? f[f.length - 1] : f[0])]);
+      const last = cellOf(f[f.length - 1]);
+      if (firstState.has(key)) {
+        placed.push([px, py, cellOf(f[0]), 0], [px, py, last, 0.001]);
+      } else {
+        placed.push([px, py, last, 0]);
+        if (switchable(f)) other.push([px, py, cellOf(f[0])]);
+      }
     }
     if (!placed.length) continue;
     const { texture, uv } = atlas.build('CI8/RGBA16 tiles', `cast ${hex(a.id)} ut 0x${y.u32(y.slot(castdt, 1) + 8).toString(16)}`);
     const tex = textures.push(texture) - 1;
     const q = new QuadBuilder();
-    for (const [px, py, cell] of placed) q.quad(px, -py, layer.unitW, layer.unitH, uv(cell));
+    for (const [px, py, cell, z] of placed) q.quad(px, -py, layer.unitW, layer.unitH, uv(cell), undefined, z);
 
     // Parallax plane: P = r * cam + floor16(r * cam0 - a) - r * cam0 per axis, with the anchor a stored
     // 16 bytes before the attribute record.
