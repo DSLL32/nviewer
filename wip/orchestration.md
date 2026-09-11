@@ -56,6 +56,9 @@ conversation.
     (2026-09-11, about 22:05).
   - To resume, start a new lead per game from its `WIP.md` and the "Research
     investigations" procedure in AGENTS.md.
+  - Copies of the seven `WIP.md` files as of the wind-down are in
+    `wip/research/<game>.md`. The scratch copy is authoritative if a resumed lead
+    updates it, and the paths inside point into the scratch directories.
 
   | Game | Spec state | Next step |
   |---|---|---|
