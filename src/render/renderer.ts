@@ -191,6 +191,73 @@ void main() {
   gl_Position.xy += uOffset * gl_Position.w;
 }`;
 
+// Wireframe overlays (setWireframe, setCollisionWireframe): triangle edges drawn as GL lines from the batches' own
+// vertex buffers with one shared edge index buffer (non-indexed triangles: vertex v, v+1, v+2), depth-tested against the
+// shaded scene with a small pull towards the camera. The cutaway variant drops what the cutaway removed.
+const WIRE_VS = `#version 300 es
+layout(location = 0) in vec3 aPosition;
+uniform mat4 uViewProj;
+uniform mat4 uModel;
+out highp float vLogW;
+void main() {
+  vec4 world = uModel * vec4(aPosition, 1.0);
+  gl_Position = uViewProj * world;
+  vLogW = 1.0 + gl_Position.w;
+}`;
+
+const wireFs = (cutaway: boolean) => `#version 300 es
+${cutaway ? '#define CUTAWAY' : ''}
+precision highp float;
+uniform vec4 uColor;
+uniform highp float uLogDepthCoef;
+uniform highp float uDepthBias;
+#ifdef CUTAWAY
+uniform highp sampler2D uPeelDepth;
+uniform highp float uPeelEpsilon;
+const ivec2 PEEL_TAPS[5] = ivec2[5](ivec2(0, 0), ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1));
+#endif
+in highp float vLogW;
+out vec4 outColor;
+void main() {
+  highp float depth = log2(max(vLogW, 1e-6)) * uLogDepthCoef;
+#ifdef CUTAWAY
+  ivec2 pixel = ivec2(gl_FragCoord.xy);
+  ivec2 last = textureSize(uPeelDepth, 0) - 1;
+  highp float first = -1.0;
+  for (int k = 0; k < 5; k++) {
+    highp float d = texelFetch(uPeelDepth, clamp(pixel + PEEL_TAPS[k], ivec2(0), last), 0).r;
+    if (d < 1.0) first = max(first, d);
+  }
+  if (first >= 0.0 && depth <= first + uPeelEpsilon) discard;
+#endif
+  gl_FragDepth = max(0.0, depth - uDepthBias);
+  outColor = uColor;
+}`;
+
+const WIRE_DEPTH_BIAS = 1e-4;
+const WIRE_COLOR = [0.35, 0.9, 1, 0.55] as const; // level geometry
+const COLLISION_WIRE_COLOR = [1, 0.45, 0.15, 0.85] as const; // collision layers
+
+interface WireProgram {
+  program: WebGLProgram;
+  uViewProj: WebGLUniformLocation | null;
+  uModel: WebGLUniformLocation | null;
+  uColor: WebGLUniformLocation | null;
+  uLogDepthCoef: WebGLUniformLocation | null;
+  uDepthBias: WebGLUniformLocation | null;
+  uPeelEpsilon: WebGLUniformLocation | null;
+}
+
+function createWireProgram(gl: WebGL2RenderingContext, cutaway: boolean): WireProgram {
+  const program = createProgram(gl, WIRE_VS, wireFs(cutaway));
+  const loc = (name: string) => gl.getUniformLocation(program, name);
+  if (cutaway) {
+    gl.useProgram(program);
+    gl.uniform1i(loc('uPeelDepth'), 1);
+  }
+  return { program, uViewProj: loc('uViewProj'), uModel: loc('uModel'), uColor: loc('uColor'), uLogDepthCoef: loc('uLogDepthCoef'), uDepthBias: loc('uDepthBias'), uPeelEpsilon: loc('uPeelEpsilon') };
+}
+
 const HIGHLIGHT_FS = `#version 300 es
 precision highp float;
 uniform vec4 uColor;
@@ -273,6 +340,7 @@ interface GpuBatch {
   depthWrite: boolean;
   cullBack: boolean;
   decal: boolean;
+  edges: WebGLBuffer | null; // the wireframe index buffer bound to this batch's vertex array, once used
 }
 
 interface GpuMesh {
@@ -302,6 +370,7 @@ interface DrawItem {
   animated: boolean;
   noFog: boolean; // the game draws this instance without fog even when fog is on
   mirrored: boolean; // negative determinant: winding is flipped
+  collision: boolean; // in a collision layer (LevelLayer kind 'collision')
   x: number;
   y: number;
   z: number;
@@ -323,6 +392,8 @@ interface Scene {
   clearColor: [number, number, number]; // 0..1
   levelClearColor: [number, number, number] | null; // Level.clearColor, 0..1
   backdrop: { texture: WebGLTexture; window: [number, number, number, number]; tint: [number, number, number] } | null;
+  // Line indices for the wireframe overlays, sized for the largest batch; made when a wireframe is first shown.
+  edgeIndex: { buffer: WebGLBuffer; type: number; triangles: number; bytes: number } | null;
 }
 
 const DEFAULT_CLEAR: [number, number, number] = [0.46, 0.64, 0.86];
@@ -376,6 +447,10 @@ export class LevelRenderer {
   private readonly highlightVao: WebGLVertexArrayObject;
   private readonly highlightBuffer: WebGLBuffer;
   private highlight: { color: [number, number, number]; fillCount: number; lineCount: number } | null = null;
+  private wireframe = false;
+  private collisionWireframe = false;
+  private wireProgram: WireProgram | null = null;
+  private wireCutawayProgram: WireProgram | null = null;
   private readonly anisoExt: EXT_texture_filter_anisotropic | null;
   private readonly filter: TextureFilter;
   private scene: Scene | null = null;
@@ -488,6 +563,25 @@ export class LevelRenderer {
    * an enclosed room seen from outside). Two passes: the nearest surfaces' depth into a texture, then the scene with
    * everything not behind that depth discarded. Sky, sky planes and backdrops are unaffected.
    */
+  /** Wireframe overlay: the triangle edges of the drawn level geometry (not sky, backdrops or collision layers). */
+  setWireframe(enabled: boolean) {
+    if (this.wireframe === enabled) return;
+    this.wireframe = enabled;
+    this.dirty = true;
+  }
+
+  /** Collision wireframe: the triangle edges of the collision layers, whether those layers are shown or not. */
+  setCollisionWireframe(enabled: boolean) {
+    if (this.collisionWireframe === enabled) return;
+    this.collisionWireframe = enabled;
+    this.dirty = true;
+  }
+
+  /** Size of the wireframe edge index buffer in bytes (0 until a wireframe was shown). */
+  get wireframeIndexBytes(): number {
+    return this.scene?.edgeIndex?.bytes ?? 0;
+  }
+
   setCutaway(enabled: boolean) {
     if (this.cutaway === enabled) return;
     this.cutaway = enabled;
@@ -584,6 +678,8 @@ export class LevelRenderer {
       return mesh;
     };
 
+    const collisionInstances = new Set<number>();
+    for (const layer of level.layers ?? []) if (layer.kind === 'collision') for (const i of layer.instances) collisionInstances.add(i);
     const items: DrawItem[] = [];
     for (let index = 0; index < level.instances.length; index++) {
       const inst = level.instances[index];
@@ -591,7 +687,7 @@ export class LevelRenderer {
       const mesh = getMesh(inst.mesh);
       if (!mesh) continue;
       const m = inst.matrix;
-      items.push({ index, mesh, model: m, animated: inst.animated === true, noFog: inst.noFog === true, mirrored: det3(m) < 0, x: m[12], y: m[13], z: m[14], dist: 0 });
+      items.push({ index, mesh, model: m, animated: inst.animated === true, noFog: inst.noFog === true, mirrored: det3(m) < 0, collision: collisionInstances.has(index), x: m[12], y: m[13], z: m[14], dist: 0 });
     }
 
     const sky: GpuMesh[] = [];
@@ -647,6 +743,7 @@ export class LevelRenderer {
       blendItems: items.filter((i) => i.mesh.blended.length > 0),
       hasDecals: items.some((i) => i.mesh.decal.length > 0),
       hasBackground: items.some((i) => i.mesh.background.length > 0),
+      edgeIndex: null,
       skyPlanes,
       skyPlaneTextures: [...skyPlaneTextures.values()],
       sky,
@@ -896,11 +993,14 @@ export class LevelRenderer {
     }
 
     if (peel) {
-      // Unbind the depth texture: the next first pass renders into it.
+      // Unbind the depth texture: the next first pass renders into it (after the wireframes, which test against it).
+      if (this.wireframe || this.collisionWireframe) drawCalls += this.drawWires(scene, logDepthCoef, true);
       gl.activeTexture(gl.TEXTURE1);
       gl.bindTexture(gl.TEXTURE_2D, null);
       gl.activeTexture(gl.TEXTURE0);
     }
+
+    if (!peel && (this.wireframe || this.collisionWireframe)) drawCalls += this.drawWires(scene, logDepthCoef, false);
 
     if (options.highlight !== false) drawCalls += this.drawHighlight(logDepthCoef);
 
@@ -920,6 +1020,8 @@ export class LevelRenderer {
     this.gl.deleteVertexArray(this.quadVao);
     this.gl.deleteBuffer(this.quadBuffer);
     this.gl.deleteProgram(this.skyPlaneProgram);
+    if (this.wireProgram) this.gl.deleteProgram(this.wireProgram.program);
+    if (this.wireCutawayProgram) this.gl.deleteProgram(this.wireCutawayProgram.program);
   }
 
   /** The cutaway first-pass target at the canvas size (created or resized on demand); null if unsupported. */
@@ -1007,6 +1109,88 @@ export class LevelRenderer {
     return calls;
   }
 
+  /**
+   * The wireframe overlays over the shaded scene: edges of the drawn level geometry, then of the collision layers (shown
+   * or not). Returns the number of draw calls.
+   */
+  private drawWires(scene: Scene, logDepthCoef: number, cutaway: boolean): number {
+    const gl = this.gl;
+    const edges = this.edgeIndexFor(scene);
+    if (!edges) return 0;
+    const P = cutaway ? (this.wireCutawayProgram ??= createWireProgram(gl, true)) : (this.wireProgram ??= createWireProgram(gl, false));
+    gl.useProgram(P.program);
+    gl.uniformMatrix4fv(P.uViewProj, false, this.viewProj);
+    gl.uniform1f(P.uLogDepthCoef, logDepthCoef);
+    gl.uniform1f(P.uDepthBias, WIRE_DEPTH_BIAS);
+    if (cutaway) gl.uniform1f(P.uPeelEpsilon, (CUTAWAY_EPSILON / Math.LN2) * logDepthCoef);
+    this.setDepthTest(true);
+    this.setDepthWrite(false);
+    this.setBlend(true);
+    this.setCull(false);
+    const showAnimated = this.showAnimated;
+    const hidden = this.hiddenInstances;
+    const opacity = this.instanceOpacity;
+    let calls = 0;
+    let boundModel: Mat4 | null = null;
+    const pass = (collision: boolean, color: readonly number[]) => {
+      gl.uniform4f(P.uColor, color[0], color[1], color[2], color[3]);
+      for (const item of scene.items) {
+        if (item.collision !== collision) continue;
+        // Level geometry as drawn; collision layers always.
+        if (!collision && ((item.animated && !showAnimated) || hidden?.has(item.index) || opacity?.has(item.index))) continue;
+        if (item.model !== boundModel) {
+          gl.uniformMatrix4fv(P.uModel, false, item.model);
+          boundModel = item.model;
+        }
+        for (const list of [item.mesh.solid, item.mesh.decal, item.mesh.blended]) {
+          for (const b of list) {
+            const count = Math.floor(b.count / 3) * 6;
+            if (count === 0) continue;
+            gl.bindVertexArray(b.vao);
+            if (b.edges !== edges.buffer) {
+              gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, edges.buffer); // stored in the batch's vertex array
+              b.edges = edges.buffer;
+            }
+            gl.drawElements(gl.LINES, count, edges.type, 0);
+            calls++;
+          }
+        }
+      }
+    };
+    if (this.wireframe) pass(false, WIRE_COLOR);
+    if (this.collisionWireframe) pass(true, COLLISION_WIRE_COLOR);
+    return calls;
+  }
+
+  /** The shared edge index buffer: for triangle t (vertices 3t..3t+2) the lines 3t-3t+1, 3t+1-3t+2, 3t+2-3t. */
+  private edgeIndexFor(scene: Scene): NonNullable<Scene['edgeIndex']> | null {
+    if (scene.edgeIndex) return scene.edgeIndex;
+    const gl = this.gl;
+    let maxVertices = 0;
+    for (const b of scene.batches) maxVertices = Math.max(maxVertices, b.count);
+    const triangles = Math.floor(maxVertices / 3);
+    if (triangles === 0) return null;
+    const big = maxVertices > 65535;
+    const indices = big ? new Uint32Array(triangles * 6) : new Uint16Array(triangles * 6);
+    for (let t = 0, o = 0; t < triangles; t++) {
+      const v = t * 3;
+      indices[o++] = v;
+      indices[o++] = v + 1;
+      indices[o++] = v + 1;
+      indices[o++] = v + 2;
+      indices[o++] = v + 2;
+      indices[o++] = v;
+    }
+    const buffer = gl.createBuffer();
+    if (!buffer) return null;
+    gl.bindVertexArray(null);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buffer);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, null);
+    scene.edgeIndex = { buffer, type: big ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT, triangles, bytes: indices.byteLength };
+    return scene.edgeIndex;
+  }
+
   /** The selection overlay, after the whole scene. Returns the number of draw calls. */
   private drawHighlight(logDepthCoef: number): number {
     const h = this.highlight;
@@ -1092,6 +1276,7 @@ export class LevelRenderer {
       depthWrite: b.depthWrite,
       cullBack: b.cullBack === true,
       decal: b.decal === true,
+      edges: null,
     };
   }
 
@@ -1105,6 +1290,7 @@ export class LevelRenderer {
     }
     for (const t of scene.textures) gl.deleteTexture(t);
     for (const t of scene.skyPlaneTextures) gl.deleteTexture(t);
+    if (scene.edgeIndex) gl.deleteBuffer(scene.edgeIndex.buffer);
     this.scene = null;
   }
 

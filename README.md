@@ -22,8 +22,8 @@ pan, the wheel (or Space/E, C/Q) zooms, V switches to free fly, and the Layers p
 layers, objects, collision and markers.
 
 **Controls:** click the view to capture the mouse, then look around with the mouse · arrow keys look around · W A S D move ·
-Space/E up · C/Q down · Ctrl+click selects an object and Alt+click a face (details, and a Report button that saves a bug report with screenshots when running the dev server; Report view reports the whole view) · Shift faster · mouse wheel changes speed · R reset view · X cutaway (hides the nearest surface, to look into enclosed areas) · F nearest
-filtering · H help · Esc releases the mouse.
+Space/E up · C/Q down · Ctrl+click selects an object and Alt+click a face (details, and a Report button that saves a bug report with screenshots when running the dev server; Report view reports the whole view) · Shift faster · mouse wheel changes speed · R reset view · X cutaway (hides the nearest surface, to look into enclosed areas) · F wireframe ·
+Shift+F collision wireframe · H help · Esc releases the mouse.
 
 ## Layout
 

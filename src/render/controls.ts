@@ -3,7 +3,7 @@
 import type { FlyCamera } from './camera';
 import { clamp, vec3, type Vec3 } from './math';
 
-export type ControlAction = 'reset' | 'toggle-filter' | 'toggle-help' | 'toggle-view' | 'toggle-cutaway';
+export type ControlAction = 'reset' | 'toggle-wireframe' | 'toggle-collision-wireframe' | 'toggle-help' | 'toggle-view' | 'toggle-cutaway';
 
 /** Holding Ctrl picks whole objects (instances), holding Alt picks single triangles. */
 export type PickMode = 'object' | 'face';
@@ -326,7 +326,7 @@ export class FlyControls {
     if (e.repeat || e.ctrlKey) return;
     const action: ControlAction | null =
       e.code === 'KeyR' ? 'reset'
-      : e.code === 'KeyF' ? 'toggle-filter'
+      : e.code === 'KeyF' ? (e.shiftKey ? 'toggle-collision-wireframe' : 'toggle-wireframe')
       : e.code === 'KeyH' ? 'toggle-help'
       : e.code === 'KeyV' ? 'toggle-view'
       : e.code === 'KeyX' ? 'toggle-cutaway'

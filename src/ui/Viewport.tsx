@@ -94,6 +94,9 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
   const [fogOn, setFogOn] = useState(readFogSetting);
   const [cullOn, setCullOn] = useState(() => readFlag(CULL_KEY));
   const [cutaway, setCutaway] = useState(false);
+  const [wireframe, setWireframe] = useState(false);
+  const [collisionWireframe, setCollisionWireframe] = useState(false);
+  const [viewHint, setViewHint] = useState<string | null>(null); // a brief note (e.g. no collision to show)
   const [skyPref, setSkyPref] = useState<string>(() => readString(SKY_KEY) ?? '');
   const [showBackdrop, setShowBackdrop] = useState(() => readString(BACKDROP_KEY) !== '0');
   const [helpOpen, setHelpOpen] = useState(true);
@@ -253,7 +256,11 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
 
   actionRef.current = (a) => {
     const engine = engineRef.current;
-    if (a === 'toggle-filter') setNearest((v) => !v);
+    if (a === 'toggle-wireframe') setWireframe((v) => !v);
+    else if (a === 'toggle-collision-wireframe') {
+      if (level?.layers?.some((l) => l.kind === 'collision' && l.instances.length > 0)) setCollisionWireframe((v) => !v);
+      else if (level) setViewHint('No collision in this level');
+    }
     else if (a === 'toggle-help') setHelpOpen((v) => !v);
     else if (a === 'toggle-view') toggleView();
     else if (a === 'toggle-cutaway') setCutaway((v) => !v);
@@ -463,6 +470,13 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
   useEffect(() => engineRef.current?.renderer.setNearestFiltering(nearest), [nearest]);
   useEffect(() => engineRef.current?.renderer.setShowAnimated(showScripted), [showScripted]);
   useEffect(() => engineRef.current?.renderer.setCutaway(cutaway), [cutaway]);
+  useEffect(() => engineRef.current?.renderer.setWireframe(wireframe), [wireframe]);
+  useEffect(() => engineRef.current?.renderer.setCollisionWireframe(collisionWireframe), [collisionWireframe]);
+  useEffect(() => {
+    if (!viewHint) return;
+    const timer = setTimeout(() => setViewHint(null), 3000);
+    return () => clearTimeout(timer);
+  }, [viewHint]);
   useEffect(() => engineRef.current?.renderer.setHiddenInstances(hiddenInstances), [hiddenInstances]);
   useEffect(() => {
     engineRef.current?.renderer.setFogEnabled(fogOn);
@@ -685,6 +699,8 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
       toggles: {
         cutaway,
         nearestFiltering: nearest,
+        wireframe,
+        collisionWireframe,
         backfaceCulling: cullOn,
         authenticFog: fogOn,
         showScripted,
@@ -732,6 +748,7 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
 
   const hasScripted = level?.instances.some((i) => i.animated && i.mesh >= 0) ?? false;
   const hasFog = !!level?.fog;
+  const hasCollision = level?.layers?.some((l) => l.kind === 'collision' && l.instances.length > 0) ?? false;
   const layers = level?.layers ?? [];
 
   return (
@@ -814,7 +831,8 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
                 <dt>Shift</dt><dd>Fast (×4)</dd>
                 <dt>V</dt><dd>Free fly</dd>
                 <dt>R</dt><dd>Reset view</dd>
-                <dt>F</dt><dd>Toggle nearest filtering</dd>
+                <dt>F</dt><dd>Wireframe</dd>
+                <dt>Shift + F</dt><dd>Collision wireframe</dd>
                 <dt>X</dt><dd>Cutaway (hide the nearest surface)</dd>
                 <dt>Ctrl + click</dt><dd>Select object or marker</dd>
                 <dt>Alt + click</dt><dd>Select face</dd>
@@ -830,7 +848,8 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
                 <dt>Wheel</dt><dd>Adjust speed</dd>
                 {sideView && (<><dt>V</dt><dd>Side view</dd></>)}
                 <dt>R</dt><dd>Reset view</dd>
-                <dt>F</dt><dd>Toggle nearest filtering</dd>
+                <dt>F</dt><dd>Wireframe</dd>
+                <dt>Shift + F</dt><dd>Collision wireframe</dd>
                 <dt>X</dt><dd>Cutaway (hide the nearest surface)</dd>
                 <dt>Ctrl + click</dt><dd>Select {level?.markers?.length ? 'object or marker' : 'object'}</dd>
                 <dt>Alt + click</dt><dd>Select face</dd>
@@ -884,6 +903,14 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
               <input id="cutaway-toggle" type="checkbox" checked={cutaway} onChange={(e) => setCutaway(e.target.checked)} />
               Cutaway (X)
             </label>
+            <label className="check" title="Triangle edges of the level geometry as drawn (F)">
+              <input id="wireframe-toggle" type="checkbox" checked={wireframe} onChange={(e) => setWireframe(e.target.checked)} />
+              Wireframe (F)
+            </label>
+            <label className={`check${hasCollision ? '' : ' muted'}`} title={hasCollision ? 'Triangle edges of the collision layers, shown or not (Shift+F)' : 'No collision in this level'}>
+              <input id="collision-wireframe-toggle" type="checkbox" checked={collisionWireframe && hasCollision} disabled={!hasCollision} onChange={(e) => setCollisionWireframe(e.target.checked)} />
+              Collision wireframe (Shift+F){!hasCollision && level ? <span className="small muted"> (no collision in this level)</span> : null}
+            </label>
             <label className="check" title="Hide the back sides of single-sided polygons, as the game does">
               <input id="cull-toggle" type="checkbox" checked={cullOn} onChange={(e) => setCullOn(e.target.checked)} />
               Back-face culling
@@ -936,6 +963,11 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
         </div>
       )}
       {children}
+      {viewHint && (
+        <div className="hud report-status small" id="view-hint" role="status">
+          {viewHint}
+        </div>
+      )}
       {reportStatus && (
         <div className={`hud report-status small${reportStatus.kind === 'error' ? ' error' : ''}`} id="report-status" role="status">
           {reportStatus.text}
