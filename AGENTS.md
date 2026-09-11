@@ -44,6 +44,13 @@ When asked to investigate a game (ROM formats for the viewer):
    research captures (`~/.ai-tmp/r49/bm/tools/raster.ts`, `compare.ts`), and
    in-app checks with Playwright's Chromium from a throwaway script outside the
    repo.
+ - Every drawn instance belongs to a layer so the user can toggle it: the level
+   geometry (`main`, or rooms in a `rooms` group), objects, backdrops and so on,
+   plus a hidden-by-default `collision` layer. The viewer always draws instances
+   that are in no layer and gives them no checkbox of their own (only a generic
+   "other geometry" fallback). Verify with
+   `npx tsx /home/n64/.ai-tmp/r49/impl/layeraudit.ts [rom name filter]`: every
+   level, exit code 0.
  - The main session commits each piece separately, staging only that agent's
    files (or hunks), checks the commit in a clean `git worktree` of HEAD
    (tsc + level loads), and keeps README.md and the game's spec up to date,
