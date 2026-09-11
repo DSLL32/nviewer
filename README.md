@@ -82,6 +82,19 @@ Shift+F collision wireframe · H help · Esc releases the mouse.
 - `tools/`: Node scripts, run with `npx tsx`
   - `levelstats.ts rom.z64 [sheetDir]`: parse all levels, print stats, write texture contact sheets
   - `extract.ts rom.z64 outDir`: dump every decompressed asset file (Rush 2049 only)
+  - checking scripts, over every supported ROM (`roms.ts`; the ROM directory is `$NVIEWER_ROMS`,
+    default `/data/software/ai-scratch`; each takes optional ROM name filters):
+    - `npm run check:hashes` (`hashall.ts`): hash every level of every game, to show that a change to
+      one loader leaves the others bit-identical. `--src <checkout>` loads the loaders from another
+      checkout, e.g. a worktree of HEAD, for the baseline.
+    - `npm run check:transfer` (`transfer.ts`): load every level twice through `structuredClone` with
+      all ArrayBuffers transferred, as `src/worker.ts` does. Catches buffers shared between levels.
+    - `npm run check:layers` (`layeraudit.ts`): every drawn instance must be in a toggleable layer, and
+      every game except Star Fox 64 must have a collision layer.
+    - `npm run check:render` (`render/selftest.ts`): numeric self-checks of the offline renderer.
+  - `tools/render/`: offline software rasterizer for the `Level` model (`raster.ts`), PNG read/write
+    (`png.ts`), side-by-side image comparison (`compare.ts`), texture contact sheets (`sheet.ts`) and a
+    tiny font (`font.ts`). Used to compare renders with emulator captures without a browser.
 
 ## ROM format notes
 

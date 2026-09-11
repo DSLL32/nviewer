@@ -37,20 +37,25 @@ When asked to investigate a game (ROM formats for the viewer):
    the files it owns; shared files (`types.ts`, `index.ts`, `displaylist.ts`,
    `texture.ts`, `libultra.ts`) get one owner at a time, and contract fields in
    `types.ts` are added by the main session.
- - Agents don't commit, don't restart the user's dev server, and verify with:
-   `tsc`, `/home/n64/.ai-tmp/r49/impl/hashall.ts` (other games bit-identical),
-   every level loading twice through `structuredClone` with all ArrayBuffers
-   transferred (the web worker transfers them), offline renders against the
-   research captures (`~/.ai-tmp/r49/bm/tools/raster.ts`, `compare.ts`), and
-   in-app checks with Playwright's Chromium from a throwaway script outside the
-   repo.
+ - Agents don't commit, don't restart the user's dev server, and verify with the
+   checking scripts in `tools/` (see README.md; ROMs come from `$NVIEWER_ROMS`):
+   - `npm run typecheck`;
+   - `npm run check:hashes` — every level of every game hashed; compare against a
+     baseline from a worktree of HEAD (`tsx tools/hashall.ts --src <worktree>`)
+     to show the other games are bit-identical;
+   - `npm run check:transfer` — every level loaded twice through
+     `structuredClone` with all ArrayBuffers transferred, as the web worker does;
+   - `npm run check:layers` — the layer rule below;
+   - offline renders against the research captures with `tools/render/`
+     (`raster.ts`, `compare.ts`, `sheet.ts`);
+   - in-app checks with Playwright's Chromium from a throwaway script outside the
+     repo.
  - Every drawn instance belongs to a layer so the user can toggle it: the level
    geometry (`main`, or rooms in a `rooms` group), objects, backdrops and so on,
    plus a hidden-by-default `collision` layer. The viewer always draws instances
    that are in no layer and gives them no checkbox of their own (only a generic
    "other geometry" fallback). Verify with
-   `npx tsx /home/n64/.ai-tmp/r49/impl/layeraudit.ts [rom name filter]`: every
-   level, exit code 0.
+   `npm run check:layers [-- <rom name filter>]`: every level, exit code 0.
  - The main session commits each piece separately, staging only that agent's
    files (or hunks), checks the commit in a clean `git worktree` of HEAD
    (tsc + level loads), and keeps README.md and the game's spec up to date,
@@ -109,10 +114,10 @@ Research in progress (spec not yet in the repo):
 | Pilotwings 64 | `r49/pilotwings/` |
 
 Shared:
- - `r49/impl/`: implementation verification (`hashall.ts`, `layeraudit.ts`),
-   per-agent check directories (`ge_core`, `pd_obj`, `zelda_mus`, `fe_*` …) and
-   the clean-worktree scripts in `impl/ge/`.
- - `r49/bm/tools/`: offline renderer (`raster.ts`, `compare.ts`).
+ - `r49/impl/`: per-agent check directories (`ge_core`, `pd_obj`, `zelda_mus`,
+   `fe_*` …) and the clean-worktree scripts in `impl/ge/`. The checking scripts
+   themselves now live in the repo under `tools/`; the copies here are historical.
+ - `r49/bm/tools/`: where the offline renderer came from, now `tools/render/`.
  - `r49/pw/`: the Playwright install used for in-app checks.
  - `r49/fe/`, `r49/buildtest/`, `r49/headrom/`: early frontend screenshots, a
    build output and an old copy of `src/rom`.

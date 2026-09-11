@@ -12,8 +12,12 @@ conversation.
   (OoT, MM, debug ROMs) and the 1997 OoT alpha.
 - **Collision:** every game except Star Fox 64 (excluded by the user) has a hidden
   collision layer.
-- **Layer completeness:** every drawn instance is in a layer.
-  `~/.ai-tmp/r49/impl/layeraudit.ts` passes over every level of all 16 ROMs.
+- **Layer completeness:** every drawn instance is in a layer. `npm run
+  check:layers` (`tools/layeraudit.ts`) passes over every level of all 16 ROMs.
+- **Checking scripts:** the verification scripts now live in the repo under
+  `tools/` (`hashall.ts`, `transfer.ts`, `layeraudit.ts`, `render/`), with the
+  ROM list in `tools/roms.ts` and the ROM directory in `$NVIEWER_ROMS`. The
+  copies in the scratch directories are historical.
   - The viewer shows an "other geometry" toggle as a fallback (45b2740).
   - BattleTanx layers by kind (6bb6f03).
   - Rule in AGENTS.md (d2f761e).

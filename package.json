@@ -7,7 +7,11 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check:layers": "tsx tools/layeraudit.ts",
+    "check:transfer": "tsx tools/transfer.ts",
+    "check:hashes": "tsx tools/hashall.ts",
+    "check:render": "tsx tools/render/selftest.ts"
   },
   "devDependencies": {
     "@types/node": "^22.20.2",
