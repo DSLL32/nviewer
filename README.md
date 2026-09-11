@@ -264,6 +264,11 @@ Textures are uploaded with the RDP tile commands, not read in place.
 - **Levels.** Gex 64: the Media Dimension hub, the 14 channel levels, bonus and boss levels, the intro
   and logo scenes. Gex 3: the four hub areas, 11 TV levels, bonus and Secret TV levels, bosses, the
   title screen and intros. Names come from the games' own tables.
+- **Collision.** Hidden layers: "collision" holds the static collision triangles (Gex 64: the face records of the
+  render-BSP leaves; Gex 3: the per-leaf collision records), floors green, walls orange, ceilings purple, other
+  surface flags or types in their own colour and faces with an event record tinted red; "invisible objects" holds
+  the objects the game never draws (Gex 64 invisible volumes, proximity triggers and hub menu hotspots, Gex 3
+  sound-emitter markers). The world and placed objects have "world" and "objects" layers.
 - **Music.** Software Creations' libmus at 22050 Hz, one tick per video frame.
   - Gex 64 uses an older player revision with per-level banks. Its list includes the four jingles and
     an unused Pre-History Channel song that no table references.
@@ -381,8 +386,10 @@ Textures are uploaded with the RDP tile commands, not read in place.
 - Gex: animated materials (flipbooks, scrolling water and lava) show their first frame; characters
   and enemies stand in their rest pose, and skinned Gex 3 objects are not shown. Objects that the
   level scripts spawn are not shown; invisible volumes and marker boxes (Gex 3 sound emitters) are
-  hidden by class or by their all-black placeholder texture. Vertex-colour animation (flickering
-  lights) shows the file's colours.
+  hidden by class or by their all-black placeholder texture (shown in a hidden layer). Vertex-colour animation
+  (flickering lights) shows the file's colours. The meanings of Gex 64 collision flag bits and Gex 3 surface types
+  are not decoded (colours only tell them apart), nor the event records they point to (warps, triggers); Gex 64
+  logic objects without geometry (collide_, qcoll___, gatesph_, camswch_, …) are not shown.
 - Yoshi's Story: sprites show one frame; actors drawn by code or meshes (lifts, the Bowser
   room arena, bosses) are markers; menu worlds are not listed; music plays Yoshi's normal mood (the game's
   per-song channel mute masks), without the happy, sad and "super" variants, and reverb is not modelled.

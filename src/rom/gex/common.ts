@@ -6,7 +6,7 @@
 // up, without mirroring.
 import { type Mtx, runDisplayList } from '../displaylist';
 import { inflateRaw } from '../inflate';
-import type { Batch, CameraView, Mesh, Texture } from '../types';
+import type { Batch, CameraView, DebugInfo, Level, LevelLayer, Mesh, Texture } from '../types';
 import { view } from '../util';
 
 export const LEVEL_BASE = 0x8024b000;
@@ -120,6 +120,92 @@ export function isMarkerMesh(batches: Batch[], textures: Texture[]): boolean {
     if (sum / (t.rgba.length / 4) / 3 > 4) return false;
   }
   return tris <= 18;
+}
+
+// A static collision triangle in game space (Z up), for the collision overlay.
+export interface CollisionFace {
+  v: number[][]; // three vertices
+  n: number[]; // unit normal from the level's normal table
+  surface: number; // the record's surface flags or type, which picks the colour
+  special: boolean; // the face refers to an event record (triggers, warps)
+  source: number; // offset of the record in the inflated level image (Batch.triSource)
+}
+
+// Floor, wall, ceiling (by the normal), as in the Zelda 64 overlay.
+const KIND_COLORS = [[90, 200, 90], [200, 150, 80], [200, 90, 200]];
+
+function hueColor(key: number): number[] {
+  const h = (Math.imul(key + 1, 2654435761) >>> 0) / 2 ** 32, k = (n: number) => (n + h * 6) % 6;
+  return [5, 3, 1].map((n) => Math.round(255 * (0.95 - 0.7 * Math.max(0, Math.min(k(n), 4 - k(n), 1)))));
+}
+
+// All collision faces as one translucent, double-sided overlay batch: floor/wall/ceiling colours for plain surfaces
+// (surface 0), mixed with a colour per surface value otherwise; faces with an event record are tinted red. Each
+// face is lifted one unit along its normal and drawn as a decal, so it never fights the world surface it matches.
+export function collisionBatch(faces: CollisionFace[]): Batch | null {
+  const pos: number[] = [], col: number[] = [], src: number[] = [];
+  for (const f of faces) {
+    const kind = f.n[2] > 0.5 ? 0 : f.n[2] < -0.5 ? 2 : 1;
+    let rgb = KIND_COLORS[kind];
+    if (f.surface) rgb = rgb.map((c, i) => Math.round(c * 0.4 + hueColor(f.surface)[i] * 0.6));
+    if (f.special) rgb = rgb.map((c, i) => Math.round(c * 0.35 + [240, 40, 40][i] * 0.65));
+    for (const p of f.v) {
+      pos.push(p[0] + f.n[0], p[2] + f.n[2], -(p[1] + f.n[1]));
+      col.push(rgb[0], rgb[1], rgb[2], f.special ? 190 : 150);
+    }
+    src.push(f.source);
+  }
+  if (!pos.length) return null;
+  return {
+    texture: -1, blend: 'blend', depthTest: true, depthWrite: false, cullBack: false, decal: true,
+    positions: new Float32Array(pos), uvs: new Float32Array((pos.length / 3) * 2), colors: new Uint8Array(col), triSource: new Uint32Array(src),
+  };
+}
+
+// "value:count" pairs, most frequent first.
+export function histogram(counts: Map<number, number>, limit = 16): string {
+  return [...counts].sort((a, b) => b[1] - a[1]).slice(0, limit).map(([k, n]) => `0x${k.toString(16)}:${n}`).join(' ') +
+    (counts.size > limit ? ` (+${counts.size - limit} more)` : '');
+}
+
+// An invisible object (volume, trigger, hotspot) as an untextured translucent overlay in a colour per class.
+export function volumeBatches(batches: Batch[], cls: string): Batch[] {
+  const rgb = hueColor([...cls].reduce((h, c) => Math.imul(h, 31) + c.charCodeAt(0), 7));
+  return batches.map((b) => {
+    const colors = new Uint8Array(b.colors.length);
+    for (let i = 0; i < colors.length; i += 4) colors.set([rgb[0], rgb[1], rgb[2], 110], i);
+    return {
+      texture: -1, blend: 'blend', depthTest: true, depthWrite: false, cullBack: false,
+      positions: b.positions, uvs: new Float32Array(b.uvs.length), colors, ...(b.triSource ? { triSource: b.triSource } : {}),
+    };
+  });
+}
+
+// Layers for a loaded level: the world (instance 0) and the placed objects, shown as before, then the collision
+// overlay and the invisible objects, appended after the level was built (bounds and unplaced meshes stay those of
+// the drawn level) and hidden by default.
+export function addOverlayLayers(level: Level, collision: Mesh | null, volumes: { name: string; mesh: Mesh; matrix: Float32Array; info: DebugInfo }[]): Level {
+  const layers: LevelLayer[] = [
+    { name: 'world', kind: 'main', instances: [0] },
+    { name: 'objects', kind: 'objects', instances: level.instances.map((_, i) => i).slice(1) },
+  ];
+  const identity = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+  if (collision) {
+    const mesh = level.meshes.push(collision) - 1;
+    const instance = level.instances.push({ name: 'collision', mesh, matrix: identity, info: collision.info }) - 1;
+    layers.push({ name: 'collision', kind: 'collision', instances: [instance], visibleByDefault: false });
+  }
+  if (volumes.length) {
+    const meshOf = new Map<Mesh, number>();
+    const instances = volumes.map((v) => {
+      let mesh = meshOf.get(v.mesh);
+      if (mesh === undefined) meshOf.set(v.mesh, (mesh = level.meshes.push(v.mesh) - 1));
+      return level.instances.push({ name: v.name, mesh, matrix: v.matrix, info: v.info }) - 1;
+    });
+    layers.push({ name: 'invisible objects', kind: 'collision', instances, visibleByDefault: false });
+  }
+  level.layers = layers;
+  return level;
 }
 
 // Instance transform (verified for Gex 64): world = T(x, y, z) * Rx * Ry * Rz * v in game space,

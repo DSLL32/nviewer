@@ -11,13 +11,16 @@
 // Tree nodes (24 bytes): +0x0C u8 type (1 inner with children at +0x10/+0x14, 2 leaf). World geometry
 // is stored as command fragments after each leaf, drawn per material: the game emits the material
 // DL followed by the fragments' commands.
-import type { Game, Instance, Level, LevelInfo, Mesh, MusicTrack, Texture } from '../types';
+import type { Batch, DebugInfo, Game, Instance, Level, LevelInfo, Mesh, MusicTrack, Texture } from '../types';
 import { buildLevel, fogPosition, meshFromBatches } from '../bomberman/common';
 import { runDisplayList } from '../displaylist';
 import { inflateRaw } from '../inflate';
 import { parseLibmusBank, renderLibmusSong, type Wave } from '../music/libmus';
 import { view } from '../util';
-import { animatedMaterial, cstr, gex3ObjectMesh, instanceMatrix, isMarkerMesh, LEVEL_BASE, objectClass, ObjectTable, startCamera, SyntheticList, titleCase, toRom, Z_UP } from './common';
+import {
+  addOverlayLayers, animatedMaterial, collisionBatch, type CollisionFace, cstr, gex3ObjectMesh, histogram, instanceMatrix, isMarkerMesh, LEVEL_BASE,
+  objectClass, ObjectTable, startCamera, SyntheticList, titleCase, toRom, volumeBatches, Z_UP,
+} from './common';
 
 const LEVEL_TABLE = 0x8013c;
 const LEVEL_SIZE = 0x54;
@@ -111,6 +114,7 @@ function loadLevel(rom: Uint8Array, objects: ObjectTable, def: LevelDef): Level 
   };
   const stack = [ptr(scene)];
   const seen = new Set<number>();
+  const leaves: number[] = [];
   while (stack.length) {
     const node = stack.pop()!;
     if (!inFile(node) || node + 24 > file.length || seen.has(node)) continue;
@@ -120,6 +124,7 @@ function loadLevel(rom: Uint8Array, objects: ObjectTable, def: LevelDef): Level 
       continue;
     }
     if (file[node + 12] !== 2) continue;
+    leaves.push(node);
     for (let p = node + 24, k = 0; k < 1000 && p + 16 <= file.length; k++) {
       const w0 = u32(p);
       if (w0 === 0) break;
@@ -199,6 +204,8 @@ function loadLevel(rom: Uint8Array, objects: ObjectTable, def: LevelDef): Level 
   const names = ptr(0x44);
   const nameCount = u32(names);
   const meshOf = new Map<string, { mesh: number; skeletal: boolean } | null>();
+  const markerMeshes = new Map<string, { batches: Batch[]; cls: string }>();
+  const markerRecords: { i: number; r: number; name: string }[] = [];
   for (let i = 0, n = u32(0x84), arr = ptr(0x88); i < n && arr + (i + 1) * 0x34 <= file.length; i++) {
     const r = arr + i * 0x34;
     const objIndex = dv.getInt32(r);
@@ -209,12 +216,17 @@ function loadLevel(rom: Uint8Array, objects: ObjectTable, def: LevelDef): Level 
       entry = null;
       const data = objects.data(name);
       const obj = data ? gex3ObjectMesh(data, `obj:${name}:`, textures, textureKeys) : null;
-      if (obj && obj.batches.length && !isMarkerMesh(obj.batches, textures)) {
-        const mesh = { ...meshFromBatches(name.replace(/_+$/, ''), obj.batches), info: { object: name, class: objectClass(data!), triSource: 'offset in the object data (past its end: synthetic list)' } };
-        entry = { mesh: meshes.push(mesh) - 1, skeletal: obj.skeletal };
+      if (obj && obj.batches.length) {
+        if (isMarkerMesh(obj.batches, textures)) {
+          markerMeshes.set(name, { batches: obj.batches, cls: objectClass(data!) });
+        } else {
+          const mesh = { ...meshFromBatches(name.replace(/_+$/, ''), obj.batches), info: { object: name, class: objectClass(data!), triSource: 'offset in the object data (past its end: synthetic list)' } };
+          entry = { mesh: meshes.push(mesh) - 1, skeletal: obj.skeletal };
+        }
       }
       meshOf.set(name, entry);
     }
+    if (markerMeshes.has(name)) markerRecords.push({ i, r, name });
     if (!entry) continue;
     instances.push({
       name: meshes[entry.mesh].name, mesh: entry.mesh,
@@ -230,7 +242,64 @@ function loadLevel(rom: Uint8Array, objects: ObjectTable, def: LevelDef): Level 
   // Player start at header +0x30 (s16 x, y, z; within 2,000 units of the game camera in level frames).
   const [sx, sy, sz] = [0x30, 0x32, 0x34].map((o) => dv.getInt16(o));
   if (sx || sy || sz) extra.camera = startCamera(sx, sy, sz, meshes[0]);
-  return buildLevel(def.info, `gex3-${def.info.index}`, textures, meshes, instances, extra);
+  const level = buildLevel(def.info, `gex3-${def.info.index}`, textures, meshes, instances, extra);
+
+  // Collision (code 0x80016F60): records after each tree leaf's pointer (+0x10; u8 count at +0x0D; scene +0x20 is the
+  // total) {u16 base; u16 corners, three 5-bit offsets from base to segment-1 vertices; s16 normal (scene +0x40, count
+  // +0x2C; negative negates; the top 2 bits of its first word are the dominant axis); u16 surface, whose low 5 bits
+  // are the type the game tests with a 1 << type mask} + u16 event index (scene +0x3C table, count +0x28) when
+  // surface bit 0 is set and (surface & 0xE) is 4, 10 or 12.
+  const faces: CollisionFace[] = [];
+  const surfaces = new Map<number, number>();
+  const hex = (v: number) => `0x${v.toString(16)}`;
+  const vertexPool = segments[1], normalPool = ptr(scene + 0x40);
+  const vertexCount = u32(scene + 0x18), normalCount = u32(scene + 0x2c);
+  let events = 0, records = 0;
+  for (const leaf of leaves) {
+    for (let k = 0, p = ptr(leaf + 0x10), n = file[leaf + 0x0d]; k < n && p >= 0 && p + 10 <= file.length; k++) {
+      const base = dv.getUint16(p), corners = dv.getUint16(p + 2), normal = dv.getInt16(p + 4), surface = dv.getUint16(p + 6);
+      const event = (surface & 1) !== 0 && [4, 10, 12].includes(surface & 0xe);
+      const idx = [0, 5, 10].map((s) => base + ((corners >> s) & 0x1f));
+      const a = Math.abs(normal), no = normalPool + 6 * a, sign = normal < 0 ? -1 : 1;
+      records++;
+      if (idx.every((v) => v < vertexCount && vertexPool + 16 * v + 6 <= file.length) && a < normalCount && no + 6 <= file.length) {
+        const nx = ((dv.getUint16(no) & 0x3fff) ^ 0x2000) - 0x2000;
+        faces.push({
+          v: idx.map((v) => [0, 2, 4].map((o) => dv.getInt16(vertexPool + 16 * v + o))),
+          n: [nx, dv.getInt16(no + 2), dv.getInt16(no + 4)].map((c) => (sign * c) / 4096),
+          surface, special: event, source: p,
+        });
+        surfaces.set(surface, (surfaces.get(surface) ?? 0) + 1);
+        if (event) events++;
+      }
+      p += event ? 10 : 8;
+    }
+  }
+  const cb = collisionBatch(faces);
+  const cInfo: DebugInfo = {
+    level: cstr(rom, toRom(rdv.getUint32(t))), source: 'collision records of the tree leaves (leaf +0x0D count, +0x10 pointer)',
+    scene: hex(scene), records: hex(ptr(scene + 0x38)), normals: hex(normalPool), vertices: hex(vertexPool), eventTable: hex(ptr(scene + 0x3c)),
+    faces: faces.length, recordCount: u32(scene + 0x20), leaves: leaves.length, eventFaces: events, skipped: records - faces.length,
+    surfaces: histogram(surfaces), triSource: 'offset of the collision record in the inflated level image',
+  };
+  const collision = cb ? { ...meshFromBatches('collision', [cb]), info: cInfo } : null;
+
+  // Level-editor markers (sound emitters, generators) that the game never draws.
+  const markers = new Map<string, Mesh>();
+  const volumes = markerRecords.map(({ i, r, name }) => {
+    const m = markerMeshes.get(name)!;
+    let mesh = markers.get(name);
+    if (!mesh) {
+      mesh = { ...meshFromBatches(name.replace(/_+$/, ''), volumeBatches(m.batches, m.cls)), info: { object: name, class: m.cls, triSource: 'offset in the object data (past its end: synthetic list)' } };
+      markers.set(name, mesh);
+    }
+    return {
+      name: mesh.name, mesh,
+      matrix: instanceMatrix(dv.getInt16(r + 8), dv.getInt16(r + 10), dv.getInt16(r + 12), dv.getInt16(r + 16), dv.getInt16(r + 18), dv.getInt16(r + 20)),
+      info: { instance: i, record: hex(r), object: name, class: m.cls, flags: dv.getUint16(r + 0x0e) },
+    };
+  });
+  return addOverlayLayers(level, collision, volumes);
 }
 
 // One song per level (15 distinct), stored as raw DEFLATE; named after the levels that use it.

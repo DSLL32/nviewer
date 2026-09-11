@@ -10,13 +10,16 @@
 //   colour, +0x52 u16 fog minimum, +0x7C instance count, +0x80 48-byte instances.
 // Render BSP nodes (24 bytes): +0x08 u16 kind (bit 1 = leaf); inner nodes point to their children at
 // +0x10/+0x14; leaves are followed by chunks {u16 flags; u16 size; u32 extra} + F3DEX 1.x list.
-import type { Game, Instance, Level, LevelInfo, Mesh, Texture } from '../types';
+import type { DebugInfo, Game, Instance, Level, LevelInfo, Mesh, Texture } from '../types';
 import { buildLevel, fogPosition, meshFromBatches } from '../bomberman/common';
 import { runDisplayList } from '../displaylist';
 import { inflateRaw } from '../inflate';
 import { decodeGex64Music, listGex64Music } from '../music/libmus64';
 import { view } from '../util';
-import { animatedMaterial, cstr, gex64ObjectMesh, instanceMatrix, LEVEL_BASE, objectClass, ObjectTable, startCamera, SyntheticList, titleCase, toRom, Z_UP } from './common';
+import {
+  addOverlayLayers, animatedMaterial, collisionBatch, type CollisionFace, cstr, gex64ObjectMesh, histogram, instanceMatrix, LEVEL_BASE, objectClass,
+  ObjectTable, startCamera, SyntheticList, titleCase, toRom, volumeBatches, Z_UP,
+} from './common';
 
 const LEVEL_TABLE = 0x708e0;
 const INFO_TABLE = 0x78ea8;
@@ -92,6 +95,7 @@ function loadLevel(rom: Uint8Array, objects: ObjectTable, def: LevelDef): Level 
   syn.cmd(0xbb000001, 0x80008000);
   const stack = [ptr(scene)];
   const seen = new Set<number>();
+  const leaves: number[] = [];
   while (stack.length) {
     const node = stack.pop()!;
     if (!inFile(node) || seen.has(node)) continue;
@@ -100,6 +104,7 @@ function loadLevel(rom: Uint8Array, objects: ObjectTable, def: LevelDef): Level 
       stack.push(ptr(node + 0x14), ptr(node + 0x10));
       continue;
     }
+    leaves.push(node);
     for (let c = node + 16; c + 8 <= file.length;) {
       const flags = dv.getUint16(c), size = dv.getUint16(c + 2);
       if (size === 0) break;
@@ -169,6 +174,8 @@ function loadLevel(rom: Uint8Array, objects: ObjectTable, def: LevelDef): Level 
   const names = ptr(0x40);
   const nameCount = u32(names);
   const meshOf = new Map<string, { mesh: number; skeletal: boolean } | null>();
+  const hiddenNames = new Set<string>();
+  const hiddenRecords: { i: number; r: number; name: string }[] = [];
   for (let i = 0, n = u32(0x7c), arr = ptr(0x80); i < n && arr + (i + 1) * 48 <= file.length; i++) {
     const r = arr + i * 48;
     const objIndex = dv.getInt32(r);
@@ -179,6 +186,7 @@ function loadLevel(rom: Uint8Array, objects: ObjectTable, def: LevelDef): Level 
       entry = null;
       const data = objects.data(name);
       const hidden = data && HIDDEN_CLASSES.has(objectClass(data));
+      if (hidden) hiddenNames.add(name);
       const obj = data && !hidden ? gex64ObjectMesh(data, `obj:${name}:`, textures, textureKeys) : null;
       if (obj && obj.batches.length) {
         const mesh = { ...meshFromBatches(name.replace(/_+$/, ''), obj.batches), info: { object: name, class: objectClass(data!), triSource: 'offset in the object data (past its end: synthetic list)' } };
@@ -186,6 +194,7 @@ function loadLevel(rom: Uint8Array, objects: ObjectTable, def: LevelDef): Level 
       }
       meshOf.set(name, entry);
     }
+    if (hiddenNames.has(name)) hiddenRecords.push({ i, r, name });
     if (!entry) continue;
     instances.push({
       name: meshes[entry.mesh].name, mesh: entry.mesh,
@@ -202,7 +211,65 @@ function loadLevel(rom: Uint8Array, objects: ObjectTable, def: LevelDef): Level 
   extra.clearColor = color;
   const [sx, sy, sz] = [0x2c, 0x2e, 0x30].map((o) => dv.getInt16(o));
   if (sx || sy || sz) extra.camera = startCamera(sx, sy, sz, meshes[0]);
-  return buildLevel(def.info, `gex64-${def.info.index}`, textures, meshes, instances, extra);
+  const level = buildLevel(def.info, `gex64-${def.info.index}`, textures, meshes, instances, extra);
+
+  // Collision faces (scene +0x1C count, +0x28 records), listed by the render-BSP leaves (+0x0A u16 count, +0x0C
+  // pointer): {u16 v0, v1, v2 (segment-1 vertex indices); u16 flags; s16 normal; s16 edge normals x3 (outward, in
+  // the face plane)} + a pointer to an event record when flags & 0x4400. Normals: scene +0x2C, count +0x20, s16 4.12
+  // triples; a negative index negates the entry. (The second BSP at scene +0x34 lists instances, not collision.)
+  const faces: CollisionFace[] = [];
+  const surfaces = new Map<number, number>();
+  const hex = (v: number) => `0x${v.toString(16)}`;
+  const vertexPool = segments[1], normalPool = ptr(scene + 0x2c);
+  const vertexCount = u32(scene + 0x18), normalCount = u32(scene + 0x20);
+  const done = new Set<number>();
+  let events = 0;
+  for (const leaf of leaves) {
+    for (let k = 0, p = ptr(leaf + 0x0c), n = dv.getUint16(leaf + 0x0a); k < n && p >= 0 && p + 16 <= file.length; k++) {
+      const flags = dv.getUint16(p + 6), normal = dv.getInt16(p + 8);
+      const idx = [0, 2, 4].map((o) => dv.getUint16(p + o));
+      const a = Math.abs(normal), no = normalPool + 6 * a, sign = normal < 0 ? -1 : 1;
+      if (!done.has(p) && idx.every((v) => v < vertexCount && vertexPool + 16 * v + 6 <= file.length) && a < normalCount && no + 6 <= file.length) {
+        faces.push({
+          v: idx.map((v) => [0, 2, 4].map((o) => dv.getInt16(vertexPool + 16 * v + o))),
+          n: [0, 2, 4].map((o) => (sign * dv.getInt16(no + o)) / 4096),
+          surface: flags, special: (flags & 0x4400) !== 0, source: p,
+        });
+        surfaces.set(flags, (surfaces.get(flags) ?? 0) + 1);
+        if (flags & 0x4400) events++;
+      }
+      done.add(p);
+      p += flags & 0x4400 ? 20 : 16;
+    }
+  }
+  const cb = collisionBatch(faces);
+  const cInfo: DebugInfo = {
+    level: cstr(rom, t + 0x14), source: 'collision faces of the render-BSP leaves (leaf +0x0A count, +0x0C pointer)',
+    scene: hex(scene), records: hex(ptr(scene + 0x28)), normals: hex(normalPool), vertices: hex(vertexPool),
+    faces: faces.length, faceCount: u32(scene + 0x1c), leaves: leaves.length, eventFaces: events,
+    flags: histogram(surfaces), triSource: 'offset of the collision face record in the inflated level image',
+  };
+  const collision = cb ? { ...meshFromBatches('collision', [cb]), info: cInfo } : null;
+
+  // Objects of the hidden classes (invisible volumes, proximity triggers, menu hotspots), untextured.
+  const hiddenMeshes = new Map<string, Mesh | null>();
+  const volumes = hiddenRecords.flatMap(({ i, r, name }) => {
+    let mesh = hiddenMeshes.get(name);
+    if (mesh === undefined) {
+      const data = objects.data(name)!;
+      const obj = gex64ObjectMesh(data, `obj:${name}:`, [], new Map());
+      mesh = obj && obj.batches.length
+        ? { ...meshFromBatches(name.replace(/_+$/, ''), volumeBatches(obj.batches, objectClass(data))), info: { object: name, class: objectClass(data), triSource: 'offset in the object data (past its end: synthetic list)' } }
+        : null;
+      hiddenMeshes.set(name, mesh);
+    }
+    return mesh ? [{
+      name: mesh.name, mesh,
+      matrix: instanceMatrix(dv.getInt16(r + 8), dv.getInt16(r + 10), dv.getInt16(r + 12), dv.getInt16(r + 16), dv.getInt16(r + 18), dv.getInt16(r + 20)),
+      info: { instance: i, record: hex(r), object: name, class: String(mesh.info?.class ?? '') },
+    }] : [];
+  });
+  return addOverlayLayers(level, collision, volumes);
 }
 
 export function openGex64(rom: Uint8Array): Game {

@@ -14,6 +14,7 @@
 > | world geometry, textures, coordinates, culling | high (renders match screenshots) | high (renders match screenshots) |
 > | fog, clear colour, sky | high (one sky mismatch, one sky not shown) | high |
 > | instances | high (rotation order verified) | medium (rotation order unproven) |
+> | collision geometry (§5.2.1, §5.3.1) | high (layout, sizes, normals; all levels) — flag meanings not traced | high (reader code, all levels) — type names not traced |
 > | object models | medium (rest pose only; no animation) | medium (rigid only; skinning not decoded) |
 > | animated textures | medium (flipbooks); flag-4 records undecoded | medium (flipbooks); procedural kinds undecoded |
 > | music engine, formats, song list | high (player matches RAM exactly) | high (player matches RAM exactly) |
@@ -392,9 +393,10 @@ looney30.
 +0x52 u16   fog min (gSPFogPosition min; >= 1000 -> 980), fog max = 1000
 +0x7C u32   instance count            +0x80 ptr instance array (48-byte records)
 +0x90..+0x9C, +0xA4  ptrs to 12-byte names (theme/music/sky names, e.g. "looney", "carrot")
-scene: +0x00 ptr render-BSP root   +0x18 u32 vertex count   +0x24 ptr vertex pool (segment 1)
-       +0x28 ptr collision faces   +0x2C ptr plane normals (6-byte s16 4.12)
-       +0x34 ptr second BSP (HYPOTHESIS: collision)   +0x38 ptr material DLs (segment 2)   +0x3C ptr texture pool (segment 3)
+scene: +0x00 ptr render-BSP root   +0x10 u32 instance count  +0x14 ptr instances (= hdr+0x7C/+0x80)
+       +0x18 u32 vertex count   +0x1C u32 collision face count   +0x20 u32 normal count   +0x24 ptr vertex pool (segment 1)
+       +0x28 ptr collision faces (§5.2.1)   +0x2C ptr normals (6-byte s16 4.12)
+       +0x34 ptr instance BSP (§5.2.1; not collision)   +0x38 ptr material DLs (segment 2)   +0x3C ptr texture pool (segment 3)
 ```
 Segments are set by `0x8002BBFC` each frame: `BC000406 <seg1>`, `BC000806 <seg2>`, `BC000C06 <seg3>`,
 `BC001006 <hdr+0x28>` (F3DEX 1.x `G_MOVEWORD`).
@@ -405,7 +407,7 @@ Segments are set by `0x8002BBFC` each frame: `BC000406 <seg1>`, `BC000806 <seg2>
 +0x08 u16 kind                      1 = interior, 2 = leaf
 interior: +0x0A s16 planeIndex (into scene+0x2C; negative = negated normal)
           +0x0C s32 distance   +0x10 ptr childA   +0x14 ptr childB
-leaf:     +0x0A u16 collisionFaceCount   +0x0C ptr collision faces
+leaf:     +0x0A u16 collisionFaceCount   +0x0C ptr first collision face of the leaf (§5.2.1)
           +0x10 chunks: {u16 flags; u16 dlSize; u32 extra} + F3DEX 1.x DL[dlSize] ... ; dlSize 0 ends the leaf
 ```
 Chunk DLs contain `06000000 02xxxxxx` (G_DL to a segment-2 material), `04` G_VTX from segment 1,
@@ -511,6 +513,60 @@ Class meanings are HYPOTHESIS; they are inferred from names.
    reference object files directly.
 6. gillig1 has 19 sky records, but the reference renderer shows no sky for it (not resolved).
 
+#### 5.2.1 Gex 64 collision (verified on all 31 level files unless marked)
+
+**Collision faces.** There is no separate collision BSP: every render-BSP leaf lists its own collision faces with
+`+0x0A u16 count` and `+0x0C ptr` to the first face of a run in the face array at `scene+0x28`. The runs are
+contiguous. Together they cover every face exactly once, and the total equals `scene+0x1C` in every level (231,586
+faces in all).
+```
++0x00 u16 v0, v1, v2      indices into the world vertex pool (segment 1, scene+0x24): the render vertices
++0x06 u16 flags           surface flags (below)
++0x08 s16 normal          face normal: index into scene+0x2C (s16 4.12 x, y, z; count scene+0x20); negative = -entry[-i]
++0x0A s16 edge x 3        edge-plane normals for v0->v1, v1->v2, v2->v0 (same table, same sign rule)
++0x10 ptr event record    present only when flags & 0x4400 (record size 20 instead of 16)
+```
+- **Record size rule:** a face record is 20 bytes when `flags & 0x4400`, otherwise 16. With this rule every leaf pointer
+  lands on a record start in looney30, map5, scifi10 and gillig1, and looney30's array ends exactly at the next section
+  (`0x570A0`). The other rules tried (`0xC000`, `0x4000`, `0x400`, `0xC400`) leave 55–652 misaligned leaf pointers.
+  Every level loads with the rule, and the faces found equal `scene+0x1C`.
+- **Normals:** the face normal agrees with the winding: dot product ≥ 0.995 with the normalised cross product
+  (v1−v0)×(v2−v0) for 3,000 looney30 faces. The edge normals are perpendicular to the face normal (|dot| < 0.0004) and
+  to their edge (|dot| < 0.09). They point away from the face centre (8,995 of 9,000). Shared edges use opposite
+  signs, e.g. index 4 and −4.
+- **Vertices:** the faces use the render vertices, so the collision coincides with the drawn world. The overlay check
+  (§8.7) finds 88–99% of faces exactly on a drawn triangle. The rest are invisible surfaces.
+- **Event records:** the pointer at +0x10 points into the level header area (e.g. looney30 `0x29C..0x1A60`; 55 distinct
+  records). Records are variable-length lists of u32s, e.g. `00000003 00000011 0000003C 0000000F 8024CE68 0000000D ...`,
+  with embedded pointers. **HYPOTHESIS:** event scripts (warps, music/camera triggers). The format is not decoded.
+- **Flags** (`u16 +0x06`): every bit except 0x10 and 0x2000 occurs. Bit counts over levels 0–25 as floor/wall/ceiling
+  faces (normal z > 0.5 / between / < −0.5):
+  `0x1` 5,740/53,254/11,336; `0x2` 207/2,272/1,306; `0x4` 1,443/817/34; `0x8` 3,704/883/307; `0x20` 680/1,631/644;
+  `0x40` 1,230/3,917/726; `0x80` 5,181/15,132/3,903; `0x100` 742/6,056/1,984; `0x200` 4,868/303/0;
+  `0x400` 1,216/138/38 (always with an event record); `0x800` 776/812/138; `0x1000` 21,403/45,003/9,261 (on most
+  faces of horror4, horror2, rezop3, kungfu1, prehst1 and prehst2); `0x4000` 1,098/7,651/266 (always with an event
+  record); `0x8000` 3,195/12,304/741. Code that tests them (main image):
+  - `0x8000DF0C` skips faces with `0x4000` or `0x40` in a wall/point test (**HYPOTHESIS:** 0x4000 = non-solid
+    trigger face);
+  - `0x800076CC` tests `0x1000` on the player's current face;
+  - `0x8001E270` tests `0x201`, `0x8001EB60` `0x1`, `0x8001ED30` `0x8`/`0x20`, `0x8001EDE4` `0x40`, `0x800201A4`
+    `0x2`, `0x8002FFAC`/`0x80049438` `0x800`.
+
+  The meaning of the individual bits was **not** traced.
+
+**Second BSP (`scene+0x34`) = instance BSP, not collision (resolves the earlier HYPOTHESIS).** Its nodes use the same
+24-byte layout as the render BSP (kinds 1 and 2, planes from `scene+0x2C`). A leaf's `+0x0A u16 count` and `+0x0C ptr`
+point to a `u32[count]` list of pointers to 48-byte instance records (§5.2 Instances). Over all 31 levels: 7,601
+pointers, 0 not on an instance record, and each of the 6,007 instances listed at least once. `scene+0x10` always equals
+the instance count. **HYPOTHESIS:** the game uses it to activate or cull instances near the camera. The code that walks
+it was not identified (the generic tree walker `0x80034DB8` has no direct `jal` callers).
+
+**Invisible objects.** Objects of the classes `invis___` (34 placements), `jinvis__` (2), `proxsig_` (31), `tvmenu__`
+(2), `select__` (2), `password` (1) and `loadtv__` (1) have face-list geometry that the game never draws. **HYPOTHESIS:**
+volumes, proximity triggers and hub menu hotspots. The no-geometry logic classes (`collide_` 9, `qcoll___` 2,
+`gatesph_` 8, `camswch_` 5, `slider__` 9, `follow__` 11, `qcsph___` 3) have no parameter block. Their only size is the
+instance `+0x16` radius (e.g. 1827 for every `collide_`), so their shape is unknown.
+
 ### 5.3 Gex 3 level file (verified on gexcave6, anime1, snow96, endboss1 unless marked)
 
 The design is the same as Gex 64 (§5.1). The layouts differ, and world geometry is stored as
@@ -532,14 +588,17 @@ The design is the same as Gex 64 (§5.1). The layouts differ, and world geometry
 +0x84 u32   instance count    +0x88 ptr instance array (0x34-byte records)
 +0x108/+0x10C/+0x110  sizes of the per-frame gfx/vertex buffers
 scene: +0x00 ptr root node  +0x10/+0x14 instance count/array  +0x18 u32 world vertex count
-       +0x30 ptr vertex pool (segment 1)   +0x38 ptr per-leaf aux records (8 bytes; HYPOTHESIS visibility)
+       +0x1C u32 (HYPOTHESIS: collision related, e.g. hub 0xA9A)  +0x20 u32 collision record count
+       +0x24 u32 (unknown)  +0x28 u32 event table count  +0x2C u32 collision normal count
+       +0x30 ptr vertex pool (segment 1)   +0x38 ptr collision records (§5.3.1; earlier HYPOTHESIS "visibility" was wrong)
+       +0x3C ptr event table (ptr[+0x28])   +0x40 ptr collision normals (right after the vertex pool)
        +0x58 ptr material DL pool (segment 2)   +0x5C ptr texture/TLUT pool (segment 3)
 ```
 Segments 1–4 are set every frame by `0x80022230` (F3DEX2 `G_MOVEWORD` `DB06…`).
 
 **Tree** (24-byte nodes from `scene+0x00`): `+0x00 s16 minX, minY, minZ, maxX, maxY, maxZ` (AABB);
-`+0x0C u8 type` (1 = inner, 2 = leaf); `+0x0D u8` (leaf: aux count); `+0x0E u16` (inner: split
-value, HYPOTHESIS; leaf: id); `+0x10 ptr` (inner: child A; leaf: aux records); `+0x14 ptr` (inner:
+`+0x0C u8 type` (1 = inner, 2 = leaf); `+0x0D u8` (leaf: collision record count); `+0x0E u16` (inner: split
+value, HYPOTHESIS; leaf: id); `+0x10 ptr` (inner: child A; leaf: collision records); `+0x14 ptr` (inner:
 child B). The hub has 1,556 inner nodes and 1,557 leaves.
 
 **Fragments** follow each leaf record inline and end with a `u32 0` plus 4 pad bytes `CDCDCDCD`:
@@ -645,6 +704,51 @@ their parts collapse at the origin. Behaviour class at object +0x20 (full list i
 3. Some placed hub objects are hidden in game depending on state or mission.
 4. The earlier guess of hub TV assignment from shared objects was wrong (egypt01 and war01 are in Lake
    Flaccid).
+
+#### 5.3.1 Gex 3 collision (verified by code and on all 30 level files unless marked)
+
+**Collision records.** Each tree leaf lists `u8 count` (`+0x0D`) variable-length records at `ptr +0x10`. They are
+stored in tree order from `scene+0x38`, and the total equals `scene+0x20` in every level (338,922 faces in all).
+The reader is the collision loop at `0x80016F60..0x800172A4`:
+```
++0x00 u16 base
++0x02 u16 corners         vertex k = base + ((corners >> 5k) & 0x1F), k = 0..2 (bit 15 unused); world vertex pool (segment 1)
++0x04 s16 normal          index into scene+0x40 (count scene+0x2C); negative = negated entry
++0x06 u16 surface         low 5 bits = type; the query skips a face when (1 << type) & mask (0x80016F9C)
++0x08 u16 event index     only when surface & 1 and (surface & 0xE) is 4, 10 or 12 (record size 10, else 8)
+```
+- **Record size rule:** it comes straight from the loop step at `0x80017254`. With it every leaf's run ends where the
+  next leaf's starts, in all 30 levels. The last run ends 4–12 bytes before `scene+0x3C`, padded with `CDCD`.
+- **Corner decode:** also used by `0x80013AE8`, `0x80013C44` and `0x80013CC4`, which load `scene+0x30 + 16 × (base + delta)`.
+  Typical quads are two records with corners `0x0820` (+2, +1, +0) and `0x0062` (+0, +3, +2).
+- **Normals:** 6-byte entries `{u16 w; s16 y; s16 z}` with x = the low 14 bits of w, sign-extended, in 4.12
+  (`0x80012B0C`). The top 2 bits of w are returned separately: 0 = x-dominant, 1 = y-dominant, 2 = z-dominant, 3 =
+  mixed (from the entries' directions in 3 levels; **HYPOTHESIS:** the projection axis for the point-in-triangle test).
+  338,878 of 338,891 non-degenerate faces have dot ≥ 0.98 between this normal and the winding normal. The maximum
+  |index| is `scene+0x2C − 1` in every level.
+- **Vertices:** these are the render vertices, as in Gex 64: 96–98% of faces lie exactly on a drawn triangle (§8.7).
+- **Surface word:**
+  - types (low 5 bits) over all levels: 0 (215,397 plain), 2 (54,668), 16 (16,471), 1, 4, 6, 24, 8, 9, 5, 18, 17, 13, 11,
+    3, 7, 23;
+  - upper bits `0x20`, `0x40`, `0x80`, `0x800` and `0x4000` also occur (e.g. `0x4000` on 7,995 faces);
+  - events (surface with an index): type 5 (1,381), type 11 (167), type 13 (232). For types 5 and 11 (`(s & 0xE)`
+    = 4 or 10) the table entry is passed to `0x80055194` with the actor. For type 13 (12) the entry + 4 is stored at
+    actor `+0xF4`.
+  - 23 type-5 indices in two levels exceed `scene+0x28`. The game does not check the bound (it only skips negative
+    values in one path).
+  - Entries of the `scene+0x3C` table are variable records, e.g. the hub's `00000001 00000048 "gexcave7"`.
+    **HYPOTHESIS:** type 5 = warp or trigger surfaces; the type names are not traced.
+
+**Invisible objects.** The viewer hides "marker" objects: meshes of at most 18 triangles whose textures are all black
+(sound emitters and generators such as sfxwind, cricket, waterg; 278 placements in all). No other class is hidden.
+
+**Viewer mapping (both games, `src/rom/gex`).** The collision faces make up one mesh in a hidden `collision` layer
+(kind `collision`). Each face is coloured by its normal: floor (z > 0.5) green, wall orange, ceiling purple. A face with
+a non-zero surface word gets a colour per value mixed in, and a face with an event record is tinted red. Faces are
+lifted 1 unit along the normal and drawn as a translucent decal. `Batch.triSource` is the record offset, and the mesh
+info lists offsets, counts and a flag/surface histogram. The hidden objects above are untextured, with a colour per
+class, in a hidden `invisible objects` layer. The world and the drawn objects are in the `world` and `objects`
+layers, shown as before. The overlay is appended after `buildLevel`, so bounds and the unplaced list are unchanged.
 
 ## 6. Music
 
@@ -1138,6 +1242,21 @@ Every run used its own run directory `<agent>/run` under `/home/n64/.ai-tmp/r49/
 `pgrep -a mupen64plus` and `ps -ef | grep -E 'headless|mupen'` showed no process under
 `/home/n64/.ai-tmp/r49/gex/`, and every run-dir pid had exited.
 
+### 8.7 Collision (both games)
+No emulator was used. All checks are static (disassembly of the main images and the extracted level files) or run
+through the viewer's loaders. Scratch scripts are in `/home/n64/.ai-tmp/gexcoll/`.
+
+| check | method | result |
+|---|---|---|
+| Gex 64 record size | leaf pointers against sequential walks with 5 candidate rules (`g64faces.py`) | `flags & 0x4400` → 20 bytes: 0 misaligned leaf pointers in looney30/map5/scifi10/gillig1; other rules 2–652 |
+| Gex 64 normals | face normal vs winding, edge normals vs face/edge | dot ≥ 0.995; edge normals in-plane and outward (8,995/9,000) |
+| Gex 64 second BSP | every leaf list in 31 levels vs the instance array | 7,601 pointers, all on 48-byte instance records, all 6,007 instances covered |
+| Gex 3 record size | loop code `0x80017254` + leaf gaps in 30 levels (`g3aux.py`) | 0 mismatches (last run padded with `CDCD`); the `surface & 4` rule gave 2,540 bad leaves |
+| Gex 3 normals | `0x80012B0C` decode vs winding (`g3norm.py`) | 338,878 / 338,891 faces dot ≥ 0.98 |
+| face counts | viewer load of all 31 + 30 levels (`loadtest.ts`) | decoded faces = `scene+0x1C` (Gex 64) / `scene+0x20` (Gex 3) in every level, 0 skipped records |
+| alignment with the world | collision triangles (minus the 1-unit lift) keyed against world triangles (`render.ts`) | Gex 64: hub 95.7%, looney30 93.1%, scifi10 88.5%, kungfu4 98.9%; Gex 3: gexcave6 95.9%, snow96 96.7%, anime1 96.9%, endboss1 98.0% |
+| visual | offline raster, start camera and top view, world vs world + collision | overlays follow floors, walls and ramps; images `renders/*_cmp.png`, `*_only.png` |
+
 ## 9. Open questions and unknowns
 
 Everything in this section is unverified. Items are **HYPOTHESIS** unless stated otherwise.
@@ -1162,8 +1281,13 @@ Levels:
   assumed to be collision-only or special surfaces.
 - **Gex 3:** the rotation order of the three instance angles is not proven (only Z was checked).
   Multi-segment (skinned) object meshes and animations are not decoded.
-- **Gex 3:** header +0x54 is assumed to be the draw distance or far plane. The per-leaf aux records
-  and the procedural material kinds 4/6/8 are not decoded. 2–4 fragment lists per level fail to parse.
+- **Gex 3:** header +0x54 is assumed to be the draw distance or far plane. The procedural material kinds 4/6/8 are
+  not decoded. 2–4 fragment lists per level fail to parse. (The per-leaf "aux records" are the collision records,
+  §5.3.1.)
+- **Collision, both games:** the meanings of the Gex 64 face flag bits and of the Gex 3 surface types and upper
+  bits were not traced; only the code sites that test them are listed (§5.2.1, §5.3.1). The event records (Gex 64
+  face +0x10 pointer, Gex 3 `scene+0x3C` table) are not decoded. Gex 3 `scene+0x1C` and `+0x24` are unknown counts.
+  The code that walks the Gex 64 instance BSP (`scene+0x34`) was not found. Nothing was checked in the running game.
 - **Gex 3:** level record `+0x0C` skips 0x0D among the TV levels; it may be a cut 12th TV level. The
   hub TV record field `a` is assumed to be the remote count needed.
 - **Gex 3:** the 540 unreferenced materials may partly be drawn by overlay code (not scanned).
