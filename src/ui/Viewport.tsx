@@ -821,40 +821,56 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
         )}
         {helpOpen && (
           <>
-            {sideActive ? (
-              <dl className="controls-help">
-                <dt>Drag</dt><dd>Pan</dd>
-                <dt>W A S D / arrows</dt><dd>Pan</dd>
-                <dt>Wheel</dt><dd>Zoom</dd>
-                <dt>Space / E</dt><dd>Zoom in</dd>
-                <dt>C / Q</dt><dd>Zoom out</dd>
-                <dt>Shift</dt><dd>Fast (×4)</dd>
-                <dt>V</dt><dd>Free fly</dd>
-                <dt>R</dt><dd>Reset view</dd>
-                <dt>F</dt><dd>Wireframe</dd>
-                <dt>Shift + F</dt><dd>Collision wireframe</dd>
-                <dt>X</dt><dd>Cutaway (hide the nearest surface)</dd>
-                <dt>Ctrl + click</dt><dd>Select object or marker</dd>
-                <dt>Alt + click</dt><dd>Select face</dd>
-              </dl>
-            ) : (
-              <dl className="controls-help">
-                <dt>Mouse</dt><dd>Look (click to capture, Esc releases)</dd>
-                <dt>W A S D</dt><dd>Move</dd>
-                <dt>Arrow keys</dt><dd>Look around</dd>
-                <dt>Space / E</dt><dd>Up</dd>
-                <dt>C / Q</dt><dd>Down</dd>
-                <dt>Shift</dt><dd>Fast (×5)</dd>
-                <dt>Wheel</dt><dd>Adjust speed</dd>
-                {sideView && (<><dt>V</dt><dd>Side view</dd></>)}
-                <dt>R</dt><dd>Reset view</dd>
-                <dt>F</dt><dd>Wireframe</dd>
-                <dt>Shift + F</dt><dd>Collision wireframe</dd>
-                <dt>X</dt><dd>Cutaway (hide the nearest surface)</dd>
-                <dt>Ctrl + click</dt><dd>Select {level?.markers?.length ? 'object or marker' : 'object'}</dd>
-                <dt>Alt + click</dt><dd>Select face</dd>
-              </dl>
-            )}
+            {/* Controls, grouped into sections that start collapsed (native <details>: keyboard accessible). */}
+            <div className="controls-sections" id="controls-help">
+              <details className="controls-section" data-section="movement">
+                <summary>Movement</summary>
+                {sideActive ? (
+                  <dl className="controls-help">
+                    <dt>Drag</dt><dd>Pan</dd>
+                    <dt>W A S D / arrows</dt><dd>Pan</dd>
+                    <dt>Wheel</dt><dd>Zoom</dd>
+                    <dt>Space / E</dt><dd>Zoom in</dd>
+                    <dt>C / Q</dt><dd>Zoom out</dd>
+                    <dt>Shift</dt><dd>Fast (×4)</dd>
+                  </dl>
+                ) : (
+                  <dl className="controls-help">
+                    <dt>Mouse</dt><dd>Look (click to capture, Esc releases)</dd>
+                    <dt>W A S D</dt><dd>Move</dd>
+                    <dt>Arrow keys</dt><dd>Look around</dd>
+                    <dt>Space / E</dt><dd>Up</dd>
+                    <dt>C / Q</dt><dd>Down</dd>
+                    <dt>Shift</dt><dd>Fast (×5)</dd>
+                    <dt>Wheel</dt><dd>Adjust speed</dd>
+                  </dl>
+                )}
+              </details>
+              <details className="controls-section" data-section="camera">
+                <summary>Camera</summary>
+                <dl className="controls-help">
+                  {sideActive ? (<><dt>V</dt><dd>Free fly</dd></>) : sideView ? (<><dt>V</dt><dd>Side view</dd></>) : null}
+                  <dt>R</dt><dd>Reset view</dd>
+                </dl>
+              </details>
+              <details className="controls-section" data-section="view">
+                <summary>View and overlays</summary>
+                <dl className="controls-help">
+                  <dt>F</dt><dd>Wireframe</dd>
+                  <dt>Shift + F</dt><dd>Collision wireframe</dd>
+                  <dt>X</dt><dd>Cutaway (hide the nearest surface)</dd>
+                  <dt>H</dt><dd>Show or hide this help</dd>
+                </dl>
+              </details>
+              <details className="controls-section" data-section="selection">
+                <summary>Selection</summary>
+                <dl className="controls-help">
+                  <dt>Ctrl + click</dt><dd>Select {sideActive || level?.markers?.length ? 'object or marker' : 'object'}</dd>
+                  <dt>Alt + click</dt><dd>Select face</dd>
+                  <dt>Esc</dt><dd>Clear the selection</dd>
+                </dl>
+              </details>
+            </div>
             <label className="check">
               <input id="nearest-toggle" type="checkbox" checked={nearest} onChange={(e) => setNearest(e.target.checked)} />
               Nearest texture filtering

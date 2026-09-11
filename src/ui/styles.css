@@ -105,6 +105,12 @@ button.link { background: none; border: none; padding: 0; color: var(--accent); 
 .controls-help { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 4px 0 2px; font-size: 12px; }
 .controls-help dt { color: var(--accent); white-space: nowrap; }
 .controls-help dd { margin: 0; color: var(--muted); }
+/* Help popup: control lists in collapsible sections (collapsed by default). */
+.controls-sections { display: flex; flex-direction: column; gap: 2px; margin: 2px 0; }
+.controls-section > summary { cursor: pointer; font-size: 12px; font-weight: 600; padding: 2px 0; border-radius: 3px; }
+.controls-section > summary:hover { color: var(--accent); }
+.controls-section > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.controls-section .controls-help { margin: 2px 0 4px 14px; }
 .check { display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; }
 
 .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); display: flex; gap: 12px; align-items: center; background: #2a1c1a; z-index: 10; }
