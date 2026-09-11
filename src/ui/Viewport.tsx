@@ -371,8 +371,12 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
   const skies = level?.skies ?? [];
   const activeSky = skies.length === 0 || skyPref === SKY_NONE ? null : (skies.find((sk) => sk.name === skyPref) ?? skies[0]).name;
   useEffect(() => engineRef.current?.renderer.setSky(activeSky), [activeSky, level]);
+  // Sky planes (Level.skyPlanes) share the preference: "None" in the sky list hides them too, and vice versa.
+  const hasSkyPlanes = (level?.skyPlanes?.length ?? 0) > 0;
+  const skyPlanesOn = skyPref !== SKY_NONE;
+  useEffect(() => engineRef.current?.renderer.setSkyPlanesVisible(skyPlanesOn), [skyPlanesOn]);
   useEffect(() => {
-    if (skyPref) writeString(SKY_KEY, skyPref);
+    writeString(SKY_KEY, skyPref);
   }, [skyPref]);
   useEffect(() => {
     engineRef.current?.renderer.setBackdropVisible(showBackdrop);
@@ -598,6 +602,12 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
                   ))}
                   <option value={SKY_NONE}>None</option>
                 </select>
+              </label>
+            )}
+            {hasSkyPlanes && (
+              <label className="check" title="The cloud layer (and water) the game projects behind the level">
+                <input id="sky-toggle" type="checkbox" checked={skyPlanesOn} onChange={(e) => setSkyPref(e.target.checked ? '' : SKY_NONE)} />
+                Show sky
               </label>
             )}
             {level?.backdrop && (

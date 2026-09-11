@@ -82,6 +82,23 @@ export interface Sky {
   mesh: number;
 }
 
+// A horizontal textured plane at a fixed world height that the game projects to the screen before the level
+// (GoldenEye's cloud layer and Frigate's water): drawn first, without depth or fog, over the whole view where the
+// plane is visible (clouds above the eye, water below); the rest of the screen keeps the clear colour.
+// For a view ray with direction d, w = min(1, 2|d.y| / |d.xz|) (0 at the horizon, 1 from about 27 degrees up or down),
+// shade = horizon + color x (1 - horizon / 255) x w, and the texel comes from the plane hit point (x, z) / uvScale.
+//   'clouds': out = horizon + (shade - horizon) x texel   (combine (SHADE - ENV) x TEXEL0 + ENV)
+//   'water':  out = texel x shade
+export interface SkyPlane {
+  combine: 'clouds' | 'water';
+  height: number; // world Y
+  texture: number; // index into Level.textures, repeating
+  uvScale: number; // world units per texture repeat, along x and z
+  color: [number, number, number]; // plane colour, 0..255
+  horizon: [number, number, number]; // colour at the horizon (the environment colour), 0..255
+  horizonOffset?: number; // the game casts the ray for screen row y through row y + offset (pixels of its 240-line screen)
+}
+
 // A 2D picture the game draws across the whole screen before the level (no depth, no fog).
 // The texture window [u0, u1] x [v0, v1] (0..1 across the texture) spans the screen
 // left to right and top to bottom.
@@ -140,6 +157,7 @@ export interface Level {
   fog?: Fog; // absent when the game shows no fog
   // Skies the game chooses between (at random, for Rush 1), if it builds them itself.
   skies?: Sky[];
+  skyPlanes?: SkyPlane[]; // drawn in order (water first, then clouds)
   // Colour the game clears the screen to (0..255), when it clears it.
   clearColor?: [number, number, number];
   backdrop?: Backdrop;
@@ -170,7 +188,7 @@ export interface DecodedMusic {
 
 // A loaded ROM of one supported game.
 export interface Game {
-  id: 'rush2049' | 'rush1' | 'bm64' | 'bm64sa' | 'bmhero' | 'battletanx' | 'battletanxga' | 'gex64' | 'gex3' | 'yoshistory' | 'sf64';
+  id: 'rush2049' | 'rush1' | 'bm64' | 'bm64sa' | 'bmhero' | 'battletanx' | 'battletanxga' | 'gex64' | 'gex3' | 'yoshistory' | 'sf64' | 'goldeneye';
   title: string;
   levels: LevelInfo[];
   loadLevel(index: number): Level;

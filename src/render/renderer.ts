@@ -1,8 +1,8 @@
 // WebGL2 level renderer: uploads a parsed Level once, then draws sky, opaque/cutout and blended passes.
-import type { Backdrop, Batch, Fog, Level, Mesh } from '../rom';
+import type { Backdrop, Batch, Fog, Level, Mesh, SkyPlane } from '../rom';
 import type { FlyCamera } from './camera';
 import { applyTextureFilter, createProgram, uploadTexture, type TextureFilter } from './gl';
-import { mat4, type Mat4 } from './math';
+import { mat4, vec3, type Mat4 } from './math';
 
 const VS = `#version 300 es
 layout(location = 0) in vec3 aPosition;
@@ -88,6 +88,57 @@ void main() {
   outColor = vec4(texture(uTexture, vUv).rgb * uTint, 1.0);
 }`;
 
+// Level.skyPlanes: a full-screen pass that casts each pixel's view ray onto a horizontal world plane. The direction is
+// interpolated from the four screen corners (exact for a pinhole camera, and continuous, so the texture derivatives
+// hold); the horizon offset shifts the rays' screen rows before the cast.
+const SKY_PLANE_VS = `#version 300 es
+layout(location = 0) in vec2 aCorner; // 0..1, y up
+uniform vec3 uRay0; // ray through the screen centre (forward, shifted by the horizon offset)
+uniform vec3 uRayX; // added per NDC unit to the right
+uniform vec3 uRayY; // added per NDC unit up
+out vec3 vDir;
+void main() {
+  vec2 ndc = aCorner * 2.0 - 1.0;
+  vDir = uRay0 + uRayX * ndc.x + uRayY * ndc.y;
+  gl_Position = vec4(ndc, 0.0, 1.0);
+}`;
+
+const SKY_PLANE_FS = `#version 300 es
+precision highp float;
+uniform sampler2D uTexture;
+uniform float uSide; // +1: plane above the eye (rays going up hit it), -1: below
+uniform float uHeight; // |plane height - eye height|, world units
+uniform vec2 uUvOrigin; // eye (x, z) / uvScale, wrapped to [0, 1) on the CPU for precision
+uniform float uInvUvScale;
+uniform vec3 uColor; // 0..1
+uniform vec3 uHorizon; // 0..1
+uniform bool uWater; // texel x shade; else (shade - horizon) x texel + horizon
+in vec3 vDir;
+out vec4 outColor;
+void main() {
+  float dy = vDir.y * uSide;
+  float dxz = length(vDir.xz);
+  // Hit distance, capped just above the horizon so the UVs stay finite and continuous for the texture derivatives
+  // (the pixels past the horizon are discarded below).
+  float t = uHeight / max(dy, 1e-4 * dxz + 1e-9);
+  vec2 uv = uUvOrigin + vDir.xz * (t * uInvUvScale);
+  vec2 gx = dFdx(uv);
+  vec2 gy = dFdy(uv);
+  vec3 texel = textureGrad(uTexture, uv, gx, gy).rgb;
+  // Towards the horizon one pixel spans a large part of a texture repeat, beyond what mipmaps and anisotropic
+  // filtering resolve: fade to the texture's average colour there instead of shimmering.
+  float footprint = max(length(gx), length(gy)); // texture repeats per pixel
+  vec3 mean = textureLod(uTexture, vec2(0.5), 16.0).rgb;
+  texel = mix(texel, mean, smoothstep(0.1, 0.5, footprint));
+  if (dy <= 0.0) discard;
+  float w = min(1.0, 2.0 * dy / max(dxz, 1e-9));
+  vec3 shade = uHorizon + uColor * (1.0 - uHorizon) * w;
+  outColor = vec4(uWater ? texel * shade : uHorizon + (shade - uHorizon) * texel, 1.0);
+}`;
+
+// The horizon offset is given in pixels of the game's 3D view, which is 220 rows tall (110 rows per NDC unit).
+const SKY_OFFSET_ROWS_PER_NDC = 110;
+
 // Selection overlay (picked object box / face): flat colour with the scene's logarithmic depth, so one pass can be
 // depth-tested against the level and another drawn through it.
 const HIGHLIGHT_VS = `#version 300 es
@@ -138,8 +189,22 @@ interface GpuBatch {
 
 interface GpuMesh {
   solid: GpuBatch[]; // opaque + cutout, in display-list order
+  // `solid` split for the level pass: batches without depth test or depth write (backdrops the game draws before the
+  // rest, e.g. GoldenEye's Dam backdrop room), drawn across all instances before the depth-tested ones; and the rest.
+  background: GpuBatch[];
+  tested: GpuBatch[];
   decal: GpuBatch[]; // coplanar decals (any blend mode), drawn after all solid geometry with a depth bias
   blended: GpuBatch[];
+}
+
+interface GpuSkyPlane {
+  texture: WebGLTexture;
+  water: boolean;
+  height: number; // world Y
+  uvScale: number;
+  color: [number, number, number]; // 0..1
+  horizon: [number, number, number]; // 0..1
+  offsetNdc: number; // horizon offset in NDC units (positive: the plane appears shifted up)
 }
 
 interface DrawItem {
@@ -162,6 +227,9 @@ interface Scene {
   items: DrawItem[];
   blendItems: DrawItem[];
   hasDecals: boolean;
+  hasBackground: boolean;
+  skyPlanes: GpuSkyPlane[]; // Level.skyPlanes, drawn in order
+  skyPlaneTextures: WebGLTexture[]; // repeating copies of their textures
   sky: GpuMesh[]; // legacy sky domes (Rush 2049: unplaced *SKY meshes)
   skies: { name: string; mesh: GpuMesh }[]; // Level.skies (Rush 1), one drawn at a time
   clearColor: [number, number, number]; // 0..1
@@ -218,6 +286,9 @@ export class LevelRenderer {
   private readonly uBackdropTint: WebGLUniformLocation | null;
   private readonly quadVao: WebGLVertexArrayObject;
   private readonly quadBuffer: WebGLBuffer;
+  private skyPlanesVisible = true;
+  private readonly skyPlaneProgram: WebGLProgram;
+  private readonly skyPlaneUniforms: Record<'ray0' | 'rayX' | 'rayY' | 'side' | 'height' | 'uvOrigin' | 'invUvScale' | 'color' | 'horizon' | 'water', WebGLUniformLocation | null>;
   private readonly highlightProgram: WebGLProgram;
   private readonly uHlViewProj: WebGLUniformLocation | null;
   private readonly uHlOffset: WebGLUniformLocation | null;
@@ -276,6 +347,15 @@ export class LevelRenderer {
     gl.bindVertexArray(null);
     this.quadVao = quadVao;
     this.quadBuffer = quadBuffer;
+    const sp = createProgram(gl, SKY_PLANE_VS, SKY_PLANE_FS);
+    this.skyPlaneProgram = sp;
+    const loc = (name: string) => gl.getUniformLocation(sp, name);
+    this.skyPlaneUniforms = {
+      ray0: loc('uRay0'), rayX: loc('uRayX'), rayY: loc('uRayY'), side: loc('uSide'), height: loc('uHeight'),
+      uvOrigin: loc('uUvOrigin'), invUvScale: loc('uInvUvScale'), color: loc('uColor'), horizon: loc('uHorizon'), water: loc('uWater'),
+    };
+    gl.useProgram(sp);
+    gl.uniform1i(loc('uTexture'), 0);
     const hp = createProgram(gl, HIGHLIGHT_VS, HIGHLIGHT_FS);
     this.highlightProgram = hp;
     this.uHlViewProj = gl.getUniformLocation(hp, 'uViewProj');
@@ -309,7 +389,7 @@ export class LevelRenderer {
   setNearestFiltering(nearest: boolean) {
     if (this.filter.nearest === nearest) return;
     this.filter.nearest = nearest;
-    for (const t of this.scene?.textures ?? []) applyTextureFilter(this.gl, t, this.filter, this.anisoExt);
+    for (const t of [...(this.scene?.textures ?? []), ...(this.scene?.skyPlaneTextures ?? [])]) applyTextureFilter(this.gl, t, this.filter, this.anisoExt);
     this.dirty = true;
   }
 
@@ -331,6 +411,13 @@ export class LevelRenderer {
   setBackdropVisible(visible: boolean) {
     if (this.backdropVisible === visible) return;
     this.backdropVisible = visible;
+    this.dirty = true;
+  }
+
+  /** Show or hide the level's sky planes (Level.skyPlanes); hidden, the clear colour shows instead. */
+  setSkyPlanesVisible(visible: boolean) {
+    if (this.skyPlanesVisible === visible) return;
+    this.skyPlanesVisible = visible;
     this.dirty = true;
   }
 
@@ -406,12 +493,17 @@ export class LevelRenderer {
       if (!src) return null;
       let mesh = meshes.get(index);
       if (!mesh) {
-        mesh = { solid: [], decal: [], blended: [] };
+        mesh = emptyMesh();
         for (const b of src.batches) {
           const gb = this.uploadBatch(b, textures);
           if (!gb) continue;
           batches.push(gb);
-          (gb.decal ? mesh.decal : gb.mode === Mode.Blend ? mesh.blended : mesh.solid).push(gb);
+          if (gb.decal) mesh.decal.push(gb);
+          else if (gb.mode === Mode.Blend) mesh.blended.push(gb);
+          else {
+            mesh.solid.push(gb);
+            (!gb.depthTest && !gb.depthWrite ? mesh.background : mesh.tested).push(gb);
+          }
         }
         meshes.set(index, mesh);
       }
@@ -438,7 +530,7 @@ export class LevelRenderer {
       for (const entry of level.skies) {
         const src = level.meshes[entry.mesh];
         if (!src) continue;
-        const mesh: GpuMesh = { solid: [], decal: [], blended: [] };
+        const mesh = emptyMesh();
         for (const b of src.batches) {
           const gb = this.uploadBatch(b, textures);
           if (!gb) continue;
@@ -458,6 +550,21 @@ export class LevelRenderer {
       }
     }
 
+    // Sky planes sample their texture as repeating whatever wrap the level gives it: a separate copy, so geometry that
+    // shares the texture keeps its own wrap mode.
+    const skyPlaneTextures = new Map<number, WebGLTexture>();
+    const skyPlanes: GpuSkyPlane[] = [];
+    for (const p of level.skyPlanes ?? []) {
+      const src = level.textures[p.texture];
+      if (!src || !(p.uvScale > 0) || !Number.isFinite(p.height)) continue;
+      let texture = skyPlaneTextures.get(p.texture);
+      if (!texture) {
+        texture = uploadTexture(gl, { ...src, wrapS: 'repeat', wrapT: 'repeat' }, this.filter, this.anisoExt);
+        skyPlaneTextures.set(p.texture, texture);
+      }
+      skyPlanes.push(skyPlaneOf(p, texture));
+    }
+
     this.scene = {
       textures,
       meshes,
@@ -465,6 +572,9 @@ export class LevelRenderer {
       items,
       blendItems: items.filter((i) => i.mesh.blended.length > 0),
       hasDecals: items.some((i) => i.mesh.decal.length > 0),
+      hasBackground: items.some((i) => i.mesh.background.length > 0),
+      skyPlanes,
+      skyPlaneTextures: [...skyPlaneTextures.values()],
       sky,
       skies,
       clearColor,
@@ -493,7 +603,10 @@ export class LevelRenderer {
       return;
     }
 
-    // Screen-fixed backdrop picture, before everything else.
+    // Sky planes (clouds, water), before everything else: each pixel's view ray cast onto the plane.
+    if (scene.skyPlanes.length > 0 && this.skyPlanesVisible) drawCalls += this.drawSkyPlanes(scene.skyPlanes, camera);
+
+    // Screen-fixed backdrop picture, before the level.
     if (scene.backdrop && this.backdropVisible) {
       this.setDepthTest(false);
       this.setDepthWrite(false);
@@ -590,14 +703,22 @@ export class LevelRenderer {
       }
     }
 
-    // Opaque and cutout geometry.
+    // Opaque and cutout geometry: first the batches without depth test or write (backdrops: drawn in instance order
+    // they would paint over nearer geometry), then the depth-tested ones.
     const showAnimated = this.showAnimated;
     const hidden = this.hiddenInstances;
     const opacity = this.instanceOpacity;
+    if (scene.hasBackground) {
+      for (const item of scene.items) {
+        if ((item.animated && !showAnimated) || hidden?.has(item.index) || opacity?.has(item.index)) continue;
+        fogFor(item);
+        for (const b of item.mesh.background) draw(b, item.model, false, false, item.mirrored);
+      }
+    }
     for (const item of scene.items) {
       if ((item.animated && !showAnimated) || hidden?.has(item.index) || opacity?.has(item.index)) continue;
       fogFor(item);
-      for (const b of item.mesh.solid) draw(b, item.model, b.depthTest, b.depthWrite, item.mirrored);
+      for (const b of item.mesh.tested) draw(b, item.model, b.depthTest, b.depthWrite, item.mirrored);
     }
 
     // Decals (RDP decal depth mode, e.g. floor markings): after the surfaces they lie on, pulled towards the camera.
@@ -657,6 +778,50 @@ export class LevelRenderer {
     this.gl.deleteProgram(this.backdropProgram);
     this.gl.deleteVertexArray(this.quadVao);
     this.gl.deleteBuffer(this.quadBuffer);
+    this.gl.deleteProgram(this.skyPlaneProgram);
+  }
+
+  /** Level.skyPlanes as full-screen passes, without depth, blending, culling or fog. Returns the number of draw calls. */
+  private drawSkyPlanes(planes: GpuSkyPlane[], camera: FlyCamera): number {
+    const gl = this.gl;
+    const canvas = gl.canvas as HTMLCanvasElement;
+    const aspect = canvas.width / Math.max(1, canvas.height);
+    const tanY = Math.tan(camera.fovY / 2);
+    const f = camera.forward();
+    const r = camera.right();
+    const u = vec3.cross(r, f);
+    const [ex, ey, ez] = camera.position;
+    const U = this.skyPlaneUniforms;
+    this.setDepthTest(false);
+    this.setDepthWrite(false);
+    this.setBlend(false);
+    this.setCull(false);
+    gl.useProgram(this.skyPlaneProgram);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindVertexArray(this.quadVao);
+    gl.uniform3f(U.rayX, r[0] * tanY * aspect, r[1] * tanY * aspect, r[2] * tanY * aspect);
+    gl.uniform3f(U.rayY, u[0] * tanY, u[1] * tanY, u[2] * tanY);
+    let calls = 0;
+    for (const p of planes) {
+      const side = p.water ? -1 : 1;
+      const rel = (p.height - ey) * side;
+      if (!(rel > 0)) continue; // the eye is on the far side of the plane: the game draws nothing of it
+      // The game casts the ray of screen row y through row y + offset (rows grow downwards): the ray shown at NDC y is
+      // the unshifted ray of NDC y - offset.
+      const o = -p.offsetNdc * tanY;
+      gl.uniform3f(U.ray0, f[0] + u[0] * o, f[1] + u[1] * o, f[2] + u[2] * o);
+      gl.uniform1f(U.side, side);
+      gl.uniform1f(U.height, rel);
+      gl.uniform2f(U.uvOrigin, fract(ex / p.uvScale), fract(ez / p.uvScale));
+      gl.uniform1f(U.invUvScale, 1 / p.uvScale);
+      gl.uniform3fv(U.color, p.color);
+      gl.uniform3fv(U.horizon, p.horizon);
+      gl.uniform1i(U.water, p.water ? 1 : 0);
+      gl.bindTexture(gl.TEXTURE_2D, p.texture);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      calls++;
+    }
+    return calls;
   }
 
   /** The selection overlay, after the whole scene. Returns the number of draw calls. */
@@ -751,6 +916,7 @@ export class LevelRenderer {
       for (const buf of b.buffers) gl.deleteBuffer(buf);
     }
     for (const t of scene.textures) gl.deleteTexture(t);
+    for (const t of scene.skyPlaneTextures) gl.deleteTexture(t);
     this.scene = null;
   }
 
@@ -787,6 +953,27 @@ export class LevelRenderer {
     else this.gl.disable(this.gl.BLEND);
     this.stBlend = on;
   }
+}
+
+function emptyMesh(): GpuMesh {
+  return { solid: [], background: [], tested: [], decal: [], blended: [] };
+}
+
+function skyPlaneOf(p: SkyPlane, texture: WebGLTexture): GpuSkyPlane {
+  const unit = (c: readonly number[]): [number, number, number] => [c[0] / 255, c[1] / 255, c[2] / 255];
+  return {
+    texture,
+    water: p.combine === 'water',
+    height: p.height,
+    uvScale: p.uvScale,
+    color: unit(p.color),
+    horizon: unit(p.horizon),
+    offsetNdc: (p.horizonOffset ?? 0) / SKY_OFFSET_ROWS_PER_NDC,
+  };
+}
+
+function fract(x: number): number {
+  return x - Math.floor(x);
 }
 
 function backdropOf(b: Backdrop | undefined, textures: WebGLTexture[]): Scene['backdrop'] {
