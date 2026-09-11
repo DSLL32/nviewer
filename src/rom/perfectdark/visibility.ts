@@ -98,6 +98,9 @@ const CUBE: View[] = [
 
 type Rect = [number, number, number, number]; // x0, y0, x1, y1 in the face's NDC
 
+/** Given two rooms showing a coplanar surface at point with normal: the room the game draws later, or null if unclear. */
+export type DrawOrder = (roomA: number, roomB: number, point: readonly number[], normal: readonly number[]) => number | null;
+
 export interface VisibilityOptions {
   step?: number;
   drop?: number;
@@ -291,12 +294,10 @@ export class PdVisibility {
     return [...shown].sort((a, b) => a - b);
   }
 
-  /** Rooms visible from everywhere the player can reach from the seeds; null when no seed stands on a floor. */
-  fromPlay(seeds: readonly (readonly number[])[], opts: VisibilityOptions = {}): PlayVisibility | null {
-    const reached = this.reachable(seeds, opts);
-    if (!reached.size) return null;
+  /** Eye points on reached floor tiles at standing height, one per grid cell of a room, with their start rooms. */
+  private eyeList(reached: Set<FloorTile>, opts: VisibilityOptions = {}): { eye: number[]; start: number[] }[] {
     const cell = opts.eyeCell ?? EYE_CELL, heights = opts.eyeHeights ?? EYE_HEIGHTS;
-    const eyes = new Map<string, { eye: number[]; start: number[] }>(), playable = new Set<number>();
+    const eyes = new Map<string, { eye: number[]; start: number[] }>();
     for (const t of reached) {
       const n = t.v.length;
       const cx = t.v.reduce((s, p) => s + p[0], 0) / n, cz = t.v.reduce((s, p) => s + p[2], 0) / n;
@@ -305,26 +306,85 @@ export class PdVisibility {
         for (const h of heights) {
           const key = `${t.room}/${Math.round(x / cell)}/${Math.round(z / cell)}/${Math.round((y + h) / 50)}`;
           if (eyes.has(key)) continue;
-          const eye = [x, y + h, z], start = this.startRooms(eye, t.room);
-          for (const room of start) playable.add(room);
-          eyes.set(key, { eye, start });
+          const eye = [x, y + h, z];
+          eyes.set(key, { eye, start: this.startRooms(eye, t.room) });
         }
       }
     }
+    return [...eyes.values()];
+  }
+
+  /** Rooms visible from everywhere the player can reach from the seeds; null when no seed stands on a floor. */
+  fromPlay(seeds: readonly (readonly number[])[], opts: VisibilityOptions = {}): PlayVisibility | null {
+    const reached = this.reachable(seeds, opts);
+    if (!reached.size) return null;
+    const eyes = this.eyeList(reached, opts), playable = new Set<number>();
+    for (const e of eyes) for (const room of e.start) playable.add(room);
     const scriptRooms = this.scriptRooms(playable);
     // Everything the walk can ever add: the portal graph's reach from the eye rooms. Once all of it is visible, stop.
-    const reachable = new Set(playable), queue = [...playable];
-    while (queue.length) for (const { other } of this.byRoom[queue.pop()!] ?? []) if (!reachable.has(other)) { reachable.add(other); queue.push(other); }
+    const reachable = this.portalDepths([...playable]);
     const visible = new Set<number>();
     // one eye per room first, so the visible set fills up early
-    const order = [...eyes.values()].sort((a, b) => a.start[0] - b.start[0]);
+    const order = [...eyes].sort((a, b) => a.start[0] - b.start[0]);
     const firsts = order.filter((e, i) => i === 0 || e.start[0] !== order[i - 1].start[0]);
-    for (const e of [...firsts, ...order.filter((e) => !firsts.includes(e))]) {
+    const firstSet = new Set(firsts);
+    for (const e of [...firsts, ...order.filter((e) => !firstSet.has(e))]) {
       if (visible.size >= reachable.size) break;
       this.walk(e.eye, e.start, visible);
     }
     const added = scriptRooms.filter((room) => !visible.has(room));
     for (const room of added) visible.add(room);
-    return { visible, playable, eyes: eyes.size, reachedTiles: reached.size, floorTiles: this.tiles.length, scriptRooms: added };
+    return { visible, playable, eyes: eyes.length, reachedTiles: reached.size, floorTiles: this.tiles.length, scriptRooms: added };
+  }
+
+  /** Portal-hop distance from the start rooms of every room the portal graph reaches. */
+  portalDepths(start: readonly number[]): Map<number, number> {
+    const depth = new Map<number, number>(start.map((room) => [room, 0]));
+    const queue = [...start];
+    for (let i = 0; i < queue.length; i++) {
+      for (const { other } of this.byRoom[queue[i]] ?? []) {
+        if (depth.has(other)) continue;
+        depth.set(other, depth.get(queue[i])! + 1);
+        queue.push(other);
+      }
+    }
+    return depth;
+  }
+
+  /**
+   * Which of two rooms the game draws later where both show a coplanar surface (point, normal): the game draws rooms in
+   * portal order from the camera's room (the first BG calls of 10 of the 13 captured frames have non-decreasing portal-hop
+   * depth from the camera room; script-shown rooms come first), and a later coplanar draw passes the depth test. Votes of the
+   * playable eyes nearest in front of the surface (up to 48 within 2500 units) whose walk reaches both rooms: the deeper room
+   * wins; eyes at equal depth abstain. The winner needs three quarters of the votes, else null.
+   */
+  drawOrder(seeds: readonly (readonly number[])[]): DrawOrder {
+    let eyes: { eye: number[]; start: number[] }[] | null = null;
+    const walks = new Map<number, { seen: Set<number>; depth: Map<number, number> }>();
+    return (a, b, point, normal) => {
+      eyes ??= this.eyeList(this.reachable(seeds));
+      const candidates: [number, number][] = [];
+      eyes.forEach((e, i) => {
+        const rel = [e.eye[0] - point[0], e.eye[1] - point[1], e.eye[2] - point[2]];
+        const dist = Math.hypot(rel[0], rel[1], rel[2]);
+        if (dist <= 2500 && rel[0] * normal[0] + rel[1] * normal[1] + rel[2] * normal[2] > 20) candidates.push([dist, i]);
+      });
+      candidates.sort((p, q) => p[0] - q[0]);
+      let votesA = 0, votesB = 0;
+      for (const [, i] of candidates.slice(0, 48)) {
+        let w = walks.get(i);
+        if (!w) {
+          const seen = new Set<number>();
+          this.walk(eyes[i].eye, eyes[i].start, seen);
+          walks.set(i, (w = { seen, depth: this.portalDepths(eyes[i].start) }));
+        }
+        if (!w.seen.has(a) || !w.seen.has(b)) continue;
+        const da = w.depth.get(a) ?? 0, db = w.depth.get(b) ?? 0;
+        if (da > db) votesA++;
+        else if (db > da) votesB++;
+      }
+      const total = votesA + votesB;
+      return total && votesA >= 0.75 * total ? a : total && votesB >= 0.75 * total ? b : null;
+    };
   }
 }

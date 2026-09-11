@@ -14,7 +14,7 @@ import { parsePads, readSpawnPads } from './pads';
 import { PdRom, type StageRecord } from './rom';
 import { PdTextures } from './texture';
 import { collisionMesh, parseTiles } from './tiles';
-import { PdVisibility, type PlayVisibility } from './visibility';
+import { type DrawOrder, PdVisibility, type PlayVisibility } from './visibility';
 
 // A standing player's eye is 159 units above the floor; spawn pads sit 47 above it (verified in the Defection capture).
 const EYE_ABOVE_SPAWN_PAD = 112;
@@ -124,15 +124,17 @@ function spawnCamera(r: PdRom, def: StageDef, rooms: RoomMesh[]): CameraView | u
 }
 
 /**
- * Rooms visible from play: seeded by the setup's spawn pads and every pad of the stage (null: no seed stands on a floor, keep
- * every room).
+ * Rooms visible from play, seeded by the setup's spawn pads and every pad of the stage (visible null: no seed stands on a
+ * floor, keep every room), and the game's draw order between rooms from those places (null without tiles or pads).
  */
-function playVisibility(r: PdRom, def: StageDef, bg: PdBg): PlayVisibility | null {
+function playVisibility(r: PdRom, def: StageDef, bg: PdBg): { visible: PlayVisibility | null; drawOrder: DrawOrder | undefined } {
   const { stage } = def;
-  if (!r.hasFile(stage.tiles) || !r.hasFile(stage.pads)) return null;
+  if (!r.hasFile(stage.tiles) || !r.hasFile(stage.pads)) return { visible: null, drawOrder: undefined };
   const pads = parsePads(r.file(stage.pads)).pads;
   const spawns = def.setup ? readSpawnPads(r.file(def.setup)).flatMap((n) => (pads[n] ? [pads[n].pos] : [])) : [];
-  return new PdVisibility(bg, r.file(stage.tiles)).fromPlay([...spawns, ...pads.map((p) => p.pos)]);
+  const seeds = [...spawns, ...pads.map((p) => p.pos)];
+  const vis = new PdVisibility(bg, r.file(stage.tiles));
+  return { visible: vis.fromPlay(seeds), drawOrder: vis.drawOrder(seeds) };
 }
 
 function loadLevel(r: PdRom, def: StageDef): Level {
@@ -150,7 +152,7 @@ function loadLevel(r: PdRom, def: StageDef): Level {
   const rooms = buildRooms(bg, bgName, textures, { envAlpha: env.envAlpha });
   // Rooms the game's portals and visibility script can never show from where the player can be (visibility.ts) go to a
   // hidden layer: scenery such as Defection's city towers, which the viewer would otherwise draw.
-  const seen = playVisibility(r, def, bg);
+  const play = playVisibility(r, def, bg), seen = play.visible;
   // One layer per room, grouped, like Zelda's scenes; the hidden ones share a layer in the same group.
   const roomLayers: LevelLayer[] = [];
   const hiddenLayer: LevelLayer = { name: 'rooms never visible from play', kind: 'background', instances: [], visibleByDefault: false, group: 'rooms' };
@@ -188,7 +190,7 @@ function loadLevel(r: PdRom, def: StageDef): Level {
 
   // ---- coplanar room surfaces the viewer would z-fight (coplanar.ts), in the level's meshes; last, so object placement,
   // cameras and bounds use the file's geometry ----
-  resolveCoplanar(rooms);
+  resolveCoplanar(rooms, play.drawOrder);
 
   // ---- collision overlay (hidden): the tiles file's polygons; appended last, outside the level bounds ----
   const collision = r.hasFile(stage.tiles) ? collisionMesh(parseTiles(r.file(stage.tiles)), r.names[stage.tiles]) : null;

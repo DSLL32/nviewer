@@ -9,16 +9,19 @@
 //   - Within a room (opaque leaves, then translucent leaves; commands in list order), a solid triangle entirely covered by
 //     later opaque coplanar ones is dropped (never visible), one lying entirely on earlier ones becomes a decal, and one
 //     partly over earlier ones moves NUDGE towards its front.
-//   - Same-side overlaps between different rooms are left: their order follows the portal walk (camera dependent).
+//   - Between different rooms the order follows the portal walk: given a DrawOrder (visibility.ts), the room the game draws
+//     later from where the player sees both keeps the surface and the other room's copy moves NUDGE behind it (so the
+//     winner's decals stay on it); overlaps with no clear order are left.
 import { mergeBatches } from '../bomberman/common';
 import type { Batch } from '../types';
 import type { RoomMesh } from './bg';
+import type { DrawOrder } from './visibility';
 
 const PLANE_TOLERANCE = 0.5; // BG vertices are whole units
 const EXACT_TOLERANCE = 0.05;
 const NUDGE = 1; // units; the renderer's depth separates this far beyond the size of any room
 
-interface Tri {
+export interface Tri {
   room: number; // index into the rooms array
   b: Batch;
   t: number;
@@ -47,17 +50,17 @@ export interface CoplanarCounts {
   translucentOnSolid: number;
 }
 
-const dot = (a: Tri, b: Tri) => a.n[0] * b.n[0] + a.n[1] * b.n[1] + a.n[2] * b.n[2];
+export const dot = (a: Tri, b: Tri) => a.n[0] * b.n[0] + a.n[1] * b.n[1] + a.n[2] * b.n[2];
 
 /** Largest distance of b's vertices from a's plane. */
-function distance(a: Tri, b: Tri): number {
+export function distance(a: Tri, b: Tri): number {
   let m = 0;
   for (let k = 0; k < 9; k += 3) m = Math.max(m, Math.abs(a.n[0] * b.p[k] + a.n[1] * b.p[k + 1] + a.n[2] * b.p[k + 2] - a.d));
   return m;
 }
 
 /** Share of 21 interior sample points of a inside any of the triangles, in the plane's dominant projection. */
-function coverage(a: Tri, parts: Tri[]): number {
+export function coverage(a: Tri, parts: Tri[]): number {
   if (!parts.length) return 0;
   const ax = Math.abs(a.n[0]) > Math.abs(a.n[1]) ? (Math.abs(a.n[0]) > Math.abs(a.n[2]) ? 0 : 2) : Math.abs(a.n[1]) > Math.abs(a.n[2]) ? 1 : 2;
   const u = ax === 0 ? 1 : 0, v = ax === 2 ? 1 : 2;
@@ -81,7 +84,7 @@ function coverage(a: Tri, parts: Tri[]): number {
   return covered / 21;
 }
 
-class Coplanar {
+export class Coplanar {
   readonly tris: Tri[] = [];
   private readonly buckets = new Map<string, Bucket>();
 
@@ -173,16 +176,34 @@ export function countCoplanar(rooms: RoomMesh[]): CoplanarCounts {
   return out;
 }
 
-const DROP = 1, DECAL = 2, OFFSET = 4;
+const DROP = 1, DECAL = 2, OFFSET = 4, BEHIND = 8;
 
 /** Resolves coplanar overlaps in place (see the header); returns the number of triangles moved, made decals and dropped. */
-export function resolveCoplanar(rooms: RoomMesh[]): { moved: number; decals: number; dropped: number } {
+export function resolveCoplanar(rooms: RoomMesh[], drawOrder?: DrawOrder): { moved: number; decals: number; dropped: number; behind: number } {
   const c = new Coplanar(rooms);
   const flags = new Map<Tri, number>();
   const set = (t: Tri, f: number) => flags.set(t, (flags.get(t) ?? 0) | f);
+  const decisions = new Map<string, number | null>();
   for (const a of c.tris) {
     const near = c.near(a);
     if (!near.length) continue;
+    if (drawOrder && a.solid) {
+      const roomA = rooms[a.room].room.index;
+      for (const b of near) {
+        if (!b.solid || b.room === a.room || dot(a, b) <= 0 || coverage(a, [b]) === 0) continue;
+        const roomB = rooms[b.room].room.index;
+        const key = `${Math.min(roomA, roomB)}/${Math.max(roomA, roomB)}/${a.nk}/${a.dk}`;
+        let winner = decisions.get(key);
+        if (winner === undefined) {
+          const centre = [0, 1, 2].map((k) => (a.p[k] + a.p[3 + k] + a.p[6 + k]) / 3);
+          decisions.set(key, (winner = drawOrder(roomA, roomB, centre, a.n)));
+        }
+        if (winner === roomB) {
+          set(a, BEHIND);
+          break;
+        }
+      }
+    }
     const opposite = near.filter((b) => b.solid && dot(a, b) < 0);
     if (opposite.length && coverage(a, opposite) > 0) set(a, OFFSET);
     if (!a.solid) {
@@ -199,7 +220,7 @@ export function resolveCoplanar(rooms: RoomMesh[]): { moved: number; decals: num
     else if (underEarlier > 0) set(a, OFFSET);
   }
   const masks = new Map<Batch, Uint8Array>();
-  const perRoom = rooms.map(() => ({ moved: 0, decals: 0, dropped: 0 }));
+  const perRoom = rooms.map(() => ({ moved: 0, decals: 0, dropped: 0, behind: 0 }));
   for (const [a, f] of flags) {
     const counts = perRoom[a.room];
     if (f & DROP) counts.dropped++;
@@ -207,6 +228,10 @@ export function resolveCoplanar(rooms: RoomMesh[]): { moved: number; decals: num
       if (f & OFFSET) {
         counts.moved++;
         for (let k = 0; k < 9; k++) a.b.positions[a.t * 9 + k] += a.n[k % 3] * NUDGE;
+      }
+      if (f & BEHIND) {
+        counts.behind++;
+        for (let k = 0; k < 9; k++) a.b.positions[a.t * 9 + k] -= a.n[k % 3] * NUDGE;
       }
       if (f & DECAL) counts.decals++;
     }
@@ -216,13 +241,14 @@ export function resolveCoplanar(rooms: RoomMesh[]): { moved: number; decals: num
     if (!mask) masks.set(a.b, (mask = new Uint8Array(a.b.positions.length / 9)));
     mask[a.t] = split;
   }
-  const total = { moved: 0, decals: 0, dropped: 0 };
+  const total = { moved: 0, decals: 0, dropped: 0, behind: 0 };
   rooms.forEach((r, i) => {
     const counts = perRoom[i];
-    if (!counts.moved && !counts.decals && !counts.dropped) return;
+    if (!counts.moved && !counts.decals && !counts.dropped && !counts.behind) return;
     total.moved += counts.moved;
     total.decals += counts.decals;
     total.dropped += counts.dropped;
+    total.behind += counts.behind;
     let split = false;
     const batches = r.mesh.batches.flatMap((b) => {
       const mask = masks.get(b);
@@ -236,7 +262,7 @@ export function resolveCoplanar(rooms: RoomMesh[]): { moved: number; decals: num
     r.mesh.radius = radius;
     r.mesh.info = {
       ...r.mesh.info,
-      coplanar: `triangles over coplanar ones: ${counts.moved} moved ${NUDGE} towards their front, ${counts.decals} decals, ${counts.dropped} hidden ones dropped`,
+      coplanar: `triangles over coplanar ones: ${counts.moved} moved ${NUDGE} towards their front, ${counts.decals} decals, ${counts.dropped} hidden ones dropped${counts.behind ? `, ${counts.behind} moved ${NUDGE} behind a surface another room draws later` : ''}`,
     };
   });
   return total;

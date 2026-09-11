@@ -870,8 +870,15 @@ city backdrop boxes).
   (opposite-facing, usually in two rooms, with `G_CULL_BACK`), 899 same-side overlaps within a room, 309 across rooms, and
   211 translucent triangles lying on solid ones.
 - The game hides them through back-face culling and draw order (the later draw passes the RDP depth test).
-- The viewer's `coplanar.ts` applies the same rules: a 1-unit nudge towards the front, decals for later draws, and hidden
-  triangles dropped. 311 remain, 291 of them same-side overlaps between rooms (portal order), 270 of which share a texture.
+- Room draw order (verified in frames): the first BG call per room has non-decreasing portal-hop depth from the camera's
+  room in 10 of 12 captured frames. Villa and Skedar Ruins draw script-shown rooms first.
+- For cross-room overlaps, the viewer takes the room the game draws later: votes of the playable eyes in front of the
+  surface that see both rooms, where the deeper room wins. That keeps Chicago room 73's brick wall and its graffiti decal
+  over room 77's copy.
+- The viewer's `coplanar.ts` applies these rules: a 1-unit nudge towards the front, decals for later draws, hidden
+  triangles dropped, and the losing cross-room copy moved behind.
+- 263 triangles remain: 243 cross-room overlaps without a clear order (equal depth or no eye sees both rooms; 228 of
+  them with the same texture), 11 same-room and 9 other.
 
 ## 5. Objects and props
 
