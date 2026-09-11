@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import type { Level, Marker, SideView } from '../rom';
+import type { Level, LevelLayer, Marker, SideView } from '../rom';
 import { FlyCamera } from '../render/camera';
 import { FlyControls, type ControlAction, type PickMode, type SideViewLimits } from '../render/controls';
 import { mat4, type Mat4 } from '../render/math';
@@ -24,6 +24,7 @@ const LABEL_CELL_H = 14;
 const FADED_OPACITY = 0; // fadeOnHover layers under the pointer vanish completely, as in the game
 const FADE_SECONDS = 0.15;
 const VIEW_SAVE_MS = 400; // at most this often while the view changes
+const GROUP_OPEN_MAX = 8; // layer groups (LevelLayer.group) with more layers than this start collapsed
 
 interface ViewportProps {
   level: Level | null;
@@ -139,6 +140,30 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
     });
     return out;
   }, [level, hiddenLayers]);
+
+  // Layers panel entries in level order: an ungrouped layer, or a group (LevelLayer.group) placed where its first layer is.
+  const layerEntries = useMemo(() => {
+    const out: ({ group: null; index: number } | { group: string; indices: number[] })[] = [];
+    const byGroup = new Map<string, number[]>();
+    (level?.layers ?? []).forEach((l, i) => {
+      if (!l.group) {
+        out.push({ group: null, index: i });
+        return;
+      }
+      let indices = byGroup.get(l.group);
+      if (!indices) {
+        indices = [];
+        byGroup.set(l.group, indices);
+        out.push({ group: l.group, indices });
+      }
+      indices.push(i);
+    });
+    return out;
+  }, [level]);
+  // Expanded or collapsed groups, per level; groups of many layers start collapsed.
+  const [groupOpenState, setGroupOpenState] = useState<{ level: Level; open: Record<string, boolean> } | null>(null);
+  const groupOpen = (name: string, size: number) =>
+    (groupOpenState && groupOpenState.level === level ? groupOpenState.open[name] : undefined) ?? size <= GROUP_OPEN_MAX;
 
   const instanceVisible = (lv: Level, i: number) => !hiddenInstances.has(i) && (showScripted || !lv.instances[i]?.animated);
   const markerVisible = (m: Marker | undefined) => !!m && (m.layer === undefined || !hiddenLayers.has(m.layer));
@@ -547,13 +572,35 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
   );
   const reportTexture = report && report.texture !== null && level ? (level.textures[report.texture] ?? null) : null;
 
-  const setLayerVisible = (index: number, visible: boolean) => {
+  // One state update however many layers change (a group toggle), so the hidden instances are recomputed once.
+  const setLayersVisible = (indices: readonly number[], visible: boolean) => {
     if (!level) return;
     const next = new Set(hiddenLayers);
-    if (visible) next.delete(index);
-    else next.add(index);
+    for (const index of indices) {
+      if (visible) next.delete(index);
+      else next.add(index);
+    }
     setLayerState({ level, hidden: next });
   };
+  const setLayerVisible = (index: number, visible: boolean) => setLayersVisible([index], visible);
+  const toggleGroupOpen = (name: string, size: number) => {
+    if (!level) return;
+    const open = groupOpenState && groupOpenState.level === level ? groupOpenState.open : {};
+    setGroupOpenState({ level, open: { ...open, [name]: !groupOpen(name, size) } });
+  };
+
+  const layerRow = (l: LevelLayer, i: number) => (
+    <label key={i} className="check layer-row" title={`${l.kind}: ${l.instances.length} instance${l.instances.length === 1 ? '' : 's'}`}>
+      <input type="checkbox" data-layer={i} checked={!hiddenLayers.has(i)} onChange={(e) => setLayerVisible(i, e.target.checked)} />
+      <span className="layer-name">{l.name}</span>
+      <span className="layer-meta small muted">
+        {[
+          l.depth !== undefined ? `z ${+l.depth.toFixed(2)}` : null,
+          l.parallax !== undefined ? `×${l.parallax.toFixed(2)}` : null,
+        ].filter(Boolean).join(' · ')}
+      </span>
+    </label>
+  );
 
   const hasScripted = level?.instances.some((i) => i.animated && i.mesh >= 0) ?? false;
   const hasFog = !!level?.fog;
@@ -715,18 +762,42 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
             <strong>Layers</strong>
             <span className="small muted">{layers.length - layers.filter((_, i) => hiddenLayers.has(i)).length} of {layers.length} shown</span>
           </div>
-          {layers.map((l, i) => (
-            <label key={i} className="check layer-row" title={`${l.kind}: ${l.instances.length} instance${l.instances.length === 1 ? '' : 's'}`}>
-              <input type="checkbox" data-layer={i} checked={!hiddenLayers.has(i)} onChange={(e) => setLayerVisible(i, e.target.checked)} />
-              <span className="layer-name">{l.name}</span>
-              <span className="layer-meta small muted">
-                {[
-                  l.depth !== undefined ? `z ${+l.depth.toFixed(2)}` : null,
-                  l.parallax !== undefined ? `×${l.parallax.toFixed(2)}` : null,
-                ].filter(Boolean).join(' · ')}
-              </span>
-            </label>
-          ))}
+          {layerEntries.map((entry) => {
+            if (entry.group === null) return layerRow(layers[entry.index], entry.index);
+            const { group, indices } = entry;
+            const shown = indices.filter((i) => !hiddenLayers.has(i)).length;
+            const open = groupOpen(group, indices.length);
+            const mixed = shown > 0 && shown < indices.length;
+            return (
+              <div key={`group:${group}`} className="layer-group" data-layer-group={group}>
+                <div className="layer-group-row">
+                  <button
+                    type="button"
+                    className="group-toggle"
+                    aria-expanded={open}
+                    aria-label={`${open ? 'Collapse' : 'Expand'} ${group}`}
+                    onClick={() => toggleGroupOpen(group, indices.length)}
+                  >
+                    {open ? '▾' : '▸'}
+                  </button>
+                  <label className="check layer-group-check" title={`${indices.length} layer${indices.length === 1 ? '' : 's'}`}>
+                    <input
+                      type="checkbox"
+                      data-layer-group-toggle={group}
+                      checked={shown === indices.length}
+                      ref={(el) => {
+                        if (el) el.indeterminate = mixed;
+                      }}
+                      onChange={(e) => setLayersVisible(indices, e.target.checked)}
+                    />
+                    <span className="layer-group-name">{group}</span>
+                  </label>
+                  <span className="layer-group-count small muted">{shown} of {indices.length} shown</span>
+                </div>
+                {open && <div className="layer-group-rows">{indices.map((i) => layerRow(layers[i], i))}</div>}
+              </div>
+            );
+          })}
         </div>
       )}
       {children}
