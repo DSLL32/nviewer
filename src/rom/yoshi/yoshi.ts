@@ -27,8 +27,9 @@ const FOV_Y = 40;
 const K = 120 / Math.tan((FOV_Y / 2) * (Math.PI / 180)); // eye distance from the main plane (329.7)
 const PLAYER_START = 0x4001;
 // Actors whose art the game assembles in code from pieces (pipes stacked from rim and body strips, the ring of
-// a 3D pipe): their unit data holds only the pieces, so they are shown as markers.
-const ASSEMBLED = new Set(['pipelift', 'pipeliftLR', 'pipelift3D', 'pipenear']);
+// a 3D pipe, the segmented Neuron worms: head, body and tail units): their unit data holds only the pieces, so
+// they are shown as markers.
+const ASSEMBLED = new Set(['pipelift', 'pipeliftLR', 'pipelift3D', 'pipenear', 'nyororon', 'nyororon2', 'nyororon3', 'nyororon4']);
 
 const US_TITLES = [
   'Treasure Hunt', 'Surprise!!', 'Rail Lift', 'Tower Climb', 'Bone Dragon Pit', "Blargg's Boiler", 'Jelly Pipe',
