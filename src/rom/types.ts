@@ -109,6 +109,9 @@ export interface LevelLayer {
   depth?: number; // the game's depth value, for display
   parallax?: number; // scroll factor relative to the main plane, for display
   visibleByDefault?: boolean; // default true
+  // An overlay the game makes see-through while the player is behind it (e.g. a hut's roof and walls): the
+  // viewer fades it out while the pointer is over it.
+  fadeOnHover?: boolean;
 }
 
 // Camera for side-scrolling games: a fixed-lens camera looking down -Z at the plane Z = 0, without

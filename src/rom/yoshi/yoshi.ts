@@ -306,28 +306,29 @@ function loadLevel(y: YoshiRom, def: LevelDef): Level {
     const add = y.record(y.slot(castdt, 5));
     const npx = layer.unitW * layer.unitH, nTiles = Math.floor(ut.length / npx);
     const pv = view(pal);
-    // Animated units: record {u16 tile[5]} ending at 0x8000. The last listed tile is the one that joins its
-    // neighbours (over all layers it matches the surrounding tiles' edges in ~94% of units; frame 0 is often
-    // the plain fill tile).
-    const tileOf = (v: number) => {
-      if (!(v & 0x8000)) return v;
+    // Switchable units: record {u16 tile[5]} ending at 0x8000, swapped when the level's switches fire (e.g. a
+    // bush covering a hidden room turns into platforms). The last listed tile is drawn: over all layers it
+    // matches the surrounding tiles' edges in ~94% of units. The first (initial) tile goes to an optional layer.
+    const frames = (v: number): number[] => {
+      if (!(v & 0x8000)) return [v];
       const o = (v & 0x7fff) * 10;
-      if (!add || o + 10 > add.length) return 0;
-      let t = 0;
-      for (let k = 0; k < 5 && view(add).getUint16(o + 2 * k) !== 0x8000; k++) t = view(add).getUint16(o + 2 * k);
-      return t;
+      const out: number[] = [];
+      for (let k = 0; add && o + 10 <= add.length && k < 5 && view(add).getUint16(o + 2 * k) !== 0x8000; k++) out.push(view(add).getUint16(o + 2 * k));
+      return out;
     };
     const atlas = new TileAtlas(layer.unitW, layer.unitH);
+    const cellOf = (t: number) => atlas.cell(t, () => {
+      const rgba = new Uint8Array(npx * 4);
+      for (let i = 0; i < npx; i++) rgba5551(pv.getUint16(ut[t * npx + i] * 2), rgba, i * 4);
+      return rgba;
+    });
     const placed: [number, number, number][] = [];
+    const initial: [number, number, number][] = [];
     layer.units('tiles', (px, py, v) => {
-      const t = tileOf(v);
-      if (t <= 0 || t >= nTiles) return;
-      const cell = atlas.cell(t, () => {
-        const rgba = new Uint8Array(npx * 4);
-        for (let i = 0; i < npx; i++) rgba5551(pv.getUint16(ut[t * npx + i] * 2), rgba, i * 4);
-        return rgba;
-      });
-      placed.push([px, py, cell]);
+      const f = frames(v).filter((t) => t > 0 && t < nTiles);
+      if (!f.length) return;
+      placed.push([px, py, cellOf(f[f.length - 1])]);
+      if (f.length > 1 && f[0] !== f[f.length - 1]) initial.push([px, py, cellOf(f[0])]);
     });
     if (!placed.length) continue;
     const { texture, uv } = atlas.build('CI8/RGBA16 tiles', `cast ${hex(a.id)} ut 0x${y.u32(y.slot(castdt, 1) + 8).toString(16)}`);
@@ -348,7 +349,15 @@ function loadLevel(y: YoshiRom, def: LevelDef): Level {
     const instance = push(mesh, new Float32Array([s, 0, 0, 0, 0, s, 0, 0, 0, 0, 1, 0, X0, -Y0, depthOf(a.z), 1]), {
       actor: a.index, cast: hex(a.id), record: `0x${a.record.toString(16)}`, z: +a.z.toFixed(3), parallax: +r.toFixed(5), anchor: anchor.join(', '),
     });
-    layers.push({ name: `${kind === 'main' ? 'main' : kind === 'background' ? 'far' : 'near'} (${name})`, kind, instances: [instance], depth: +a.z.toFixed(3), parallax: +r.toFixed(4) });
+    layers.push({ name: `${kind === 'main' ? 'main' : kind === 'background' ? 'far' : 'near'} (${name})`, kind, instances: [instance], depth: +a.z.toFixed(3), parallax: +r.toFixed(4), ...(/_mask/.test(name) ? { fadeOnHover: true } : {}) });
+    if (initial.length) {
+      // The initial state of the switchable units, just in front of the layer.
+      const qi = new QuadBuilder();
+      for (const [px, py, cell] of initial) qi.quad(px, -py, layer.unitW, layer.unitH, uv(cell));
+      const im = { ...meshFromBatches(`${name} initial`, [qi.batch(tex, 'cutout')]), info: { cast: hex(a.id), units: initial.length, state: 'initial (before switches)' } };
+      const ii = push(im, new Float32Array([s, 0, 0, 0, 0, s, 0, 0, 0, 0, 1, 0, X0, -Y0, depthOf(a.z) + 0.001, 1]), { actor: a.index, cast: hex(a.id), state: 'initial' });
+      layers.push({ name: `switch tiles, initial state (${name})`, kind, instances: [ii], depth: +a.z.toFixed(3), parallax: +r.toFixed(4), visibleByDefault: false });
+    }
     if (clearColor === undefined) {
       const bg = new Uint8Array(4);
       rgba5551(pv.getUint16(0), bg, 0);
