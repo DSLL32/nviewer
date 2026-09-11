@@ -7,6 +7,7 @@ import { openBombermanHero } from './bomberman/bmhero';
 import { openGex3 } from './gex/gex3';
 import { openGex64 } from './gex/gex64';
 import { openGoldenEye } from './goldeneye/goldeneye';
+import { openPerfectDark } from './perfectdark/perfectdark';
 import { openYoshiStory } from './yoshi/yoshi';
 import { LEVELS, loadLevel } from './level';
 import { decodeRush2049Music, listRush2049Music } from './music/rush2049';
@@ -54,10 +55,16 @@ export function openRom(bytes: Uint8Array): Game {
       return openStarFox64(rom);
     case 'NGEE':
       return openGoldenEye(rom);
+    case 'NPDE':
+      if (rom[0x3f] !== 0) throw new Error(`Perfect Dark (U) V1.${rom[0x3f]} is not supported: only the V1.0 ROM (revision 0) is.`);
+      return openPerfectDark(rom);
+    case 'NPDP':
+    case 'NPDJ':
+      throw new Error(`Perfect Dark (${code === 'NPDP' ? 'E' : 'J'}) is not supported: only Perfect Dark (U) (V1.0) is.`);
     default:
       throw new Error(`Unsupported ROM (game code "${code.replace(/[^\x20-\x7e]/g, '?')}"). ` +
         'Supported: San Francisco Rush 2049 (U), San Francisco Rush: Extreme Racing (U), Bomberman 64 (U), ' +
         'Bomberman 64: The Second Attack! (U), Bomberman Hero (U), BattleTanx (U), BattleTanx: Global Assault (U), ' +
-        'Gex 64: Enter the Gecko (U), Gex 3: Deep Cover Gecko (U), Yoshi\'s Story (J), Star Fox 64 (U), GoldenEye 007 (U).');
+        'Gex 64: Enter the Gecko (U), Gex 3: Deep Cover Gecko (U), Yoshi\'s Story (J), Star Fox 64 (U), GoldenEye 007 (U), Perfect Dark (U) (V1.0).');
   }
 }
