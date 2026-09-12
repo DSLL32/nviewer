@@ -8,6 +8,8 @@ export interface LevelInfo {
   kind: LevelKind;
   // Sub-heading within the kind's group (e.g. the world or planet), shared by consecutive levels.
   group?: string;
+  // An alternate setup selected from the parent level's View panel; omitted from the sidebar.
+  setupParent?: number;
 }
 
 export type WrapMode = 'repeat' | 'mirror' | 'clamp';
@@ -178,6 +180,8 @@ export interface Level {
   fog?: Fog; // absent when the game shows no fog
   // Mutually exclusive scene lighting choices. Batch.lightingColors holds the corresponding baked colours.
   lighting?: { presets: string[]; default: number };
+  // Alternate scene headers represented as choices within this level rather than duplicate sidebar entries.
+  setups?: { options: { name: string; level: number }[]; current: number };
   // Skies the game chooses between (at random, for Rush 1), if it builds them itself.
   skies?: Sky[];
   skyPlanes?: SkyPlane[]; // drawn in order (water first, then clouds)

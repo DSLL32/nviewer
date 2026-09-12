@@ -189,10 +189,10 @@ Names from the game's own data:
   else the main header. **Doc** (`oot-decomp/src/code/z_scene.c` Scene_CommandAlternateHeaderList, `z_play.c`).
 - **MM setups:** layer = the low 4 bits of the entrance; a null slot uses the main header; there is no age/night meaning.
   Time of day is handled by the actors' half-day masks and the environment. **Doc** (`mm-decomp/src/code/z_scene.c`).
-- **Viewer default:** layer 0 (child day for OoT, setup 0 for MM) at noon. Offer the non-empty OoT layers 1-3 as variants
-  (child night, adult day, adult night: e.g. Kakariko Village and Lon Lon Ranch have all four) and the non-cutscene MM
-  setups (a few scenes: North Clock Town, Termina Field, Romani Ranch, Snowhead, Path to Mountain Village, Clock Tower
-  rooftop). Leave cutscene layers out of the level list (they mostly add cutscene actors; optional "cutscene N" variants).
+- **Viewer default:** layer 0 (child day for OoT, setup 0 for MM) at noon. The View panel offers the non-empty OoT
+  layers 1-3 (child night, adult day, adult night: e.g. Kakariko Village and Lon Lon Ranch have all four) and the
+  non-cutscene MM setups (a few scenes: North Clock Town, Termina Field, Romani Ranch, Snowhead, Path to Mountain
+  Village, Clock Tower rooftop). Alternate setups are hidden from the sidebar. Cutscene layers remain unavailable.
 - Several places are separate scenes per state rather than layers, and group naturally as variants of one level: OoT Market,
   Market Entrance, Back Alley and Temple of Time exterior (day / night / ruins), Castle Courtyard (day / night); MM Southern
   Swamp (poisoned 0x45 / cleared 0x00), Mountain Village (0x50 / 0x5A), Goron Village (0x4D / 0x48), Twin Islands (0x5D / 0x5E),
@@ -2515,7 +2515,7 @@ Totals: 52 scenes, 145 rooms (mesh types: 74 type 0, 65 type 2, 6 type 1), 64,14
 - **Unfinished and unknown** [other]: 05, 06, 26, 29, 16, 17, 2C, 2E.
 - **Test maps** [other]: 02, 03, 04, 07, 1D, 1F, 21, 27, 28.
 
-Scene 0x09 gets a "night" variant (alternate header 1) as a sub-level. Names marked "(name: sw97)" are the sw97 project's guesses; say so in the UI info panel.
+Scene 0x09 gets a "Night" choice (alternate header 1) in the View panel. Names marked "(name: sw97)" are the sw97 project's guesses; say so in the UI info panel.
 
 ### 11.5 Formats compared with retail OoT
 
@@ -2658,7 +2658,7 @@ No emulator request (`alpha/EMU-REQUESTS.md` not written). The upper half has no
   6. **actor names:** a small table from the §11.5 rule (alpha→retail id), labelled as derived; markers only, since no object models exist;
   7. **no music.**
 - **`types.ts` needs:** nothing beyond the retail Zelda additions (backdrop and markers already exist); the new Game id only.
-- **Level extras:** sub-level for 0x09's alternate header; `clearColor` from fog colour; `camera` from player entry 0; for type-1 rooms show the backdrop plus the (mostly invisible) mesh.
+- **Level extras:** View-panel setup choice for 0x09's alternate header; `clearColor` from fog colour; `camera` from player entry 0; for type-1 rooms show the backdrop plus the (mostly invisible) mesh.
 - **Difficulty:** low once the retail OoT loader exists (about half a day). The only new code is the static level table, the waterbox size switch and the RGBA16 backdrop; the DL interpreter works as is apart from the texture-path fix it shares with retail.
 
 ### 11.10 Verification evidence

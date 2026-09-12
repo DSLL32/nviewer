@@ -184,7 +184,7 @@ const SETUP_RENDERMODE_XLU = 0xc81049d8;
 const SETUP_GEOMETRY = 0x1 | 0x4 | 0x200 | 0x2000 | 0x10000 | 0x20000;
 const PREREND_FIXED = 0x19;
 
-interface AlphaDef { scene: AlphaScene; layer: number }
+interface AlphaDef { scene: AlphaScene; layer: number; setupName?: string }
 
 function loadAlphaLevel(rom: Uint8Array, def: AlphaDef, info: LevelInfo): Level {
   const [id, start, name, sw97, , , retail, colShared, texShared, status, guessed] = def.scene;
@@ -420,16 +420,25 @@ export function openZeldaAlpha(rom: Uint8Array): Game {
   const levels: LevelInfo[] = [];
   for (const id of ORDER) {
     const s = byId.get(id)!;
-    const push = (layer: number, name: string) => {
-      levels.push({ index: levels.length, name, kind: s[4], group: s[5] });
-      defs.push({ scene: s, layer });
+    const push = (layer: number, name: string, setupName?: string, setupParent?: number) => {
+      levels.push({ index: levels.length, name, kind: s[4], group: s[5], ...(setupParent !== undefined ? { setupParent } : {}) });
+      defs.push({ scene: s, layer, setupName });
     };
-    push(0, s[2] + (s[10] ? ' (sw97 name)' : ''));
+    const main = levels.length;
+    push(0, s[2] + (s[10] ? ' (sw97 name)' : ''), id === 0x09 ? 'Day' : undefined);
     const sceneData = rom.subarray(s[1], s[1] + 0x40000);
     // Alternate headers: only 0x09 has one (night).
-    if (alternateHeaders(sceneData, 2)[0] != null) push(1, `${s[2]} (night)`);
+    if (alternateHeaders(sceneData, 2)[0] != null) push(1, `${s[2]} (night)`, 'Night', main);
   }
-  return { id: 'oot-alpha', title: 'Ocarina of Time (1997 prototype, F-Zero X cartridge)', levels, loadLevel: (i) => loadAlphaLevel(rom, defs[i], levels[i]) };
+  return {
+    id: 'oot-alpha', title: 'Ocarina of Time (1997 prototype, F-Zero X cartridge)', levels,
+    loadLevel: (i) => {
+      const level = loadAlphaLevel(rom, defs[i], levels[i]);
+      const options = defs.flatMap((def, k) => def.scene === defs[i].scene && def.setupName ? [{ name: def.setupName, level: k }] : []);
+      if (options.length > 1) level.setups = { options, current: i };
+      return level;
+    },
+  };
 }
 
 // The static table and the structural scan agree (a check for the test scripts).

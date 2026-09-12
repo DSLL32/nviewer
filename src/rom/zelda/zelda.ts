@@ -26,7 +26,7 @@ import {
   actorProfile, findDayNightTextures, findMmAreaTextures, findMmSkyFiles, findOotSkyFiles, findTables, type ZeldaGame, type ZeldaTables,
 } from './tables';
 
-interface LevelDef { scene: number; layer: number; file: string; time?: number } // time: a time-of-day variant
+interface LevelDef { scene: number; layer: number; file: string; time?: number; setupName?: string } // time: a time-of-day variant
 
 // Loader options for offline comparisons with captures: the time of day (0..0xFFFF, default noon; OoT night layers
 // midnight) and the MM day (default 1).
@@ -737,8 +737,8 @@ function sceneLevels(z: Zelda): { defs: LevelDef[]; levels: LevelInfo[] } {
   const { fs, t, game } = z;
   const defs: LevelDef[] = [];
   const levels: LevelInfo[] = [];
-  const push = (d: LevelDef, name: string, kind: LevelInfo['kind'], group: string) => {
-    levels.push({ index: levels.length, name, kind, group });
+  const push = (d: LevelDef, name: string, kind: LevelInfo['kind'], group: string, setupParent?: number) => {
+    levels.push({ index: levels.length, name, kind, group, ...(setupParent !== undefined ? { setupParent } : {}) });
     defs.push(d);
   };
   const listed = new Set<number>();
@@ -746,7 +746,8 @@ function sceneLevels(z: Zelda): { defs: LevelDef[]; levels: LevelInfo[] } {
     const e = t.scenes[id];
     if (!e) continue;
     listed.add(id);
-    push({ scene: id, layer: 0, file }, name, kind, group);
+    const main = levels.length;
+    push({ scene: id, layer: 0, file, setupName: game === 'oot' ? 'Child day' : 'Setup 0' }, name, kind, group);
     let data: Uint8Array;
     try {
       data = fs.data(e.file);
@@ -764,9 +765,12 @@ function sceneLevels(z: Zelda): { defs: LevelDef[]; levels: LevelInfo[] } {
       const layer = k + 1;
       if (h === null) return;
       if (game === 'oot') {
-        if (layer <= 3) push({ scene: id, layer, file }, `${name} (${OOT_LAYER_NAMES[layer]})`, kind, group);
+        if (layer <= 3) {
+          const setupName = OOT_LAYER_NAMES[layer].replace(/^./, (c) => c.toUpperCase());
+          push({ scene: id, layer, file, setupName }, `${name} (${OOT_LAYER_NAMES[layer]})`, kind, group, main);
+        }
       } else if (!parseHeader(data, h)?.some((c) => c.code === 0x17)) {
-        push({ scene: id, layer, file }, `${name} (setup ${layer})`, kind, group);
+        push({ scene: id, layer, file, setupName: `Setup ${layer}` }, `${name} (setup ${layer})`, kind, group, main);
       }
     });
   }
@@ -803,7 +807,12 @@ export function openZelda64(rom: Uint8Array, build: ZeldaBuild, options: ZeldaOp
     id: game,
     title,
     levels,
-    loadLevel: (i) => loadLevel(z, defs[i], levels[i]),
+    loadLevel: (i) => {
+      const level = loadLevel(z, defs[i], levels[i]);
+      const options = defs.flatMap((def, k) => def.scene === defs[i].scene && def.setupName ? [{ name: def.setupName, level: k }] : []);
+      if (defs[i].setupName && options.length > 1) level.setups = { options, current: i };
+      return level;
+    },
     music: music.tracks,
     decodeMusic: (i) => music.decode(i),
   };
