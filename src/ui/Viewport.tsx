@@ -93,6 +93,7 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
   const [showScripted, setShowScripted] = useState(true);
   const [fogOn, setFogOn] = useState(readFogSetting);
   const [cullOn, setCullOn] = useState(() => readFlag(CULL_KEY));
+  const [lightingSetting, setLightingSetting] = useState<number | null>(() => level?.lighting?.default ?? null);
   const [cutaway, setCutaway] = useState(false);
   const [wireframe, setWireframe] = useState(false);
   const [collisionWireframe, setCollisionWireframe] = useState(false);
@@ -415,7 +416,10 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
   useEffect(() => {
     const engine = engineRef.current;
     if (!engine) return;
+    const defaultLighting = level?.lighting?.default ?? null;
+    setLightingSetting(defaultLighting);
     engine.renderer.setLevel(level);
+    engine.renderer.setLightingSetting(defaultLighting);
     viewKeyRef.current = null;
     restoredViewRef.current = null;
     if (!level) return;
@@ -485,6 +489,7 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
 
   useEffect(() => engineRef.current?.renderer.setNearestFiltering(nearest), [nearest]);
   useEffect(() => engineRef.current?.renderer.setShowAnimated(showScripted), [showScripted]);
+  useEffect(() => engineRef.current?.renderer.setLightingSetting(lightingSetting), [lightingSetting]);
   useEffect(() => engineRef.current?.renderer.setCutaway(cutaway), [cutaway]);
   useEffect(() => engineRef.current?.renderer.setWireframe(wireframe), [wireframe]);
   useEffect(() => engineRef.current?.renderer.setCollisionWireframe(collisionWireframe), [collisionWireframe]);
@@ -716,6 +721,7 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
       ],
       layerGroups: groups,
       toggles: {
+        lighting: lightingSetting === null ? 'off' : (lv.lighting?.presets[lightingSetting] ?? 'off'),
         cutaway,
         nearestFiltering: nearest,
         wireframe,
@@ -769,6 +775,7 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
   const hasFog = !!level?.fog;
   const hasCollision = level?.layers?.some((l) => l.kind === 'collision' && l.instances.length > 0) ?? false;
   const layers = level?.layers ?? [];
+  const lightingPresets = level?.lighting?.presets ?? [];
 
   return (
     <main ref={viewportRef} className={`viewport${viewRect ? ' letterboxed' : ''}`}>
@@ -953,15 +960,39 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
           </>
         )}
       </div>
-      {layers.length > 0 && (
+      {level && (
         <div className="hud layer-panel" id="layer-panel">
           <div className="hud-row">
-            <strong>Layers</strong>
-            <span className="small muted">
-              {layers.length - layers.filter((_, i) => hiddenLayers.has(i)).length + (unlayeredInstances.length > 0 && !otherGeometryHidden ? 1 : 0)} of{' '}
-              {layers.length + (unlayeredInstances.length > 0 ? 1 : 0)} shown
-            </span>
+            <strong>View</strong>
           </div>
+          {lightingPresets.length > 0 && (
+            <>
+              <span className="small">Lighting</span>
+              <div className="lighting-options" role="radiogroup" aria-label="Lighting">
+                {lightingPresets.map((name, index) => (
+                  <button
+                    key={index}
+                    type="button"
+                    role="radio"
+                    aria-checked={lightingSetting === index}
+                    className="lighting-option"
+                    onClick={() => setLightingSetting(index)}
+                  >
+                    {name}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={lightingSetting === null}
+                  className="lighting-option"
+                  onClick={() => setLightingSetting(null)}
+                >
+                  Off
+                </button>
+              </div>
+            </>
+          )}
           {layerEntries.map((entry) => {
             if (entry.group === null) return layerRow(layers[entry.index], entry.index);
             const { group, indices } = entry;
