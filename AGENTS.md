@@ -101,6 +101,12 @@ Implemented (spec in the repo):
 | Perfect Dark | `r49/pd/` | |
 | Zelda 64 (OoT, MM, 1997 alpha) | `r49/zelda/` (alpha in `zelda/alpha/`) | |
 
+Research complete (spec in the repo, implementation pending):
+
+| Game | Research |
+|---|---|
+| Pilotwings 64 | `r49/pilotwings/` |
+
 Research in progress (spec not yet in the repo):
 
 | Game | Research |
@@ -111,7 +117,6 @@ Research in progress (spec not yet in the repo):
 | Pokémon Snap | `r49/snap/` |
 | Mario Party (J) | `r49/mparty/` |
 | Mario Kart 64 | `r49/mk64/` |
-| Pilotwings 64 | `r49/pilotwings/` |
 
 Shared:
  - `r49/impl/`: per-agent check directories (`ge_core`, `pd_obj`, `zelda_mus`,
