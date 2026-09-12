@@ -47,11 +47,6 @@ interface Zelda {
 
 const hex = (v: number) => `0x${(v >>> 0).toString(16)}`;
 const OOT_LAYER_NAMES = ['child day', 'child night', 'adult day', 'adult night'];
-const OOT_CUTSCENE_SYMBOLS: Record<string, string> = {
-  '0x59/4': 'gZorasFountainSapphireCs',
-  '0x59/5': 'gZorasFountainUnusedJabuCs',
-  '0x59/6': 'gZorasFountainCreditsUnusedCs',
-};
 
 // SETUPDL_25 (z_rcp.c): the state rooms and most actors draw with.
 const SETUP_COMBINE: [number, number] = [0xfc127e03, 0xff0ff3ff];
@@ -818,16 +813,15 @@ function sceneLevels(z: Zelda): { defs: LevelDef[]; levels: LevelInfo[] } {
       if (game === 'oot') {
         const normal = layer <= 3;
         const cutsceneIndex = 0xffec + layer; // layer 4 = CS_INDEX_0 (0xFFF0)
-        const symbol = OOT_CUTSCENE_SYMBOLS[`${hex(id)}/${layer}`];
         const setupName = normal
           ? OOT_LAYER_NAMES[layer].replace(/^./, (c) => c.toUpperCase())
-          : `Cutscene ${hex(cutsceneIndex)} (layer ${layer})${symbol ? ` — ${symbol}` : ''}`;
-        const suffix = normal ? OOT_LAYER_NAMES[layer] : `cutscene ${hex(cutsceneIndex)}, layer ${layer}${symbol ? `, ${symbol}` : ''}`;
+          : `Cutscene ${hex(cutsceneIndex)}`;
+        const suffix = normal ? OOT_LAYER_NAMES[layer] : `cutscene ${hex(cutsceneIndex)}`;
         push({ scene: id, layer, file, setupName }, `${name} (${suffix})`, kind, group, main);
       } else {
         const isCutscene = cmds.some((c) => c.code === 0x17);
-        const setupName = `${isCutscene ? 'Cutscene ' : ''}Setup ${layer} (layer ${layer})`;
-        push({ scene: id, layer, file, setupName }, `${name} (${isCutscene ? 'cutscene ' : ''}setup ${layer}, layer ${layer})`, kind, group, main);
+        const setupName = isCutscene ? `Cutscene setup ${layer}` : `Setup ${layer}`;
+        push({ scene: id, layer, file, setupName }, `${name} (${setupName.toLowerCase()})`, kind, group, main);
       }
     });
   }
