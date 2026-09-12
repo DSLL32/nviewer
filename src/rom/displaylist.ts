@@ -452,9 +452,14 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
         bb.col.push(...out.map((q) => Math.round(q * 255)));
         const unlit = evalCombine(st.combine, rgbaUnit(v.unlit), fold.prim, fold.env);
         bb.unlit.push(...unlit.map((q) => Math.round(q * 255)));
-        v.lighting.forEach((color, k) => {
-          const preset = evalCombine(st.combine, rgbaUnit(color), fold.prim, fold.env);
-          bb.lighting[k].push(...preset.map((q) => Math.round(q * 255)));
+        bb.lighting.forEach((colors, k) => {
+          // A render-state batch can contain both lit and unlit vertices. Presets only
+          // alter lit vertices; unlit ones retain their ordinary post-combiner colour.
+          // Append either way so every preset buffer stays vertex-aligned.
+          const preset = v.lighting[k] === undefined
+            ? out
+            : evalCombine(st.combine, rgbaUnit(v.lighting[k]), fold.prim, fold.env);
+          colors.push(...preset.map((q) => Math.round(q * 255)));
         });
       } else {
         // GoldenEye: the C0 expander patches the combiners' second alpha cycle from SHADE to ENV alpha (shade alpha
@@ -462,7 +467,10 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
         const alpha = ctx.ucode === 'f3d' ? Math.round(((v.c & 0xff) * (st.env & 0xff)) / 255) : v.c & 0xff;
         bb.col.push(v.c >>> 24, (v.c >>> 16) & 0xff, (v.c >>> 8) & 0xff, alpha);
         bb.unlit.push(v.unlit >>> 24, (v.unlit >>> 16) & 0xff, (v.unlit >>> 8) & 0xff, alpha);
-        v.lighting.forEach((color, k) => bb.lighting[k].push(color >>> 24, (color >>> 16) & 0xff, (color >>> 8) & 0xff, alpha));
+        bb.lighting.forEach((colors, k) => {
+          const color = v.lighting[k] ?? v.c;
+          colors.push(color >>> 24, (color >>> 16) & 0xff, (color >>> 8) & 0xff, alpha);
+        });
       }
       bb.hasLitVertices ||= v.lit;
     }
