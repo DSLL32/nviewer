@@ -124,9 +124,15 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, onSelec
   const viewPersistRef = useRef({ stale: false, last: 0 });
   const levelSeenRef = useRef(false); // the current engine has shown a level
   const restoredViewRef = useRef<{ level: Level; state: ViewState } | null>(null);
+  const loadedLevelRef = useRef<{ level: Level | null; gameId: string | null }>({ level: null, gameId: null });
 
   const sideView = level?.sideView ?? null;
-  const sideActive = !!sideView && flyLevel !== level;
+  const previousLevel = loadedLevelRef.current;
+  const setupSwap =
+    previousLevel.gameId !== null && previousLevel.gameId === (gameId ?? null) && siblingSetups(previousLevel.level, level);
+  // `flyLevel` is keyed by Level identity so unrelated levels start in side view. During a sibling setup swap, retain
+  // the live controls mode until the state is re-keyed to the newly loaded Level.
+  const sideActive = !!sideView && (setupSwap ? (engineRef.current?.controls.sideView ?? flyLevel !== level) : flyLevel !== level);
 
   // A prerendered picture from a fixed game camera (Backdrop.aspect) keeps its proportions: while it is shown, the 3D
   // view (canvas and marker overlay) is a centred rectangle of that aspect. Picking, markers and the renderer all work
@@ -142,7 +148,15 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, onSelec
     () => new Set((level?.layers ?? []).flatMap((l, i) => (l.visibleByDefault === false ? [i] : []))),
     [level],
   );
-  const hiddenLayers = layerState && layerState.level === level ? layerState.hidden : defaultHiddenLayers;
+  const carriedHiddenLayers =
+    setupSwap && previousLevel.level && level
+      ? transferHiddenLayers(
+          previousLevel.level,
+          level,
+          layerState?.level === previousLevel.level ? layerState.hidden : defaultHiddenForLevel(previousLevel.level),
+        )
+      : null;
+  const hiddenLayers = layerState && layerState.level === level ? layerState.hidden : (carriedHiddenLayers ?? defaultHiddenLayers);
   // Instances in no layer, when the level has layers: the Layers panel adds an "other geometry" entry for them so they
   // can be hidden too (a viewer-only entry, not a Level layer). Visible by default, remembered per level like layers.
   const unlayeredInstances = useMemo(() => {
@@ -157,7 +171,10 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, onSelec
     return out;
   }, [level]);
   const [otherGeometryState, setOtherGeometryState] = useState<{ level: Level; hidden: boolean } | null>(null);
-  const otherGeometryHidden = !!otherGeometryState && otherGeometryState.level === level && otherGeometryState.hidden;
+  const carriedOtherGeometryHidden =
+    setupSwap && previousLevel.level && otherGeometryState?.level === previousLevel.level ? otherGeometryState.hidden : false;
+  const otherGeometryHidden =
+    otherGeometryState?.level === level ? otherGeometryState.hidden : carriedOtherGeometryHidden;
   const hiddenInstances = useMemo(() => {
     const out = new Set<number>();
     level?.layers?.forEach((l, i) => {
@@ -418,10 +435,13 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, onSelec
   useEffect(() => {
     const engine = engineRef.current;
     if (!engine) return;
+    const preserveView = setupSwap;
+    const preservedSideView = preserveView && engine.controls.sideView;
     const defaultLighting = level?.lighting?.default ?? null;
     setLightingSetting(defaultLighting);
     engine.renderer.setLevel(level);
     engine.renderer.setLightingSetting(defaultLighting);
+    loadedLevelRef.current = { level, gameId: gameId ?? null };
     viewKeyRef.current = null;
     restoredViewRef.current = null;
     if (!level) return;
@@ -435,20 +455,32 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, onSelec
     let view: StartView;
     if (sv) {
       // The game's own lens, never re-framed: its parallax depends on the field of view and eye distance.
-      engine.camera.fovY = (sv.fovY * Math.PI) / 180;
       view = { position: [sv.start[0], sv.start[1], sv.distance], yaw: 0, pitch: 0, speed: Math.min(5000, Math.max(50, sv.distance)), groundY: 0 };
+      if (!preserveView) engine.camera.fovY = (sv.fovY * Math.PI) / 180;
     } else {
       // A prerendered picture only lines up through the game camera's own lens.
       const gameFov = level.backdrop?.aspect && level.camera?.fovY && level.camera.fovY > 0 && level.camera.fovY < 179 ? level.camera.fovY : null;
-      engine.camera.fovY = gameFov ? (gameFov * Math.PI) / 180 : FREE_FLY_FOV_Y;
+      const fovY = gameFov ? (gameFov * Math.PI) / 180 : FREE_FLY_FOV_Y;
+      if (!preserveView) engine.camera.fovY = fovY;
       const canvas = engine.renderer.gl.canvas as HTMLCanvasElement;
-      view = computeStartView(level, canvas.width / Math.max(1, canvas.height), engine.camera.fovY);
+      view = computeStartView(level, canvas.width / Math.max(1, canvas.height), fovY);
     }
     startViewRef.current = { level, view };
     engine.renderer.setSkyGroundHeight(view.groundY);
+    const key = viewStateKey(gameId, gameTitle, level);
+    if (preserveView) {
+      // The setup is another rendering of the same scene. Carry View choices to matching layers while setup-only
+      // layers retain their own defaults. Reset and future view persistence belong to the newly selected setup.
+      setLayerState({ level, hidden: hiddenLayers });
+      setOtherGeometryState({ level, hidden: otherGeometryHidden });
+      setFlyLevel(sv && !preservedSideView ? level : null);
+      levelSeenRef.current = true;
+      viewKeyRef.current = key;
+      viewPersistRef.current.stale = true;
+      return;
+    }
     applyView(engine, view);
     // After a reload or hot update: the saved view, if it belongs to this level.
-    const key = viewStateKey(gameId, gameTitle, level);
     const saved = levelSeenRef.current ? null : loadViewState(key);
     levelSeenRef.current = true;
     if (saved) {
@@ -465,6 +497,21 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, onSelec
     const engine = engineRef.current;
     if (!engine) return;
     const sv = level?.sideView;
+    if (setupSwap) {
+      // Refresh side-view limits without allowing setSideView to level, clamp or otherwise move the preserved camera.
+      const camera = engine.camera;
+      const position = [...camera.position] as [number, number, number];
+      const { yaw, pitch, speed, fovY } = camera;
+      engine.controls.setSideView(sv && sideActive && level ? sideLimits(sv, level) : null);
+      camera.position = position;
+      camera.yaw = yaw;
+      camera.pitch = pitch;
+      camera.speed = speed;
+      camera.fovY = fovY;
+      engine.controls.invalidate();
+      viewPersistRef.current.stale = true;
+      return;
+    }
     // A restored view is placed again once its mode is active: entering the side view levels and clamps the camera,
     // and leaving it resets the speed.
     const restored = restoredViewRef.current?.level === level ? restoredViewRef.current.state : null;
@@ -1099,6 +1146,36 @@ const CULL_KEY = 'nviewer.backfaceCulling.v2';
 const SKY_KEY = 'nviewer.sky';
 const BACKDROP_KEY = 'nviewer.showBackdrop';
 const SKY_NONE = '__none__';
+
+/** Whether two loaded levels are different setup variants of the same scene. */
+function siblingSetups(previous: Level | null, next: Level | null): boolean {
+  const a = previous?.setups;
+  const b = next?.setups;
+  if (!a || !b || a.current === b.current) return false;
+  return a.options.some((option) => option.level === b.current) && b.options.some((option) => option.level === a.current);
+}
+
+function defaultHiddenForLevel(level: Level): ReadonlySet<number> {
+  return new Set((level.layers ?? []).flatMap((layer, index) => (layer.visibleByDefault === false ? [index] : [])));
+}
+
+/** Carry layer visibility between setup variants, matching duplicate identities in their original order. */
+function transferHiddenLayers(previous: Level, next: Level, previousHidden: ReadonlySet<number>): ReadonlySet<number> {
+  const states = new Map<string, boolean[]>();
+  (previous.layers ?? []).forEach((layer, index) => {
+    const key = JSON.stringify([layer.name, layer.kind, layer.group ?? null]);
+    const matches = states.get(key);
+    if (matches) matches.push(previousHidden.has(index));
+    else states.set(key, [previousHidden.has(index)]);
+  });
+  const hidden = new Set<number>();
+  (next.layers ?? []).forEach((layer, index) => {
+    const key = JSON.stringify([layer.name, layer.kind, layer.group ?? null]);
+    const matched = states.get(key)?.shift();
+    if (matched ?? (layer.visibleByDefault === false)) hidden.add(index);
+  });
+  return hidden;
+}
 
 /** The largest rectangle of this aspect (width / height) centred in a width x height box, in whole CSS pixels. */
 function fitAspect(width: number, height: number, aspect: number) {
