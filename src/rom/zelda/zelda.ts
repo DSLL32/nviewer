@@ -47,6 +47,11 @@ interface Zelda {
 
 const hex = (v: number) => `0x${(v >>> 0).toString(16)}`;
 const OOT_LAYER_NAMES = ['child day', 'child night', 'adult day', 'adult night'];
+const OOT_CUTSCENE_SYMBOLS: Record<string, string> = {
+  '0x59/4': 'gZorasFountainSapphireCs',
+  '0x59/5': 'gZorasFountainUnusedJabuCs',
+  '0x59/6': 'gZorasFountainCreditsUnusedCs',
+};
 
 // SETUPDL_25 (z_rcp.c): the state rooms and most actors draw with.
 const SETUP_COMBINE: [number, number] = [0xfc127e03, 0xff0ff3ff];
@@ -784,16 +789,45 @@ function sceneLevels(z: Zelda): { defs: LevelDef[]; levels: LevelInfo[] } {
       const sky = main?.find((c) => c.code === 0x11);
       if (sky && data[sky.off + 6] === 0) push({ scene: id, layer: 0, file, time: CLOCK(23, 0) }, `${name} (night)`, kind, group);
     }
+    // A repeated scene header can still select different alternate room headers at a different layer. De-duplicate
+    // the complete effective setup, not just the scene pointer, so actor/object-list differences remain selectable.
+    const setupSignature = (cmds: NonNullable<ReturnType<typeof parseHeader>>, layer: number) => {
+      const header = readSceneHeader(data, cmds, layer, game);
+      const roomHeaders = header.rooms.map(({ vromStart, vromEnd }) => {
+        const room = fs.fileAt(vromStart, vromEnd);
+        if (!room) return 'missing';
+        try {
+          const selected = headerForLayer(fs.data(room), 3, layer, game);
+          return String(selected.cmds[0]?.off ?? -1);
+        } catch {
+          return 'invalid';
+        }
+      });
+      return `${cmds[0]?.off ?? -1}/${roomHeaders.join(',')}`;
+    };
+    const mainHeader = parseHeader(data, 0);
+    const seenSetups = new Set(mainHeader ? [setupSignature(mainHeader, 0)] : []);
     alternateHeaders(data, 2).forEach((h, k) => {
       const layer = k + 1;
       if (h === null) return;
+      const cmds = parseHeader(data, h);
+      if (!cmds) return;
+      const signature = setupSignature(cmds, layer);
+      if (seenSetups.has(signature)) return;
+      seenSetups.add(signature);
       if (game === 'oot') {
-        if (layer <= 3) {
-          const setupName = OOT_LAYER_NAMES[layer].replace(/^./, (c) => c.toUpperCase());
-          push({ scene: id, layer, file, setupName }, `${name} (${OOT_LAYER_NAMES[layer]})`, kind, group, main);
-        }
-      } else if (!parseHeader(data, h)?.some((c) => c.code === 0x17)) {
-        push({ scene: id, layer, file, setupName: `Setup ${layer}` }, `${name} (setup ${layer})`, kind, group, main);
+        const normal = layer <= 3;
+        const cutsceneIndex = 0xffec + layer; // layer 4 = CS_INDEX_0 (0xFFF0)
+        const symbol = OOT_CUTSCENE_SYMBOLS[`${hex(id)}/${layer}`];
+        const setupName = normal
+          ? OOT_LAYER_NAMES[layer].replace(/^./, (c) => c.toUpperCase())
+          : `Cutscene ${hex(cutsceneIndex)} (layer ${layer})${symbol ? ` — ${symbol}` : ''}`;
+        const suffix = normal ? OOT_LAYER_NAMES[layer] : `cutscene ${hex(cutsceneIndex)}, layer ${layer}${symbol ? `, ${symbol}` : ''}`;
+        push({ scene: id, layer, file, setupName }, `${name} (${suffix})`, kind, group, main);
+      } else {
+        const isCutscene = cmds.some((c) => c.code === 0x17);
+        const setupName = `${isCutscene ? 'Cutscene ' : ''}Setup ${layer} (layer ${layer})`;
+        push({ scene: id, layer, file, setupName }, `${name} (${isCutscene ? 'cutscene ' : ''}setup ${layer}, layer ${layer})`, kind, group, main);
       }
     });
   }

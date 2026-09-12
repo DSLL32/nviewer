@@ -224,6 +224,10 @@ export function ootRecipe(a: PlacedActor, c: RecipeContext): ActorDraw | null {
         }],
         note: 'Dark Link illusion room before the battle; two scrolling 32x32 texture tiles (static frame 0)',
       };
+    case 'Bg_Mjin':
+      // Params 0 is the unused ocarina pad, which dynamically replaces the profile's gameplay_keep object with
+      // object_mjin_oka. The six normal warp-pad variants also swap objects at runtime and remain markers for now.
+      return p === 0 ? one(0x68, 1, 0x140, 'unused ocarina warp pad (object_mjin_oka)') : null;
     case 'Door_Ana':
       return (p & 0x300) === 0 ? { object: FIELD_KEEP, scale: sc(0.01), rot: [a.rot[0], 0, 0], lists: [{ dl: 0x05001390, xlu: true }], note: 'grotto hole' } : null;
     default:
