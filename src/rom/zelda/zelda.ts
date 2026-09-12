@@ -275,16 +275,17 @@ function norm(v: number[]): [number, number, number] {
   return [v[0] / l, v[1] / l, v[2] / l];
 }
 
-// A display list that starts with known F3DEX2/RDP opcodes and ends within 512 commands (object offsets taken from
+// A display list that starts with known F3DEX2/RDP opcodes and ends within its owning file (object offsets taken from
 // the decomp XMLs are checked this way before they are drawn).
 const F3DEX2_OPS = new Set([0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0xd7, 0xd8, 0xd9, 0xda, 0xdb, 0xdc, 0xdd, 0xde, 0xdf, 0xe0, 0xe1, 0xe2, 0xe3,
   0xe4, 0xe5, 0xe6, 0xe7, 0xe8, 0xe9, 0xed, 0xee, 0xef, 0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9, 0xfa, 0xfb, 0xfc, 0xfd, 0xfe, 0xff]);
-function plausibleList(buf: Uint8Array, at: number): boolean {
-  if (buf[at] === 0x00 && buf[at + 1] === 0x00 && buf[at + 2] === 0x00 && buf[at + 3] === 0x00) return false;
-  for (let k = 0; k < 512 && at + (k + 1) * 8 <= buf.length; k++) {
-    const op = buf[at + k * 8];
+function plausibleList(buf: Uint8Array, at: number, end: number): boolean {
+  end = Math.min(end, buf.length);
+  if (at < 0 || at + 8 > end || (buf[at] === 0x00 && buf[at + 1] === 0x00 && buf[at + 2] === 0x00 && buf[at + 3] === 0x00)) return false;
+  for (let p = at; p + 8 <= end; p += 8) {
+    const op = buf[p];
     if (!F3DEX2_OPS.has(op)) return false;
-    if (op === 0xdf || (op === 0xde && buf[at + k * 8 + 1] === 1)) return true;
+    if (op === 0xdf || (op === 0xde && buf[p + 1] === 1)) return true;
   }
   return false;
 }
@@ -689,7 +690,10 @@ function loadLevel(z: Zelda, def: LevelDef, info: LevelInfo): Level {
           const { local } = actorTransform(a, draw, l);
           const kind = l.xlu ? 'xlu' : 'opa';
           const start = resolver(kind, Math.max(0, a.room), seg6, false)(l.dl);
-          if (start < 0 || !plausibleList(buf, start)) continue;
+          const root = l.dl >>> 24;
+          const owner = root === 4 ? keepBase : root === 5 ? subKeepBase : root === 6 ? seg6 : null;
+          const end = owner ? owner[0] + owner[1] : buf.length;
+          if (!plausibleList(buf, start, end)) continue;
           batches.push(...run(l.dl, kind, Math.max(0, a.room), seg6, {
             matrix: local, primColor: l.prim ?? 0xffffffff, envColor: l.env ?? 0x80808080,
             ...(l.xlu ? { renderMode: SETUP_RENDERMODE_XLU & ~7 } : {}),

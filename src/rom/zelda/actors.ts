@@ -2,7 +2,7 @@
 // (MM: id flags, degree rotations, half-day masks), and draw recipes for static props that draw fixed display lists.
 // Everything without a recipe becomes a marker.
 import { MM_ACTORS, OOT_ACTORS } from './names';
-import { segmentAddress, twoTexScroll, type SegmentValue } from './drawconfig';
+import { segmentAddress, segmentDisplayList, twoTexScroll, type SegmentValue } from './drawconfig';
 import type { ActorEntry, TransitionActor } from './scene';
 import type { ZeldaGame } from './tables';
 
@@ -212,6 +212,18 @@ export function ootRecipe(a: PlacedActor, c: RecipeContext): ActorDraw | null {
         note: `Lake Hylia ${raised ? 'raised' : 'lowered'} water plane; two scrolling 32x32 texture tiles (static frame 0)`,
       };
     }
+    case 'En_Blkobj':
+      return {
+        object: c.profileObject, scale: sc(1),
+        lists: [{
+          dl: o6(0x53d0), xlu: true, env: rgba(0, 0, 0, 255),
+          segments: {
+            8: segmentDisplayList([0xe200001c, 0xc8112078]),
+            13: twoTexScroll(0, 0, 0, 32, 32, 1, 0, 0, 32, 32),
+          },
+        }],
+        note: 'Dark Link illusion room before the battle; two scrolling 32x32 texture tiles (static frame 0)',
+      };
     case 'Door_Ana':
       return (p & 0x300) === 0 ? { object: FIELD_KEEP, scale: sc(0.01), rot: [a.rot[0], 0, 0], lists: [{ dl: 0x05001390, xlu: true }], note: 'grotto hole' } : null;
     default:

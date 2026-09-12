@@ -32,7 +32,8 @@ const tileSize = (t: number, x: number, y: number, w: number, h: number) => {
   y = (y >>> 0) % 2048;
   return [(0xf2000000 | ((x & 0xfff) << 12) | (y & 0xfff)) >>> 0, ((t << 24) | (((x + ((w - 1) << 2)) & 0xfff) << 12) | ((y + ((h - 1) << 2)) & 0xfff)) >>> 0];
 };
-const dl = (...parts: number[][]): SegmentValue => ({ kind: 'dl', words: [...parts.flat(), ...ENDDL] });
+export const segmentDisplayList = (...parts: number[][]): SegmentValue => ({ kind: 'dl', words: [...parts.flat(), ...ENDDL] });
+const dl = segmentDisplayList;
 const texScroll = (x: number, y: number, w: number, h: number) => dl(TILESYNC, tileSize(0, x, y, w, h));
 export const segmentAddress = (addr: number): SegmentValue => ({ kind: 'addr', addr });
 export const twoTexScroll = (t1: number, x1: number, y1: number, w1: number, h1: number, t2: number, x2: number, y2: number, w2: number, h2: number, extra: number[] = []) =>
