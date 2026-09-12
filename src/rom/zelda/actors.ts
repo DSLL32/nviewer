@@ -2,6 +2,7 @@
 // (MM: id flags, degree rotations, half-day masks), and draw recipes for static props that draw fixed display lists.
 // Everything without a recipe becomes a marker.
 import { MM_ACTORS, OOT_ACTORS } from './names';
+import { segmentAddress, twoTexScroll, type SegmentValue } from './drawconfig';
 import type { ActorEntry, TransitionActor } from './scene';
 import type { ZeldaGame } from './tables';
 
@@ -76,7 +77,7 @@ export interface DrawList {
   primLod?: number;
   env?: number;
   pre?: MatrixOp[];
-  segments?: Record<number, number>; // segment -> address (e.g. a texture in the object) set before the list
+  segments?: Record<number, SegmentValue>; // segment -> address or synthetic display list set before the model list
 }
 
 export interface ActorDraw {
@@ -94,6 +95,7 @@ export interface RecipeContext {
   child: boolean;
   time: number;
   night: boolean;
+  layer: number;
 }
 
 const KEEP = 1, FIELD_KEEP = 2, DANGEON_KEEP = 3;
@@ -170,7 +172,7 @@ export function ootRecipe(a: PlacedActor, c: RecipeContext): ActorDraw | null {
       }
       if (type === 2) {
         const [dl, tex] = sub === 1 ? [0x6810, 0xb0a0] : [0x6610, 0xa8a0];
-        return { object: DANGEON_KEEP, scale: sc(0.1), lists: [{ dl: o6(dl), segments: { 8: o6(tex) } }], note: `eye switch ${sub}` };
+        return { object: DANGEON_KEEP, scale: sc(0.1), lists: [{ dl: o6(dl), segments: { 8: segmentAddress(o6(tex)) } }], note: `eye switch ${sub}` };
       }
       if (type === 3 || type === 4) {
         if (sub === 2 || sub === 3) return null;
@@ -179,7 +181,7 @@ export function ootRecipe(a: PlacedActor, c: RecipeContext): ActorDraw | null {
           object: DANGEON_KEEP, scale: sc(0.1), note: `crystal switch ${sub}`,
           lists: [
             { dl: o6(diamond ? 0x7488 : 0x6e60), xlu: true },
-            { dl: o6(diamond ? 0x7340 : 0x6d10), env: rgba(0, 0, 0, 128), ...(diamond ? { segments: { 9: o6(0x144b0) } } : {}) },
+            { dl: o6(diamond ? 0x7340 : 0x6d10), env: rgba(0, 0, 0, 128), ...(diamond ? { segments: { 9: segmentAddress(o6(0x144b0)) } } : {}) },
           ],
         };
       }
@@ -190,6 +192,25 @@ export function ootRecipe(a: PlacedActor, c: RecipeContext): ActorDraw | null {
     case 'Bg_Spot02_Objects': {
       const dl = [0x12a50, 0x127c0, 0x130b0][p & 0xff];
       return dl ? one(c.profileObject, 0.1, dl, `set piece ${p & 0xff}`) : null;
+    }
+    case 'Bg_Spot06_Objects': {
+      const type = (p >> 8) & 0xff;
+      if (type !== 2) return null;
+      // The normal adult setup represents Lake Hylia before the Water Temple is cleared; cutscene setups force the
+      // raised model. At frame zero both scroll lists have zero offsets, but retaining the two distinct lists records
+      // the actor's actual material contract and lets the display-list decoder see both tile windows.
+      const raised = c.child || c.layer >= 4;
+      return {
+        object: c.profileObject, scale: sc(1),
+        lists: [{
+          dl: o6(raised ? 0x470 : 0x120), xlu: true, env: rgba(255, 255, 255, 128),
+          segments: {
+            8: twoTexScroll(0, 0, 0, 32, 32, 1, 0, 0, 32, 32),
+            9: twoTexScroll(0, 0, 0, 32, 32, 1, 0, 0, 32, 32),
+          },
+        }],
+        note: `Lake Hylia ${raised ? 'raised' : 'lowered'} water plane; two scrolling 32x32 texture tiles (static frame 0)`,
+      };
     }
     case 'Door_Ana':
       return (p & 0x300) === 0 ? { object: FIELD_KEEP, scale: sc(0.01), rot: [a.rot[0], 0, 0], lists: [{ dl: 0x05001390, xlu: true }], note: 'grotto hole' } : null;
@@ -260,7 +281,7 @@ export function mmRecipe(a: PlacedActor, c: RecipeContext): ActorDraw | null {
       }
       if (type === 2) {
         const [dl, tex] = sub === 1 ? [0x85f0, 0xb6c0] : [0x83f0, 0xaec0];
-        return { object: DANGEON_KEEP, scale: sc(scale), lists: [{ dl: o6(dl), xlu: (p & 8) !== 0, segments: { 8: o6(tex) } }], note: `eye switch ${sub}` };
+        return { object: DANGEON_KEEP, scale: sc(scale), lists: [{ dl: o6(dl), xlu: (p & 8) !== 0, segments: { 8: segmentAddress(o6(tex)) } }], note: `eye switch ${sub}` };
       }
       return {
         object: DANGEON_KEEP, scale: sc(scale), note: `crystal switch ${sub}`,

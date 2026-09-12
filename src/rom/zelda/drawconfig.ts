@@ -34,7 +34,8 @@ const tileSize = (t: number, x: number, y: number, w: number, h: number) => {
 };
 const dl = (...parts: number[][]): SegmentValue => ({ kind: 'dl', words: [...parts.flat(), ...ENDDL] });
 const texScroll = (x: number, y: number, w: number, h: number) => dl(TILESYNC, tileSize(0, x, y, w, h));
-const twoTexScroll = (t1: number, x1: number, y1: number, w1: number, h1: number, t2: number, x2: number, y2: number, w2: number, h2: number, extra: number[] = []) =>
+export const segmentAddress = (addr: number): SegmentValue => ({ kind: 'addr', addr });
+export const twoTexScroll = (t1: number, x1: number, y1: number, w1: number, h1: number, t2: number, x2: number, y2: number, w2: number, h2: number, extra: number[] = []) =>
   dl(TILESYNC, tileSize(t1, x1, y1, w1, h1), TILESYNC, tileSize(t2, x2, y2, w2, h2), extra);
 
 const CLOCK = (h: number, m: number) => Math.trunc(((h * 60 + m) * 0x10000) / (24 * 60) + 0.5);

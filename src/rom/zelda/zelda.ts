@@ -8,7 +8,7 @@ import { runDisplayList, type DisplayListContext } from '../displaylist';
 import { decodeRows, ImFmt, ImSiz, Tlut } from '../texture';
 import type { Backdrop, Batch, CameraView, DebugInfo, Game, Instance, Level, LevelInfo, LevelLayer, Marker, Mesh, Sky, Texture } from '../types';
 import {
-  actorTransform, categoryLayer, mmHalfDayBit, mmRecipe, ootRecipe, placeRoomActor, placeTransitionActor, type ActorDraw, type PlacedActor,
+  actorTransform, categoryLayer, mmHalfDayBit, mmRecipe, ootRecipe, placeRoomActor, placeTransitionActor, type ActorDraw, type DrawList, type PlacedActor,
 } from './actors';
 import { collisionBatch, floorBgCam, segmentHit, waterBoxBatch } from './collision';
 import { resolveCoplanar } from './coplanar';
@@ -368,7 +368,9 @@ function loadLevel(z: Zelda, def: LevelDef, info: LevelInfo): Level {
       const a = placeRoomActor(game, e, r.index);
       if (game === 'mm' && a.halfDayMask && !(a.halfDayMask & dayBit)) { otherTimes++; continue; }
       const pr = profile(a.id);
-      const draw = (game === 'oot' ? ootRecipe : mmRecipe)(a, { profileObject: pr?.objectId ?? 0, child: def.layer < 2, time, night: time >= 0xc000 || time < 0x4000 });
+      const draw = (game === 'oot' ? ootRecipe : mmRecipe)(a, {
+        profileObject: pr?.objectId ?? 0, child: def.layer < 2, time, night: time >= 0xc000 || time < 0x4000, layer: def.layer,
+      });
       placed.push({ a, draw: draw && t.objects[draw.object] ? draw : null, category: pr?.category ?? 8, roomFile: r.file });
     }
   }
@@ -408,6 +410,14 @@ function loadLevel(z: Zelda, def: LevelDef, info: LevelInfo): Level {
   for (const kind of ['opa', 'xlu'] as const) {
     for (const [s, v] of cfg[kind].segments) if (v.kind === 'dl') synth[kind].set(s, space.words(v.words));
   }
+  const actorSynth = new Map<object, number>();
+  for (const p of placed) {
+    for (const l of p.draw?.lists ?? []) {
+      for (const v of Object.values(l.segments ?? {})) {
+        if (v.kind === 'dl' && !actorSynth.has(v)) actorSynth.set(v, space.words(v.words));
+      }
+    }
+  }
   const chains = new Map<string, number>();
   for (const p of placed) {
     for (const l of p.draw?.lists ?? []) {
@@ -420,12 +430,17 @@ function loadLevel(z: Zelda, def: LevelDef, info: LevelInfo): Level {
   const buf = space.build();
 
   const within = (b: [number, number] | null, off: number) => (b && off < b[1] ? b[0] + off : -1);
-  const resolver = (kind: 'opa' | 'xlu', room: number, seg6: [number, number] | null, images: boolean, extra?: Record<number, number>) => {
+  const resolver = (kind: 'opa' | 'xlu', room: number, seg6: [number, number] | null, images: boolean, extra?: DrawList['segments']) => {
     const state = cfg[kind];
     const resolve = (addr: number): number => {
       const seg = addr >>> 24, off = addr & 0xffffff;
-      if (extra && extra[seg] !== undefined) {
-        const b = resolve(extra[seg]);
+      const e = extra?.[seg];
+      if (e) {
+        if (e.kind === 'dl') {
+          const b = actorSynth.get(e);
+          return b === undefined ? -1 : b + off;
+        }
+        const b = resolve(e.addr);
         return b < 0 ? -1 : b + off;
       }
       switch (seg) {
@@ -469,7 +484,7 @@ function loadLevel(z: Zelda, def: LevelDef, info: LevelInfo): Level {
   const textures: Texture[] = [];
   const textureKeys = new Map<string, number>();
   let listErrors = 0;
-  const run = (dl: number, kind: 'opa' | 'xlu', room: number, seg6: [number, number] | null, extra: Partial<DisplayListContext> = {}, segments?: Record<number, number>): Batch[] => {
+  const run = (dl: number, kind: 'opa' | 'xlu', room: number, seg6: [number, number] | null, extra: Partial<DisplayListContext> = {}, segments?: DrawList['segments']): Batch[] => {
     const ctx: DisplayListContext = {
       buf, ucode: 'f3dex2', resolve: resolver(kind, room, seg6, false, segments), resolveImage: resolver(kind, room, seg6, true, segments),
       textures, textureKeys, keyPrefix: '', vertexScale: 1, mirrorX: false,
