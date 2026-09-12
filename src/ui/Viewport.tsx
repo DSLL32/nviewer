@@ -157,6 +157,21 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, onSelec
         )
       : null;
   const hiddenLayers = layerState && layerState.level === level ? layerState.hidden : (carriedHiddenLayers ?? defaultHiddenLayers);
+  const collisionLayers = useMemo(
+    () => (level?.layers ?? []).flatMap((layer, index) => (layer.kind === 'collision' && layer.instances.length > 0 ? [index] : [])),
+    [level],
+  );
+  // One state update however many layers change (a group or the collision shortcut), so hidden instances are
+  // recomputed once. Collision is selected by kind, covering separately named overlays such as waterboxes.
+  const setLayersVisible = (indices: readonly number[], visible: boolean) => {
+    if (!level) return;
+    const next = new Set(hiddenLayers);
+    for (const index of indices) {
+      if (visible) next.delete(index);
+      else next.add(index);
+    }
+    setLayerState({ level, hidden: next });
+  };
   // Instances in no layer, when the level has layers: the Layers panel adds an "other geometry" entry for them so they
   // can be hidden too (a viewer-only entry, not a Level layer). Visible by default, remembered per level like layers.
   const unlayeredInstances = useMemo(() => {
@@ -293,6 +308,10 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, onSelec
   actionRef.current = (a) => {
     const engine = engineRef.current;
     if (a === 'toggle-wireframe') setWireframe((v) => !v);
+    else if (a === 'toggle-collision') {
+      if (collisionLayers.length > 0) setLayersVisible(collisionLayers, collisionLayers.some((i) => hiddenLayers.has(i)));
+      else if (level) setViewHint('No collision in this level');
+    }
     else if (a === 'toggle-collision-wireframe') {
       if (level?.layers?.some((l) => l.kind === 'collision' && l.instances.length > 0)) setCollisionWireframe((v) => !v);
       else if (level) setViewHint('No collision in this level');
@@ -677,16 +696,6 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, onSelec
   );
   const reportTexture = report && report.texture !== null && level ? (level.textures[report.texture] ?? null) : null;
 
-  // One state update however many layers change (a group toggle), so the hidden instances are recomputed once.
-  const setLayersVisible = (indices: readonly number[], visible: boolean) => {
-    if (!level) return;
-    const next = new Set(hiddenLayers);
-    for (const index of indices) {
-      if (visible) next.delete(index);
-      else next.add(index);
-    }
-    setLayerState({ level, hidden: next });
-  };
   const setLayerVisible = (index: number, visible: boolean) => setLayersVisible([index], visible);
   // Rooms: the layers of the 'rooms' group, and which of them each instance belongs to.
   const roomLayers = useMemo(() => {
@@ -822,7 +831,7 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, onSelec
 
   const hasScripted = level?.instances.some((i) => i.animated && i.mesh >= 0) ?? false;
   const hasFog = !!level?.fog;
-  const hasCollision = level?.layers?.some((l) => l.kind === 'collision' && l.instances.length > 0) ?? false;
+  const hasCollision = collisionLayers.length > 0;
   const layers = level?.layers ?? [];
   const lightingPresets = level?.lighting?.presets ?? [];
 
@@ -932,6 +941,7 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, onSelec
                 <summary>View and overlays</summary>
                 <dl className="controls-help">
                   <dt>F</dt><dd>Wireframe</dd>
+                  <dt>Z</dt><dd>Show or hide collision</dd>
                   <dt>Shift + F</dt><dd>Collision wireframe</dd>
                   <dt>X</dt><dd>Cutaway (hide the nearest surface)</dd>
                   <dt>H</dt><dd>Show or hide this help</dd>
