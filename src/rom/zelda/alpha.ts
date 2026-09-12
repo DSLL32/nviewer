@@ -7,12 +7,12 @@ import { buildLevel, fogPosition } from '../bomberman/common';
 import { runDisplayList, type DisplayListContext } from '../displaylist';
 import { decodeRows, ImFmt, ImSiz, Tlut } from '../texture';
 import type { Backdrop, Batch, CameraView, DebugInfo, Game, Instance, Level, LevelInfo, LevelKind, LevelLayer, Marker, Mesh, Texture } from '../types';
-import { collisionBatch, floorBgCam, waterBoxBatch } from './collision';
+import { floorBgCam, waterBoxBatch } from './collision';
 import { resolveCoplanar } from './coplanar';
 import { currentLights, rspLighting, sceneLightPresets } from './env';
 import { OOT_ACTORS } from './names';
 import {
-  alternateHeaders, headerForLayer, parseCollision, parseHeader, readRoomHeader, readSceneHeader, s16, u32, type Collision, type RoomHeader,
+  alternateHeaders, headerForLayer, parseCollision, parseHeader, readRoomHeader, readSceneHeader, s16, u16, u32, type Collision, type RoomHeader,
 } from './scene';
 import { halfTexel, layerGroup, meshOf, translation } from './zelda';
 
@@ -185,6 +185,66 @@ const SETUP_GEOMETRY = 0x1 | 0x4 | 0x200 | 0x2000 | 0x10000 | 0x20000;
 const PREREND_FIXED = 0x19;
 
 interface AlphaDef { scene: AlphaScene; layer: number; setupName?: string }
+
+interface AlphaCollisionGroup { type: number; flagsA: number; flagsB: number; count: number; batch: Batch }
+
+// Keep alpha collision grouped by SurfaceType so a selected face reports the exact two words that govern it.
+// Swimming is not a CollisionPoly/SurfaceType property in Zelda: rectangular WaterBox records define water volumes.
+// Batch.triSource is the scene-buffer offset of the original 16-byte CollisionPoly record.
+function alphaCollisionGroups(c: Collision, sceneData: Uint8Array, collisionHeader: number): AlphaCollisionGroup[] {
+  const header = collisionHeader & 0xffffff;
+  const polyList = header + 0x1c <= sceneData.length ? u32(sceneData, header + 0x18) & 0xffffff : 0;
+  const colors: [number, number, number][] = [[90, 200, 90], [200, 150, 80], [200, 90, 200]];
+  const groups = new Map<string, { type: number; flagsA: number; flagsB: number; pos: number[]; col: number[]; src: number[] }>();
+  for (let i = 0; i < c.polys.length; i++) {
+    const p = c.polys[i];
+    const vertices = p.v.map((v) => c.vertices[v]);
+    if (vertices.some((v) => !v)) continue;
+    const record = polyList + i * 16;
+    const flagsA = record + 6 <= sceneData.length ? u16(sceneData, record + 2) & 0xe000 : 0;
+    const flagsB = record + 6 <= sceneData.length ? u16(sceneData, record + 4) & 0xe000 : 0;
+    const key = `${p.type}:${flagsA}:${flagsB}`;
+    const g = groups.get(key) ?? { type: p.type, flagsA, flagsB, pos: [], col: [], src: [] };
+    groups.set(key, g);
+    const kind = p.normal[1] > 0.5 ? 0 : p.normal[1] < -0.5 ? 2 : 1;
+    const st = c.surfaceTypes[p.type] ?? [0, 0];
+    const h = (Math.imul(st[0] ^ Math.imul(st[1], 40503), 2654435761) >>> 24) / 255;
+    const shade = 0.7 + 0.3 * h;
+    const rgb = colors[kind].map((v) => Math.round(v * shade));
+    for (const v of vertices) {
+      g.pos.push(v![0], v![1], v![2]);
+      g.col.push(rgb[0], rgb[1], rgb[2], 150);
+    }
+    g.src.push(record);
+  }
+  return [...groups.values()].sort((a, b) => a.type - b.type || a.flagsA - b.flagsA || a.flagsB - b.flagsB).map((g) => ({
+    type: g.type, flagsA: g.flagsA, flagsB: g.flagsB, count: g.src.length,
+    batch: {
+      texture: -1, blend: 'blend', depthTest: true, depthWrite: false, cullBack: false,
+      positions: new Float32Array(g.pos), uvs: new Float32Array((g.pos.length / 3) * 2), colors: new Uint8Array(g.col),
+      triSource: new Uint32Array(g.src),
+    },
+  }));
+}
+
+function alphaSurfaceInfo(type: number, flagsA: number, flagsB: number, words: [number, number], count: number): DebugInfo {
+  const [w0, w1] = words;
+  const word = (v: number) => `0x${(v >>> 0).toString(16).padStart(8, '0')}`;
+  return {
+    surfaceType: type, surfaceWords: `${word(w0)} ${word(w1)}`, polygonFlags: `${word(flagsA)} ${word(flagsB)}`, polygonsWithFlags: count,
+    bgCamIndex: w0 & 0xff, exitIndex: (w0 >>> 8) & 0x1f, floorType: (w0 >>> 13) & 0x1f,
+    wallType: (w0 >>> 21) & 0x1f, floorProperty: (w0 >>> 26) & 0xf,
+    soft: (w0 >>> 30) & 1 ? 'yes' : 'no', horseBlocked: w0 >>> 31 ? 'yes' : 'no',
+    material: w1 & 0xf, floorEffect: (w1 >>> 4) & 3, lightSetting: (w1 >>> 6) & 0x1f,
+    echo: (w1 >>> 11) & 0x3f, hookshot: (w1 >>> 17) & 1 ? 'yes' : 'no',
+    conveyorSpeed: (w1 >>> 18) & 7, conveyorDirection: (w1 >>> 21) & 0x3f,
+    wallDamage: (w1 >>> 27) & 1 ? 'yes' : 'no',
+    ignoreCamera: flagsA & 0x2000 ? 'yes' : 'no', ignoreEntities: flagsA & 0x4000 ? 'yes' : 'no',
+    ignoreProjectiles: flagsA & 0x8000 ? 'yes' : 'no', floorConveyor: flagsB & 0x2000 ? 'yes' : 'no',
+    swimmable: 'not encoded by SurfaceType; swimming regions are separate waterboxes',
+    triSource: 'offset of the 16-byte collision polygon record in the scene buffer',
+  };
+}
 
 function loadAlphaLevel(rom: Uint8Array, def: AlphaDef, info: LevelInfo): Level {
   const [id, start, name, sw97, , , retail, colShared, texShared, status, guessed] = def.scene;
@@ -394,8 +454,12 @@ function loadAlphaLevel(rom: Uint8Array, def: AlphaDef, info: LevelInfo): Level 
 
   if (collision) {
     const cInfo: DebugInfo = { ...levelInfo, polygons: collision.polys.length, waterBoxes: collision.waterBoxes.length, waterBoxSize: 12 };
-    const cb = collisionBatch(collision);
-    if (cb) place('collision', 'collision', meshOf('collision', [cb], cInfo), 'collision', cInfo, false);
+    const groups = alphaCollisionGroups(collision, sceneData, sh.collision);
+    for (const g of groups) {
+      const sInfo = { ...cInfo, ...alphaSurfaceInfo(g.type, g.flagsA, g.flagsB, collision.surfaceTypes[g.type] ?? [0, 0], g.count) };
+      const suffix = g.flagsA || g.flagsB ? ` flags ${hex(g.flagsA)}/${hex(g.flagsB)}` : '';
+      place('collision', 'collision', meshOf(`collision surface ${g.type}${suffix}`, [g.batch], sInfo), `collision surface ${g.type}${suffix}`, sInfo, false);
+    }
     const wb = waterBoxBatch(collision);
     if (wb) place('waterboxes', 'collision', meshOf('waterboxes', [wb], cInfo), 'waterboxes', cInfo, false);
   }
