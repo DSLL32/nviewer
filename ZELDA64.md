@@ -1267,6 +1267,11 @@ Which entry (**doc** `z_kankyo.c Environment_Update`; MM `Environment_UpdateLigh
   Hyrule Field 0x8A8C US and 0x871C MQ (dir (−30,116,19) and (−20,118,19)), Deku Tree MQ lightMode 1 entry 0, SCT day
   and night, Termina Field (fog (70,80,70), zFar 12850).
 
+The viewer's **View → Lighting** radio buttons switch the baked RSP vertex lighting between the canonical Dawn, Noon,
+Dusk and Night settings for `lightMode` 0 scenes, or the stored Setting 1…N records for `lightMode` 1 scenes. **Off**
+uses full-bright shade colour. This control changes lighting only; fog, sky and other time-dependent scene state remain
+those of the loaded level variant.
+
 ### 7.4 Lights used for rooms
 
 `dirLight1` = light 1 (sun) direction/colour, `dirLight2` = light 2 (moon), ambient = settings ambient (+ adjustments,

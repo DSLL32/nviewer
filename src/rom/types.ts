@@ -41,6 +41,11 @@ export interface Batch {
   positions: Float32Array;
   uvs: Float32Array;
   colors: Uint8Array;
+  // Full-bright vertex colours for geometry whose N64 display list enables RSP lighting. Vertices drawn without
+  // lighting keep their normal colour. Omitted when a batch has no lit vertices.
+  unlitColors?: Uint8Array;
+  // Colours for Level.lighting.presets, in the same order. Only present when the batch has lit vertices.
+  lightingColors?: Uint8Array[];
   // Per triangle: the address of the display-list command that drew it (in the loader's buffer, see
   // Mesh.info), for bug reports.
   triSource?: Uint32Array;
@@ -171,6 +176,8 @@ export interface Level {
   markers?: Marker[];
   pixelArt?: boolean; // default to nearest texture filtering
   fog?: Fog; // absent when the game shows no fog
+  // Mutually exclusive scene lighting choices. Batch.lightingColors holds the corresponding baked colours.
+  lighting?: { presets: string[]; default: number };
   // Skies the game chooses between (at random, for Rush 1), if it builds them itself.
   skies?: Sky[];
   skyPlanes?: SkyPlane[]; // drawn in order (water first, then clouds)

@@ -340,6 +340,9 @@ interface GpuBatch {
   depthWrite: boolean;
   cullBack: boolean;
   decal: boolean;
+  colorBuffer: WebGLBuffer | null;
+  unlitColorBuffer: WebGLBuffer | null;
+  lightingColorBuffers: WebGLBuffer[];
   edges: WebGLBuffer | null; // the wireframe index buffer bound to this batch's vertex array, once used
 }
 
@@ -385,6 +388,7 @@ interface Scene {
   blendItems: DrawItem[];
   hasDecals: boolean;
   hasBackground: boolean;
+  lightingPresetCount: number;
   skyPlanes: GpuSkyPlane[]; // Level.skyPlanes, drawn in order
   skyPlaneTextures: WebGLTexture[]; // repeating copies of their textures
   sky: GpuMesh[]; // legacy sky domes (Rush 2049: unplaced *SKY meshes)
@@ -419,6 +423,7 @@ export class LevelRenderer {
   private instanceOpacity: ReadonlyMap<number, number> | null = null;
   private fog: Fog | null = null;
   private fogEnabled = false;
+  private lightingSetting: number | null = 0;
   private cullingEnabled = false;
   private backdropVisible = true;
   private skyGroundY = 0;
@@ -534,6 +539,14 @@ export class LevelRenderer {
   setFogEnabled(enabled: boolean) {
     if (this.fogEnabled === enabled) return;
     this.fogEnabled = enabled;
+    this.dirty = true;
+  }
+
+  /** Select one of Level.lighting.presets, or null to show lit geometry at full brightness. */
+  setLightingSetting(setting: number | null) {
+    if (this.lightingSetting === setting) return;
+    this.lightingSetting = setting;
+    this.applyLightingColors();
     this.dirty = true;
   }
 
@@ -743,6 +756,7 @@ export class LevelRenderer {
       blendItems: items.filter((i) => i.mesh.blended.length > 0),
       hasDecals: items.some((i) => i.mesh.decal.length > 0),
       hasBackground: items.some((i) => i.mesh.background.length > 0),
+      lightingPresetCount: level.lighting?.presets.length ?? 0,
       edgeIndex: null,
       skyPlanes,
       skyPlaneTextures: [...skyPlaneTextures.values()],
@@ -752,6 +766,8 @@ export class LevelRenderer {
       levelClearColor: level.clearColor ? [level.clearColor[0] / 255, level.clearColor[1] / 255, level.clearColor[2] / 255] : null,
       backdrop: backdropOf(level.backdrop, textures),
     };
+    this.lightingSetting = level.lighting?.default ?? 0;
+    this.applyLightingColors();
   }
 
   /** Draw a frame. `highlight: false` leaves out the selection overlay (e.g. for a bug report's plain view). */
@@ -1245,21 +1261,28 @@ export class LevelRenderer {
     if (!vao) throw new Error('createVertexArray failed');
     gl.bindVertexArray(vao);
     const buffers: WebGLBuffer[] = [];
-    const attrib = (location: number, data: ArrayBufferView, size: number, type: number, normalized: boolean) => {
+    const buffer = (data: ArrayBufferView) => {
       const buf = gl.createBuffer();
       if (!buf) throw new Error('createBuffer failed');
       gl.bindBuffer(gl.ARRAY_BUFFER, buf);
       gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+      buffers.push(buf);
+      return buf;
+    };
+    const attrib = (location: number, data: ArrayBufferView, size: number, type: number, normalized: boolean) => {
+      const buf = buffer(data);
       gl.enableVertexAttribArray(location);
       gl.vertexAttribPointer(location, size, type, normalized, 0, 0);
-      buffers.push(buf);
+      return buf;
     };
     attrib(0, b.positions, 3, gl.FLOAT, false);
     const textured = b.texture >= 0 && b.texture < textures.length && b.uvs.length >= count * 2;
     if (textured) attrib(1, b.uvs, 2, gl.FLOAT, false);
     else gl.vertexAttrib2f(1, 0, 0);
-    if (b.colors.length >= count * 4) attrib(2, b.colors, 4, gl.UNSIGNED_BYTE, true);
-    else gl.vertexAttrib4f(2, 1, 1, 1, 1);
+    const colorBuffer = b.colors.length >= count * 4 ? attrib(2, b.colors, 4, gl.UNSIGNED_BYTE, true) : null;
+    if (!colorBuffer) gl.vertexAttrib4f(2, 1, 1, 1, 1);
+    const unlitColorBuffer = (b.unlitColors?.length ?? 0) >= count * 4 ? buffer(b.unlitColors!) : null;
+    const lightingColorBuffers = (b.lightingColors ?? []).filter((colors) => colors.length >= count * 4).map(buffer);
     const texture1 = textured && b.texture1 !== undefined && b.texture1 >= 0 && b.texture1 < textures.length && (b.uvs1?.length ?? 0) >= count * 2 ? textures[b.texture1] : null;
     if (texture1) attrib(3, b.uvs1!, 2, gl.FLOAT, false);
     gl.bindVertexArray(null);
@@ -1276,8 +1299,27 @@ export class LevelRenderer {
       depthWrite: b.depthWrite,
       cullBack: b.cullBack === true,
       decal: b.decal === true,
+      colorBuffer,
+      unlitColorBuffer,
+      lightingColorBuffers,
       edges: null,
     };
+  }
+
+  private applyLightingColors() {
+    const scene = this.scene;
+    if (!scene || scene.lightingPresetCount === 0) return;
+    const gl = this.gl;
+    for (const b of scene.batches) {
+      const color = this.lightingSetting === null
+        ? (b.unlitColorBuffer ?? b.colorBuffer)
+        : (b.lightingColorBuffers[this.lightingSetting] ?? b.colorBuffer);
+      if (!color) continue;
+      gl.bindVertexArray(b.vao);
+      gl.bindBuffer(gl.ARRAY_BUFFER, color);
+      gl.vertexAttribPointer(2, 4, gl.UNSIGNED_BYTE, true, 0, 0);
+    }
+    gl.bindVertexArray(null);
   }
 
   private freeScene() {

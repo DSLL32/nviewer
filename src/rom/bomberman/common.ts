@@ -35,6 +35,7 @@ export function mergeBatches(batches: Batch[]): Batch[] {
       positions: cat((b) => b.positions, (n) => new Float32Array(n)),
       uvs: cat((b) => b.uvs, (n) => new Float32Array(n)),
       colors: cat((b) => b.colors, (n) => new Uint8Array(n)),
+      ...(g.some((b) => b.unlitColors) ? { unlitColors: cat((b) => b.unlitColors ?? b.colors, (n) => new Uint8Array(n)) } : {}),
       ...(g.every((b) => b.triSource) ? { triSource: cat((b) => b.triSource!, (n) => new Uint32Array(n)) } : { triSource: undefined }),
     };
   });
@@ -59,7 +60,9 @@ export function withAlpha(mesh: Mesh, alpha: number): Mesh {
     batches: mergeBatches(mesh.batches.map((b) => {
       const colors = b.colors.slice();
       for (let k = 3; k < colors.length; k += 4) colors[k] = Math.round(colors[k] * alpha);
-      return { ...b, colors, blend: 'blend', depthWrite: false };
+      const unlitColors = b.unlitColors?.slice();
+      if (unlitColors) for (let k = 3; k < unlitColors.length; k += 4) unlitColors[k] = Math.round(unlitColors[k] * alpha);
+      return { ...b, colors, ...(unlitColors ? { unlitColors } : {}), blend: 'blend', depthWrite: false };
     })),
   };
 }

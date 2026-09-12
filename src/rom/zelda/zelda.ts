@@ -4,7 +4,7 @@
 // prerendered background of OoT image rooms, static actors with fixed display lists, markers for the other actors,
 // spawns and transitions, and the collision and waterboxes as hidden layers.
 import { buildLevel, fogPosition } from '../bomberman/common';
-import { runDisplayList, type DisplayListContext, type DlLighting } from '../displaylist';
+import { runDisplayList, type DisplayListContext } from '../displaylist';
 import { decodeRows, ImFmt, ImSiz, Tlut } from '../texture';
 import type { Backdrop, Batch, CameraView, DebugInfo, Game, Instance, Level, LevelInfo, LevelLayer, Marker, Mesh, Sky, Texture } from '../types';
 import {
@@ -13,7 +13,7 @@ import {
 import { collisionBatch, floorBgCam, segmentHit, waterBoxBatch } from './collision';
 import { resolveCoplanar } from './coplanar';
 import { mmAnimatedMaterials, ootDrawConfig, type BufferState, type DrawConfig } from './drawconfig';
-import { CLOCK, currentLights, mmSky, mmSkyConfig, ootSky, readMmSkyTables, type MmSkyTables } from './env';
+import { CLOCK, currentLights, mmSky, mmSkyConfig, ootSky, readMmSkyTables, rspLighting, sceneLightPresets, type MmSkyTables } from './env';
 import { type ZeldaBuild, type ZeldaFile, ZeldaFs } from './fs';
 import { decodeJpeg } from './jpeg';
 import { zeldaMusic } from './music';
@@ -120,6 +120,11 @@ function mergeBatches(batches: Batch[]): Batch[] {
       positions: cat((b) => b.positions, (n) => new Float32Array(n)),
       uvs: cat((b) => b.uvs, (n) => new Float32Array(n)),
       colors: cat((b) => b.colors, (n) => new Uint8Array(n)),
+      ...(g.some((b) => b.unlitColors) ? { unlitColors: cat((b) => b.unlitColors ?? b.colors, (n) => new Uint8Array(n)) } : {}),
+      ...(g.some((b) => b.lightingColors) ? {
+        lightingColors: Array.from({ length: Math.max(...g.map((b) => b.lightingColors?.length ?? 0)) }, (_, i) =>
+          cat((b) => b.lightingColors?.[i] ?? b.colors, (n) => new Uint8Array(n))),
+      } : {}),
       triSource: cat((b) => b.triSource, (n) => new Uint32Array(n)),
       ...(g[0].uvs1 ? { uvs1: cat((b) => b.uvs1, (n) => new Float32Array(n)) } : {}),
     };
@@ -320,9 +325,13 @@ function loadLevel(z: Zelda, def: LevelDef, info: LevelInfo): Level {
   if (z.options.time !== undefined) time = z.options.time;
   const day = z.options.day ?? 1;
   const lights = currentLights(game, sh.lightMode, sh.lights, time);
-  const lighting: DlLighting = lights
-    ? { ambient: lights.ambient as [number, number, number], lights: [{ color: lights.l1Color as [number, number, number], dir: norm(lights.l1Dir) }, { color: lights.l2Color as [number, number, number], dir: norm(lights.l2Dir) }] }
-    : { ambient: [255, 255, 255], lights: [] };
+  const lighting = lights ? rspLighting(lights) : { ambient: [255, 255, 255] as [number, number, number], lights: [] };
+  const lightingPresets = sceneLightPresets(game, sh.lightMode, sh.lights);
+  let defaultLighting = lightingPresets.findIndex((preset) => JSON.stringify(preset.lighting) === JSON.stringify(lighting));
+  if (lightingPresets.length && defaultLighting < 0) {
+    lightingPresets.unshift({ name: 'Current', lighting });
+    defaultLighting = 0;
+  }
   const zFar = lights ? (game === 'mm' ? Math.min(lights.zFar, 12800) : lights.zFar) : 12800;
   const fog = lights && lights.fogNear < 1000
     ? fogPosition(lights.fogNear, game === 'mm' ? Math.max(1000, Math.trunc((lights.zFar * 5) / 64)) : 1000, lights.fogColor as [number, number, number], 10, zFar)
@@ -466,7 +475,7 @@ function loadLevel(z: Zelda, def: LevelDef, info: LevelInfo): Level {
       textures, textureKeys, keyPrefix: '', vertexScale: 1, mirrorX: false,
       geometryMode: SETUP_GEOMETRY, renderMode: (kind === 'xlu' ? SETUP_RENDERMODE_XLU : SETUP_RENDERMODE) & ~7, alphaCompare: 0,
       combineMode: SETUP_COMBINE, otherModeH: SETUP_OTHERMODE_H, primColor: cfg[kind].prim ?? 0xffffffff, envColor: cfg[kind].env ?? 0x80808080,
-      lighting, directImages: true, secondTexture: true, decals: true, combiner: true, textureGen: true, branchZ: 'near',
+      lighting, lightingPresets: lightingPresets.map((preset) => preset.lighting), directImages: true, secondTexture: true, decals: true, combiner: true, textureGen: true, branchZ: 'near',
       matrix: IDENTITY_MTX, resolveMatrix: matrixResolver(kind, room, seg6),
       ...extra,
     };
@@ -714,6 +723,7 @@ function loadLevel(z: Zelda, def: LevelDef, info: LevelInfo): Level {
 
   const level = buildLevel(info, `${game}-${hex(def.scene)}-${def.layer}`, textures, meshes, instances, {
     layers, markers, clearColor: [0, 0, 0], ...(fog ? { fog } : {}), ...(camera ? { camera } : {}),
+    ...(lightingPresets.length ? { lighting: { presets: lightingPresets.map((preset) => preset.name), default: defaultLighting } } : {}),
     ...(skies.length ? { skies } : {}), ...(backdrop ? { backdrop } : {}),
   });
   void roomTris;

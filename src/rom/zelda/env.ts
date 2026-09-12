@@ -1,5 +1,6 @@
 // Environment at a time of day (ZELDA64.md §7.1-§7.5; z_kankyo.c Environment_Update): the light setting blend of
 // LIGHT_MODE_TIME scenes, the sun direction, fog and zFar, and the sky textures and colours.
+import type { DlLighting } from '../displaylist';
 import type { LightSetting } from './scene';
 import type { ZeldaGame } from './tables';
 
@@ -88,6 +89,21 @@ export interface Lights {
   source: string; // which settings, for bug reports
 }
 
+const norm = (d: number[]): [number, number, number] => {
+  const n = Math.hypot(d[0], d[1], d[2]) || 1;
+  return [d[0] / n, d[1] / n, d[2] / n];
+};
+
+export function rspLighting(lights: Pick<Lights, 'ambient' | 'l1Dir' | 'l1Color' | 'l2Dir' | 'l2Color'>): DlLighting {
+  return {
+    ambient: lights.ambient as [number, number, number],
+    lights: [
+      { color: lights.l1Color as [number, number, number], dir: norm(lights.l1Dir) },
+      { color: lights.l2Color as [number, number, number], dir: norm(lights.l2Dir) },
+    ],
+  };
+}
+
 // The lights of a scene header at `time`: lightMode 0 blends settings by the time and points light 1 at the sun
 // (light 2 opposite); lightMode 1 uses setting 0 as stored.
 export function currentLights(game: ZeldaGame, lightMode: number, list: LightSetting[], time: number): Lights | null {
@@ -113,6 +129,19 @@ export function currentLights(game: ZeldaGame, lightMode: number, list: LightSet
   }
   const L = list[0];
   return { ...L, fogNear: Math.min(996, L.fogNear), source: 'setting 0' };
+}
+
+/** The mutually exclusive scene light settings exposed by the viewer. Time-based scenes use their four canonical phases. */
+export function sceneLightPresets(game: ZeldaGame, lightMode: number, list: LightSetting[]): { name: string; lighting: DlLighting }[] {
+  if (!list.length) return [];
+  if (lightMode !== 0) return list.map((lights, i) => ({ name: `Setting ${i + 1}`, lighting: rspLighting(lights) }));
+  const phases: [string, number][] = [
+    ['Dawn', CLOCK(6, 0)], ['Noon', CLOCK(12, 0)], ['Dusk', CLOCK(17, 0) + 2], ['Night', CLOCK(0, 0)],
+  ];
+  return phases.flatMap(([name, time]) => {
+    const lights = currentLights(game, lightMode, list, time);
+    return lights ? [{ name, lighting: rspLighting(lights) }] : [];
+  });
 }
 
 // OoT normal sky at `time`: the two vr_fine/vr_cloud texture indices (0-7) and the blend (0: texture 1, 255: 2).

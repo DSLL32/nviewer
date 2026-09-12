@@ -61,6 +61,8 @@ export interface DisplayListContext {
   // vertex colour is computed from these lights (a copy; G_MOVEWORD light colours in the
   // lists change it: offset 0x20 * k = light k, 0x20 * lights.length = ambient).
   lighting?: DlLighting;
+  // Additional scene lighting choices to bake for an interactive viewer control.
+  lightingPresets?: DlLighting[];
   // Fold the colour combiner (with PRIM and ENV colours) into the vertex colours, taking
   // TEXEL0 as 1, so that texture x vertex colour gives the combiner's output.
   combiner?: boolean;
@@ -142,6 +144,9 @@ interface Tile {
 interface Vertex {
   x: number; y: number; z: number; s: number; t: number;
   c: number; // RGBA (shaded when lit)
+  unlit: number; // RGBA with lit normals replaced by white, for the viewer's lighting control
+  lighting: number[]; // RGBA for each additional lighting preset
+  lit: boolean;
   gen: [number, number] | null; // generated texture coordinates (0..1)
 }
 
@@ -185,7 +190,8 @@ interface State {
 
 interface BatchBuilder {
   batch: Omit<Batch, 'positions' | 'uvs' | 'colors' | 'triSource' | 'uvs1'>;
-  pos: number[]; uv: number[]; uv1: number[]; col: number[]; src: number[];
+  pos: number[]; uv: number[]; uv1: number[]; col: number[]; unlit: number[]; lighting: number[][]; src: number[];
+  hasLitVertices: boolean;
 }
 
 // G_SETCOMBINE fields per cycle: color a, b, c, d then alpha a, b, c, d
@@ -411,7 +417,7 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
           texture, blend, depthTest, depthWrite, cullBack, ...(decal ? { decal } : {}),
           ...(texture1 >= 0 ? { texture1, texBlend: tb!.blend, ...(tb!.blend === 'lerp' ? { texMix: tb!.mix } : {}) } : {}),
         },
-        pos: [], uv: [], uv1: [], col: [], src: [],
+        pos: [], uv: [], uv1: [], col: [], unlit: [], lighting: (ctx.lightingPresets ?? []).map(() => []), src: [], hasLitVertices: false,
       };
       builders.set(key, bb);
     }
@@ -444,12 +450,21 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
       if (fold) {
         const out = evalCombine(st.combine, rgbaUnit(v.c), fold.prim, fold.env);
         bb.col.push(...out.map((q) => Math.round(q * 255)));
+        const unlit = evalCombine(st.combine, rgbaUnit(v.unlit), fold.prim, fold.env);
+        bb.unlit.push(...unlit.map((q) => Math.round(q * 255)));
+        v.lighting.forEach((color, k) => {
+          const preset = evalCombine(st.combine, rgbaUnit(color), fold.prim, fold.env);
+          bb.lighting[k].push(...preset.map((q) => Math.round(q * 255)));
+        });
       } else {
         // GoldenEye: the C0 expander patches the combiners' second alpha cycle from SHADE to ENV alpha (shade alpha
         // carries fog), so the list's FB alpha is the surface alpha (verified: RAM 1F1093FF -> 1F1493FF, Egyptian pool).
         const alpha = ctx.ucode === 'f3d' ? Math.round(((v.c & 0xff) * (st.env & 0xff)) / 255) : v.c & 0xff;
         bb.col.push(v.c >>> 24, (v.c >>> 16) & 0xff, (v.c >>> 8) & 0xff, alpha);
+        bb.unlit.push(v.unlit >>> 24, (v.unlit >>> 16) & 0xff, (v.unlit >>> 8) & 0xff, alpha);
+        v.lighting.forEach((color, k) => bb.lighting[k].push(color >>> 24, (color >>> 16) & 0xff, (color >>> 8) & 0xff, alpha));
       }
+      bb.hasLitVertices ||= v.lit;
     }
   };
 
@@ -471,7 +486,11 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
         x = tx;
         y = ty;
       }
-      const v: Vertex = { x, y, z, s: dv.getInt16(o + 8), t: dv.getInt16(o + 10), c: dv.getUint32(o + 12), gen: null };
+      const color = dv.getUint32(o + 12);
+      const v: Vertex = {
+        x, y, z, s: dv.getInt16(o + 8), t: dv.getInt16(o + 10), c: color,
+        unlit: lit ? ((0xffffff00 | (color & 0xff)) >>> 0) : color, lighting: [], lit, gen: null,
+      };
       if (lit || gen) {
         let nx = dv.getInt8(o + 12), ny = dv.getInt8(o + 13), nz = dv.getInt8(o + 14);
         if (m) {
@@ -486,16 +505,19 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
         ny /= len;
         nz /= len;
         if (lit) {
-          const L = st.lighting!;
-          let r = L.ambient[0], g = L.ambient[1], bl = L.ambient[2];
-          for (const l of L.lights) {
-            const d = Math.max(0, nx * l.dir[0] + ny * l.dir[1] + nz * l.dir[2]);
-            r += l.color[0] * d;
-            g += l.color[1] * d;
-            bl += l.color[2] * d;
-          }
-          const q = (c: number) => Math.min(255, Math.round(c));
-          v.c = ((q(r) << 24) | (q(g) << 16) | (q(bl) << 8) | buf[o + 15]) >>> 0;
+          const shade = (L: DlLighting) => {
+            let r = L.ambient[0], g = L.ambient[1], bl = L.ambient[2];
+            for (const l of L.lights) {
+              const d = Math.max(0, nx * l.dir[0] + ny * l.dir[1] + nz * l.dir[2]);
+              r += l.color[0] * d;
+              g += l.color[1] * d;
+              bl += l.color[2] * d;
+            }
+            const q = (c: number) => Math.min(255, Math.round(c));
+            return ((q(r) << 24) | (q(g) << 16) | (q(bl) << 8) | buf[o + 15]) >>> 0;
+          };
+          v.c = shade(st.lighting!);
+          v.lighting = (ctx.lightingPresets ?? []).map(shade);
         }
         if (gen) v.gen = [nx * 0.5 + 0.5, -ny * 0.5 + 0.5];
       }
@@ -800,6 +822,8 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
     positions: new Float32Array(b.pos),
     uvs: new Float32Array(b.uv),
     colors: new Uint8Array(b.col),
+    ...(b.hasLitVertices ? { unlitColors: new Uint8Array(b.unlit) } : {}),
+    ...(b.hasLitVertices && b.lighting.length ? { lightingColors: b.lighting.map((colors) => new Uint8Array(colors)) } : {}),
     triSource: new Uint32Array(b.src),
     ...(b.batch.texture1 !== undefined ? { uvs1: new Float32Array(b.uv1) } : {}),
   }));

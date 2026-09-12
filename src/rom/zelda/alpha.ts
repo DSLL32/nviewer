@@ -4,12 +4,12 @@
 // retail OoT with these differences: F3DEX 1.x display lists, raw RGBA16 prerendered backgrounds, 12-byte waterboxes,
 // alpha actor ids, and lost draw configs (dynamic segments 7-0xD) and keep objects.
 import { buildLevel, fogPosition } from '../bomberman/common';
-import { runDisplayList, type DisplayListContext, type DlLighting } from '../displaylist';
+import { runDisplayList, type DisplayListContext } from '../displaylist';
 import { decodeRows, ImFmt, ImSiz, Tlut } from '../texture';
 import type { Backdrop, Batch, CameraView, DebugInfo, Game, Instance, Level, LevelInfo, LevelKind, LevelLayer, Marker, Mesh, Texture } from '../types';
 import { collisionBatch, floorBgCam, waterBoxBatch } from './collision';
 import { resolveCoplanar } from './coplanar';
-import { currentLights } from './env';
+import { currentLights, rspLighting, sceneLightPresets } from './env';
 import { OOT_ACTORS } from './names';
 import {
   alternateHeaders, headerForLayer, parseCollision, parseHeader, readRoomHeader, readSceneHeader, s16, u32, type Collision, type RoomHeader,
@@ -214,15 +214,13 @@ function loadAlphaLevel(rom: Uint8Array, def: AlphaDef, info: LevelInfo): Level 
   // alternate header. The fog colour is the clear colour (no sky files).
   const time = def.layer === 1 ? 0 : 0x8000;
   const lights = currentLights('oot', sh.lightMode, sh.lights, time);
-  const lighting: DlLighting = lights
-    ? {
-      ambient: lights.ambient as [number, number, number],
-      lights: [lights.l1Dir, lights.l2Dir].map((d, k) => {
-        const l = Math.hypot(d[0], d[1], d[2]) || 1;
-        return { color: (k ? lights.l2Color : lights.l1Color) as [number, number, number], dir: [d[0] / l, d[1] / l, d[2] / l] as [number, number, number] };
-      }),
-    }
-    : { ambient: [255, 255, 255], lights: [] };
+  const lighting = lights ? rspLighting(lights) : { ambient: [255, 255, 255] as [number, number, number], lights: [] };
+  const lightingPresets = sceneLightPresets('oot', sh.lightMode, sh.lights);
+  let defaultLighting = lightingPresets.findIndex((preset) => JSON.stringify(preset.lighting) === JSON.stringify(lighting));
+  if (lightingPresets.length && defaultLighting < 0) {
+    lightingPresets.unshift({ name: 'Current', lighting });
+    defaultLighting = 0;
+  }
   const fog = lights && lights.fogNear < 1000 ? fogPosition(lights.fogNear, 1000, lights.fogColor as [number, number, number], 10, lights.zFar || 12800) : undefined;
   const clearColor = (lights?.fogColor ?? [0, 0, 0]) as [number, number, number];
 
@@ -260,7 +258,7 @@ function loadAlphaLevel(rom: Uint8Array, def: AlphaDef, info: LevelInfo): Level 
       buf, ucode: 'f3dex', resolve: resolver(room, false), resolveImage: resolver(room, true), textures, textureKeys, keyPrefix: '',
       vertexScale: 1, mirrorX: false, geometryMode: SETUP_GEOMETRY, renderMode: (xlu ? SETUP_RENDERMODE_XLU : SETUP_RENDERMODE) & ~7,
       alphaCompare: 0, combineMode: SETUP_COMBINE, otherModeH: SETUP_OTHERMODE_H, primColor: 0xffffffff, envColor: 0x80808080,
-      lighting, directImages: true, secondTexture: true, decals: true, combiner: true, textureGen: true,
+      lighting, lightingPresets: lightingPresets.map((preset) => preset.lighting), directImages: true, secondTexture: true, decals: true, combiner: true, textureGen: true,
       matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
       resolveMatrix: (addr) => (addr >>> 24 === 2 || addr >>> 24 === 3 ? resolver(room, false)(addr) : identityMtx),
     };
@@ -411,7 +409,8 @@ function loadAlphaLevel(rom: Uint8Array, def: AlphaDef, info: LevelInfo): Level 
     camera = { eye: [px - fx * 260, py + 110, pz - fz * 260], target: [px + fx * 300, py + 50, pz + fz * 300], fovY: 60 };
   }
   return buildLevel(info, `oot-alpha-${hex(id)}-${def.layer}`, textures, meshes, instances, {
-    layers, markers, clearColor, ...(fog ? { fog } : {}), ...(camera ? { camera } : {}), ...(backdrop ? { backdrop } : {}),
+    layers, markers, clearColor, ...(lightingPresets.length ? { lighting: { presets: lightingPresets.map((preset) => preset.name), default: defaultLighting } } : {}),
+    ...(fog ? { fog } : {}), ...(camera ? { camera } : {}), ...(backdrop ? { backdrop } : {}),
   });
 }
 

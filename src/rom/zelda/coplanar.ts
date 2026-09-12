@@ -99,6 +99,8 @@ function extract(b: Batch, tris: Set<number>): [Batch, Batch] {
       positions: pick(b.positions, 9, (k) => new Float32Array(k)),
       uvs: pick(b.uvs, 6, (k) => new Float32Array(k)),
       colors: pick(b.colors, 12, (k) => new Uint8Array(k)),
+      ...(b.unlitColors ? { unlitColors: pick(b.unlitColors, 12, (k) => new Uint8Array(k)) } : {}),
+      ...(b.lightingColors ? { lightingColors: b.lightingColors.map((colors) => pick(colors, 12, (k) => new Uint8Array(k))) } : {}),
       ...(b.triSource ? { triSource: pick(b.triSource, 1, (k) => new Uint32Array(k)) } : {}),
       ...(b.uvs1 ? { uvs1: pick(b.uvs1, 6, (k) => new Float32Array(k)) } : {}),
     };

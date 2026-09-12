@@ -280,6 +280,7 @@ export function resolveCoplanar(rooms: RoomMesh[], drawOrder?: DrawOrder): { mov
 function subset(b: Batch, mask: Uint8Array, want: number): Batch {
   const n = mask.reduce((s, f) => s + (f === want ? 1 : 0), 0);
   const positions = new Float32Array(n * 9), uvs = new Float32Array(n * 6), colors = new Uint8Array(n * 12);
+  const unlitColors = b.unlitColors ? new Uint8Array(n * 12) : undefined;
   const triSource = b.triSource ? new Uint32Array(n) : undefined;
   let k = 0;
   for (let t = 0; t < mask.length; t++) {
@@ -287,8 +288,9 @@ function subset(b: Batch, mask: Uint8Array, want: number): Batch {
     positions.set(b.positions.subarray(t * 9, t * 9 + 9), k * 9);
     uvs.set(b.uvs.subarray(t * 6, t * 6 + 6), k * 6);
     colors.set(b.colors.subarray(t * 12, t * 12 + 12), k * 12);
+    unlitColors?.set(b.unlitColors!.subarray(t * 12, t * 12 + 12), k * 12);
     if (triSource) triSource[k] = b.triSource![t];
     k++;
   }
-  return { ...b, positions, uvs, colors, ...(triSource ? { triSource } : {}) };
+  return { ...b, positions, uvs, colors, ...(unlitColors ? { unlitColors } : {}), ...(triSource ? { triSource } : {}) };
 }
