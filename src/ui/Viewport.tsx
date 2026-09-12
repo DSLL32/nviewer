@@ -34,6 +34,8 @@ interface ViewportProps {
   gameTitle?: string | null;
   loadingName: string | null;
   error: string | null;
+  /** Select a sibling level of the current game, including another setup of the same scene. */
+  onSelectLevel: (index: number) => void;
   /** Extra panels stacked below the help panel (e.g. the music box). */
   children?: ReactNode;
 }
@@ -78,7 +80,7 @@ declare global {
   }
 }
 
-export function Viewport({ level, gameId, gameTitle, loadingName, error, children }: ViewportProps) {
+export function Viewport({ level, gameId, gameTitle, loadingName, error, onSelectLevel, children }: ViewportProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const viewportRef = useRef<HTMLElement>(null);
   const [viewportSize, setViewportSize] = useState<{ width: number; height: number } | null>(null);
@@ -965,17 +967,36 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
           <div className="hud-row">
             <strong>View</strong>
           </div>
+          {level.setups && level.setups.options.length > 1 && (
+            <>
+              <span className="small">Setup</span>
+              <div className="view-options" role="radiogroup" aria-label="Setup">
+                {level.setups.options.map((option) => (
+                  <button
+                    key={option.level}
+                    type="button"
+                    role="radio"
+                    aria-checked={level.setups?.current === option.level}
+                    className="view-option"
+                    onClick={() => onSelectLevel(option.level)}
+                  >
+                    {option.name}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
           {lightingPresets.length > 0 && (
             <>
               <span className="small">Lighting</span>
-              <div className="lighting-options" role="radiogroup" aria-label="Lighting">
+              <div className="view-options" role="radiogroup" aria-label="Lighting">
                 {lightingPresets.map((name, index) => (
                   <button
                     key={index}
                     type="button"
                     role="radio"
                     aria-checked={lightingSetting === index}
-                    className="lighting-option"
+                    className="view-option"
                     onClick={() => setLightingSetting(index)}
                   >
                     {name}
@@ -985,7 +1006,7 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, childre
                   type="button"
                   role="radio"
                   aria-checked={lightingSetting === null}
-                  className="lighting-option"
+                  className="view-option"
                   onClick={() => setLightingSetting(null)}
                 >
                   Off

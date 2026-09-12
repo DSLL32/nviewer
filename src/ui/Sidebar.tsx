@@ -68,7 +68,7 @@ function groupsOf(game: SidebarGame): KindGroup[] {
   return GROUPS.map((g) => {
     const subgroups: SubGroup[] = [];
     for (const l of game.levels) {
-      if (l.kind !== g.kind) continue;
+      if (l.kind !== g.kind || l.setupParent !== undefined) continue;
       const title = l.group ?? null;
       const last = subgroups[subgroups.length - 1];
       if (last && last.title === title) last.levels.push(l);
@@ -78,6 +78,14 @@ function groupsOf(game: SidebarGame): KindGroup[] {
     for (const s of subgroups) s.defaultOpen = s.title === null || titled <= MANY_SUBGROUPS;
     return { kind: g.kind, title: g.title, subgroups };
   }).filter((g) => g.subgroups.length > 0);
+}
+
+/** Alternate setups use their visible parent row for sidebar selection and loading state. */
+function visibleLevelRef(games: SidebarGame[], ref: LevelRef | null): LevelRef | null {
+  if (!ref) return null;
+  const game = games.find((g) => g.id === ref.gameId);
+  const index = game?.levels.find((l) => l.index === ref.index)?.setupParent ?? ref.index;
+  return { gameId: ref.gameId, index };
 }
 
 function readSubgroupsOpen(): Record<string, boolean> {
@@ -108,8 +116,9 @@ export function Sidebar({ games, selected, loading, stats, collapsed, onToggleCo
     if (!selected) return;
     const game = games.find((g) => g.id === selected.gameId);
     if (!game) return;
+    const visibleSelected = visibleLevelRef(games, selected);
     for (const group of groupsOf(game)) {
-      const sub = group.subgroups.find((s) => s.levels.some((l) => l.index === selected.index));
+      const sub = group.subgroups.find((s) => s.levels.some((l) => l.index === visibleSelected?.index));
       if (sub && !isOpen(game.id, sub)) setSubOpen((o) => ({ ...o, [subKey(game.id, sub)]: true }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -122,7 +131,9 @@ export function Sidebar({ games, selected, loading, stats, collapsed, onToggleCo
     .flatMap(({ game, groups }) =>
       groups.flatMap((g) => g.subgroups.filter((s) => isOpen(game.id, s)).flatMap((s) => s.levels.map((l) => ({ gameId: game.id, index: l.index })))),
     );
-  const selectedVisible = ordered.some((r) => sameLevelRef(r, selected));
+  const visibleSelected = visibleLevelRef(games, selected);
+  const visibleLoading = visibleLevelRef(games, loading);
+  const selectedVisible = ordered.some((r) => sameLevelRef(r, visibleSelected));
   const buttonKey = (r: LevelRef) => `${r.gameId}:${r.index}`;
 
   const move = (position: number) => {
@@ -143,7 +154,7 @@ export function Sidebar({ games, selected, loading, stats, collapsed, onToggleCo
       position = ordered.findIndex((r) => r.gameId === el.dataset.gameHeader) - 1;
       if (position < -1) position = ordered.length - 1;
     } else {
-      position = ordered.findIndex((r) => sameLevelRef(r, selected));
+      position = ordered.findIndex((r) => sameLevelRef(r, visibleSelected));
     }
     switch (e.key) {
       case 'ArrowDown': move(position + 1); break;
@@ -159,7 +170,7 @@ export function Sidebar({ games, selected, loading, stats, collapsed, onToggleCo
       {levels.map((l) => {
         const ref = { gameId: game.id, index: l.index };
         const s = stats[game.id]?.[l.index];
-        const isSelected = sameLevelRef(ref, selected);
+        const isSelected = sameLevelRef(ref, visibleSelected);
         const isFirst = sameLevelRef(ref, ordered[0]);
         return (
           <li key={l.index}>
@@ -178,7 +189,7 @@ export function Sidebar({ games, selected, loading, stats, collapsed, onToggleCo
             >
               <span className="level-name">
                 {l.name}
-                {sameLevelRef(loading, ref) && <span className="spinner tiny" aria-label="loading" />}
+                {sameLevelRef(visibleLoading, ref) && <span className="spinner tiny" aria-label="loading" />}
               </span>
               {s && (
                 <span className="level-stats" title={`${s.triangles} triangles, ${s.textures} textures, ${s.instances} placed objects (${s.scripted} scripted), parsed in ${s.loadMs.toFixed(0)} ms`}>

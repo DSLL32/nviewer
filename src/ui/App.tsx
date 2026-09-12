@@ -287,6 +287,9 @@ export function App() {
             gameTitle={games.find((g) => g.id === levelGameId)?.title ?? null}
             loadingName={romBusy ?? (loading !== null ? levelName(games, loading) : null)}
             error={levelError}
+            onSelectLevel={(index) => {
+              if (levelGameId) selectLevel({ gameId: levelGameId, index });
+            }}
           >
             <MusicBox games={games} currentGameId={selected?.gameId ?? null} decode={decodeMusic} />
           </Viewport>

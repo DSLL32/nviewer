@@ -180,10 +180,10 @@ button.link { background: none; border: none; padding: 0; color: var(--accent); 
 .layer-name { flex: 1 1 120px; min-width: 0; overflow-wrap: anywhere; }
 /* Depth and parallax: beside a short name, or right-aligned on the next line under a long one. */
 .layer-meta { margin-left: auto; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.lighting-options { display: flex; flex-wrap: wrap; gap: 3px; }
-.lighting-option { padding: 3px 7px; font-size: 11px; line-height: 1.2; }
-.lighting-option[aria-checked='true'] { color: #1b1305; background: var(--accent); border-color: transparent; }
-.lighting-option[aria-checked='true']:hover { border-color: transparent; filter: brightness(1.08); }
+.view-options { display: flex; flex-wrap: wrap; gap: 3px; }
+.view-option { padding: 3px 7px; font-size: 11px; line-height: 1.2; }
+.view-option[aria-checked='true'] { color: #1b1305; background: var(--accent); border-color: transparent; }
+.view-option[aria-checked='true']:hover { border-color: transparent; filter: brightness(1.08); }
 /* Layer groups (LevelLayer.group): a heading with a collapse button, a checkbox for the whole group and a count. */
 .layer-group { display: flex; flex-direction: column; gap: inherit; }
 .layer-group-row { display: flex; align-items: center; gap: 4px; }
