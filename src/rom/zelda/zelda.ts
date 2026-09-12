@@ -336,6 +336,10 @@ function loadLevel(z: Zelda, def: LevelDef, info: LevelInfo): Level {
   const fog = lights && lights.fogNear < 1000
     ? fogPosition(lights.fogNear, game === 'mm' ? Math.max(1000, Math.trunc((lights.zFar * 5) / 64)) : 1000, lights.fogColor as [number, number, number], 10, zFar)
     : undefined;
+  // OoT skybox 0x1D draws no cube; Environment_DrawSkyboxFilters instead fills the frame with the current fog colour.
+  const clearColor: [number, number, number] = game === 'oot' && sh.skyboxId === 0x1d && lights
+    ? [lights.fogColor[0], lights.fogColor[1], lights.fogColor[2]]
+    : [0, 0, 0];
 
   // ---- draw config ----
   let cfg: DrawConfig;
@@ -737,7 +741,7 @@ function loadLevel(z: Zelda, def: LevelDef, info: LevelInfo): Level {
   }
 
   const level = buildLevel(info, `${game}-${hex(def.scene)}-${def.layer}`, textures, meshes, instances, {
-    layers, markers, clearColor: [0, 0, 0], ...(fog ? { fog } : {}), ...(camera ? { camera } : {}),
+    layers, markers, clearColor, ...(fog ? { fog } : {}), ...(camera ? { camera } : {}),
     ...(lightingPresets.length ? { lighting: { presets: lightingPresets.map((preset) => preset.name), default: defaultLighting } } : {}),
     ...(skies.length ? { skies } : {}), ...(backdrop ? { backdrop } : {}),
   });
