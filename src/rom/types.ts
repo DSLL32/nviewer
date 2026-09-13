@@ -96,6 +96,9 @@ export interface Fog {
 export interface Sky {
   name: string;
   mesh: number;
+  // The game draws this sky without alpha blending; omitted skies use the viewer's
+  // usual blended sky pass.
+  opaque?: boolean;
 }
 
 // A horizontal textured plane at a fixed world height that the game projects to the screen before the level
