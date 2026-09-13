@@ -26,15 +26,17 @@ import {
   actorProfile, findDayNightTextures, findMmAreaTextures, findMmSkyFiles, findOotSkyFiles, findTables, type ZeldaGame, type ZeldaTables,
 } from './tables';
 
-interface LevelDef { scene: number; layer: number; file: string; time?: number; setupName?: string } // time: a time-of-day variant
+export interface ZeldaLevelDef { scene: number; layer: number; file: string; time?: number; setupName?: string } // time: a time-of-day variant
 
 // Loader options for offline comparisons with captures: the time of day (0..0xFFFF, default noon; OoT night layers
 // midnight) and the MM day (default 1).
 export interface ZeldaOptions { time?: number; day?: number; trace?: (message: string) => void }
 
-interface Zelda {
+export type ZeldaFileSystem = Pick<ZeldaFs, 'files' | 'present' | 'fileAt' | 'fileByVrom' | 'size' | 'data' | 'name'>;
+
+export interface ZeldaRuntime {
   options: ZeldaOptions;
-  fs: ZeldaFs;
+  fs: ZeldaFileSystem;
   t: ZeldaTables;
   game: ZeldaGame;
   dayNight: number[] | null;
@@ -43,6 +45,8 @@ interface Zelda {
   mmSkyTables: MmSkyTables | null;
   areaTextures: (ZeldaFile | null)[] | null;
   profiles: Map<number, { category: number; objectId: number } | null>;
+  source?: boolean;
+  idPrefix?: string;
 }
 
 const hex = (v: number) => `0x${(v >>> 0).toString(16)}`;
@@ -290,11 +294,11 @@ function plausibleList(buf: Uint8Array, at: number, end: number): boolean {
   return false;
 }
 
-function sceneFileName(z: Zelda, def: LevelDef, f: ZeldaFile) {
+function sceneFileName(z: ZeldaRuntime, def: ZeldaLevelDef, f: ZeldaFile) {
   return z.fs.name(f.index) || def.file;
 }
 
-function loadLevel(z: Zelda, def: LevelDef, info: LevelInfo): Level {
+export function loadZeldaLevel(z: ZeldaRuntime, def: ZeldaLevelDef, info: LevelInfo): Level {
   const { fs, t, game } = z;
   const entry = t.scenes[def.scene];
   if (!entry) throw new Error(`scene ${hex(def.scene)} is not in this ROM`);
@@ -361,7 +365,7 @@ function loadLevel(z: Zelda, def: LevelDef, info: LevelInfo): Level {
 
   // ---- actors: placements, profiles and recipes (decided before the address space is built) ----
   const profile = (id: number) => {
-    if (!z.profiles.has(id)) z.profiles.set(id, actorProfile(fs, t, id));
+    if (!z.profiles.has(id)) z.profiles.set(id, z.source ? null : actorProfile(fs as ZeldaFs, t, id));
     return z.profiles.get(id)!;
   };
   const dayBit = mmHalfDayBit(day, time >= 0xc000 || time < 0x4000);
@@ -471,6 +475,7 @@ function loadLevel(z: Zelda, def: LevelDef, info: LevelInfo): Level {
   // G_MTX in room lists (placement matrices in the room file, Jabu-Jabu's segment 0xD scale, MM's segment 1 billboard
   // and code's identity matrix at a RAM address); other addresses as for display lists.
   const codeIdentity = (addr: number) => {
+    if (z.source) return false;
     const o = addr - t.codeVram;
     if (o < 0 || o + 64 > t.codeData.length) return false;
     const dv = new DataView(t.codeData.buffer, t.codeData.byteOffset + o, 64);
@@ -744,7 +749,7 @@ function loadLevel(z: Zelda, def: LevelDef, info: LevelInfo): Level {
     }
   }
 
-  const level = buildLevel(info, `${game}-${hex(def.scene)}-${def.layer}`, textures, meshes, instances, {
+  const level = buildLevel(info, `${z.idPrefix ?? game}-${hex(def.scene)}-${def.layer}`, textures, meshes, instances, {
     layers, markers, clearColor, ...(fog ? { fog } : {}), ...(camera ? { camera } : {}),
     ...(lightingPresets.length ? { lighting: { presets: lightingPresets.map((preset) => preset.name), default: defaultLighting } } : {}),
     ...(skies.length ? { skies } : {}), ...(backdrop ? { backdrop } : {}),
@@ -756,11 +761,11 @@ function loadLevel(z: Zelda, def: LevelDef, info: LevelInfo): Level {
   return level;
 }
 
-function sceneLevels(z: Zelda): { defs: LevelDef[]; levels: LevelInfo[] } {
+function sceneLevels(z: ZeldaRuntime): { defs: ZeldaLevelDef[]; levels: LevelInfo[] } {
   const { fs, t, game } = z;
-  const defs: LevelDef[] = [];
+  const defs: ZeldaLevelDef[] = [];
   const levels: LevelInfo[] = [];
-  const push = (d: LevelDef, name: string, kind: LevelInfo['kind'], group: string, setupParent?: number) => {
+  const push = (d: ZeldaLevelDef, name: string, kind: LevelInfo['kind'], group: string, setupParent?: number) => {
     levels.push({ index: levels.length, name, kind, group, ...(setupParent !== undefined ? { setupParent } : {}) });
     defs.push(d);
   };
@@ -839,7 +844,7 @@ export function openZelda64(rom: Uint8Array, build: ZeldaBuild, options: ZeldaOp
   const fs = new ZeldaFs(rom, build);
   const t = findTables(fs);
   const game = t.game;
-  const z: Zelda = {
+  const z: ZeldaRuntime = {
     options, fs, t, game,
     dayNight: game === 'oot' ? findDayNightTextures(t.codeData) : null,
     ootSky: game === 'oot' ? findOotSkyFiles(fs, t.codeData) : null,
@@ -859,7 +864,7 @@ export function openZelda64(rom: Uint8Array, build: ZeldaBuild, options: ZeldaOp
     title,
     levels,
     loadLevel: (i) => {
-      const level = loadLevel(z, defs[i], levels[i]);
+      const level = loadZeldaLevel(z, defs[i], levels[i]);
       const options = defs.flatMap((def, k) => def.scene === defs[i].scene && def.setupName ? [{ name: def.setupName, level: k }] : []);
       if (defs[i].setupName && options.length > 1) level.setups = { options, current: i };
       return level;
