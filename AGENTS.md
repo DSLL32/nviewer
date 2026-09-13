@@ -102,6 +102,7 @@ Implemented (spec in the repo):
 | Star Fox 64 | `r49/sf/` | |
 | GoldenEye 007 | `r49/ge/` (unused content in `ge/unused/`, including the Citadel stan decoder) | |
 | Off Road Challenge | `r49/offroad/` | |
+| Air Boarder 64 | `r49/airboarder64/` | |
 | Perfect Dark | `r49/pd/` | |
 | Pokémon Snap | `r49/snap/` | |
 | Zelda 64 (OoT, MM, 1997 alpha) | `r49/zelda/` (alpha in `zelda/alpha/`) | |
@@ -123,7 +124,6 @@ Research in progress (spec not yet in the repo):
 | Mario Kart 64 | `r49/mk64/` |
 | Spider-Man | `r49/spiderman/` |
 | Stunt Racer 64 | `r49/stuntracer64/` |
-| Airboarder 64 | `r49/airboarder64/` |
 
 Shared:
  - `r49/impl/`: per-agent check directories (`ge_core`, `pd_obj`, `zelda_mus`,

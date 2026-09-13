@@ -4,7 +4,7 @@ A browser viewer for the levels of these N64 games (USA versions): *San Francisc
 *San Francisco Rush: Extreme Racing*, *Bomberman 64*, *Bomberman 64: The Second Attack!*,
 *Bomberman Hero*, *BattleTanx*, *BattleTanx: Global Assault*, *Gex 64: Enter the Gecko*,
 *Gex 3: Deep Cover Gecko*, *Yoshi's Story* (Japan), *Star Fox 64* (V1.0 and V1.1), *GoldenEye 007*,
-*Off Road Challenge* (USA and Europe), *Pilotwings 64* (USA, Europe and Japan), *Pokémon Snap*,
+*Off Road Challenge* (USA and Europe), *Air Boarder 64* (Japan and Europe), *Pilotwings 64* (USA, Europe and Japan), *Pokémon Snap*,
 *Perfect Dark* (V1.0), and *The Legend of Zelda: Ocarina of Time* and
 *Majora's Mask* (retail and debug builds, plus the 1997 Ocarina of Time prototype preserved on an F-Zero X development
 cartridge). Load one or more ROMs, pick a level in the sidebar, and fly around freely, with
@@ -89,6 +89,10 @@ Z shows or hides collision · Shift+F collision wireframe · the View panel can 
     - `fs.ts`: regional file tables, raw file views and RAM-pointer resolution
     - `level.ts`, `texture.ts`: sectors, placements, float meshes, packed-CI4/RGBA16 materials, objects, collision candidates
     - `offroad.ts`: nine tracks and game assembly; `music.ts`: WESS songs and authored loops
+  - `airboarder64/`: Air Boarder 64 (Japan and Europe; format notes in `AIRBOARDER64.md`)
+    - `archive.ts`: regional archive tables and headerless LH5 decoding
+    - `course.ts`, `collision.ts`, `objects.ts`, `level.ts`: six courses, selectable challenge setups, course geometry,
+      collision and placement objects; `music.ts`: eight old-libmus songs and authored loops
   - `perfectdark/`: Perfect Dark (format notes in `PERFECTDARK.md`)
     - `rom.ts`: data segment, file and stage tables, text; `texture.ts`: the global texture store and its two decoders
     - `gbi.ts`: Perfect Dark's display-list microcode; `bg.ts`: rooms and sky rooms; `environment.ts`: fog, sky planes;
