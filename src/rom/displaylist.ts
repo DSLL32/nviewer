@@ -59,7 +59,7 @@ export interface DisplayListContext {
   matrix?: Mtx;
   // RSP lighting: with G_LIGHTING set, vertex colour bytes are a signed normal and the
   // vertex colour is computed from these lights (a copy; G_MOVEWORD light colours in the
-  // lists change it: offset 0x20 * k = light k, 0x20 * lights.length = ambient).
+  // lists change it: F3DEX uses 0x20-byte slots, F3DEX2 uses 0x18-byte slots).
   lighting?: DlLighting;
   // Additional scene lighting choices to bake for an interactive viewer control.
   lightingPresets?: DlLighting[];
@@ -109,7 +109,8 @@ const VERTEX_SCALE = 1 / 16;
 
 // RSP commands whose opcodes differ between the microcodes.
 const F3DEX2 = {
-  VTX: 0x01, TRI1: 0x05, TRI2: 0x06, QUAD: 0x07, POPMTX: 0xd8, MTX: 0xda, TEXTURE: 0xd7, GEOMETRYMODE: 0xd9,
+  VTX: 0x01, MODIFYVTX: 0x02, TRI1: 0x05, TRI2: 0x06, QUAD: 0x07, POPMTX: 0xd8, MTX: 0xda,
+  MOVEWORD: 0xdb, TEXTURE: 0xd7, GEOMETRYMODE: 0xd9,
   DL: 0xde, ENDDL: 0xdf, SETOTHERMODE_L: 0xe2, SETOTHERMODE_H: 0xe3, BRANCH_Z: 0x04, RDPHALF_1: 0xe1,
 };
 const F3DEX = {
@@ -533,6 +534,28 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
     }
   };
 
+  // G_MODIFYVTX changes an already transformed cache entry. Pokémon Snap uses
+  // RGBA and ST patches to join vertices loaded under parent and child matrices.
+  const modifyVertex = (where: number, index: number, value: number) => {
+    const v = st.vtx[index];
+    if (!v) return;
+    if (where === 0x10) {
+      v.c = value >>> 0;
+      v.unlit = v.lit ? ((0xffffff00 | (value & 0xff)) >>> 0) : value >>> 0;
+    } else if (where === 0x14) {
+      v.s = value >> 16;
+      v.t = (value << 16) >> 16;
+    }
+  };
+
+  const moveWord = (offset: number, index: number, value: number, stride: number) => {
+    if (!st.lighting || index !== G_MW_LIGHTCOL || offset % stride !== 0) return;
+    const k = offset / stride;
+    const color: [number, number, number] = [value >>> 24, (value >>> 16) & 0xff, (value >>> 8) & 0xff];
+    if (k < st.lighting.lights.length) st.lighting.lights[k].color = color;
+    else if (k === st.lighting.lights.length) st.lighting.ambient = color;
+  };
+
   const loadMatrix = (addr: number, projection: boolean, load: boolean, push: boolean) => {
     if (!st.mtx || projection) return;
     const o = (ctx.resolveMatrix ?? resolve)(addr);
@@ -739,6 +762,9 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
           vertices(w1, n, ((w0 & 0xff) >> 1) - n);
           break;
         }
+        case F3DEX2.MODIFYVTX:
+          modifyVertex((w0 >>> 16) & 0xff, (w0 & 0xffff) >>> 1, w1);
+          break;
         case F3DEX2.TRI1: tri(w0); break;
         case F3DEX2.TRI2: case F3DEX2.QUAD: tri(w0); tri(w1); break;
         case F3DEX2.TEXTURE:
@@ -760,6 +786,9 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
         }
         case F3DEX2.POPMTX:
           if (st.mtx) for (let k = w1 >>> 6; k > 0 && st.mtxStack.length; k--) st.mtx = st.mtxStack.pop()!;
+          break;
+        case F3DEX2.MOVEWORD:
+          moveWord(w0 & 0xffff, (w0 >>> 16) & 0xff, w1, 0x18);
           break;
         case F3DEX2.DL: call = w1; push = ((w0 >>> 16) & 0xff) === 0; break;
         case F3DEX2.ENDDL: end = true; break;
@@ -800,12 +829,7 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
           break;
         case F3DEX.MOVEWORD: {
           const offset = (w0 >>> 8) & 0xffff;
-          if (st.lighting && (w0 & 0xff) === G_MW_LIGHTCOL && (offset & 0x1f) === 0) {
-            const k = offset >> 5;
-            const color: [number, number, number] = [w1 >>> 24, (w1 >>> 16) & 0xff, (w1 >>> 8) & 0xff];
-            if (k < st.lighting.lights.length) st.lighting.lights[k].color = color;
-            else if (k === st.lighting.lights.length) st.lighting.ambient = color;
-          }
+          moveWord(offset, w0 & 0xff, w1, 0x20);
           break;
         }
         case F3DEX.RDPHALF_1: st.rdpHalf1 = w1; break;
