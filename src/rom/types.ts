@@ -36,6 +36,9 @@ export interface Batch {
   // The game draws this batch with back-face culling (front faces wind counter-clockwise,
   // the OpenGL convention).
   cullBack: boolean;
+  // Always cull back faces even when the diagnostic culling toggle is off. Use only for
+  // authored paired front/back surfaces whose facing selects different visible artwork.
+  forceCullBack?: boolean;
   // Coplanar decal over other geometry (the RDP's decal depth mode): draw after the
   // surfaces it lies on, with a depth offset towards the camera.
   decal?: boolean;
