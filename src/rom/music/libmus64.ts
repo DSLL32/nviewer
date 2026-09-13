@@ -14,12 +14,7 @@ import type { DecodedMusic, MusicTrack } from '../types';
 import { view } from '../util';
 import { type PreparedWave, prepareWave, RESAMPLE_LUT, type Wave } from './libultra';
 
-const OUTPUT_RATE = 22050;
-const TICK_SAMPLES = 367;
-const VSYNCS = 60;
-const EQPOWER_ROM = 0x7a400;
 const MAX_RATIO = 1.99996;
-const MASTER_SONG_VOLUME = 0x3fff;
 const LEVEL_AUDIO = 0x701a8;
 const JINGLES = 0x7060c;
 const EXTRAS_BANK = 0x4973a0;
@@ -27,7 +22,37 @@ const EXTRAS_SAMPLES = 0x4958f0;
 const LEVEL_COUNT = 31;
 // The game plays music at about -33 dBFS (renders match captured game audio within 1 dB). Tracks are
 // boosted for playback next to the other games; the loudest track still peaks below full scale.
-const PLAYBACK_GAIN = 2.25;
+const GEX_PROFILE: Libmus64Profile = {
+  outputRate: 22050,
+  tickSamples: 367,
+  vsyncs: 60,
+  eqpowerRom: 0x7a400,
+  maxVoices: 24,
+  masterSongVolume: 0x3fff,
+  playbackGain: 2.25,
+};
+
+// Declarative differences between games using Software Creations' older libmus player.
+// `tickSamples` preserves an observed fixed audio update size (as in Gex). When omitted,
+// updates divide outputRate evenly across vsyncs without cumulative rounding drift.
+export interface Libmus64Profile {
+  outputRate: number;
+  tickSamples?: number;
+  vsyncs: number;
+  eqpowerRom: number;
+  maxVoices: number;
+  masterSongVolume: number;
+  playbackGain: number;
+}
+
+export interface Libmus64SongDef {
+  start: number;
+  end: number;
+  compressed: boolean;
+  bank: number;
+  samples: number;
+  volume: number;
+}
 
 const f32 = Math.fround;
 const s8 = (x: number) => (x << 24) >> 24;
@@ -198,7 +223,7 @@ class Channel {
   swTime = 0;
   tempoScale = 128;
   length = 1;
-  tempoInc = Math.trunc(24576 / VSYNCS);
+  tempoInc = 0; // initialized from the game's VI rate by Player
   handleVol = 128;
   lastVol = 0xffff;
   volCnt = 1;
@@ -275,9 +300,9 @@ class Player {
   readonly chans: Channel[] = [];
   frame = 0;
 
-  constructor(private readonly rom: Uint8Array, private readonly song: Song, private readonly bank: Bank, handleVolume: number, eq: Int32Array, private readonly mixing: boolean) {
+  constructor(private readonly rom: Uint8Array, private readonly song: Song, private readonly bank: Bank, handleVolume: number, eq: Int32Array, private readonly profile: Libmus64Profile, private readonly mixing: boolean) {
     song.chan.forEach((start, i) => {
-      if (!start) return;
+      if (!start || this.chans.length >= profile.maxVoices) return;
       const c = new Channel(eq);
       c.pdata = c.dataBase = start;
       c.volPtr = song.vol[i] || null;
@@ -285,6 +310,7 @@ class Player {
       c.pbPtr = song.pbend[i] || null;
       c.pbBase = song.pbend[i];
       c.handleVol = handleVolume;
+      c.tempoInc = Math.trunc(24576 / profile.vsyncs);
       this.chans.push(c);
     });
   }
@@ -321,7 +347,7 @@ class Player {
       case 0x83: c.port = 0; return p;
       case 0x84: return this.setEnvelope(c, p);
       case 0x85: { // tempo in BPM, 48 ticks per quarter note, for every channel of the song
-        const base = Math.trunc(Math.trunc((d[p] * 24576) / 120) / VSYNCS);
+        const base = Math.trunc(Math.trunc((d[p] * 24576) / 120) / this.profile.vsyncs);
         for (const o of this.chans) o.tempoInc = (base * o.tempoScale) >> 7;
         return p + 1;
       }
@@ -413,7 +439,7 @@ class Player {
     if (c.playing) {
       c.playing = false;
       if (this.mixing) {
-        c.voice.setVol(0, TICK_SAMPLES);
+        c.voice.setVol(0, this.tickSampleCount());
         c.voice.stop();
       }
     }
@@ -475,7 +501,7 @@ class Player {
     if (!c.tie) {
       c.pendingWave = this.bank.waves[c.wave] ?? null;
       if (c.playing && c.lastVol !== 0) {
-        if (this.mixing) c.voice.setVol(0, TICK_SAMPLES);
+        if (this.mixing) c.voice.setVol(0, this.tickSampleCount());
         c.lastVol = 0;
       } else {
         this.startVoice(c);
@@ -543,10 +569,10 @@ class Player {
   private volumeUpdate(c: Channel) {
     let v = Math.floor((c.vol * c.envVol * c.vel * c.handleVol) / 8192);
     if (v > 32767) v = 32767;
-    v = Math.floor((v * MASTER_SONG_VOLUME) / 32768);
+    v = Math.floor((v * this.profile.masterSongVolume) / 32768);
     if (v !== c.lastVol) {
       c.lastVol = v;
-      if (this.mixing) c.voice.setVol(v, TICK_SAMPLES);
+      if (this.mixing) c.voice.setVol(v, this.tickSampleCount());
     }
     if (c.pan !== c.lastPan) {
       const p = ((c.pan * c.handlePan) >> 7) & 0x7f;
@@ -638,6 +664,12 @@ class Player {
   }
 
   // One player tick (__MusIntMain 0x80054510).
+  private tickSampleCount() {
+    if (this.profile.tickSamples !== undefined) return this.profile.tickSamples;
+    const { outputRate, vsyncs } = this.profile;
+    return Math.floor(((this.frame + 1) * outputRate) / vsyncs) - Math.floor((this.frame * outputRate) / vsyncs);
+  }
+
   tick() {
     for (const c of this.chans) {
       if (c.pdata === null) continue;
@@ -674,13 +706,7 @@ class Player {
   }
 }
 
-interface SongDef {
-  start: number;
-  end: number;
-  compressed: boolean;
-  bank: number;
-  samples: number;
-  volume: number;
+interface SongDef extends Libmus64SongDef {
   uses: string[];
 }
 
@@ -721,7 +747,8 @@ function songDefs(rom: Uint8Array, levelNames: string[]): SongDef[] {
 }
 
 const defsCache = new WeakMap<Uint8Array, SongDef[]>();
-const bankCache = new WeakMap<Uint8Array, Map<number, Bank>>();
+const bankCache = new WeakMap<Uint8Array, Map<string, Bank>>();
+const eqCache = new WeakMap<Uint8Array, Map<number, Int32Array>>();
 
 export function listGex64Music(rom: Uint8Array, levelNames: string[]): MusicTrack[] {
   const defs = songDefs(rom, levelNames);
@@ -739,17 +766,39 @@ export function decodeGex64Music(rom: Uint8Array, index: number): DecodedMusic {
   const defs = defsCache.get(rom) ?? songDefs(rom, []);
   const def = defs[index];
   if (!def) throw new Error(`No music track ${index}`);
+  return decodeLibmus64Music(rom, def, GEX_PROFILE);
+}
+
+function frameSample(profile: Libmus64Profile, frame: number) {
+  return profile.tickSamples !== undefined
+    ? frame * profile.tickSamples
+    : Math.floor((frame * profile.outputRate) / profile.vsyncs);
+}
+
+// Decode one song with the shared old-libmus player. Parsed banks and their lazily prepared
+// VADPCM waves remain attached to the ROM, so selecting another track from the same bank does
+// not repeat either stage of sample decoding.
+export function decodeLibmus64Music(rom: Uint8Array, def: Libmus64SongDef, profile: Libmus64Profile): DecodedMusic {
   let banks = bankCache.get(rom);
   if (!banks) bankCache.set(rom, (banks = new Map()));
-  let bank = banks.get(def.bank);
-  if (!bank) banks.set(def.bank, (bank = parseBank(rom, def.bank, def.samples)));
+  const bankKey = `${def.bank}:${def.samples}`;
+  let bank = banks.get(bankKey);
+  if (!bank) banks.set(bankKey, (bank = parseBank(rom, def.bank, def.samples)));
   const song = parseSong(def.compressed ? inflateRaw(rom, def.start, 0) : rom.slice(def.start, def.end));
-  const eq = Int32Array.from({ length: 128 }, (_, i) => view(rom).getInt16(EQPOWER_ROM + i * 2));
+  let eqs = eqCache.get(rom);
+  if (!eqs) eqCache.set(rom, (eqs = new Map()));
+  let eq = eqs.get(profile.eqpowerRom);
+  if (!eq) {
+    eq = Int32Array.from({ length: 128 }, (_, i) => view(rom).getInt16(profile.eqpowerRom + i * 2));
+    eqs.set(profile.eqpowerRom, eq);
+  }
 
   // Pass 1 runs the player alone to find the loop (the latest `for 255` and its first jump back) or
   // the end of a one-shot song; pass 2 mixes.
-  const maxFrames = Math.ceil((600 * OUTPUT_RATE) / TICK_SAMPLES);
-  const probe = new Player(rom, song, bank, def.volume, eq, false);
+  const maxFrames = profile.tickSamples !== undefined
+    ? Math.ceil((600 * profile.outputRate) / profile.tickSamples)
+    : profile.vsyncs * 600;
+  const probe = new Player(rom, song, bank, def.volume, eq, profile, false);
   let loopStart: number | undefined;
   let loopFrames: number | undefined;
   let endFrame = maxFrames;
@@ -764,30 +813,34 @@ export function decodeGex64Music(rom: Uint8Array, index: number): DecodedMusic {
       break;
     }
     if (probe.allStopped()) {
-      endFrame = f + 1 + Math.ceil((3 * OUTPUT_RATE) / TICK_SAMPLES); // release tails
+      const tailFrames = profile.tickSamples !== undefined
+        ? Math.ceil((3 * profile.outputRate) / profile.tickSamples)
+        : profile.vsyncs * 3;
+      endFrame = f + 1 + tailFrames; // release tails
       break;
     }
   }
-  const total = endFrame * TICK_SAMPLES;
+  const total = frameSample(profile, endFrame);
   const left = new Float32Array(total);
   const right = new Float32Array(total);
-  const player = new Player(rom, song, bank, def.volume, eq, true);
+  const player = new Player(rom, song, bank, def.volume, eq, profile, true);
   for (let f = 0; f < endFrame; f++) {
     player.tick();
-    const from = f * TICK_SAMPLES;
-    for (const c of player.chans) c.voice.mix(left, right, from, from + TICK_SAMPLES);
+    const from = frameSample(profile, f);
+    const to = frameSample(profile, f + 1);
+    for (const c of player.chans) c.voice.mix(left, right, from, to);
   }
-  const scale = PLAYBACK_GAIN / (32768 * 32768);
+  const scale = profile.playbackGain / (32768 * 32768);
   for (const buf of [left, right]) {
     for (let i = 0; i < total; i++) {
       const x = buf[i] * scale;
       buf[i] = x > 1 ? 1 : x < -1 ? -1 : x;
     }
   }
-  const music: DecodedMusic = { sampleRate: OUTPUT_RATE, channels: [left, right] };
+  const music: DecodedMusic = { sampleRate: profile.outputRate, channels: [left, right] };
   if (loopStart !== undefined && loopFrames !== undefined && loopFrames > 0) {
-    music.loopStart = loopStart * TICK_SAMPLES;
-    music.loopEnd = (loopStart + loopFrames) * TICK_SAMPLES;
+    music.loopStart = frameSample(profile, loopStart);
+    music.loopEnd = frameSample(profile, loopStart + loopFrames);
   }
   return music;
 }
