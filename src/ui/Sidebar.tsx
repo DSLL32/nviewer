@@ -48,6 +48,7 @@ interface SidebarProps {
   onSelect: (ref: LevelRef) => void;
   onRemove: (gameId: string) => void;
   onAddRom: () => void;
+  onAddBbgames: () => void;
 }
 
 interface SubGroup {
@@ -97,7 +98,7 @@ function readSubgroupsOpen(): Record<string, boolean> {
   }
 }
 
-export function Sidebar({ games, selected, loading, stats, collapsed, onToggleCollapsed, onSelect, onRemove, onAddRom }: SidebarProps) {
+export function Sidebar({ games, selected, loading, stats, collapsed, onToggleCollapsed, onSelect, onRemove, onAddRom, onAddBbgames }: SidebarProps) {
   const buttons = useRef(new Map<string, HTMLButtonElement>());
   const [subOpen, setSubOpen] = useState<Record<string, boolean>>(readSubgroupsOpen);
   const subKey = (gameId: string, sub: SubGroup) => `${gameId}|${sub.key}`;
@@ -270,7 +271,8 @@ export function Sidebar({ games, selected, loading, stats, collapsed, onToggleCo
       </nav>
       <footer className="sidebar-footer">
         <button type="button" className="add-rom" onClick={onAddRom}>Add ROM…</button>
-        <div className="small muted">A ROM of a game that is already loaded replaces it.</div>
+        <button type="button" className="add-rom" onClick={onAddBbgames}>Open bbgames folder…</button>
+        <div className="small muted">ROMs are cached; bbgames source-folder access lasts only for this page session.</div>
       </footer>
     </aside>
   );

@@ -4,9 +4,10 @@ interface LandingProps {
   busy: string | null;
   error: string | null;
   onPick: () => void;
+  onPickBbgames: () => void;
 }
 
-export function Landing({ busy, error, onPick }: LandingProps) {
+export function Landing({ busy, error, onPick, onPickBbgames }: LandingProps) {
   return (
     <main className="landing">
       <div className="landing-card">
@@ -35,6 +36,7 @@ export function Landing({ busy, error, onPick }: LandingProps) {
             <li>The Legend of Zelda: Ocarina of Time, Majora's Mask (retail and debug)</li>
             <li>F-Zero X (CFZE) development ROM with the 1997 Ocarina of Time prototype</li>
           </ul>
+          <div className="small muted">Zelda source maps: choose the bbgames folder in a directory-handle browser. Folder access is not saved.</div>
         </div>
         <div className="dropzone" aria-busy={busy !== null}>
           {busy ? (
@@ -47,6 +49,7 @@ export function Landing({ busy, error, onPick }: LandingProps) {
               <button type="button" className="primary" onClick={onPick} autoFocus>
                 Choose ROM file…
               </button>
+              <button type="button" onClick={onPickBbgames}>Open bbgames folder…</button>
               <div className="muted small">or drop the ROM file anywhere on this page</div>
             </>
           )}

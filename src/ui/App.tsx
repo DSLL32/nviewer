@@ -8,6 +8,7 @@ import { Sidebar, sameLevelRef, type LevelRef, type SidebarGame } from './Sideba
 import { useFileDrop } from './useFileDrop';
 import { Viewport } from './Viewport';
 import { ParserClient } from './workerClient';
+import { pickBbgamesDirectory, type BbgamesSelection } from './bbgames';
 
 const MAX_ROM_BYTES = 128 * 1024 * 1024;
 
@@ -222,6 +223,30 @@ export function App() {
 
   const dragging = useFileDrop(openFile);
 
+  const openBbgames = useCallback(async (selection: BbgamesSelection) => {
+    const client = clientRef.current;
+    if (!client) return;
+    setRomError(null);
+    setRomBusy(`Opening Zelda source maps from ${selection.name}…`);
+    try {
+      addGame(await client.openSource(selection.name, selection.sourceTree, selection.files));
+    } catch (e) {
+      setRomError(`Could not open bbgames source maps: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setRomBusy(null);
+    }
+  }, [addGame]);
+
+  const pickBbgames = useCallback(async () => {
+    setRomError(null);
+    try {
+      const selection = await pickBbgamesDirectory();
+      if (selection) await openBbgames(selection);
+    } catch (e) {
+      setRomError(e instanceof Error ? e.message : String(e));
+    }
+  }, [openBbgames]);
+
   const removeGame = useCallback(
     async (gameId: string) => {
       bumpGeneration(gameId);
@@ -280,6 +305,7 @@ export function App() {
             onSelect={selectLevel}
             onRemove={(id) => void removeGame(id)}
             onAddRom={pickFile}
+            onAddBbgames={() => void pickBbgames()}
           />
           <Viewport
             level={level}
@@ -301,7 +327,7 @@ export function App() {
           )}
         </div>
       ) : (
-        <Landing busy={checking ? 'Checking for saved ROMs…' : romBusy} error={romError} onPick={pickFile} />
+        <Landing busy={checking ? 'Checking for saved ROMs…' : romBusy} error={romError} onPick={pickFile} onPickBbgames={() => void pickBbgames()} />
       )}
       {dragging && (
         <div className="drop-overlay">
