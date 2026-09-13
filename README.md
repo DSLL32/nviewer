@@ -10,6 +10,13 @@ cartridge). Load one or more ROMs, pick a level in the sidebar, and fly around f
 each game's soundtrack in the music box. ROMs are parsed entirely in the browser (in a Web Worker)
 and cached in IndexedDB; nothing is uploaded anywhere.
 
+The viewer can also open the `bbgames` source root and expose a first set of hidden and historical
+Zelda scene objects from `z_ocarina2` (preferred) or `z_ocarina`. This mode uses
+`showDirectoryPicker()` to obtain a real directory handle and reads only its explicit 124-file
+allowlist; it does not upload or enumerate the folder, and it does not cache the source files.
+Firefox does not currently provide this directory-handle API, so source-folder mode requires a
+supporting browser such as Chromium. Normal ROM loading continues to work in Firefox.
+
 ## Run
 
     npm install
@@ -18,6 +25,9 @@ and cached in IndexedDB; nothing is uploaded anywhere.
 
 Open the page, then choose or drop ROM files such as `San Francisco Rush 2049 (U) [!].z64` or
 `Bomberman Hero (U) [!].z64` (`.v64`/`.n64` byte orders work too).
+
+For the Zelda source maps, choose **Open bbgames folder…** and select the `bbgames` directory itself,
+not either Zelda child directory. It must directly contain `z_ocarina2` and/or `z_ocarina`.
 
 **Side-scrollers** (Yoshi's Story) open in a side view through the game's own camera: drag or W A S D / arrow keys
 pan, the wheel (or Space/E, C/Q) zooms, V switches to free fly, and the Layers panel shows or hides background
@@ -72,6 +82,8 @@ Z shows or hides collision · Shift+F collision wireframe · H help · Esc relea
       files, animations (standing poses), placement and object layers; `perfectdark.ts`: levels; `music.ts`: songs
   - `zelda/`: Ocarina of Time and Majora's Mask (format notes in `ZELDA64.md`)
     - `fs.ts`, `tables.ts`: build detection, Yaz0 filesystem, code tables; `scene.ts`: scene and room headers
+    - `elf.ts`, `source.ts`, `sourceManifest.ts`: bounded MIPS ELF relocation and the explicit bbgames
+      hidden-map allowlist/source loader
     - `drawconfig.ts`: animated materials at frame 0; `env.ts`, `sky.ts`, `jpeg.ts`: lights, fog, skyboxes, prerendered
       backgrounds; `collision.ts`, `actors.ts`, `names.ts`: collision, static actors, names; `zelda.ts`: levels;
       `music.ts` with `music/zelda64.ts` (Zelda's revision of the EAD sequence driver)
@@ -98,6 +110,8 @@ Z shows or hides collision · Shift+F collision wireframe · H help · Esc relea
     - `npm run check:layers` (`layeraudit.ts`): every drawn instance must be in a toggleable layer, and
       every game except Star Fox 64 must have a collision layer.
     - `npm run check:render` (`render/selftest.ts`): numeric self-checks of the offline renderer.
+    - `npm run check:zelda-source -- /path/to/bbgames`: load the 21 allowlisted Zelda source maps twice,
+      exercise transferable buffers, audit their layers, and test the linked `zelda_tool_rom.o` fallback.
   - `tools/render/`: offline software rasterizer for the `Level` model (`raster.ts`), PNG read/write
     (`png.ts`), side-by-side image comparison (`compare.ts`), texture contact sheets (`sheet.ts`) and a
     tiny font (`font.ts`). Used to compare renders with emulator captures without a browser.

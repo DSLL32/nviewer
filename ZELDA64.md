@@ -2119,6 +2119,27 @@ Suggested order: fs/tables/names and the level list; rooms with the display-list
 the second texture and half-texel fix in the renderer); environment and sky; draw configs; collision overlay; static
 actors and markers; music; prerendered backgrounds; the alpha.
 
+### 9.0.1 bbgames source-object mode
+
+The viewer additionally supports a deliberately bounded first wave of historical and hidden source objects from a
+user-selected `bbgames` root. It prefers `z_ocarina2` when both trees exist and otherwise accepts `z_ocarina`.
+`showDirectoryPicker()` supplies a real directory handle; the frontend reads exactly 124 allowlisted object paths,
+without recursively enumerating, uploading, persisting, or caching the selected tree. **Verified** (repository code;
+`npm run check:zelda-source -- /home/n64/bbgames`).
+
+The 21 entries are the complete discarded `.GOMI/Ddanh_noanime` scene, 15 complete build-unreferenced top-level
+scene sets, the older `K_Home5.oo` scene, the sparse `zelda_tool_rom` historical payload, and the `Bdan_dd`,
+`Hidan_dd`, and `Mizusin_dd` tool-geometry fragments. The loader accepts `tool_data.o` or the linked
+`zelda_tool_rom.o` for the sparse payload. It parses bounded big-endian ELF32 MIPS relocatable objects and applies
+only `R_MIPS_32`, then adapts the resulting scene/room data to the shared Zelda renderer. **Verified** (object bytes,
+ELF relocation fixture, and two fresh loads of every entry: 54,028 total triangles).
+
+This is source-map support, not reconstruction of a complete game build. Available room geometry, textures,
+collision, lights, spawns, transitions, and actor placements are exposed; absent common objects, actor code,
+skies, and music are not guessed. Actor placements whose model data is unavailable remain markers, tool fragments
+show geometry only, and the sparse historical payload currently exposes its validated collision body. **Verified**
+(source objects and repository checker); fuller presentation is future work.
+
 ### 9.1 Filesystem, tables and level list
 
 - `src/rom/zelda/fs.ts`: byte order normalisation, `zelda@` + dmadata detection, Yaz0 decoder, file access by VROM.
