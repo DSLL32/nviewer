@@ -4,7 +4,7 @@ A browser viewer for the levels of these N64 games (USA versions): *San Francisc
 *San Francisco Rush: Extreme Racing*, *Bomberman 64*, *Bomberman 64: The Second Attack!*,
 *Bomberman Hero*, *BattleTanx*, *BattleTanx: Global Assault*, *Gex 64: Enter the Gecko*,
 *Gex 3: Deep Cover Gecko*, *Yoshi's Story* (Japan), *Star Fox 64* (V1.0 and V1.1), *GoldenEye 007*,
-*Pilotwings 64* (USA, Europe and Japan), *Perfect Dark* (V1.0), and *The Legend of Zelda: Ocarina of Time* and
+*Pilotwings 64* (USA, Europe and Japan), *Pokémon Snap*, *Perfect Dark* (V1.0), and *The Legend of Zelda: Ocarina of Time* and
 *Majora's Mask* (retail and debug builds, plus the 1997 Ocarina of Time prototype preserved on an F-Zero X development
 cartridge). Load one or more ROMs, pick a level in the sidebar, and fly around freely, with
 each game's soundtrack in the music box. ROMs are parsed entirely in the browser (in a Web Worker)
@@ -435,6 +435,24 @@ Textures are uploaded with the RDP tile commands, not read in place.
   collision overlay coloured by slope.
 - **Music.** 63 compressed-MIDI sequences for libultra's player, rendered by `libultra.ts` with GoldenEye's per-track
   loop rules.
+
+### Pokémon Snap
+
+`POKEMONSNAP.md` documents the formats in full; in short:
+- **Files.** The game has no filesystem: fixed ROM ranges hold overlays and position-dependent segments. The viewer
+  resolves each course's load list into one address space. Identified level assets are stored uncompressed; the VPK0
+  streams used by menus and the boot intro are outside the course loader.
+- **Levels.** The seven courses are Beach, Tunnel, Volcano, River, Cave, Valley and Rainbow Cloud. World and scenery
+  blocks are translated by their course positions and rendered from F3DEX2 display lists; material lists that the
+  game builds in RAM are reconstructed from its texture records.
+- **Environment.** Course fog and clear colours, camera-attached sky domes and the verified starting camera are shown.
+  Hidden marker layers trace the on-rails camera path and object paths.
+- **Objects.** Course spawn lists place Pokémon and static props on the world. Pokémon use the first frame of their
+  initial animation, including its hidden parts, and the most detailed model LOD.
+- **Collision.** Hidden layers show the surface-coloured height map, Tunnel and Cave ceiling maps, and static-object
+  boxes, cylinders and spheres.
+- **Music.** All 37 compressed-MIDI sequences use Snap's modified libultra sequence player. The viewer applies each
+  song's extra-volume controller and renders each soundtrack entry on its own with its authored loops.
 
 ## Known gaps
 
