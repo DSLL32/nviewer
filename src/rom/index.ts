@@ -8,6 +8,7 @@ import { openGex3 } from './gex/gex3';
 import { openGex64 } from './gex/gex64';
 import { openGoldenEye } from './goldeneye/goldeneye';
 import { openPilotwings } from './pilotwings/pilotwings';
+import { openPokemonSnap } from './pokemonsnap/pokemonsnap';
 import { openPerfectDark } from './perfectdark/perfectdark';
 import { openYoshiStory } from './yoshi/yoshi';
 import { LEVELS, loadLevel } from './level';
@@ -61,6 +62,17 @@ export function openRom(bytes: Uint8Array): Game {
       return openStarFox64(rom);
     case 'NGEE':
       return openGoldenEye(rom);
+    case 'NPFE':
+      return openPokemonSnap(rom);
+    case 'NPFJ':
+    case 'NPFP':
+    case 'NPFF':
+    case 'NPFD':
+    case 'NPFI':
+    case 'NPFS':
+    case 'NPFU':
+    case 'NPHE':
+      throw new Error(`Pokémon Snap (${code}) is not supported: only Pokémon Snap (U) is currently supported.`);
     case 'NPWE':
     case 'NPWP':
     case 'NPWJ':
@@ -79,6 +91,7 @@ export function openRom(bytes: Uint8Array): Game {
         'Supported: San Francisco Rush 2049 (U), San Francisco Rush: Extreme Racing (U), Bomberman 64 (U), ' +
         'Bomberman 64: The Second Attack! (U), Bomberman Hero (U), BattleTanx (U), BattleTanx: Global Assault (U), ' +
         'Gex 64: Enter the Gecko (U), Gex 3: Deep Cover Gecko (U), Yoshi\'s Story (J), Star Fox 64 (U), GoldenEye 007 (U), ' +
+        'Pokémon Snap (U), ' +
         'Pilotwings 64 (U/E/J), Perfect Dark (U) (V1.0), ' +
         'The Legend of Zelda: Ocarina of Time and Majora\'s Mask.');
     }
