@@ -1,5 +1,5 @@
 // WebGL2 level renderer: uploads a parsed Level once, then draws sky, opaque/cutout and blended passes.
-import type { Backdrop, Batch, Fog, Level, Mesh, SkyPlane } from '../rom';
+import type { Backdrop, Batch, Fog, Level, Mesh, PanoramaSky, SkyPlane } from '../rom';
 import type { FlyCamera } from './camera';
 import { applyTextureFilter, createProgram, uploadTexture, type TextureFilter } from './gl';
 import { mat4, vec3, type Mat4 } from './math';
@@ -125,6 +125,30 @@ in vec2 vUv;
 out vec4 outColor;
 void main() {
   outColor = vec4(texture(uTexture, vUv).rgb * uTint, 1.0);
+}`;
+
+// Screen-space panorama panel: its rectangle is in NDC while the source window uses normalised texel-centre
+// coordinates. Keeping this separate from the fixed backdrop shader leaves that established path unchanged.
+const PANORAMA_VS = `#version 300 es
+layout(location = 0) in vec2 aCorner; // 0..1, y up
+uniform vec4 uRect; // left, bottom, right, top (NDC)
+uniform vec4 uWindow; // u0, v0, u1, v1 (top-left texture origin)
+out vec2 vUv;
+void main() {
+  gl_Position = vec4(mix(uRect.x, uRect.z, aCorner.x), mix(uRect.y, uRect.w, aCorner.y), 0.0, 1.0);
+  vUv = vec2(mix(uWindow.x, uWindow.z, aCorner.x), mix(uWindow.w, uWindow.y, aCorner.y));
+}`;
+
+const PANORAMA_FS = `#version 300 es
+precision highp float;
+uniform sampler2D uTexture;
+uniform vec3 uTint;
+uniform bool uSolid;
+uniform vec3 uFill;
+in vec2 vUv;
+out vec4 outColor;
+void main() {
+  outColor = vec4(uSolid ? uFill : texture(uTexture, vUv).rgb * uTint, 1.0);
 }`;
 
 // Level.skyPlanes: a full-screen pass that casts each pixel's view ray onto a horizontal world plane. The direction is
@@ -367,6 +391,69 @@ interface GpuSkyPlane {
   offsetNdc: number; // horizon offset in NDC units (positive: the plane appears shifted up)
 }
 
+interface GpuPanorama {
+  definition: PanoramaSky;
+  upper: { texture: WebGLTexture; width: number; height: number };
+  lower: { texture: WebGLTexture; width: number; height: number };
+  tint: [number, number, number]; // 0..1
+}
+
+type GpuSky =
+  | { name: string; kind: 'mesh'; batches: GpuBatch[] }
+  | { name: string; kind: 'panorama'; panorama: GpuPanorama };
+
+export interface PanoramaQuad {
+  texture: 'upper' | 'lower';
+  /** Logical viewport coordinates, left/top inclusive and right/bottom exclusive. */
+  rect: [number, number, number, number];
+  /** Inclusive source texel-centre endpoints, left/top/right/bottom. */
+  source: [number, number, number, number];
+}
+
+export function panoramaTop(sky: PanoramaSky, pitch: number): number {
+  const value = Math.trunc(Math.sin(pitch) * sky.top.sinScale + sky.top.bias * sky.top.biasScale) + sky.top.offset;
+  return Math.max(sky.top.min, Math.min(sky.top.max, value));
+}
+
+/**
+ * The panorama compositor's eight logical screen rectangles. A full turn occupies `period` logical pixels; the
+ * upper texture is split into panels matching the single repeating lower panel. Quantising before panel selection
+ * preserves the source compositor's stable 256-pixel panels rather than sampling across their seams.
+ */
+export function panoramaQuads(sky: PanoramaSky, yaw: number, pitch: number): PanoramaQuad[] {
+  const [logicalW] = sky.logicalViewport;
+  const [panelW, panelH] = sky.panelScreen;
+  const [upperW, upperH] = sky.upperSource;
+  const [lowerW, lowerH] = sky.lowerSource;
+  if (![logicalW, ...sky.logicalViewport, sky.period, panelW, panelH, upperW, upperH, lowerW, lowerH].every((v) => Number.isFinite(v) && v > 0)) return [];
+  const panelCount = Math.round(sky.period / panelW);
+  if (panelCount < 1 || Math.abs(panelCount * panelW - sky.period) > 1e-6) return [];
+
+  const turn = sky.yawSign * yaw / (Math.PI * 2) + sky.yawPhase;
+  const yawUnit = Math.trunc(turn * sky.period);
+  const panelUnit = Math.floor((yawUnit - sky.period / 2) / panelW) * panelW;
+  const firstX = panelUnit - yawUnit + logicalW / 2;
+  const top = panoramaTop(sky, pitch);
+  const panelIndex = Math.round(panelUnit / panelW);
+  const firstPanel = ((panelIndex % panelCount) + panelCount) % panelCount;
+  const out: PanoramaQuad[] = [];
+  for (let i = 0; i < 4; i++) {
+    const left = firstX + i * panelW;
+    const panel = (firstPanel + i) % panelCount;
+    out.push({
+      texture: 'upper',
+      rect: [left, top, left + panelW, top + panelH],
+      source: [panel * upperW, 0, (panel + 1) * upperW - 1, upperH - 1],
+    });
+    out.push({
+      texture: 'lower',
+      rect: [left, top + panelH, left + panelW, top + panelH * 2],
+      source: [0, 0, lowerW - 1, lowerH - 1],
+    });
+  }
+  return out;
+}
+
 interface DrawItem {
   index: number; // into Level.instances
   mesh: GpuMesh;
@@ -393,7 +480,7 @@ interface Scene {
   skyPlanes: GpuSkyPlane[]; // Level.skyPlanes, drawn in order
   skyPlaneTextures: WebGLTexture[]; // repeating copies of their textures
   sky: GpuMesh[]; // legacy sky domes (Rush 2049: unplaced *SKY meshes)
-  skies: { name: string; batches: GpuBatch[] }[]; // Level.skies (Rush 1), one drawn at a time
+  skies: GpuSky[]; // Level.skies, one mesh or screen-space panorama drawn at a time
   clearColor: [number, number, number]; // 0..1
   levelClearColor: [number, number, number] | null; // Level.clearColor, 0..1
   backdrop: { texture: WebGLTexture; window: [number, number, number, number]; tint: [number, number, number] } | null;
@@ -439,6 +526,12 @@ export class LevelRenderer {
   private readonly backdropProgram: WebGLProgram;
   private readonly uBackdropWindow: WebGLUniformLocation | null;
   private readonly uBackdropTint: WebGLUniformLocation | null;
+  private readonly panoramaProgram: WebGLProgram;
+  private readonly uPanoramaRect: WebGLUniformLocation | null;
+  private readonly uPanoramaWindow: WebGLUniformLocation | null;
+  private readonly uPanoramaTint: WebGLUniformLocation | null;
+  private readonly uPanoramaSolid: WebGLUniformLocation | null;
+  private readonly uPanoramaFill: WebGLUniformLocation | null;
   private readonly quadVao: WebGLVertexArrayObject;
   private readonly quadBuffer: WebGLBuffer;
   private skyPlanesVisible = true;
@@ -481,6 +574,14 @@ export class LevelRenderer {
     this.uBackdropTint = gl.getUniformLocation(this.backdropProgram, 'uTint');
     gl.useProgram(this.backdropProgram);
     gl.uniform1i(gl.getUniformLocation(this.backdropProgram, 'uTexture'), 0);
+    this.panoramaProgram = createProgram(gl, PANORAMA_VS, PANORAMA_FS);
+    this.uPanoramaRect = gl.getUniformLocation(this.panoramaProgram, 'uRect');
+    this.uPanoramaWindow = gl.getUniformLocation(this.panoramaProgram, 'uWindow');
+    this.uPanoramaTint = gl.getUniformLocation(this.panoramaProgram, 'uTint');
+    this.uPanoramaSolid = gl.getUniformLocation(this.panoramaProgram, 'uSolid');
+    this.uPanoramaFill = gl.getUniformLocation(this.panoramaProgram, 'uFill');
+    gl.useProgram(this.panoramaProgram);
+    gl.uniform1i(gl.getUniformLocation(this.panoramaProgram, 'uTexture'), 0);
     const quadVao = gl.createVertexArray();
     const quadBuffer = gl.createBuffer();
     if (!quadVao || !quadBuffer) throw new Error('Could not create backdrop quad');
@@ -713,6 +814,11 @@ export class LevelRenderer {
       // flags are honoured whatever the culling toggle says: Gex 3 builds its sky from patches that must not be
       // seen from behind.
       for (const entry of level.skies) {
+        if (entry.kind === 'panorama') {
+          const panorama = panoramaOf(entry, level, textures);
+          if (panorama) skies.push({ name: entry.name, kind: 'panorama', panorama });
+          continue;
+        }
         const src = level.meshes[entry.mesh];
         if (!src) continue;
         const skyBatches: GpuBatch[] = [];
@@ -723,7 +829,7 @@ export class LevelRenderer {
           batches.push(gb);
           skyBatches.push(gb);
         }
-        skies.push({ name: entry.name, batches: skyBatches });
+        skies.push({ name: entry.name, kind: 'mesh', batches: skyBatches });
       }
     } else {
       for (const index of level.unplaced) {
@@ -792,6 +898,8 @@ export class LevelRenderer {
       this.lastFrame = { drawCalls };
       return;
     }
+    const skySelection = this.skySelection;
+    const activeSky: GpuSky | null = skySelection === null ? null : (scene.skies.find((s) => s.name === skySelection) ?? scene.skies[0] ?? null);
 
     // Sky planes (clouds, water), before everything else: each pixel's view ray cast onto the plane.
     if (scene.skyPlanes.length > 0 && this.skyPlanesVisible) drawCalls += this.drawSkyPlanes(scene.skyPlanes, camera);
@@ -811,6 +919,9 @@ export class LevelRenderer {
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       drawCalls++;
     }
+
+    // A panorama is already in screen space, so draw its eight quantised panels before setting up the 3D program.
+    if (activeSky?.kind === 'panorama') drawCalls += this.drawPanorama(activeSky.panorama, camera);
 
     const logDepthCoef = 1 / Math.log2(camera.far + 1);
     camera.viewProjection(this.viewProj, canvas.width / Math.max(1, canvas.height));
@@ -928,11 +1039,9 @@ export class LevelRenderer {
     const [cx, cy, cz] = camera.position;
     if (scene.skies.length > 0) {
       // Level.skies positions are relative to the camera: only the camera rotation applies.
-      const sel = this.skySelection;
-      const active = sel === null ? null : (scene.skies.find((s) => s.name === sel) ?? scene.skies[0]);
-      if (active) {
+      if (activeSky?.kind === 'mesh') {
         mat4.translation(this.skyModel, cx, cy, cz);
-        for (const b of active.batches) draw(b, this.skyModel, false, false, false, 'game');
+        for (const b of activeSky.batches) draw(b, this.skyModel, false, false, false, 'game');
       }
     } else {
       // Legacy dome: follows the camera, offset down by the ground height (see setSkyGroundHeight).
@@ -1035,6 +1144,7 @@ export class LevelRenderer {
     this.gl.deleteProgram(this.main.program);
     if (this.cutawayProgram) this.gl.deleteProgram(this.cutawayProgram.program);
     this.gl.deleteProgram(this.backdropProgram);
+    this.gl.deleteProgram(this.panoramaProgram);
     this.gl.deleteVertexArray(this.quadVao);
     this.gl.deleteBuffer(this.quadBuffer);
     this.gl.deleteProgram(this.skyPlaneProgram);
@@ -1082,6 +1192,52 @@ export class LevelRenderer {
     this.gl.deleteFramebuffer(this.peel.fbo);
     this.gl.deleteTexture(this.peel.depth);
     this.peel = null;
+  }
+
+  /** Screen-space cylindrical panorama as four upper and four lower logical panels. */
+  private drawPanorama(panorama: GpuPanorama, camera: FlyCamera): number {
+    const gl = this.gl;
+    const sky = panorama.definition;
+    const [logicalW, logicalH] = sky.logicalViewport;
+    const quads = panoramaQuads(sky, camera.yaw, camera.pitch);
+    if (quads.length === 0) return 0;
+    this.setDepthTest(false);
+    this.setDepthWrite(false);
+    this.setBlend(false);
+    this.setCull(false);
+    gl.useProgram(this.panoramaProgram);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.uniform3fv(this.uPanoramaTint, panorama.tint);
+    gl.bindVertexArray(this.quadVao);
+    gl.bindTexture(gl.TEXTURE_2D, panorama.upper.texture);
+    let bound: WebGLTexture | null = panorama.upper.texture;
+    const setRect = (left: number, top: number, right: number, bottom: number) =>
+      gl.uniform4f(this.uPanoramaRect, left * 2 / logicalW - 1, 1 - bottom * 2 / logicalH, right * 2 / logicalW - 1, 1 - top * 2 / logicalH);
+    let calls = 0;
+    const fill = sky.fillAbove;
+    const fillBottom = fill ? Math.min(logicalH, Math.max(0, panoramaTop(sky, camera.pitch) + fill.overlap)) : 0;
+    if (fill && fillBottom > 0) {
+      gl.uniform1i(this.uPanoramaSolid, 1);
+      gl.uniform3f(this.uPanoramaFill, fill.color[0] / 255, fill.color[1] / 255, fill.color[2] / 255);
+      setRect(0, 0, logicalW, fillBottom);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      calls++;
+    }
+    gl.uniform1i(this.uPanoramaSolid, 0);
+    for (const quad of quads) {
+      const src = quad.texture === 'upper' ? panorama.upper : panorama.lower;
+      if (src.texture !== bound) {
+        gl.bindTexture(gl.TEXTURE_2D, src.texture);
+        bound = src.texture;
+      }
+      const [left, top, right, bottom] = quad.rect;
+      setRect(left, top, right, bottom);
+      const [u0, v0, u1, v1] = quad.source;
+      gl.uniform4f(this.uPanoramaWindow, (u0 + 0.5) / src.width, (v0 + 0.5) / src.height, (u1 + 0.5) / src.width, (v1 + 0.5) / src.height);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      calls++;
+    }
+    return calls;
   }
 
   /** Level.skyPlanes as full-screen passes, without depth, blending, culling or fog. Returns the number of draw calls. */
@@ -1399,6 +1555,21 @@ function backdropOf(b: Backdrop | undefined, textures: WebGLTexture[]): Scene['b
   if (!b || b.texture < 0 || b.texture >= textures.length) return null;
   const tint = b.tint ?? [255, 255, 255];
   return { texture: textures[b.texture], window: [b.u0, b.v0, b.u1, b.v1], tint: [tint[0] / 255, tint[1] / 255, tint[2] / 255] };
+}
+
+function panoramaOf(sky: PanoramaSky, level: Level, textures: WebGLTexture[]): GpuPanorama | null {
+  const upper = level.textures[sky.upperTexture];
+  const lower = level.textures[sky.lowerTexture];
+  if (!upper || !lower || !textures[sky.upperTexture] || !textures[sky.lowerTexture]) return null;
+  const panelCount = Math.round(sky.period / sky.panelScreen[0]);
+  if (panelCount * sky.upperSource[0] > upper.width || sky.upperSource[1] > upper.height || sky.lowerSource[0] > lower.width || sky.lowerSource[1] > lower.height) return null;
+  if (panoramaQuads(sky, 0, 0).length === 0) return null;
+  return {
+    definition: sky,
+    upper: { texture: textures[sky.upperTexture], width: upper.width, height: upper.height },
+    lower: { texture: textures[sky.lowerTexture], width: lower.width, height: lower.height },
+    tint: [sky.tint[0] / 255, sky.tint[1] / 255, sky.tint[2] / 255],
+  };
 }
 
 /** Average color along the lowest ring of the sky dome, used as the clear color below it. */

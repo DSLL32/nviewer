@@ -42,6 +42,10 @@ for (const rom of romPaths(filters)) {
       h.update(new Uint8Array(i.matrix.buffer));
     }
     h.update(JSON.stringify([level.fog, level.clearColor, level.camera, level.backdrop]));
+    // Panorama metadata is opt-in so existing mesh-sky and no-sky hashes remain byte-for-byte stable. Its referenced
+    // texture bytes and dimensions were already included by the texture loop above.
+    const panoramas = (level.skies ?? []).filter((sky) => sky.kind === 'panorama');
+    if (panoramas.length > 0) h.update(JSON.stringify(panoramas));
     h.update(JSON.stringify((level.layers ?? []).map((l) => [l.name, l.kind, l.group, l.visibleByDefault, l.instances.length])));
   }
   console.log(`${game.id} ${game.levels.length} ${h.digest('hex')}`); // one plain line per game, for diffing

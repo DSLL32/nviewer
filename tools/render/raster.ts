@@ -2,7 +2,8 @@
 // Mirrors src/render/renderer.ts: sky first (no depth, no fog), then opaque+cutout batches in instance/display-list
 // order, then blended batches back to front by instance origin (depth test per batch, no depth write).
 // OpenGL conventions: clip z in [-1, 1], depth func LEQUAL, CCW front faces, texture row 0 = uv v 0.
-import type { Batch, Fog, Instance, Level, Mesh, Texture } from '../../src/rom/types';
+import type { Batch, Fog, Instance, Level, Mesh, PanoramaSky, Texture } from '../../src/rom/types';
+import { panoramaQuads, panoramaTop } from '../../src/render/renderer';
 
 export type Vec3 = [number, number, number];
 export type RGB = [number, number, number];
@@ -136,6 +137,7 @@ interface Camera {
   view: Float64Array;
   proj: Float64Array;
   eye: Vec3;
+  forward: Vec3;
 }
 
 function buildCamera(o: CameraOptions, aspect: number): Camera {
@@ -183,7 +185,7 @@ function buildCamera(o: CameraOptions, aspect: number): Camera {
     proj[11] = -1;
     proj[14] = (2 * far * near) / (near - far);
   }
-  return { view, proj, eye: [eye[0], eye[1], eye[2]] };
+  return { view, proj, eye: [eye[0], eye[1], eye[2]], forward: f };
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -625,6 +627,73 @@ function batchTexture(b: Batch, textures: Texture[]): MipTex | null {
   return getMipTex(textures[b.texture]);
 }
 
+function validPanorama(sky: PanoramaSky, textures: Texture[]): boolean {
+  const upper = textures[sky.upperTexture], lower = textures[sky.lowerTexture];
+  if (!upper || !lower || panoramaQuads(sky, 0, 0).length === 0) return false;
+  const panelCount = Math.round(sky.period / sky.panelScreen[0]);
+  return panelCount * sky.upperSource[0] <= upper.width && sky.upperSource[1] <= upper.height
+    && sky.lowerSource[0] <= lower.width && sky.lowerSource[1] <= lower.height;
+}
+
+/** Draw the same logical screen rectangles and texel-centre windows as LevelRenderer.drawPanorama. */
+function drawPanorama(r: Raster, sky: PanoramaSky, textures: Texture[], yaw: number, pitch: number) {
+  const upperSrc = textures[sky.upperTexture], lowerSrc = textures[sky.lowerTexture];
+  if (!upperSrc || !lowerSrc) return;
+  const upper = getMipTex(upperSrc), lower = getMipTex(lowerSrc);
+  const [logicalW, logicalH] = sky.logicalViewport;
+  const tint = [sky.tint[0] / 255, sky.tint[1] / 255, sky.tint[2] / 255];
+  const sample = new Float64Array(4);
+  const fill = sky.fillAbove;
+  const fillBottom = fill ? Math.min(logicalH, Math.max(0, panoramaTop(sky, pitch) + fill.overlap)) : 0;
+  if (fill && fillBottom > 0) {
+    r.stats.triangles += 2;
+    const bottom = fillBottom * r.H / logicalH;
+    const maxY = Math.min(r.H - 1, Math.ceil(bottom - 0.5) - 1);
+    let pixels = 0;
+    for (let y = 0; y <= maxY; y++) for (let x = 0; x < r.W; x++) {
+      const out = (y * r.W + x) * 3;
+      r.color[out] = fill.color[0] / 255;
+      r.color[out + 1] = fill.color[1] / 255;
+      r.color[out + 2] = fill.color[2] / 255;
+      pixels++;
+    }
+    r.stats.pixels += pixels;
+  }
+  for (const quad of panoramaQuads(sky, yaw, pitch)) {
+    r.stats.triangles += 2;
+    const texture = quad.texture === 'upper' ? upper : lower;
+    const textureSrc = quad.texture === 'upper' ? upperSrc : lowerSrc;
+    const [logicalLeft, logicalTop, logicalRight, logicalBottom] = quad.rect;
+    const left = logicalLeft * r.W / logicalW, right = logicalRight * r.W / logicalW;
+    const top = logicalTop * r.H / logicalH, bottom = logicalBottom * r.H / logicalH;
+    const minX = Math.max(0, Math.ceil(left - 0.5)), maxX = Math.min(r.W - 1, Math.ceil(right - 0.5) - 1);
+    const minY = Math.max(0, Math.ceil(top - 0.5)), maxY = Math.min(r.H - 1, Math.ceil(bottom - 0.5) - 1);
+    if (minX > maxX || minY > maxY) {
+      r.stats.rejected += 2;
+      continue;
+    }
+    if (left < 0 || right > r.W || top < 0 || bottom > r.H) r.stats.clipped += 2;
+    const [sourceLeft, sourceTop, sourceRight, sourceBottom] = quad.source;
+    const u0 = (sourceLeft + 0.5) / textureSrc.width, u1 = (sourceRight + 0.5) / textureSrc.width;
+    const v0 = (sourceTop + 0.5) / textureSrc.height, v1 = (sourceBottom + 0.5) / textureSrc.height;
+    const lambda = Math.log2(Math.max(Math.abs((u1 - u0) * textureSrc.width / (right - left)), Math.abs((v1 - v0) * textureSrc.height / (bottom - top))));
+    let pixels = 0;
+    for (let y = minY; y <= maxY; y++) {
+      const v = v0 + (v1 - v0) * ((y + 0.5 - top) / (bottom - top));
+      for (let x = minX; x <= maxX; x++) {
+        const u = u0 + (u1 - u0) * ((x + 0.5 - left) / (right - left));
+        sampleTex(texture, u, v, lambda, r.nearest, r.mip, sample);
+        const out = (y * r.W + x) * 3;
+        r.color[out] = sample[0] * tint[0];
+        r.color[out + 1] = sample[1] * tint[1];
+        r.color[out + 2] = sample[2] * tint[2];
+        pixels++;
+      }
+    }
+    r.stats.pixels += pixels;
+  }
+}
+
 /** Render a level to RGBA8 (width x height, row 0 = top, alpha 255). */
 export function renderLevel(level: LevelLike, opts: RenderOptions): Uint8Array {
   const t0 = performance.now();
@@ -652,10 +721,12 @@ export function renderLevel(level: LevelLike, opts: RenderOptions): Uint8Array {
   const [ex, ey, ez] = cam.eye;
   let clear: RGB = DEFAULT_CLEAR;
   const skyDraws: { mesh: Mesh; model: Float64Array; forceBlend: boolean }[] = [];
+  let panorama: PanoramaSky | null = null;
   if (level.skies && level.skies.length > 0) {
-    const valid = level.skies.filter((s) => meshes[s.mesh]);
+    const valid = level.skies.filter((s) => s.kind === 'panorama' ? validPanorama(s, textures) : meshes[s.mesh]);
     const active = valid.find((s) => s.name === opts.sky) ?? valid[0];
-    if (active) skyDraws.push({ mesh: meshes[active.mesh], model: mat4.translation(ex, ey, ez), forceBlend: true });
+    if (active?.kind === 'panorama') panorama = active;
+    else if (active) skyDraws.push({ mesh: meshes[active.mesh], model: mat4.translation(ex, ey, ez), forceBlend: true });
   } else {
     let groundY: number | null = null;
     for (const index of level.unplaced ?? []) {
@@ -686,6 +757,7 @@ export function renderLevel(level: LevelLike, opts: RenderOptions): Uint8Array {
   // Sky: no depth, no fog, no culling.
   if (opts.drawSkies !== false) {
     r.fog = null;
+    if (panorama) drawPanorama(r, panorama, textures, Math.atan2(cam.forward[0], -cam.forward[2]), Math.asin(Math.max(-1, Math.min(1, cam.forward[1]))));
     for (const s of skyDraws) {
       const solid = s.forceBlend ? [] : s.mesh.batches.filter((b) => modeOf(b) !== Mode.Blend);
       const blended = s.forceBlend ? s.mesh.batches : s.mesh.batches.filter((b) => modeOf(b) === Mode.Blend);

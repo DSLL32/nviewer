@@ -669,7 +669,7 @@ export function loadZeldaLevel(z: ZeldaRuntime, def: ZeldaLevelDef, info: LevelI
   // Textures used by the level first, then sky and background pictures.
   const textureBase = textures.length;
   for (const tx of skyTextures) textures.push(tx);
-  for (const s of skies) for (const b of meshes[s.mesh].batches) b.texture += textureBase;
+  for (const s of skies) if (s.kind !== 'panorama') for (const b of meshes[s.mesh].batches) b.texture += textureBase;
   if (backdrop) backdrop.texture += textureBase;
 
   // ---- static actors and markers ----

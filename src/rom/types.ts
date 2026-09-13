@@ -96,13 +96,48 @@ export interface Fog {
 
 // A sky mesh in Level.meshes, drawn around the camera (camera translation ignored),
 // before the level, without depth or fog. Positions are relative to the camera.
-export interface Sky {
+export interface MeshSky {
   name: string;
+  kind?: 'mesh';
   mesh: number;
   // The game draws this sky without alpha blending; omitted skies use the viewer's
   // usual blended sky pass.
   opaque?: boolean;
 }
+
+// A screen-space cylindrical panorama, drawn before the level without depth or fog.
+// `yawPhase` is the panorama turn at screen centre when camera yaw is zero;
+// `yawSign` maps the viewer's yaw onto panorama turns. `top` is calculated in
+// logical pixels as trunc(sin(pitch) * sinScale + bias * biasScale) + offset,
+// then clamped. The upper texture contains one complete turn; the lower texture
+// is one horizontally repeating panel.
+export interface PanoramaSky {
+  name: string;
+  kind: 'panorama';
+  upperTexture: number;
+  lowerTexture: number;
+  tint: [number, number, number]; // multiplies both textures, 0..255
+  logicalViewport: [number, number];
+  period: number;
+  panelScreen: [number, number];
+  upperSource: [number, number]; // source texels per upper panel; panels are stitched horizontally in the texture
+  lowerSource: [number, number]; // source texels in the horizontally repeating lower panel
+  yawSign: -1 | 1;
+  yawPhase: number; // turns
+  // Optional solid fill from the top of the logical viewport through
+  // max(0, calculated top + overlap), drawn before the panorama panels.
+  fillAbove?: { color: [number, number, number]; overlap: number };
+  top: {
+    sinScale: number;
+    bias: number;
+    biasScale: number;
+    offset: number;
+    min: number;
+    max: number;
+  };
+}
+
+export type Sky = MeshSky | PanoramaSky;
 
 // A horizontal textured plane at a fixed world height that the game projects to the screen before the level
 // (GoldenEye's cloud layer and Frigate's water): drawn first, without depth or fog, over the whole view where the
