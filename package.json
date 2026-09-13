@@ -12,7 +12,8 @@
     "check:layers": "tsx tools/layeraudit.ts",
     "check:transfer": "tsx tools/transfer.ts",
     "check:hashes": "tsx tools/hashall.ts",
-    "check:render": "tsx tools/render/selftest.ts"
+    "check:render": "tsx tools/render/selftest.ts",
+    "check:zelda-source": "tsx tools/zelda-source.ts"
   },
   "devDependencies": {
     "@types/node": "^22.20.2",
