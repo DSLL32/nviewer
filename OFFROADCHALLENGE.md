@@ -284,7 +284,7 @@ The Features menu offers `RANDOM`, `BLUE`, `STORMY` and `DUSK`; default is Rando
 
 Routine `0x800175C0` selects one of twelve raw sky files: IDs `22,13,32,6,30,2,23,1,24,40,20,33`. Each file is `0x11BD0` bytes and contains a 64-byte pair of RGBA16 palettes, a 256×567 packed-CI4 atlas, and a 16-byte header. Tables at `0x8006D13C`, `0x8006D0E0` and `0x8006D114` provide the file IDs, resource pointers and tint colours; the feature-option dispatcher at `0x80034C14` partitions them among Blue, Stormy, Dusk and Random. The consumer at `0x8001775C` draws eight panels using 77-row strides and a second palette bank at `+0xE700`. **[V-ROM/V-ASM]**
 
-The remaining implementation problem is not locating or decoding the art. Retail presents it through a camera-dependent 2D quad compositor whose eight 60-byte records feed `0x80015160`, including yaw/pitch clipping. Translating that exactly into nviewer's camera-relative 3D `Level.skies` contract remains open; a guessed panorama would not be verified. **[OPEN]**
+The viewer implements this as a screen-space panorama rather than a perspective sky mesh. It stitches the three upper slabs into a repeating 480×154 turn, repeats the 160×105 lower slab, and reproduces the eight quantized panels, tint, yaw scroll, pitch displacement and conditional black top fill. It exposes the twelve deterministic pictures as `Blue 1…3`, `Stormy 1…2`, `Dusk 1…4`, and the three Mode-5 variants. Random remains a game selection policy rather than a thirteenth picture. **[V-REPO/V-TOOL]**
 
 ### 6.3 Fog, lighting and colors
 
@@ -455,7 +455,7 @@ Every instance must belong to exactly one visible-control layer: **[DESIGN]**
 
 Do not move a visibly rendered record exclusively into collision merely because physics also references it. Either share the decoded mesh through a second diagnostic instance or generate collision wire geometry, keeping the ordinary instance in its visual layer. Files 14, 15 and 36 contain common race/vehicle material outside the per-track load path; omit them from the initial static course scene and add them later only as an explicit optional layer. **[DESIGN]**
 
-The present `Texture`, `Mesh`, `Instance`, `LevelLayer`, `CameraView` and `clearColor` contracts are sufficient for the established static data. A faithful random/selectable sky may require `Level.skies` once the sky resource mechanism is identified. No hardware `Fog` should be synthesized from screenshots alone. **[V-REPO/DESIGN]**
+The `PanoramaSky` branch of `Level.skies` represents the verified camera-dependent compositor while preserving the existing selector shared with mesh skies. No hardware `Fog` should be synthesized from screenshots alone. **[V-REPO/DESIGN]**
 
 ### 9.4 Music player
 
