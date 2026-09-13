@@ -3,6 +3,7 @@
 import ParserWorker from '../worker?worker&inline';
 import type { RomSummary, WorkerRequest, WorkerResponse } from '../protocol';
 import type { DecodedMusic, Level } from '../rom';
+import type { ZeldaSourceFile } from '../rom/zelda/source';
 
 type Pending = { resolve: (r: WorkerResponse) => void; reject: (e: Error) => void };
 type DistributiveOmit<T, K extends keyof T> = T extends unknown ? Omit<T, K> : never;
@@ -41,6 +42,14 @@ export class ParserClient {
    */
   async open(name: string, bytes: ArrayBuffer): Promise<RomSummary> {
     const r = await this.request({ type: 'open', name, bytes }, [bytes]);
+    if (r.type !== 'rom') throw new Error('Unexpected worker response');
+    if (!r.ok) throw new Error(r.error);
+    return r.rom;
+  }
+
+  /** Open the explicitly supported files selected from a bbgames source folder; source folders are not cached. */
+  async openSource(name: string, sourceTree: string, files: ZeldaSourceFile[]): Promise<RomSummary> {
+    const r = await this.request({ type: 'open-source', name, sourceTree, files }, files.map((f) => f.bytes));
     if (r.type !== 'rom') throw new Error('Unexpected worker response');
     if (!r.ok) throw new Error(r.error);
     return r.rom;

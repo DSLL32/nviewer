@@ -1,8 +1,10 @@
 // Messages between the UI thread and the parser worker.
 import type { DecodedMusic, Game, Level, LevelInfo, MusicTrack } from './rom';
+import type { ZeldaSourceFile } from './rom/zelda/source';
 
 export type WorkerRequest =
   | { type: 'open'; id: number; name: string; bytes: ArrayBuffer }
+  | { type: 'open-source'; id: number; name: string; sourceTree: string; files: ZeldaSourceFile[] }
   | { type: 'restore'; id: number }
   | { type: 'remove'; id: number; gameId: string }
   | { type: 'level'; id: number; gameId: string; index: number }
