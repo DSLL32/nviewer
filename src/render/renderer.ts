@@ -392,7 +392,7 @@ interface Scene {
   skyPlanes: GpuSkyPlane[]; // Level.skyPlanes, drawn in order
   skyPlaneTextures: WebGLTexture[]; // repeating copies of their textures
   sky: GpuMesh[]; // legacy sky domes (Rush 2049: unplaced *SKY meshes)
-  skies: { name: string; mesh: GpuMesh }[]; // Level.skies (Rush 1), one drawn at a time
+  skies: { name: string; batches: GpuBatch[] }[]; // Level.skies (Rush 1), one drawn at a time
   clearColor: [number, number, number]; // 0..1
   levelClearColor: [number, number, number] | null; // Level.clearColor, 0..1
   backdrop: { texture: WebGLTexture; window: [number, number, number, number]; tint: [number, number, number] } | null;
@@ -707,21 +707,22 @@ export class LevelRenderer {
     const skies: Scene['skies'] = [];
     let clearColor = DEFAULT_CLEAR;
     if (level.skies && level.skies.length > 0) {
-      // Game-built skies: always alpha-blended (texture x vertex colour; alpha fades out at the horizon). Their
-      // cullBack flags are honoured whatever the culling toggle says: Gex 3 builds its sky from patches that must
-      // not be seen from behind.
+      // Game-built skies normally use the viewer's blended pass (texture x vertex colour; alpha fades out at the
+      // horizon). Some games explicitly draw a sky opaque; those retain each source batch's blend mode. cullBack
+      // flags are honoured whatever the culling toggle says: Gex 3 builds its sky from patches that must not be
+      // seen from behind.
       for (const entry of level.skies) {
         const src = level.meshes[entry.mesh];
         if (!src) continue;
-        const mesh = emptyMesh();
+        const skyBatches: GpuBatch[] = [];
         for (const b of src.batches) {
           const gb = this.uploadBatch(b, textures);
           if (!gb) continue;
-          gb.mode = Mode.Blend;
+          if (!entry.opaque) gb.mode = Mode.Blend;
           batches.push(gb);
-          mesh.blended.push(gb);
+          skyBatches.push(gb);
         }
-        skies.push({ name: entry.name, mesh });
+        skies.push({ name: entry.name, batches: skyBatches });
       }
     } else {
       for (const index of level.unplaced) {
@@ -922,7 +923,7 @@ export class LevelRenderer {
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     }
 
-    // Sky: drawn first around the camera, without depth, fog or culling.
+    // Sky: drawn first around the camera, without depth or fog; Level.skies retain their game-authored culling.
     const [cx, cy, cz] = camera.position;
     if (scene.skies.length > 0) {
       // Level.skies positions are relative to the camera: only the camera rotation applies.
@@ -930,7 +931,7 @@ export class LevelRenderer {
       const active = sel === null ? null : (scene.skies.find((s) => s.name === sel) ?? scene.skies[0]);
       if (active) {
         mat4.translation(this.skyModel, cx, cy, cz);
-        for (const b of active.mesh.blended) draw(b, this.skyModel, false, false, false, 'game');
+        for (const b of active.batches) draw(b, this.skyModel, false, false, false, 'game');
       }
     } else {
       // Legacy dome: follows the camera, offset down by the ground height (see setSkyGroundHeight).
