@@ -30,6 +30,7 @@ export function Landing({ busy, error, onPick }: LandingProps) {
             <li>Yoshi's Story (J)</li>
             <li>Star Fox 64 (U) (V1.0, V1.1)</li>
             <li>GoldenEye 007 (U)</li>
+            <li>Pilotwings 64 (U/E/J)</li>
             <li>Perfect Dark (U) (V1.0)</li>
             <li>The Legend of Zelda: Ocarina of Time, Majora's Mask (retail and debug)</li>
             <li>F-Zero X (CFZE) development ROM with the 1997 Ocarina of Time prototype</li>
