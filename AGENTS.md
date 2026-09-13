@@ -102,6 +102,7 @@ Implemented (spec in the repo):
 | Star Fox 64 | `r49/sf/` | |
 | GoldenEye 007 | `r49/ge/` (unused content in `ge/unused/`, including the Citadel stan decoder) | |
 | Perfect Dark | `r49/pd/` | |
+| Pokémon Snap | `r49/snap/` | |
 | Zelda 64 (OoT, MM, 1997 alpha) | `r49/zelda/` (alpha in `zelda/alpha/`) | |
 
 Research complete (spec in the repo, implementation pending):
@@ -109,6 +110,7 @@ Research complete (spec in the repo, implementation pending):
 | Game | Research |
 |---|---|
 | Pilotwings 64 | `r49/pilotwings/` |
+| Off Road Challenge | `r49/offroad/` |
 
 Research in progress (spec not yet in the repo):
 
@@ -117,10 +119,8 @@ Research in progress (spec not yet in the repo):
 | The World Is Not Enough | `r49/twine/` |
 | Banjo-Kazooie | `r49/banjo/` |
 | Glover | `r49/glover/` |
-| Pokémon Snap | `r49/snap/` |
 | Mario Party (J) | `r49/mparty/` |
 | Mario Kart 64 | `r49/mk64/` |
-| Off Road Challenge | `r49/offroad/` |
 
 Shared:
  - `r49/impl/`: per-agent check directories (`ge_core`, `pd_obj`, `zelda_mus`,
