@@ -117,6 +117,7 @@ Research in progress (spec not yet in the repo):
 | Pokémon Snap | `r49/snap/` |
 | Mario Party (J) | `r49/mparty/` |
 | Mario Kart 64 | `r49/mk64/` |
+| Off Road Challenge | `r49/offroad/` |
 
 Shared:
  - `r49/impl/`: per-agent check directories (`ge_core`, `pd_obj`, `zelda_mus`,
