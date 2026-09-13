@@ -506,7 +506,8 @@ export function renderSequence(bytes: Uint8Array, bank: Bank, seq: Sequence, opt
         sound = s;
         break;
       }
-      if (key < s.keyMin) r = i - 1;
+      // __lookupSoundQuick: velocity layers of one key are ordered by velocity.
+      if (key < s.keyMin || (vel < s.velMin && key <= s.keyMax)) r = i - 1;
       else l = i + 1;
     }
     if (!sound) return;
