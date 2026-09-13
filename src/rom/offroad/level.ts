@@ -3,6 +3,7 @@
 import type { Batch, CameraView, Instance, Level, LevelInfo, Marker, Mesh } from '../types';
 import { emptyBounds } from '../util';
 import type { OffroadImage, OffroadRom } from './fs';
+import { buildOffroadSkies } from './sky';
 import { buildMaterialTextures, type MaterialTexture, type TextureWindow } from './texture';
 
 const TRACK_NAMES = ['Mojave', 'El Paso', 'Vegas', 'Pikes Peak', "Ol' South", 'Baja', 'Flagstaff', 'El Cajon', 'Guadalupe'];
@@ -385,9 +386,10 @@ export function loadOffroadLevel(rom: OffroadRom, index: number): Level {
   }
   if (!collisionInstances.length) throw new Error(`Off Road Challenge ${info.name} has no decoded collision candidates`);
   if (!Number.isFinite(bounds.min[0])) { bounds.min = [-1, -1, -1]; bounds.max = [1, 1, 1]; }
+  const skySet = buildOffroadSkies(rom, materialSet.textures.length);
 
   return {
-    info, id: IDS[index], textures: materialSet.textures, meshes, instances, unplaced: [], bounds,
+    info, id: IDS[index], textures: [...materialSet.textures, ...skySet.textures], meshes, instances, unplaced: [], bounds,
     markers: markers.length ? markers : undefined,
     layers: [
       { name: 'track', kind: 'main', instances: trackInstances },
@@ -395,8 +397,7 @@ export function loadOffroadLevel(rom: OffroadRom, index: number): Level {
       { name: 'collision candidates', kind: 'collision', instances: collisionInstances, visibleByDefault: false },
     ],
     camera: startCamera(sectors, startSector, bounds),
-    // The four selectable sky pictures remain undecoded; blue is an explicit
-    // retail choice and is a less misleading fallback than synthesized fog.
+    skies: skySet.skies,
     clearColor: [112, 155, 196],
   };
 }
