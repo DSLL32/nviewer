@@ -15,6 +15,12 @@ background mode if it has one (such as Claude Code's `run_in_background`), or a 
 
     ~/mupen64plus/headless.sh '/path/to/game.z64' &
 
+Glide64mk2 is the default video plugin. Override it for games that require another dynamically
+loaded plugin, for example GLideN64:
+
+    M64P_GFX_PLUGIN=~/mupen64plus/install/lib/mupen64plus/mupen64plus-video-GLideN64.so \
+      ~/mupen64plus/headless.sh '/path/to/game.z64' &
+
 Its output goes to `~/mupen64plus/run/emulator.log`, which is recreated at each start.
 
 It's ready once `~/mupen64plus/run/shots/*-latest.png` exists, usually within a few seconds. If new
