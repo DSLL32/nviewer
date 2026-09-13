@@ -16,6 +16,9 @@ When asked to investigate a game (ROM formats for the viewer):
  - Every emulator session runs in a fresh subagent with its own run directory;
    it stops the emulator and checks that no mupen64plus or `headless-*.sh`
    process is left.
+ - At most one emulator session may be live per game investigation, including
+   sessions launched by nested agents. Emulator tasks run serially, with
+   process cleanup verified before the next session starts.
  - Deliverable: `<GAME>.md`, structured like the existing specs (`STARFOX.md`,
    `GOLDENEYE.md`, `ZELDA64.md`): ROM identification and versions, filesystem
    and compression, level list, geometry and textures, environment (fog, sky,
