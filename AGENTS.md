@@ -101,6 +101,7 @@ Implemented (spec in the repo):
 | Yoshi's Story | `r49/ys/` | |
 | Star Fox 64 | `r49/sf/` | |
 | GoldenEye 007 | `r49/ge/` (unused content in `ge/unused/`, including the Citadel stan decoder) | |
+| Off Road Challenge | `r49/offroad/` | |
 | Perfect Dark | `r49/pd/` | |
 | Pokémon Snap | `r49/snap/` | |
 | Zelda 64 (OoT, MM, 1997 alpha) | `r49/zelda/` (alpha in `zelda/alpha/`) | |
@@ -110,7 +111,6 @@ Research complete (spec in the repo, implementation pending):
 | Game | Research |
 |---|---|
 | Pilotwings 64 | `r49/pilotwings/` |
-| Off Road Challenge | `r49/offroad/` |
 
 Research in progress (spec not yet in the repo):
 
