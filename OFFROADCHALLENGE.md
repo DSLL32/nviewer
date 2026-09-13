@@ -39,7 +39,7 @@ Unless stated otherwise, ROM offsets and RAM addresses are for the US release. R
 | code | uncompressed ROM `0x1000–0x88BC0` maps directly to RAM `0x80000400–0x80087FC0`; BSS follows through `0x8015E700` **[V-ROM/V-ASM]** |
 | filesystem | 41 raw files in a 16-byte table at US ROM `0x6E310`; collectively and gaplessly cover `0x88BC0–0xC75030`; no file compression **[V-ROM/V-ASM/V-TOOL]** |
 | tracks | nine complete tracks: six ordinarily visible plus Flagstaff, El Cajon and Guadalupe as retail unlockables; each has one main file, while the three hidden tracks share an auxiliary file with their corresponding visible track **[V-ROM/V-ASM/V-FRAME]** |
-| graphics | custom float-vertex/model and 24-byte polygon format converted at runtime to F3DEX.NoN 1.21; 128-wide CI8 atlases with RGBA16 TLUT windows **[V-ROM/V-ASM/V-TOOL]** |
+| graphics | custom float-vertex/model and 24-byte polygon format converted at runtime to F3DEX.NoN 1.21; packed-CI4 atlases stored as 128-byte/256-texel rows, with 16-entry RGBA16 TLUT windows **[V-ROM/V-ASM/V-TOOL]** |
 | environment | user-selectable Random/Blue/Stormy/Dusk skies; fixed render-state templates disable hardware fog and lighting; nominal projection is 53.13° horizontal / 42.67° vertical **[V-ROM/V-ASM/V-FRAME]** |
 | music | Williams WESS: `SN64` v2 bank, `SSEQ` v2 with 12 music + 153 SFX sequences, 196 VADPCM waves at 22,050 Hz; six named radio songs and six other music sequences **[V-ROM/V-ASM/V-TOOL]** |
 | versions | European `NOFP` uses the same parser: 40/41 raw files are structurally identical after self-pointer rebasing; the audio archive is byte-identical **[V-ROM/V-TOOL]** |
@@ -224,12 +224,12 @@ Polygon fields currently established: **[V-ROM/V-ASM]**
 
 - `+0x00` packed flags; bit `0x100` selects the textured path;
 - `+0x01` palette-selector index;
-- bytes `+0x04…+0x0B` supply four S/T pairs, reordered as `(7,6),(5,4),(11,10),(9,8)` and multiplied by 32;
+- bytes `+0x04…+0x0B` supply four S/T pairs, in logical-reference order `(5,4),(7,6),(9,8),(11,10)`, and are multiplied by 32;
 - `+0x0E` selects a texture-atlas row;
 - `+0x10/+0x12/+0x14/+0x16` are `u16` float-word offsets; divide by three for vertex indices;
-- equal first/fourth indices encode a triangle; otherwise the face is a quad.
+- equal second/third indices encode a triangle; otherwise the face is a quad.
 
-The runtime transforms float vertices to temporary N64 vertices and emits `gSPVertex` plus `BF`/`B1` triangle commands. **[V-ASM]**
+The runtime transforms float vertices to temporary N64 vertices and emits `gSPVertex` plus `BF`/`B1` triangle commands. The corrected triangle sentinel and UV order follow the register/data flow in `0x80013E7C`: the comparison uses the low half of polygon `+0x10` (reference 1 at `+0x12`) and the high half of `+0x14` (reference 2 at `+0x14`), while the triangle's temporary indices map back to logical references 0, 1 and 3. **[V-ASM]**
 
 ### 5.4 Textures and materials
 
@@ -239,10 +239,10 @@ For all nine tracks, root `+0x04` resolves a sole resource descriptor: **[V-ROM/
 +00 u32 palette-bank/config count
 +04 u32 RGBA16 palette-data base
 +08 u32 0x80000000 | atlasHeight
-+0C u32 CI8 atlas base
++0C u32 packed-CI4 atlas base
 ```
 
-The terrain path sets a 128-pixel-wide CI8 image. Polygon `+0x0E * 128` selects the starting row; the per-face UV extrema determine the loaded rectangle. `G_SETTILE` uses wrap on both axes with mask and shift zero. Root `+0x08` is a `u32` lookup indexed by polygon byte `+0x01`; doubling the selected value produces the offset into the RGBA16 TLUT data. Several tracks reference through exactly `atlasHeight-1`, independently validating the low 31 bits of descriptor `+0x08` as height. Remaining packed polygon/material bits are open. **[V-ROM/V-ASM/V-TOOL]**
+The terrain builder describes the source as a 128-wide CI8 image for loading bytes into TMEM, but describes the render tile as CI4. Each 128-byte source row therefore contains 256 logical texels, with the high nibble first. Polygon `+0x0E * 128` selects the starting row; the per-face UV extrema determine the loaded rectangle. `G_SETTILE` uses wrap on both axes with mask and shift zero. Root `+0x08` is a `u32` lookup indexed by polygon byte `+0x01`; doubling the selected value produces the offset of a 16-entry RGBA16 TLUT window. Several tracks reference through exactly `atlasHeight-1`, independently validating the low 31 bits of descriptor `+0x08` as height. The earlier research prototype's CI8 decode caused rainbow-smearing and transparent holes; packed-CI4 decoding was confirmed by coherent Mojave and El Paso offline and browser renders. Remaining packed polygon/material bits are open. **[V-ROM/V-ASM/V-TOOL]**
 
 ### 5.5 Collision
 
@@ -431,7 +431,7 @@ Do not extract files at runtime. An `OffroadRom.file(id)` view over the normaliz
 |---|---|---|---|
 | `src/rom/offroad/fs.ts` | version profile, 41-entry table, bounded file views, pointer resolver | `fs/NOTES.md`, `fs/file_table.tsv`, `fs/extract.py` | low |
 | `src/rom/offroad/level.ts` | track tables/root, sector/category walk, placement and model decoding | `levels/NOTES.md`, `levels/analyze_orc.py` | medium-high |
-| `src/rom/offroad/texture.ts` | CI8 atlas windows, palette selection, RGBA16 TLUT and material state | `levels/NOTES.md` | medium |
+| `src/rom/offroad/texture.ts` | packed-CI4 atlas windows, palette selection, RGBA16 TLUT and material state | `levels/NOTES.md` | medium |
 | `src/rom/offroad/music.ts` | WESS/SN64 archive, SSEQ event interpreter, bank/sample decode and song metadata | `music/NOTES.md`, `music/analyze_wess.py` | medium |
 | `src/rom/offroad/offroad.ts` | `Game`, nine-entry level list, assembly, layers, camera/environment defaults | §§4–6 | medium |
 | shared `types.ts` / `index.ts` | game ID and detection only | current repository contracts | low |
@@ -467,7 +467,7 @@ The existing `DecodedMusic` interface is adequate. The driver is not the standar
 |---|---|---|
 | ROM/files | low | regional offsets and rejecting malformed pointers |
 | track geometry/placement | medium-high | packed category/material fields and custom float-index face encoding |
-| textures | medium | dynamic CI8 atlas rectangles and palette-window selection |
+| textures | medium | dynamic packed-CI4 atlas rectangles and palette-window selection |
 | environment/camera | medium | sky mechanism and unverified chase offsets, rather than basic geometry |
 | objects/collision | medium-high | exact five-category semantics and visual/collision overlap |
 | music | medium | a small new WESS event scheduler; bank location is simple, exact envelope/voice fidelity is the risk |
