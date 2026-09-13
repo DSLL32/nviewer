@@ -114,7 +114,7 @@ const F3DEX2 = {
   DL: 0xde, ENDDL: 0xdf, SETOTHERMODE_L: 0xe2, SETOTHERMODE_H: 0xe3, BRANCH_Z: 0x04, RDPHALF_1: 0xe1,
 };
 const F3DEX = {
-  MTX: 0x01, VTX: 0x04, DL: 0x06, BRANCH_Z: 0xb0, TRI2: 0xb1, QUAD: 0xb5, RDPHALF_1: 0xb4,
+  MTX: 0x01, VTX: 0x04, DL: 0x06, BRANCH_Z: 0xb0, TRI2: 0xb1, MODIFYVTX: 0xb2, QUAD: 0xb5, RDPHALF_1: 0xb4,
   CLEARGEOMETRYMODE: 0xb6, SETGEOMETRYMODE: 0xb7, ENDDL: 0xb8, SETOTHERMODE_L: 0xb9,
   SETOTHERMODE_H: 0xba, TEXTURE: 0xbb, MOVEWORD: 0xbc, POPMTX: 0xbd, TRI1: 0xbf,
 };
@@ -800,6 +800,8 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
       switch (op) {
         // The start index is stored doubled, like triangle vertex indices.
         case F3DEX.VTX: vertices(w1, (w0 >>> 10) & 0x3f, ((w0 >>> 16) & 0xff) >> 1); break;
+        // F3DEX/F3DLX uses opcode B2 (F3DEX2 uses 02).
+        case F3DEX.MODIFYVTX: modifyVertex((w0 >>> 16) & 0xff, (w0 & 0xffff) >>> 1, w1); break;
         case F3DEX.TRI1: tri(w1); break;
         case F3DEX.TRI2: tri(w0); tri(w1); break;
         case F3DEX.QUAD: {
