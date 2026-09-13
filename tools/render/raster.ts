@@ -35,7 +35,7 @@ export interface RenderStats {
 export interface RenderOptions extends CameraOptions {
   width: number;
   height: number;
-  /** Honour Batch.cullBack (default false, like the viewer's default). */
+  /** Honour Batch.cullBack (default false, like the viewer's default). Batch.forceCullBack is always honoured. */
   cull?: boolean;
   /** Clear colour 0..255. Default: fog colour when fog is on, else the legacy sky horizon colour, else [117,163,219]. */
   background?: RGB;
@@ -675,7 +675,7 @@ export function renderLevel(level: LevelLike, opts: RenderOptions): Uint8Array {
     r.mode = mode;
     r.depthTest = depthTest;
     r.depthWrite = depthWrite;
-    r.cull = allowCull && cullOn && b.cullBack === true;
+    r.cull = b.forceCullBack === true || (allowCull && cullOn && b.cullBack === true);
     r.mirrored = mirrored;
   };
   const drawBatch = (b: Batch, model: Mat4) => {

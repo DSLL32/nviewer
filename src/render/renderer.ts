@@ -339,6 +339,7 @@ interface GpuBatch {
   depthTest: boolean;
   depthWrite: boolean;
   cullBack: boolean;
+  forceCullBack: boolean;
   decal: boolean;
   colorBuffer: WebGLBuffer | null;
   unlitColorBuffer: WebGLBuffer | null;
@@ -550,7 +551,7 @@ export class LevelRenderer {
     this.dirty = true;
   }
 
-  /** Cull back faces of batches flagged cullBack (the game's own setting). Off: both sides are drawn. */
+  /** Cull ordinary cullBack batches when enabled; forceCullBack batches remain culled in either setting. */
   setBackfaceCulling(enabled: boolean) {
     if (this.cullingEnabled === enabled) return;
     this.cullingEnabled = enabled;
@@ -864,7 +865,7 @@ export class LevelRenderer {
       this.setDepthTest(depthTest);
       this.setDepthWrite(depthWrite);
       this.setBlend(forceBlend || b.mode === Mode.Blend);
-      const cull = policy === 'game' ? b.cullBack : policy === 'toggle' && this.cullingEnabled && b.cullBack;
+      const cull = b.forceCullBack || (policy === 'game' ? b.cullBack : policy === 'toggle' && this.cullingEnabled && b.cullBack);
       this.setCull(cull);
       if (cull) this.setMirroredWinding(mirrored);
       if (model !== boundModel) {
@@ -1299,6 +1300,7 @@ export class LevelRenderer {
       depthTest: b.depthTest,
       depthWrite: b.depthWrite,
       cullBack: b.cullBack === true,
+      forceCullBack: b.forceCullBack === true,
       decal: b.decal === true,
       colorBuffer,
       unlitColorBuffer,

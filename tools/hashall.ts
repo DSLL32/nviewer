@@ -30,6 +30,8 @@ for (const rom of romPaths(filters)) {
     for (const m of level.meshes) {
       for (const b of m.batches) {
         h.update(JSON.stringify([b.texture, b.blend, b.depthTest, b.depthWrite, b.cullBack, b.decal]));
+        // Keep existing-game hashes stable while making the opt-in semantic flag part of the level hash.
+        if (b.forceCullBack === true) h.update('forceCullBack');
         h.update(new Uint8Array(b.positions.buffer));
         h.update(new Uint8Array(b.uvs.buffer));
         h.update(b.colors);

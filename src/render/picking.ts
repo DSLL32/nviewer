@@ -13,7 +13,7 @@ export interface PickHit {
 export interface PickOptions {
   /** Whether an instance is currently drawn (e.g. scripted objects can be hidden). */
   include(instanceIndex: number): boolean;
-  /** Skip back faces of batches the game culls (when the viewer draws them culled). */
+  /** Skip ordinary cullBack faces when the viewer's diagnostic toggle is on. forceCullBack is always honoured. */
   cullBackFaces: boolean;
   /** Ignore hits closer than this (the camera's near plane). */
   minT: number;
@@ -93,7 +93,7 @@ export class LevelPicker {
         if (!bb || !rayHitsBox(lo, ld, bb, opts.minT, bestT)) continue;
         const batch = mesh.batches[bi];
         if (opts.batch && !opts.batch(batch)) continue;
-        const cull = opts.cullBackFaces && batch.cullBack === true;
+        const cull = batch.forceCullBack === true || (opts.cullBackFaces && batch.cullBack === true);
         const hit = rayBatch(lo, ld, batch, level.textures, cull, mirrored, opts.minT, bestT);
         if (hit) {
           bestT = hit.t;

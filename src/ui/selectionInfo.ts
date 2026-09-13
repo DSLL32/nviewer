@@ -142,6 +142,7 @@ export function describeSelection(level: Level, game: GameIdentity | null, sel: 
     ['depthTest', yesNo(batch.depthTest)],
     ['depthWrite', yesNo(batch.depthWrite)],
     ['cullBack', yesNo(batch.cullBack)],
+    ['forceCullBack', yesNo(batch.forceCullBack)],
     ['decal', yesNo(batch.decal)],
   ];
 
