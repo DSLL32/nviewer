@@ -38,14 +38,20 @@ const FORWARD = ['KeyW'];
 const BACK = ['KeyS'];
 const LEFT = ['KeyA'];
 const RIGHT = ['KeyD'];
-const UP = ['Space', 'KeyE'];
-const DOWN = ['KeyC', 'KeyQ'];
+const WORLD_UP = ['Space'];
+const WORLD_DOWN = ['KeyC'];
+const CAMERA_UP = ['KeyE'];
+const CAMERA_DOWN = ['KeyQ'];
 const TURN_LEFT = ['ArrowLeft'];
 const TURN_RIGHT = ['ArrowRight'];
 const LOOK_UP = ['ArrowUp'];
 const LOOK_DOWN = ['ArrowDown'];
 const FAST = ['ShiftLeft', 'ShiftRight'];
-const HELD_KEYS = new Set([...FORWARD, ...BACK, ...LEFT, ...RIGHT, ...UP, ...DOWN, ...TURN_LEFT, ...TURN_RIGHT, ...LOOK_UP, ...LOOK_DOWN, ...FAST]);
+const HELD_KEYS = new Set([
+  ...FORWARD, ...BACK, ...LEFT, ...RIGHT,
+  ...WORLD_UP, ...WORLD_DOWN, ...CAMERA_UP, ...CAMERA_DOWN,
+  ...TURN_LEFT, ...TURN_RIGHT, ...LOOK_UP, ...LOOK_DOWN, ...FAST,
+]);
 
 export class FlyControls {
   private keys = new Set<string>();
@@ -148,7 +154,7 @@ export class FlyControls {
       const fast = has(FAST) ? SIDE_FAST : 1;
       const panX = (has(RIGHT) || has(TURN_RIGHT) ? 1 : 0) - (has(LEFT) || has(TURN_LEFT) ? 1 : 0);
       const panY = (has(FORWARD) || has(LOOK_UP) ? 1 : 0) - (has(BACK) || has(LOOK_DOWN) ? 1 : 0);
-      const zoom = (has(DOWN) ? 1 : 0) - (has(UP) ? 1 : 0); // C/Q back away, Space/E move in
+      const zoom = (has(WORLD_DOWN) || has(CAMERA_DOWN) ? 1 : 0) - (has(WORLD_UP) || has(CAMERA_UP) ? 1 : 0); // C/Q back away, Space/E move in
       if (panX !== 0 || panY !== 0 || zoom !== 0) {
         const [x, y, z] = cam.position;
         // Pan speed follows the zoom: the visible height is 2 * z * tan(fovY / 2).
@@ -175,13 +181,16 @@ export class FlyControls {
 
     const f = cam.forward();
     const r = cam.right();
+    const u = vec3.cross(r, f);
     let dir: Vec3 = [0, 0, 0];
     if (has(FORWARD)) dir = vec3.add(dir, f);
     if (has(BACK)) dir = vec3.sub(dir, f);
     if (has(RIGHT)) dir = vec3.add(dir, r);
     if (has(LEFT)) dir = vec3.sub(dir, r);
-    if (has(UP)) dir[1] += 1;
-    if (has(DOWN)) dir[1] -= 1;
+    if (has(WORLD_UP)) dir[1] += 1;
+    if (has(WORLD_DOWN)) dir[1] -= 1;
+    if (has(CAMERA_UP)) dir = vec3.add(dir, u);
+    if (has(CAMERA_DOWN)) dir = vec3.sub(dir, u);
     if (vec3.length(dir) > 1e-6) {
       const speed = cam.speed * (has(FAST) ? FAST_MULTIPLIER : 1);
       cam.position = vec3.add(cam.position, vec3.scale(vec3.normalize(dir), speed * dt));

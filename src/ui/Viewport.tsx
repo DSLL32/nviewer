@@ -1111,8 +1111,8 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
                     <dt>Mouse</dt><dd>Look (click to capture, Esc releases)</dd>
                     <dt>W A S D</dt><dd>Move</dd>
                     <dt>Arrow keys</dt><dd>Look around</dd>
-                    <dt>Space / E</dt><dd>Up</dd>
-                    <dt>C / Q</dt><dd>Down</dd>
+                    <dt>Space / C</dt><dd>World up / down</dd>
+                    <dt>E / Q</dt><dd>Camera up / down</dd>
                     <dt>Shift</dt><dd>Fast (×5)</dd>
                     <dt>Wheel</dt><dd>Adjust speed</dd>
                   </dl>
