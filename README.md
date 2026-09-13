@@ -449,7 +449,8 @@ Textures are uploaded with the RDP tile commands, not read in place.
 - **Levels.** All nine tracks are shown, including unlockable Flagstaff, El Cajon and Guadalupe. The viewer walks every
   sector, reconstructs the custom float meshes and placements, and decodes packed-CI4 atlas windows with RGBA16 palettes.
 - **Environment.** The tracks use their verified no-fog render state and 42.67° vertical field of view. The start view
-  follows the first sectors; a blue clear colour stands in for the game's four selectable sky pictures.
+  follows the first sectors. The twelve sky resources and their Blue/Stormy/Dusk/Random selection are mapped, but the
+  game's camera-dependent eight-panel compositor is not yet ported, so a blue clear colour remains the fallback.
 - **Objects and collision.** Track-resident standard objects are placed with the course, while specialized records are
   markers. A hidden layer shows the category-3/4 object bounds used as collision candidates.
 - **Music.** All 12 WESS music sequences are decoded on demand at 22,050 Hz: two one-shots and ten authored loops,
@@ -528,6 +529,7 @@ Textures are uploaded with the RDP tile commands, not read in place.
   the set chosen in the menu; grenade records flagged 0x100000, which the game creates but never draws, are hidden;
   static-pose guards show small gaps at some joints; the Bunker monitors whose setup records have no pad are not shown;
   music has no reverb.
-- Off Road Challenge: the four selectable sky pictures are not decoded, so every track uses a blue clear colour;
+- Off Road Challenge: the twelve sky resources are decoded, but their camera-dependent eight-panel compositor is not
+  ported, so every track uses a blue clear colour;
   specialized object models remain markers; collision is shown as object bounds rather than exact driveable surfaces;
   WESS reverb/effects and exact priority-based voice stealing are not modelled.

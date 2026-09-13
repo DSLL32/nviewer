@@ -204,7 +204,7 @@ The shared 36-byte placement schema is: **[V-ROM/V-ASM]**
 
 Root `+0x10` holds a count followed by `{u32 templatePtr, u32 instanceId}` pairs; each template uses the same placement schema. These are track-resident auxiliary objects. Common vehicle/race files 14, 15 and 36 are not loaded by the track loader and should be omitted from the initial static scene; they can become an optional vehicle layer later. **[V-ROM/V-ASM/DESIGN]**
 
-The angle feeds a sin/cos transform. Y is vertical: physics uses X/Z for planar distance and the middle component for height. Low 16 bits representing one yaw turn is the leading interpretation, but handedness/sign and the packed `+0x08/+0x0C/+0x10` names remain unresolved. Preserve the native float coordinates—often hundreds of thousands of units—and fit the viewer camera to their bounds rather than applying an unverified scale. **[V-ASM/HYP/DESIGN]**
+The angle feeds a sin/cos transform. Routine `0x8004239C` consumes the full unsigned 32-bit word as one binary-angle turn: the high bits select a sine-table entry and the low 17 bits interpolate it. Y is vertical; physics uses X/Z for planar distance and the middle component for height. The source world must be reflected on X to enter the viewer's right-handed frame, including both placement translation and rotation. This was independently checked against the sidedness and location of signs, grandstands, tents and terrain in reports 0012–0019. Preserve the native float coordinates—often hundreds of thousands of units—and fit the viewer camera to their bounds rather than applying an unverified scale. The packed `+0x08/+0x0C/+0x10` names remain unresolved. **[V-ASM/V-TOOL]**
 
 ### 5.3 Meshes and polygons
 
@@ -229,7 +229,7 @@ Polygon fields currently established: **[V-ROM/V-ASM]**
 - `+0x10/+0x12/+0x14/+0x16` are `u16` float-word offsets; divide by three for vertex indices;
 - equal second/third indices encode a triangle; otherwise the face is a quad.
 
-The runtime transforms float vertices to temporary N64 vertices and emits `gSPVertex` plus `BF`/`B1` triangle commands. The corrected triangle sentinel and UV order follow the register/data flow in `0x80013E7C`: the comparison uses the low half of polygon `+0x10` (reference 1 at `+0x12`) and the high half of `+0x14` (reference 2 at `+0x14`), while the triangle's temporary indices map back to logical references 0, 1 and 3. **[V-ASM]**
+The runtime transforms float vertices to temporary N64 vertices and emits `gSPVertex` plus `BF`/`B1` triangle commands. The corrected sentinel, UV order and triangle winding follow the register/data flow in `0x80013E7C`: the comparison uses the low half of polygon `+0x10` (reference 1 at `+0x12`) and the high half of `+0x14` (reference 2 at `+0x14`); a triangle uses logical references `(1,0,3)`, while a quad uses `(1,0,3)` and `(1,3,2)`. **[V-ASM/V-TOOL]**
 
 ### 5.4 Textures and materials
 
@@ -242,7 +242,7 @@ For all nine tracks, root `+0x04` resolves a sole resource descriptor: **[V-ROM/
 +0C u32 packed-CI4 atlas base
 ```
 
-The terrain builder describes the source as a 128-wide CI8 image for loading bytes into TMEM, but describes the render tile as CI4. Each 128-byte source row therefore contains 256 logical texels, with the high nibble first. Polygon `+0x0E * 128` selects the starting row; the per-face UV extrema determine the loaded rectangle. `G_SETTILE` uses wrap on both axes with mask and shift zero. Root `+0x08` is a `u32` lookup indexed by polygon byte `+0x01`; doubling the selected value produces the offset of a 16-entry RGBA16 TLUT window. Several tracks reference through exactly `atlasHeight-1`, independently validating the low 31 bits of descriptor `+0x08` as height. The earlier research prototype's CI8 decode caused rainbow-smearing and transparent holes; packed-CI4 decoding was confirmed by coherent Mojave and El Paso offline and browser renders. Remaining packed polygon/material bits are open. **[V-ROM/V-ASM/V-TOOL]**
+The terrain builder describes the source as a 128-wide CI8 image for loading bytes into TMEM, but describes the render tile as CI4. Each 128-byte source row therefore contains 256 logical texels, with the high nibble first. Polygon `+0x0E * 128` selects the starting row; the per-face UV extrema determine the loaded rectangle. `G_SETTILE` uses wrap on both axes with mask and shift zero. Root `+0x08` is a `u32` lookup indexed by polygon byte `+0x01`; doubling the selected value produces the offset of a 16-entry RGBA16 TLUT window. Several tracks reference through exactly `atlasHeight-1`, independently validating the low 31 bits of descriptor `+0x08` as height. The normal reset render mode `0x0F0A7008` is the game's anti-aliased, Z-buffered textured-edge mode, so textured faces use one-bit alpha cutout; this restores the transparent surroundings of tree, cliff and other billboard art. The earlier research prototype's CI8 decode caused rainbow-smearing and transparent holes; packed-CI4 decoding and the cutout state were confirmed by coherent offline and browser renders. Remaining packed polygon/material bits are open. **[V-ROM/V-ASM/V-TOOL]**
 
 ### 5.5 Collision
 
@@ -282,7 +282,9 @@ The US manual further describes Mojave construction zones/overpass traffic, El P
 
 The Features menu offers `RANDOM`, `BLUE`, `STORMY` and `DUSK`; default is Random. **[V-ROM]** Independent El Paso starts under Random produced different blue and storm-cloud art, proving that Random resolves per race. **[V-FRAME]**
 
-The exact sky image/table and whether it is camera-relative geometry or a background primitive remain unresolved. **[OPEN]**
+Routine `0x800175C0` selects one of twelve raw sky files: IDs `22,13,32,6,30,2,23,1,24,40,20,33`. Each file is `0x11BD0` bytes and contains a 64-byte pair of RGBA16 palettes, a 256×567 packed-CI4 atlas, and a 16-byte header. Tables at `0x8006D13C`, `0x8006D0E0` and `0x8006D114` provide the file IDs, resource pointers and tint colours; the feature-option dispatcher at `0x80034C14` partitions them among Blue, Stormy, Dusk and Random. The consumer at `0x8001775C` draws eight panels using 77-row strides and a second palette bank at `+0xE700`. **[V-ROM/V-ASM]**
+
+The remaining implementation problem is not locating or decoding the art. Retail presents it through a camera-dependent 2D quad compositor whose eight 60-byte records feed `0x80015160`, including yaw/pitch clipping. Translating that exactly into nviewer's camera-relative 3D `Level.skies` contract remains open; a guessed panorama would not be verified. **[OPEN]**
 
 ### 6.3 Fog, lighting and colors
 
@@ -440,7 +442,7 @@ The research Python programs are format probes, not production sources. Port the
 
 ### 9.3 Level assembly and layers
 
-Expose all nine tracks in internal order with `kind: 'race'`; identify Flagstaff, El Cajon and Guadalupe as unlockable in their display names or group. For one selected track: load its optional file when present, open its main file, resolve the root, walk every sector/category and root auxiliary record, intern each distinct model/texture, and emit one transformed instance per placement. Convert quads to two triangles without changing winding; preserve source file/record/polygon offsets in `DebugInfo`. **[DESIGN]**
+Expose all nine tracks in internal order with `kind: 'race'`; identify Flagstaff, El Cajon and Guadalupe as unlockable in their display names or group. For one selected track: load its optional file when present, open its main file, resolve the root, walk every sector/category and root auxiliary record, intern each distinct model/texture, and emit one transformed instance per placement. Reflect the source world on X, consume the full 32-bit binary angle, and preserve the retail triangle order above. Preserve source file/record/polygon offsets in `DebugInfo`. **[DESIGN/V-TOOL]**
 
 Every instance must belong to exactly one visible-control layer: **[DESIGN]**
 
