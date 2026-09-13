@@ -11,9 +11,10 @@ interface SelectionPanelProps {
   reportBusy?: boolean;
   /** For a selection inside room layers (LevelLayer group 'rooms'): hide its room, show only it, or show all rooms. */
   roomActions?: { rooms: string; hide?: () => void; only: () => void; showAll?: () => void };
+  idPrefix?: string;
 }
 
-export function SelectionPanel({ report, texture, onClear, onReport, reportBusy, roomActions }: SelectionPanelProps) {
+export function SelectionPanel({ report, texture, onClear, onReport, reportBusy, roomActions, idPrefix }: SelectionPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
 
@@ -25,38 +26,39 @@ export function SelectionPanel({ report, texture, onClear, onReport, reportBusy,
   const copy = async () => {
     setCopyState((await copyText(report.copyText)) ? 'copied' : 'failed');
   };
+  const id = (name: string) => (idPrefix ? `${idPrefix}-${name}` : name);
 
   return (
-    <div ref={panelRef} className="hud selection-panel" id="selection-panel" aria-live="polite">
+    <div ref={panelRef} className="hud selection-panel" id={id('selection-panel')} aria-live="polite">
       <div className="hud-row">
         <strong className="selection-title">{report.title}</strong>
         <span className="selection-actions">
           {onReport ? (
-            <button type="button" id="selection-report" onClick={onReport} disabled={reportBusy} title="Describe the issue and save a report with screenshots">
+            <button type="button" id={id('selection-report')} onClick={onReport} disabled={reportBusy} title="Describe the issue and save a report with screenshots">
               Report
             </button>
           ) : (
-            <button type="button" id="selection-copy" onClick={() => void copy()}>
+            <button type="button" id={id('selection-copy')} onClick={() => void copy()}>
               {copyState === 'copied' ? 'Copied' : 'Copy'}
             </button>
           )}
-          <button type="button" className="link" id="selection-clear" onClick={onClear}>Clear</button>
+          <button type="button" className="link" id={id('selection-clear')} onClick={onClear}>Clear</button>
         </span>
       </div>
       {copyState === 'failed' && <div className="small error">Could not access the clipboard.</div>}
       {roomActions && (
-        <div className="selection-actions selection-room-actions" id="selection-room-actions">
+        <div className="selection-actions selection-room-actions" id={id('selection-room-actions')}>
           <span className="small muted room-names">{roomActions.rooms}</span>
           {roomActions.hide && (
-            <button type="button" id="selection-hide-room" onClick={roomActions.hide}>Hide room</button>
+            <button type="button" id={id('selection-hide-room')} onClick={roomActions.hide}>Hide room</button>
           )}
-          <button type="button" id="selection-only-room" onClick={roomActions.only}>Show only this room</button>
+          <button type="button" id={id('selection-only-room')} onClick={roomActions.only}>Show only this room</button>
           {roomActions.showAll && (
-            <button type="button" id="selection-show-all-rooms" onClick={roomActions.showAll}>Show all rooms</button>
+            <button type="button" id={id('selection-show-all-rooms')} onClick={roomActions.showAll}>Show all rooms</button>
           )}
         </div>
       )}
-      {texture && <TextureThumb texture={texture} />}
+      {texture && <TextureThumb texture={texture} id={id('selection-texture')} />}
       {report.sections.map((s) => (
         <section key={s.title} className="selection-section">
           <h3>{s.title}</h3>
@@ -76,7 +78,7 @@ export function SelectionPanel({ report, texture, onClear, onReport, reportBusy,
 
 const THUMB_MAX = 96; // CSS pixels for the larger side
 
-function TextureThumb({ texture }: { texture: Texture }) {
+function TextureThumb({ texture, id }: { texture: Texture; id: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const w = Math.max(1, texture.width | 0);
   const h = Math.max(1, texture.height | 0);
@@ -90,7 +92,7 @@ function TextureThumb({ texture }: { texture: Texture }) {
   const scale = Math.max(1, Math.min(8, Math.floor(THUMB_MAX / Math.max(w, h))));
   return (
     <div className="texture-thumb">
-      <canvas ref={canvasRef} id="selection-texture" width={w} height={h} style={{ width: w * scale, height: h * scale }} />
+      <canvas ref={canvasRef} id={id} width={w} height={h} style={{ width: w * scale, height: h * scale }} />
     </div>
   );
 }

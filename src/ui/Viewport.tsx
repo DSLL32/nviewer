@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { Level, LevelLayer, Marker, SideView } from '../rom';
 import { FlyCamera } from '../render/camera';
 import { FlyControls, type ControlAction, type PickMode, type SideViewLimits } from '../render/controls';
@@ -36,8 +36,41 @@ interface ViewportProps {
   error: string | null;
   /** Select a sibling level of the current game, including another setup of the same scene. */
   onSelectLevel: (index: number) => void;
+  /** Identifies comparison panes and scopes DOM ids when both are present. */
+  instanceId?: string;
+  pane?: 'left' | 'right';
+  onClose?: () => void;
+  onViewSync?: (event: ViewSyncEvent) => void;
+  onCameraSync?: () => void;
+  onReady?: () => void;
   /** Extra panels stacked below the help panel (e.g. the music box). */
   children?: ReactNode;
+}
+
+export interface CameraSyncState {
+  position: [number, number, number];
+  yaw: number;
+  pitch: number;
+  fovY: number;
+  speed: number;
+  sideView: boolean;
+}
+
+type BooleanViewKey = 'nearest' | 'scripted' | 'fog' | 'sideView' | 'skyPlanes' | 'backdrop' | 'cutaway' | 'wireframe' | 'collisionWireframe' | 'culling';
+
+export type ViewSyncEvent =
+  | { key: BooleanViewKey; value: boolean }
+  | { key: 'sky'; value: string | null }
+  | { key: 'setup'; value: string }
+  | { key: 'lighting'; value: string | null }
+  | { key: 'layer'; identity: string; visible: boolean }
+  | { key: 'otherGeometry'; visible: boolean };
+
+export interface ViewportHandle {
+  applyViewEvent(event: ViewSyncEvent): void;
+  applyCamera(camera: CameraSyncState): void;
+  cameraSnapshot(): CameraSyncState | null;
+  copyViewTo(target: ViewportHandle, includeSetup?: boolean): void;
 }
 
 interface Engine {
@@ -80,7 +113,10 @@ declare global {
   }
 }
 
-export function Viewport({ level, gameId, gameTitle, loadingName, error, onSelectLevel, children }: ViewportProps) {
+export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewport(
+  { level, gameId, gameTitle, loadingName, error, onSelectLevel, instanceId, pane = 'left', onClose, onViewSync, onCameraSync, onReady, children },
+  forwardedRef,
+) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const viewportRef = useRef<HTMLElement>(null);
   const [viewportSize, setViewportSize] = useState<{ width: number; height: number } | null>(null);
@@ -88,6 +124,8 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, onSelec
   const markerHostRef = useRef<HTMLDivElement>(null);
   const markerEntriesRef = useRef<MarkerEntry[]>([]);
   const engineRef = useRef<Engine | null>(null);
+  const suppressCameraSyncRef = useRef<CameraSyncState | null>(null);
+  const muteCameraSyncRef = useRef(false);
   const [glError, setGlError] = useState<string | null>(null);
   const [speed, setSpeed] = useState(500);
   const [locked, setLocked] = useState(false);
@@ -163,14 +201,17 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, onSelec
   );
   // One state update however many layers change (a group or the collision shortcut), so hidden instances are
   // recomputed once. Collision is selected by kind, covering separately named overlays such as waterboxes.
-  const setLayersVisible = (indices: readonly number[], visible: boolean) => {
+  const setLayersVisible = (indices: readonly number[], visible: boolean, sync = true) => {
     if (!level) return;
-    const next = new Set(hiddenLayers);
-    for (const index of indices) {
-      if (visible) next.delete(index);
-      else next.add(index);
-    }
-    setLayerState({ level, hidden: next });
+    setLayerState((current) => {
+      const next = new Set(current?.level === level ? current.hidden : hiddenLayers);
+      for (const index of indices) {
+        if (visible) next.delete(index);
+        else next.add(index);
+      }
+      return { level, hidden: next };
+    });
+    if (sync) for (const index of indices) onViewSync?.({ key: 'layer', identity: layerIdentity(level.layers ?? [], index), visible });
   };
   // Instances in no layer, when the level has layers: the Layers panel adds an "other geometry" entry for them so they
   // can be hidden too (a viewer-only entry, not a Level layer). Visible by default, remembered per level like layers.
@@ -299,26 +340,39 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, onSelec
     else setPicked({ level, sel: { kind: 'face', instance: hit.instance, batch: hit.batch, tri: hit.tri, point: hit.point } });
   };
 
-  const toggleView = () => {
+  const toggleView = (sync = true) => {
     if (!level?.sideView) return;
     restoredViewRef.current = null;
     setFlyLevel(sideActive ? level : null);
+    if (sync) onViewSync?.({ key: 'sideView', value: !sideActive });
   };
 
   actionRef.current = (a) => {
     const engine = engineRef.current;
-    if (a === 'toggle-wireframe') setWireframe((v) => !v);
+    if (a === 'toggle-wireframe') {
+      const value = !wireframe;
+      setWireframe(value);
+      onViewSync?.({ key: 'wireframe', value });
+    }
     else if (a === 'toggle-collision') {
       if (collisionLayers.length > 0) setLayersVisible(collisionLayers, collisionLayers.some((i) => hiddenLayers.has(i)));
       else if (level) setViewHint('No collision in this level');
     }
     else if (a === 'toggle-collision-wireframe') {
-      if (level?.layers?.some((l) => l.kind === 'collision' && l.instances.length > 0)) setCollisionWireframe((v) => !v);
+      if (level?.layers?.some((l) => l.kind === 'collision' && l.instances.length > 0)) {
+        const value = !collisionWireframe;
+        setCollisionWireframe(value);
+        onViewSync?.({ key: 'collisionWireframe', value });
+      }
       else if (level) setViewHint('No collision in this level');
     }
     else if (a === 'toggle-help') setHelpOpen((v) => !v);
     else if (a === 'toggle-view') toggleView();
-    else if (a === 'toggle-cutaway') setCutaway((v) => !v);
+    else if (a === 'toggle-cutaway') {
+      const value = !cutaway;
+      setCutaway(value);
+      onViewSync?.({ key: 'cutaway', value });
+    }
     else if (a === 'reset' && engine && startViewRef.current) {
       restoredViewRef.current = null;
       applyView(engine, startViewRef.current.view);
@@ -341,6 +395,7 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, onSelec
       onSpeedChange: (s) => {
         setSpeed(s);
         viewPersistRef.current.stale = true;
+        if (!muteCameraSyncRef.current && !suppressCameraSyncRef.current) onCameraSync?.();
       },
       onLockChange: setLocked,
       onAction: (a) => actionRef.current(a),
@@ -405,6 +460,11 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, onSelec
       const dt = Math.min(Math.max((t - last) / 1000, 0), 0.1);
       last = t;
       const moved = controls.update(dt);
+      if (moved) {
+        const suppressed = suppressCameraSyncRef.current;
+        suppressCameraSyncRef.current = null;
+        if (!suppressed || !sameCamera(cameraState(engine), suppressed)) onCameraSync?.();
+      }
       updateFade(fadeRef.current, pointer, moved, dt, engine, canvas);
       if (moved || renderer.dirty) {
         renderer.render(camera);
@@ -454,6 +514,7 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, onSelec
   useEffect(() => {
     const engine = engineRef.current;
     if (!engine) return;
+    muteCameraSyncRef.current = true;
     const preserveView = setupSwap;
     const preservedSideView = preserveView && engine.controls.sideView;
     const defaultLighting = level?.lighting?.default ?? null;
@@ -463,7 +524,11 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, onSelec
     loadedLevelRef.current = { level, gameId: gameId ?? null };
     viewKeyRef.current = null;
     restoredViewRef.current = null;
-    if (!level) return;
+    if (!level) {
+      muteCameraSyncRef.current = false;
+      suppressCameraSyncRef.current = null;
+      return;
+    }
     // Far plane from the level size (the logarithmic depth buffer keeps precision across the whole range).
     const { min, max } = level.bounds;
     const diag = [0, 1, 2].every((k) => Number.isFinite(min[k]) && Number.isFinite(max[k]))
@@ -496,6 +561,8 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, onSelec
       levelSeenRef.current = true;
       viewKeyRef.current = key;
       viewPersistRef.current.stale = true;
+      muteCameraSyncRef.current = false;
+      suppressCameraSyncRef.current = cameraState(engine);
       return;
     }
     applyView(engine, view);
@@ -509,12 +576,15 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, onSelec
     }
     viewKeyRef.current = key;
     viewPersistRef.current.stale = true;
+    muteCameraSyncRef.current = false;
+    suppressCameraSyncRef.current = cameraState(engine);
   }, [level]);
 
   // Side view on or off; free fly starts from wherever the side-view eye is.
   useEffect(() => {
     const engine = engineRef.current;
     if (!engine) return;
+    muteCameraSyncRef.current = true;
     const sv = level?.sideView;
     if (setupSwap) {
       // Refresh side-view limits without allowing setSideView to level, clamp or otherwise move the preserved camera.
@@ -529,6 +599,8 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, onSelec
       camera.fovY = fovY;
       engine.controls.invalidate();
       viewPersistRef.current.stale = true;
+      muteCameraSyncRef.current = false;
+      suppressCameraSyncRef.current = cameraState(engine);
       return;
     }
     // A restored view is placed again once its mode is active: entering the side view levels and clamps the camera,
@@ -544,6 +616,8 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, onSelec
     }
     if (restoreNow) engine.controls.setSpeed(restored.speed);
     viewPersistRef.current.stale = true;
+    muteCameraSyncRef.current = false;
+    suppressCameraSyncRef.current = cameraState(engine);
   }, [level, sideActive]);
 
   // Pixel-art levels default to nearest filtering (F still toggles); leaving them restores linear filtering.
@@ -834,9 +908,123 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, onSelec
   const hasCollision = collisionLayers.length > 0;
   const layers = level?.layers ?? [];
   const lightingPresets = level?.lighting?.presets ?? [];
+  const domId = (id: string) => (instanceId ? `${instanceId}-${id}` : id);
+
+  const cameraSnapshot = (): CameraSyncState | null => {
+    const engine = engineRef.current;
+    if (!engine) return null;
+    return cameraState(engine);
+  };
+
+  const applyViewEvent = (event: ViewSyncEvent) => {
+    if (!level) return;
+    switch (event.key) {
+      case 'nearest': setNearest(event.value); break;
+      case 'scripted': if (hasScripted) setShowScripted(event.value); break;
+      case 'fog': if (hasFog) setFogOn(event.value); break;
+      case 'sideView':
+        if (sideView && sideActive !== event.value) toggleView(false);
+        break;
+      case 'skyPlanes':
+        if (hasSkyPlanes) setSkyPref(event.value ? (skyPref === SKY_NONE ? '' : skyPref) : SKY_NONE);
+        break;
+      case 'backdrop': if (level.backdrop) setShowBackdrop(event.value); break;
+      case 'cutaway': setCutaway(event.value); break;
+      case 'wireframe': setWireframe(event.value); break;
+      case 'collisionWireframe': if (hasCollision) setCollisionWireframe(event.value); break;
+      case 'culling': setCullOn(event.value); break;
+      case 'sky':
+        if (skies.length > 0 && (event.value === null || skies.some((sky) => sky.name === event.value))) {
+          setSkyPref(event.value ?? SKY_NONE);
+        }
+        break;
+      case 'setup': {
+        const option = level.setups?.options.find((candidate) => candidate.name === event.value);
+        if (option && option.level !== level.setups?.current) onSelectLevel(option.level);
+        break;
+      }
+      case 'lighting': {
+        if (event.value === null && lightingPresets.length > 0) setLightingSetting(null);
+        else {
+          const index = event.value === null ? -1 : lightingPresets.indexOf(event.value);
+          if (index >= 0) setLightingSetting(index);
+        }
+        break;
+      }
+      case 'layer': {
+        const index = layers.findIndex((_, candidate) => layerIdentity(layers, candidate) === event.identity);
+        if (index >= 0) setLayersVisible([index], event.visible, false);
+        break;
+      }
+      case 'otherGeometry':
+        if (unlayeredInstances.length > 0) setOtherGeometryState({ level, hidden: !event.visible });
+        break;
+    }
+  };
+
+  const currentViewEvents = (includeSetup = false): ViewSyncEvent[] => {
+    const events: ViewSyncEvent[] = [
+      { key: 'nearest', value: nearest },
+      { key: 'cutaway', value: cutaway },
+      { key: 'wireframe', value: wireframe },
+      { key: 'culling', value: cullOn },
+    ];
+    if (hasScripted) events.push({ key: 'scripted', value: showScripted });
+    if (hasFog) events.push({ key: 'fog', value: fogOn });
+    if (sideView) events.push({ key: 'sideView', value: sideActive });
+    if (skies.length > 0) events.push({ key: 'sky', value: activeSky });
+    if (hasSkyPlanes) events.push({ key: 'skyPlanes', value: skyPlanesOn });
+    if (level?.backdrop) events.push({ key: 'backdrop', value: showBackdrop });
+    if (hasCollision) events.push({ key: 'collisionWireframe', value: collisionWireframe });
+    // App requests setup seeding only once after a sidebar selection. In-panel setup clicks disarm that seed before
+    // their loads start, so a pane that finishes first cannot copy the peer's still-old setup back.
+    if (includeSetup) {
+      const setup = level?.setups?.options.find((option) => option.level === level.setups?.current);
+      if (setup) events.push({ key: 'setup', value: setup.name });
+    }
+    if (lightingPresets.length > 0) events.push({ key: 'lighting', value: lightingSetting === null ? null : (lightingPresets[lightingSetting] ?? null) });
+    layers.forEach((_, index) => events.push({ key: 'layer', identity: layerIdentity(layers, index), visible: !hiddenLayers.has(index) }));
+    if (unlayeredInstances.length > 0) events.push({ key: 'otherGeometry', visible: !otherGeometryHidden });
+    return events;
+  };
+
+  useImperativeHandle(forwardedRef, () => ({
+    applyViewEvent,
+    applyCamera(camera) {
+      const engine = engineRef.current;
+      if (!engine) return;
+      suppressCameraSyncRef.current = camera;
+      if (sideView && engine.controls.sideView !== camera.sideView) {
+        setFlyLevel(camera.sideView ? null : level);
+        engine.controls.setSideView(camera.sideView ? sideLimits(sideView, level!) : null);
+      }
+      engine.camera.position = [...camera.position];
+      engine.camera.yaw = camera.yaw;
+      engine.camera.pitch = camera.pitch;
+      engine.camera.fovY = camera.fovY;
+      engine.controls.setSpeed(camera.speed);
+      engine.controls.invalidate();
+      // If side/free mode is not supported here, suppress the actual compatible state rather than bouncing that
+      // local difference back and changing the source pane.
+      suppressCameraSyncRef.current = cameraState(engine);
+      viewPersistRef.current.stale = true;
+    },
+    cameraSnapshot,
+    copyViewTo(target, includeSetup = false) {
+      for (const event of currentViewEvents(includeSetup)) target.applyViewEvent(event);
+      const camera = cameraSnapshot();
+      if (camera) target.applyCamera(camera);
+    },
+  }));
+
+  useEffect(() => {
+    if (!level) return;
+    const frame = requestAnimationFrame(() => onReady?.());
+    return () => cancelAnimationFrame(frame);
+  }, [level]);
 
   return (
-    <main ref={viewportRef} className={`viewport${viewRect ? ' letterboxed' : ''}`}>
+    <main ref={viewportRef} className={`viewport${viewRect ? ' letterboxed' : ''}`} data-pane={pane}>
       <canvas
         ref={canvasRef}
         className={`gl-canvas${pickMode ? ` pick-${pickMode}` : ''}${sideActive ? ' side-view' : ''}`}
@@ -863,7 +1051,7 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, onSelec
         </div>
       )}
       {level && !loadingName && (pickMode || !locked) && (
-        <div className="click-hint" id="click-hint">
+        <div className="click-hint" id={domId('click-hint')}>
           {pickMode === 'object'
             ? 'Click an object to select it · Esc clears the selection'
             : pickMode === 'face'
@@ -884,29 +1072,29 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, onSelec
         </div>
         <div className="hud-row small muted">
           {sideActive ? (
-            <span id="view-mode">Side view</span>
+            <span id={domId('view-mode')}>Side view</span>
           ) : (
-            <span id="view-mode">{sideView ? 'Free fly · ' : ''}Speed <strong className="speed">{Math.round(speed)}</strong> u/s</span>
+            <span id={domId('view-mode')}>{sideView ? 'Free fly · ' : ''}Speed <strong className="speed">{Math.round(speed)}</strong> u/s</span>
           )}
           <span ref={posRef} className="mono" />
         </div>
         {reportAvailable && level && (
           <div className="hud-row small">
-            <button type="button" className="link" id="report-view" onClick={() => void submitReport(false)} disabled={reportStatus?.kind === 'busy'} title="Describe an issue with this view and save a report with a screenshot">
+            <button type="button" className="link" id={domId('report-view')} onClick={() => void submitReport(false)} disabled={reportStatus?.kind === 'busy'} title="Describe an issue with this view and save a report with a screenshot">
               Report view
             </button>
           </div>
         )}
         {sideView && (
           <label className="check" title="The game's own side-scrolling camera, or free fly through the layers (V)">
-            <input id="side-view-toggle" type="checkbox" checked={sideActive} onChange={toggleView} />
+            <input id={domId('side-view-toggle')} type="checkbox" checked={sideActive} onChange={() => toggleView()} />
             Side view (V)
           </label>
         )}
         {helpOpen && (
           <>
             {/* Controls, grouped into sections that start collapsed (native <details>: keyboard accessible). */}
-            <div className="controls-sections" id="controls-help">
+            <div className="controls-sections" id={domId('controls-help')}>
               <details className="controls-section" data-section="movement">
                 <summary>Movement</summary>
                 {sideActive ? (
@@ -957,30 +1145,30 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, onSelec
               </details>
             </div>
             <label className="check">
-              <input id="nearest-toggle" type="checkbox" checked={nearest} onChange={(e) => setNearest(e.target.checked)} />
+              <input id={domId('nearest-toggle')} type="checkbox" checked={nearest} onChange={(e) => { setNearest(e.target.checked); onViewSync?.({ key: 'nearest', value: e.target.checked }); }} />
               Nearest texture filtering
             </label>
             <label
               className={`check${hasScripted ? '' : ' muted'}`}
               title="Objects the game moves along a path (shown at their start) or places at random (e.g. battle soft-block positions)"
             >
-              <input id="scripted-toggle" type="checkbox" checked={showScripted} onChange={(e) => setShowScripted(e.target.checked)} />
+              <input id={domId('scripted-toggle')} type="checkbox" checked={showScripted} onChange={(e) => { setShowScripted(e.target.checked); if (hasScripted) onViewSync?.({ key: 'scripted', value: e.target.checked }); }} />
               Show scripted/random objects
             </label>
             <label className={`check${hasFog ? '' : ' muted'}`} title={hasFog ? "The game's own distance fog" : 'No fog in this game'}>
               <input
-                id="fog-toggle"
+                id={domId('fog-toggle')}
                 type="checkbox"
                 checked={fogOn}
                 disabled={!hasFog}
-                onChange={(e) => setFogOn(e.target.checked)}
+                onChange={(e) => { setFogOn(e.target.checked); onViewSync?.({ key: 'fog', value: e.target.checked }); }}
               />
               Authentic fog{!hasFog && level ? <span className="small muted"> (no fog in this level)</span> : null}
             </label>
             {skies.length > 0 && (
               <label className="check select-row" title="The game picks one of these at random per race">
                 Sky
-                <select id="sky-select" value={activeSky ?? SKY_NONE} onChange={(e) => setSkyPref(e.target.value)}>
+                <select id={domId('sky-select')} value={activeSky ?? SKY_NONE} onChange={(e) => { const value = e.target.value; setSkyPref(value); onViewSync?.({ key: 'sky', value: value === SKY_NONE ? null : value }); }}>
                   {skies.map((sk) => (
                     <option key={sk.name} value={sk.name}>{sk.name}</option>
                   ))}
@@ -990,39 +1178,40 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, onSelec
             )}
             {hasSkyPlanes && (
               <label className="check" title="The cloud layer (and water) the game projects behind the level">
-                <input id="sky-toggle" type="checkbox" checked={skyPlanesOn} onChange={(e) => setSkyPref(e.target.checked ? '' : SKY_NONE)} />
+                <input id={domId('sky-toggle')} type="checkbox" checked={skyPlanesOn} onChange={(e) => { setSkyPref(e.target.checked ? '' : SKY_NONE); onViewSync?.({ key: 'skyPlanes', value: e.target.checked }); }} />
                 Show sky
               </label>
             )}
             {level?.backdrop && (
               <label className="check" title="The 2D picture the game draws behind the level">
-                <input id="backdrop-toggle" type="checkbox" checked={showBackdrop} onChange={(e) => setShowBackdrop(e.target.checked)} />
+                <input id={domId('backdrop-toggle')} type="checkbox" checked={showBackdrop} onChange={(e) => { setShowBackdrop(e.target.checked); onViewSync?.({ key: 'backdrop', value: e.target.checked }); }} />
                 Show backdrop
               </label>
             )}
             <label className="check" title="Hide the nearest surface under each pixel to look inside enclosed areas from outside (X)">
-              <input id="cutaway-toggle" type="checkbox" checked={cutaway} onChange={(e) => setCutaway(e.target.checked)} />
+              <input id={domId('cutaway-toggle')} type="checkbox" checked={cutaway} onChange={(e) => { setCutaway(e.target.checked); onViewSync?.({ key: 'cutaway', value: e.target.checked }); }} />
               Cutaway (X)
             </label>
             <label className="check" title="Triangle edges of the level geometry as drawn (F)">
-              <input id="wireframe-toggle" type="checkbox" checked={wireframe} onChange={(e) => setWireframe(e.target.checked)} />
+              <input id={domId('wireframe-toggle')} type="checkbox" checked={wireframe} onChange={(e) => { setWireframe(e.target.checked); onViewSync?.({ key: 'wireframe', value: e.target.checked }); }} />
               Wireframe (F)
             </label>
             <label className={`check${hasCollision ? '' : ' muted'}`} title={hasCollision ? 'Triangle edges of the collision layers, shown or not (Shift+F)' : 'No collision in this level'}>
-              <input id="collision-wireframe-toggle" type="checkbox" checked={collisionWireframe && hasCollision} disabled={!hasCollision} onChange={(e) => setCollisionWireframe(e.target.checked)} />
+              <input id={domId('collision-wireframe-toggle')} type="checkbox" checked={collisionWireframe && hasCollision} disabled={!hasCollision} onChange={(e) => { setCollisionWireframe(e.target.checked); onViewSync?.({ key: 'collisionWireframe', value: e.target.checked }); }} />
               Collision wireframe (Shift+F){!hasCollision && level ? <span className="small muted"> (no collision in this level)</span> : null}
             </label>
             <label className="check" title="Hide the back sides of single-sided polygons, as the game does">
-              <input id="cull-toggle" type="checkbox" checked={cullOn} onChange={(e) => setCullOn(e.target.checked)} />
+              <input id={domId('cull-toggle')} type="checkbox" checked={cullOn} onChange={(e) => { setCullOn(e.target.checked); onViewSync?.({ key: 'culling', value: e.target.checked }); }} />
               Back-face culling
             </label>
           </>
         )}
       </div>
       {level && (
-        <div className="hud layer-panel" id="layer-panel">
+        <div className="hud layer-panel" id={domId('layer-panel')}>
           <div className="hud-row">
             <strong>View</strong>
+            {pane === 'right' && onClose && <button type="button" className="link close-pane" onClick={onClose}>Close pane</button>}
           </div>
           {level.setups && level.setups.options.length > 1 && (
             <>
@@ -1035,7 +1224,7 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, onSelec
                     role="radio"
                     aria-checked={level.setups?.current === option.level}
                     className="view-option"
-                    onClick={() => onSelectLevel(option.level)}
+                    onClick={() => { onSelectLevel(option.level); onViewSync?.({ key: 'setup', value: option.name }); }}
                   >
                     {option.name}
                   </button>
@@ -1054,7 +1243,7 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, onSelec
                     role="radio"
                     aria-checked={lightingSetting === index}
                     className="view-option"
-                    onClick={() => setLightingSetting(index)}
+                    onClick={() => { setLightingSetting(index); onViewSync?.({ key: 'lighting', value: name }); }}
                   >
                     {name}
                   </button>
@@ -1064,7 +1253,7 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, onSelec
                   role="radio"
                   aria-checked={lightingSetting === null}
                   className="view-option"
-                  onClick={() => setLightingSetting(null)}
+                  onClick={() => { setLightingSetting(null); onViewSync?.({ key: 'lighting', value: null }); }}
                 >
                   Off
                 </button>
@@ -1114,9 +1303,9 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, onSelec
             >
               <input
                 type="checkbox"
-                id="other-geometry-toggle"
+                id={domId('other-geometry-toggle')}
                 checked={!otherGeometryHidden}
-                onChange={(e) => level && setOtherGeometryState({ level, hidden: !e.target.checked })}
+                onChange={(e) => { if (level) setOtherGeometryState({ level, hidden: !e.target.checked }); onViewSync?.({ key: 'otherGeometry', visible: e.target.checked }); }}
               />
               <span className="layer-name">other geometry</span>
               <span className="layer-meta small muted" />
@@ -1126,12 +1315,12 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, onSelec
       )}
       {children}
       {viewHint && (
-        <div className="hud report-status small" id="view-hint" role="status">
+        <div className="hud report-status small" id={domId('view-hint')} role="status">
           {viewHint}
         </div>
       )}
       {reportStatus && (
-        <div className={`hud report-status small${reportStatus.kind === 'error' ? ' error' : ''}`} id="report-status" role="status">
+        <div className={`hud report-status small${reportStatus.kind === 'error' ? ' error' : ''}`} id={domId('report-status')} role="status">
           {reportStatus.text}
         </div>
       )}
@@ -1139,6 +1328,7 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, onSelec
         <SelectionPanel
           report={report}
           texture={reportTexture}
+          idPrefix={instanceId}
           onClear={() => setPicked(null)}
           roomActions={roomActions}
           {...(reportAvailable ? { onReport: () => void submitReport(true), reportBusy: reportStatus?.kind === 'busy' } : {})}
@@ -1147,7 +1337,7 @@ export function Viewport({ level, gameId, gameTitle, loadingName, error, onSelec
       </div>
     </main>
   );
-}
+});
 
 const FOG_KEY = 'nviewer.authenticFog';
 // New key: an "on" stored by the earlier culling implementation must not carry over (now off by default).
@@ -1156,6 +1346,35 @@ const CULL_KEY = 'nviewer.backfaceCulling.v2';
 const SKY_KEY = 'nviewer.sky';
 const BACKDROP_KEY = 'nviewer.showBackdrop';
 const SKY_NONE = '__none__';
+
+function sameCamera(a: CameraSyncState, b: CameraSyncState): boolean {
+  return a.position[0] === b.position[0] && a.position[1] === b.position[1] && a.position[2] === b.position[2]
+    && a.yaw === b.yaw && a.pitch === b.pitch && a.fovY === b.fovY && a.speed === b.speed && a.sideView === b.sideView;
+}
+
+function cameraState(engine: Engine): CameraSyncState {
+  const camera = engine.camera;
+  return {
+    position: [...camera.position],
+    yaw: camera.yaw,
+    pitch: camera.pitch,
+    fovY: camera.fovY,
+    speed: camera.speed,
+    sideView: engine.controls.sideView,
+  };
+}
+
+/** Semantic layer identity, with an occurrence suffix for duplicate names in one level. */
+function layerIdentity(layers: readonly LevelLayer[], index: number): string {
+  const layer = layers[index];
+  if (!layer) return '';
+  let occurrence = 0;
+  for (let i = 0; i < index; i++) {
+    const other = layers[i];
+    if (other.name === layer.name && other.kind === layer.kind && (other.group ?? null) === (layer.group ?? null)) occurrence++;
+  }
+  return JSON.stringify([layer.kind, layer.group ?? null, layer.name, occurrence]);
+}
 
 /** Whether two loaded levels are different setup variants of the same scene. */
 function siblingSetups(previous: Level | null, next: Level | null): boolean {

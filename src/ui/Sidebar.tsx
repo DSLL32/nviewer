@@ -41,11 +41,13 @@ export const sameLevelRef = (a: LevelRef | null | undefined, b: LevelRef | null 
 interface SidebarProps {
   games: SidebarGame[];
   selected: LevelRef | null;
+  rightSelected: LevelRef | null;
   loading: LevelRef | null;
+  rightLoading: LevelRef | null;
   stats: Record<string, Record<number, LevelStats>>;
   collapsed: Record<string, boolean>;
   onToggleCollapsed: (gameId: string) => void;
-  onSelect: (ref: LevelRef) => void;
+  onSelect: (ref: LevelRef, pane?: 'left' | 'right') => void;
   onRemove: (gameId: string) => void;
   onAddRom: () => void;
   onAddBbgames: () => void;
@@ -98,7 +100,7 @@ function readSubgroupsOpen(): Record<string, boolean> {
   }
 }
 
-export function Sidebar({ games, selected, loading, stats, collapsed, onToggleCollapsed, onSelect, onRemove, onAddRom, onAddBbgames }: SidebarProps) {
+export function Sidebar({ games, selected, rightSelected, loading, rightLoading, stats, collapsed, onToggleCollapsed, onSelect, onRemove, onAddRom, onAddBbgames }: SidebarProps) {
   const buttons = useRef(new Map<string, HTMLButtonElement>());
   const [subOpen, setSubOpen] = useState<Record<string, boolean>>(readSubgroupsOpen);
   const subKey = (gameId: string, sub: SubGroup) => `${gameId}|${sub.key}`;
@@ -133,7 +135,9 @@ export function Sidebar({ games, selected, loading, stats, collapsed, onToggleCo
       groups.flatMap((g) => g.subgroups.filter((s) => isOpen(game.id, s)).flatMap((s) => s.levels.map((l) => ({ gameId: game.id, index: l.index })))),
     );
   const visibleSelected = visibleLevelRef(games, selected);
+  const visibleRightSelected = visibleLevelRef(games, rightSelected);
   const visibleLoading = visibleLevelRef(games, loading);
+  const visibleRightLoading = visibleLevelRef(games, rightLoading);
   const selectedVisible = ordered.some((r) => sameLevelRef(r, visibleSelected));
   const buttonKey = (r: LevelRef) => `${r.gameId}:${r.index}`;
 
@@ -172,6 +176,7 @@ export function Sidebar({ games, selected, loading, stats, collapsed, onToggleCo
         const ref = { gameId: game.id, index: l.index };
         const s = stats[game.id]?.[l.index];
         const isSelected = sameLevelRef(ref, visibleSelected);
+        const isRightSelected = sameLevelRef(ref, visibleRightSelected);
         const isFirst = sameLevelRef(ref, ordered[0]);
         return (
           <li key={l.index}>
@@ -183,14 +188,16 @@ export function Sidebar({ games, selected, loading, stats, collapsed, onToggleCo
                 if (el) buttons.current.set(buttonKey(ref), el);
                 else buttons.current.delete(buttonKey(ref));
               }}
-              className={`level-item${isSelected ? ' selected' : ''}`}
+              className={`level-item${isSelected ? ' selected' : ''}${isRightSelected ? ' selected-right' : ''}`}
               aria-current={isSelected ? 'true' : undefined}
               tabIndex={isSelected || (!selectedVisible && isFirst) ? 0 : -1}
-              onClick={() => onSelect(ref)}
+              onClick={(e) => onSelect(ref, e.shiftKey ? 'right' : 'left')}
+              title="Click to open on the left; Shift-click to open on the right"
             >
               <span className="level-name">
                 {l.name}
-                {sameLevelRef(visibleLoading, ref) && <span className="spinner tiny" aria-label="loading" />}
+                {(sameLevelRef(visibleLoading, ref) || sameLevelRef(visibleRightLoading, ref)) && <span className="spinner tiny" aria-label="loading" />}
+                {isRightSelected && <span className="pane-badge" aria-label="open in right pane">R</span>}
               </span>
               {s && (
                 <span className="level-stats" title={`${s.triangles} triangles, ${s.textures} textures, ${s.instances} placed objects (${s.scripted} scripted), parsed in ${s.loadMs.toFixed(0)} ms`}>

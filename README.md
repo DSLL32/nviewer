@@ -26,6 +26,11 @@ supporting browser such as Chromium. Normal ROM loading continues to work in Fir
 Open the page, then choose or drop ROM files such as `San Francisco Rush 2049 (U) [!].z64` or
 `Bomberman Hero (U) [!].z64` (`.v64`/`.n64` byte orders work too).
 
+For side-by-side comparison, Shift-click a level to open it in a right-hand pane. Ordinary clicks
+continue to choose the left pane. The panes synchronize their cameras and every compatible View
+setting; options without a matching setup, lighting preset, or layer in the other level remain local.
+Use **Close pane** in the right pane's View panel to return to a single view.
+
 For the Zelda source maps, choose **Open bbgames folder…** and select the `bbgames` directory itself,
 not either Zelda child directory. It must directly contain `z_ocarina2` and/or `z_ocarina`.
 
