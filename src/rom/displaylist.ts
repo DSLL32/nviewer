@@ -55,6 +55,7 @@ export interface DisplayListContext {
   geometryMode?: number;
   renderMode?: number;
   alphaCompare?: number;
+  textureScale?: [number, number]; // initial G_TEXTURE S/T scales, default 1/1
   // Initial modelview. When given, G_MTX / G_POPMTX in the lists are applied too.
   matrix?: Mtx;
   // RSP lighting: with G_LIGHTING set, vertex colour bytes are a signed normal and the
@@ -267,6 +268,7 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
   const dv = view(buf);
   const scale = ctx.vertexScale ?? VERTEX_SCALE;
   const mirrorX = ctx.mirrorX ?? true;
+  const [scaleS, scaleT] = ctx.textureScale ?? [1, 1];
   const st: State = {
     vtx: [],
     geometryMode: ctx.geometryMode ?? (G_ZBUFFER | (ctx.cullBackByDefault ? G_CULL_BACK[ctx.ucode] : 0)),
@@ -274,7 +276,7 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
     // Many objects set up a texture without a G_TEXTURE command of their own: the
     // game leaves texturing enabled between objects.
     combineUsesTexel: true, combine: decodeCombine(0xfc127e24, 0xfffff3f9), prim: 0xffffffff, env: 0xffffffff,
-    textureOn: true, scaleS: 1, scaleT: 1, timg: -1, timgSiz: 0, timgWidth: 0, image: -1, palette: -1,
+    textureOn: true, scaleS, scaleT, timg: -1, timgSiz: 0, timgWidth: 0, image: -1, palette: -1,
     palettes: new Map(), tlut: new Uint8Array(512), tlutKey: '',
     mem: new Uint8Array(TMEM_SIZE), loadKey: '',
     tiles: Array.from({ length: 8 }, () => ({
