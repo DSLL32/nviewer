@@ -1,4 +1,5 @@
 // Entry point: detect which supported game a ROM is and open it.
+import { openAirBoarder64 } from './airboarder64';
 import { openBattleTanx } from './battletanx';
 import { openBattleTanxGA } from './battletanxga';
 import { openBomberman64 } from './bomberman/bm64';
@@ -30,6 +31,9 @@ export function openRom(bytes: Uint8Array): Game {
   // The Ocarina of Time prototype on an F-Zero X cartridge: by the whole file's hash, before any other detection.
   if (isZeldaAlpha(rom)) return openZeldaAlpha(rom);
   switch (code) {
+    case 'NABJ':
+    case 'NABP':
+      return openAirBoarder64(rom);
     case 'NRUE': {
       const r = new RushRom(rom);
       return {
@@ -95,6 +99,7 @@ export function openRom(bytes: Uint8Array): Game {
         'Supported: San Francisco Rush 2049 (U), San Francisco Rush: Extreme Racing (U), Bomberman 64 (U), ' +
         'Bomberman 64: The Second Attack! (U), Bomberman Hero (U), BattleTanx (U), BattleTanx: Global Assault (U), ' +
         'Gex 64: Enter the Gecko (U), Gex 3: Deep Cover Gecko (U), Yoshi\'s Story (J), Star Fox 64 (U), GoldenEye 007 (U), ' +
+        'Air Boarder 64 (J/E), ' +
         'Off Road Challenge (U/E), ' +
         'Pokémon Snap (U), ' +
         'Pilotwings 64 (U/E/J), Perfect Dark (U) (V1.0), ' +
