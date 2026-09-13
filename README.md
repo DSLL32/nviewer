@@ -4,7 +4,8 @@ A browser viewer for the levels of these N64 games (USA versions): *San Francisc
 *San Francisco Rush: Extreme Racing*, *Bomberman 64*, *Bomberman 64: The Second Attack!*,
 *Bomberman Hero*, *BattleTanx*, *BattleTanx: Global Assault*, *Gex 64: Enter the Gecko*,
 *Gex 3: Deep Cover Gecko*, *Yoshi's Story* (Japan), *Star Fox 64* (V1.0 and V1.1), *GoldenEye 007*,
-*Pilotwings 64* (USA, Europe and Japan), *Pokémon Snap*, *Perfect Dark* (V1.0), and *The Legend of Zelda: Ocarina of Time* and
+*Off Road Challenge* (USA and Europe), *Pilotwings 64* (USA, Europe and Japan), *Pokémon Snap*,
+*Perfect Dark* (V1.0), and *The Legend of Zelda: Ocarina of Time* and
 *Majora's Mask* (retail and debug builds, plus the 1997 Ocarina of Time prototype preserved on an F-Zero X development
 cartridge). Load one or more ROMs, pick a level in the sidebar, and fly around freely, with
 each game's soundtrack in the music box. ROMs are parsed entirely in the browser (in a Web Worker)
@@ -84,6 +85,10 @@ Z shows or hides collision · Shift+F collision wireframe · H help · Esc relea
     - `fs.ts`, `tables.ts`: UVRM/TABL filesystem, FORM/MIO0 decoding, task and environment tables
     - `texture.ts`, `model.ts`, `objects.ts`: UVTX textures, UVMD/UVCT/UVTR geometry, UPWT/UPWL objects and paths
     - `environment.ts`, `pilotwings.ts`: island assembly, skies, fog, layers and levels; `music.ts`: songs and loops
+  - `offroad/`: Off Road Challenge (USA and Europe; format notes in `OFFROADCHALLENGE.md`)
+    - `fs.ts`: regional file tables, raw file views and RAM-pointer resolution
+    - `level.ts`, `texture.ts`: sectors, placements, float meshes, packed-CI4/RGBA16 materials, objects, collision candidates
+    - `offroad.ts`: nine tracks and game assembly; `music.ts`: WESS songs and authored loops
   - `perfectdark/`: Perfect Dark (format notes in `PERFECTDARK.md`)
     - `rom.ts`: data segment, file and stage tables, text; `texture.ts`: the global texture store and its two decoders
     - `gbi.ts`: Perfect Dark's display-list microcode; `bg.ts`: rooms and sky rooms; `environment.ts`: fog, sky planes;
@@ -436,6 +441,20 @@ Textures are uploaded with the RDP tile commands, not read in place.
 - **Music.** 63 compressed-MIDI sequences for libultra's player, rendered by `libultra.ts` with GoldenEye's per-track
   loop rules.
 
+### Off Road Challenge
+
+`OFFROADCHALLENGE.md` documents the formats in full; in short:
+- **Files.** Forty-one raw, uncompressed files are accessed through the regional ROM table. One bounded parser supports
+  the USA and European releases and resolves their absolute RAM pointers against each file's load address.
+- **Levels.** All nine tracks are shown, including unlockable Flagstaff, El Cajon and Guadalupe. The viewer walks every
+  sector, reconstructs the custom float meshes and placements, and decodes packed-CI4 atlas windows with RGBA16 palettes.
+- **Environment.** The tracks use their verified no-fog render state and 42.67° vertical field of view. The start view
+  follows the first sectors; a blue clear colour stands in for the game's four selectable sky pictures.
+- **Objects and collision.** Track-resident standard objects are placed with the course, while specialized records are
+  markers. A hidden layer shows the category-3/4 object bounds used as collision candidates.
+- **Music.** All 12 WESS music sequences are decoded on demand at 22,050 Hz: two one-shots and ten authored loops,
+  including the six named radio songs and the statically unreferenced sequence 3.
+
 ### Pokémon Snap
 
 `POKEMONSNAP.md` documents the formats in full; in short:
@@ -509,3 +528,6 @@ Textures are uploaded with the RDP tile commands, not read in place.
   the set chosen in the menu; grenade records flagged 0x100000, which the game creates but never draws, are hidden;
   static-pose guards show small gaps at some joints; the Bunker monitors whose setup records have no pad are not shown;
   music has no reverb.
+- Off Road Challenge: the four selectable sky pictures are not decoded, so every track uses a blue clear colour;
+  specialized object models remain markers; collision is shown as object bounds rather than exact driveable surfaces;
+  WESS reverb/effects and exact priority-based voice stealing are not modelled.
