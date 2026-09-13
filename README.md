@@ -26,6 +26,10 @@ supporting browser such as Chromium. Normal ROM loading continues to work in Fir
 Open the page, then choose or drop ROM files such as `San Francisco Rush 2049 (U) [!].z64` or
 `Bomberman Hero (U) [!].z64` (`.v64`/`.n64` byte orders work too).
 
+While the development server is running, research PNGs beneath `~/.ai-tmp/r49` are available at
+`/__artifacts/<relative-path>`. Set `NVIEWER_ARTIFACTS_DIR` to use a different artifact root. This
+read-only endpoint is development-only and serves PNG files without directory listings.
+
 For side-by-side comparison, Shift-click a level to open it in a right-hand pane. Ordinary clicks
 continue to choose the left pane. The panes synchronize their cameras and every compatible View
 setting; options without a matching setup, lighting preset, or layer in the other level remain local.
