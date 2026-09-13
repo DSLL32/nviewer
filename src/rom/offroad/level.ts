@@ -83,10 +83,17 @@ function parsePlacement(image: OffroadImage, address: number, getModel: (address
 }
 
 function yawMatrix(p: Placement): Float32Array {
-  const yaw = (p.angle & 0xffff) * Math.PI * 2 / 0x10000;
+  // 0x8004239C consumes the whole unsigned word as a binary angle: the high
+  // bits select a sine-table entry and the low 17 bits interpolate it. The
+  // source world is mirrored on X relative to the viewer's right-handed
+  // frame, so this is S*R with S=diag(-1,1,1). Besides putting left/right
+  // placements on the retail sides, that makes one-sided text read forward.
+  const yaw = (p.angle >>> 0) * Math.PI * 2 / 0x100000000;
   const c = Math.cos(yaw), s = Math.sin(yaw);
-  return new Float32Array([c, 0, -s, 0, 0, 1, 0, 0, s, 0, c, 0, p.position[0], p.position[1], p.position[2], 1]);
+  return new Float32Array([-c, 0, -s, 0, 0, 1, 0, 0, -s, 0, c, 0, -p.position[0], p.position[1], p.position[2], 1]);
 }
+
+const worldPosition = (p: Placement): V3 => [-p.position[0], p.position[1], p.position[2]];
 
 function appendBounds(bounds: Level['bounds'], model: RawModel, matrix: Float32Array) {
   for (let bits = 0; bits < 8; bits++) {
@@ -99,17 +106,93 @@ function appendBounds(bounds: Level['bounds'], model: RawModel, matrix: Float32A
 }
 
 function makeRenderMesh(model: RawModel, materials: Map<string, MaterialTexture>): Mesh {
-  const groups = new Map<number, { pos: number[]; uv: number[]; color: number[]; source: number[] }>();
-  const group = (key: number) => {
+  // Signs and billboards commonly contain exact or near-coincident
+  // reverse-winding twins with opposite UVs: the game relies on face culling
+  // to choose the readable side. Force culling only for those proven pairs,
+  // independently of the viewer's optional toggle for ordinary geometry.
+  const normal = (polygon: Polygon): V3 => {
+    // 0x80013E7C reorders the four file references as 1,0,3,2 before
+    // submitting both triangles, so 1,0,3 is the first triangle for both
+    // triangle-sentinel and quad records.
+    const corners = [1, 0, 3];
+    const a = model.vertices[polygon.vertices[corners[0]]], b = model.vertices[polygon.vertices[corners[1]]], c = model.vertices[polygon.vertices[corners[2]]];
+    const ab: V3 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], ac: V3 = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+    const n: V3 = [ab[1] * ac[2] - ab[2] * ac[1], ab[2] * ac[0] - ab[0] * ac[2], ab[0] * ac[1] - ab[1] * ac[0]];
+    const length = Math.hypot(...n);
+    return length ? [n[0] / length, n[1] / length, n[2] / length] : [0, 0, 0];
+  };
+  const corners = (polygon: Polygon) => polygon.vertices[1] === polygon.vertices[2] ? [0, 1, 3] : [0, 1, 2, 3];
+  const distance = (a: V3, b: V3) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+  const tolerance = Math.min(1, Math.max(1e-4, model.radius * 3e-4));
+  const twinPairing = (a: Polygon, b: Polygon): number[] | null => {
+    const ac = corners(a), bc = corners(b);
+    if (ac.length !== bc.length || !a.window || !b.window || a.window.row !== b.window.row ||
+        materials.get(a.window.key)?.texture !== materials.get(b.window.key)?.texture) return null;
+    const an = normal(a), bn = normal(b);
+    if (an[0] * bn[0] + an[1] * bn[1] + an[2] * bn[2] >= -0.999) return null;
+    const pairing: number[] = [], unused = new Set(bc);
+    for (const ai of ac) {
+      let nearest = -1, nearestDistance = Infinity;
+      for (const bi of unused) {
+        const d = distance(model.vertices[a.vertices[ai]], model.vertices[b.vertices[bi]]);
+        if (d < nearestDistance) { nearest = bi; nearestDistance = d; }
+      }
+      if (nearest < 0 || nearestDistance > tolerance) return null;
+      pairing.push(nearest); unused.delete(nearest);
+    }
+    const edges = (polygon: Polygon, cs: number[]) => {
+      const result: number[] = [];
+      for (let i = 0; i < cs.length; i++) for (let j = i + 1; j < cs.length; j++)
+        result.push(distance(model.vertices[polygon.vertices[cs[i]]], model.vertices[polygon.vertices[cs[j]]]));
+      return result.sort((x, y) => x - y);
+    };
+    const ae = edges(a, ac), be = edges(b, pairing);
+    if (ae.some((v, i) => Math.abs(v - be[i]) > tolerance * 2)) return null;
+    const axisRelation = (axis: 0 | 1) => {
+      const differences = ac.map((c, i) => a.uv[c][axis] - b.uv[pairing[i]][axis]);
+      const sums = ac.map((c, i) => a.uv[c][axis] + b.uv[pairing[i]][axis]);
+      const spread = (v: number[]) => Math.max(...v) - Math.min(...v);
+      return { same: spread(differences) <= 1, reversed: spread(sums) <= 1 };
+    };
+    const s = axisRelation(0), t = axisRelation(1);
+    return (s.same || s.reversed) && (t.same || t.reversed) && (s.reversed || t.reversed) ? pairing : null;
+  };
+  const opposedTwins = new Set<Polygon>();
+  // Candidate lookup is spatial and material keyed. Large terrain models have
+  // thousands of unrelated polygons, so comparing every pair would make level
+  // loading quadratic even though real twins are near-coincident.
+  const twinBuckets = new Map<string, Polygon[]>();
+  for (const polygon of model.polygons) {
+    if (!polygon.window) continue;
+    const cs = corners(polygon), texture = materials.get(polygon.window.key)?.texture;
+    if (texture === undefined) continue;
+    const centroid = [0, 1, 2].map((axis) => cs.reduce((sum, c) => sum + model.vertices[polygon.vertices[c]][axis], 0) / cs.length);
+    const cell = centroid.map((v) => Math.floor(v / tolerance));
+    const prefix = `${texture}/${polygon.window.row}/${cs.length}`;
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
+      const candidates = twinBuckets.get(`${prefix}/${cell[0] + dx}/${cell[1] + dy}/${cell[2] + dz}`) ?? [];
+      for (const other of candidates) if (twinPairing(other, polygon)) {
+        opposedTwins.add(other); opposedTwins.add(polygon);
+      }
+    }
+    const key = `${prefix}/${cell[0]}/${cell[1]}/${cell[2]}`;
+    const bucket = twinBuckets.get(key);
+    if (bucket) bucket.push(polygon);
+    else twinBuckets.set(key, [polygon]);
+  }
+
+  const groups = new Map<string, { texture: number; forceCullBack: boolean; pos: number[]; uv: number[]; color: number[]; source: number[] }>();
+  const group = (texture: number, forceCullBack: boolean) => {
+    const key = `${texture}/${forceCullBack ? 1 : 0}`;
     let g = groups.get(key);
-    if (!g) { g = { pos: [], uv: [], color: [], source: [] }; groups.set(key, g); }
+    if (!g) { g = { texture, forceCullBack, pos: [], uv: [], color: [], source: [] }; groups.set(key, g); }
     return g;
   };
   for (const polygon of model.polygons) {
     const material = polygon.window ? materials.get(polygon.window.key) : undefined;
     if (polygon.window && !material) throw new Error(`missing Off Road Challenge material ${polygon.window.key}`);
-    const g = group(material?.texture ?? -1);
-    const order = polygon.vertices[1] === polygon.vertices[2] ? [0, 1, 3] : [0, 1, 2, 0, 2, 3];
+    const g = group(material?.texture ?? -1, opposedTwins.has(polygon));
+    const order = polygon.vertices[1] === polygon.vertices[2] ? [1, 0, 3] : [1, 0, 3, 1, 3, 2];
     for (let i = 0; i < order.length; i++) {
       const corner = order[i], vertex = model.vertices[polygon.vertices[corner]];
       g.pos.push(...vertex);
@@ -122,10 +205,11 @@ function makeRenderMesh(model: RawModel, materials: Map<string, MaterialTexture>
     }
   }
   const batches: Batch[] = [];
-  for (const [texture, g] of groups) batches.push({
-    texture,
-    // The terrain routine uses the opaque Z-buffered render mode (0x00504240).
-    blend: 'opaque', depthTest: true, depthWrite: true, cullBack: false,
+  for (const g of groups.values()) batches.push({
+    texture: g.texture,
+    // The normal reset state is the game's textured-edge mode 0x0F0A7008.
+    blend: g.texture >= 0 ? 'cutout' : 'opaque', depthTest: true, depthWrite: true,
+    cullBack: g.forceCullBack, ...(g.forceCullBack ? { forceCullBack: true } : {}),
     positions: new Float32Array(g.pos), uvs: new Float32Array(g.uv), colors: new Uint8Array(g.color), triSource: new Uint32Array(g.source),
   });
   return {
@@ -151,7 +235,7 @@ function collisionBox(model: RawModel): Mesh {
 function sectorCenter(placements: Placement[]): V3 | null {
   const valid = placements.filter((p) => p.model);
   if (!valid.length) return null;
-  return [0, 1, 2].map((k) => valid.reduce((n, p) => n + p.position[k], 0) / valid.length) as V3;
+  return [0, 1, 2].map((k) => valid.reduce((n, p) => n + worldPosition(p)[k], 0) / valid.length) as V3;
 }
 
 function startCamera(sectors: Placement[][], start: number, bounds: Level['bounds']): CameraView {
@@ -267,7 +351,7 @@ export function loadOffroadLevel(rom: OffroadRom, index: number): Level {
 
   for (const placements of sectors) for (const p of placements) {
     if (!p.model) {
-      markers.push({ label: `unresolved sector record ${hex(p.modelAddress)}`, position: p.position, layer: 0,
+      markers.push({ label: `unresolved sector record ${hex(p.modelAddress)}`, position: worldPosition(p), layer: 0,
         info: { sector: p.sector!, category: p.category!, placement: hex(p.address), flags: hex(p.flags), model: hex(p.modelAddress) } });
       continue;
     }
@@ -280,7 +364,7 @@ export function loadOffroadLevel(rom: OffroadRom, index: number): Level {
   for (const p of auxiliary) {
     const id = p.instanceId!;
     if (!p.model) {
-      markers.push({ label: `object ${(id >>> 16) & 0xffff} (specialized model ${hex(p.modelAddress)})`, position: p.position, layer: 1,
+      markers.push({ label: `object ${(id >>> 16) & 0xffff} (specialized model ${hex(p.modelAddress)})`, position: worldPosition(p), layer: 1,
         info: { instanceId: hex(id), template: hex(p.address), model: hex(p.modelAddress), flags: hex(p.flags) } });
       continue;
     }
