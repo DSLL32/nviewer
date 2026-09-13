@@ -56,7 +56,7 @@ export interface CameraSyncState {
   sideView: boolean;
 }
 
-type BooleanViewKey = 'nearest' | 'scripted' | 'fog' | 'sideView' | 'skyPlanes' | 'backdrop' | 'cutaway' | 'wireframe' | 'collisionWireframe' | 'culling';
+type BooleanViewKey = 'nearest' | 'scripted' | 'markers' | 'fog' | 'sideView' | 'skyPlanes' | 'backdrop' | 'cutaway' | 'wireframe' | 'collisionWireframe' | 'culling';
 
 export type ViewSyncEvent =
   | { key: BooleanViewKey; value: boolean }
@@ -131,6 +131,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
   const [locked, setLocked] = useState(false);
   const [nearest, setNearest] = useState(false);
   const [showScripted, setShowScripted] = useState(true);
+  const [showMarkers, setShowMarkers] = useState(true);
   const [fogOn, setFogOn] = useState(readFogSetting);
   const [cullOn, setCullOn] = useState(() => readFlag(CULL_KEY));
   const [lightingSetting, setLightingSetting] = useState<number | null>(() => level?.lighting?.default ?? null);
@@ -265,7 +266,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
     (groupOpenState && groupOpenState.level === level ? groupOpenState.open[name] : undefined) ?? size <= GROUP_OPEN_MAX;
 
   const instanceVisible = (lv: Level, i: number) => !hiddenInstances.has(i) && (showScripted || !lv.instances[i]?.animated);
-  const markerVisible = (m: Marker | undefined) => !!m && (m.layer === undefined || !hiddenLayers.has(m.layer));
+  const markerVisible = (m: Marker | undefined) => showMarkers && !!m && (m.layer === undefined || !hiddenLayers.has(m.layer));
 
   const pickerFor = (lv: Level): LevelPicker => {
     let picker = pickerRef.current;
@@ -691,6 +692,10 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
     if (!host) return;
     host.replaceChildren();
     const entries: MarkerEntry[] = [];
+    if (!showMarkers) {
+      markerEntriesRef.current = entries;
+      return;
+    }
     (level?.markers ?? []).forEach((m, i) => {
       if (m.layer !== undefined && hiddenLayers.has(m.layer)) return;
       const el = document.createElement('div');
@@ -709,7 +714,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
     entries.sort((a, b) => Number(b.selected) - Number(a.selected));
     markerEntriesRef.current = entries;
     if (engineRef.current) engineRef.current.renderer.dirty = true;
-  }, [level, hiddenLayers, selectedMarker]);
+  }, [level, hiddenLayers, selectedMarker, showMarkers]);
 
   // Selection overlay: the object's oriented bounding box, or the face filled and outlined (markers are
   // highlighted in the marker overlay).
@@ -861,6 +866,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
         backfaceCulling: cullOn,
         authenticFog: fogOn,
         showScripted,
+        showMarkers: hasMarkers ? showMarkers : null,
         showBackdrop: lv.backdrop ? showBackdrop : null,
         sky: skies.length > 0 ? activeSky : null,
         showSky: hasSkyPlanes ? skyPlanesOn : null,
@@ -904,6 +910,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
       : undefined;
 
   const hasScripted = level?.instances.some((i) => i.animated && i.mesh >= 0) ?? false;
+  const hasMarkers = (level?.markers?.length ?? 0) > 0;
   const hasFog = !!level?.fog;
   const hasCollision = collisionLayers.length > 0;
   const layers = level?.layers ?? [];
@@ -921,6 +928,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
     switch (event.key) {
       case 'nearest': setNearest(event.value); break;
       case 'scripted': if (hasScripted) setShowScripted(event.value); break;
+      case 'markers': if (hasMarkers) setShowMarkers(event.value); break;
       case 'fog': if (hasFog) setFogOn(event.value); break;
       case 'sideView':
         if (sideView && sideActive !== event.value) toggleView(false);
@@ -970,6 +978,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
       { key: 'culling', value: cullOn },
     ];
     if (hasScripted) events.push({ key: 'scripted', value: showScripted });
+    if (hasMarkers) events.push({ key: 'markers', value: showMarkers });
     if (hasFog) events.push({ key: 'fog', value: fogOn });
     if (sideView) events.push({ key: 'sideView', value: sideActive });
     if (skies.length > 0) events.push({ key: 'sky', value: activeSky });
@@ -1154,6 +1163,10 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
             >
               <input id={domId('scripted-toggle')} type="checkbox" checked={showScripted} onChange={(e) => { setShowScripted(e.target.checked); if (hasScripted) onViewSync?.({ key: 'scripted', value: e.target.checked }); }} />
               Show scripted/random objects
+            </label>
+            <label className={`check${hasMarkers ? '' : ' muted'}`} title={hasMarkers ? 'Object and point markers' : 'No markers in this level'}>
+              <input id={domId('markers-toggle')} type="checkbox" checked={showMarkers} onChange={(e) => { setShowMarkers(e.target.checked); if (hasMarkers) onViewSync?.({ key: 'markers', value: e.target.checked }); }} />
+              Show markers{!hasMarkers && level ? <span className="small muted"> (no markers in this level)</span> : null}
             </label>
             <label className={`check${hasFog ? '' : ' muted'}`} title={hasFog ? "The game's own distance fog" : 'No fog in this game'}>
               <input
