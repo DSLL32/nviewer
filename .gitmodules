@@ -1,0 +1,21 @@
+[submodule "emu/GLideN64"]
+	path = emu/GLideN64
+	url = https://github.com/gonetz/GLideN64.git
+[submodule "emu/mupen64plus-audio-sdl"]
+	path = emu/mupen64plus-audio-sdl
+	url = https://github.com/mupen64plus/mupen64plus-audio-sdl.git
+[submodule "emu/mupen64plus-input-sdl"]
+	path = emu/mupen64plus-input-sdl
+	url = https://github.com/mupen64plus/mupen64plus-input-sdl.git
+[submodule "emu/mupen64plus-rsp-cxd4"]
+	path = emu/mupen64plus-rsp-cxd4
+	url = https://github.com/mupen64plus/mupen64plus-rsp-cxd4.git
+[submodule "emu/mupen64plus-rsp-hle"]
+	path = emu/mupen64plus-rsp-hle
+	url = https://github.com/mupen64plus/mupen64plus-rsp-hle.git
+[submodule "emu/mupen64plus-video-glide64mk2"]
+	path = emu/mupen64plus-video-glide64mk2
+	url = https://github.com/mupen64plus/mupen64plus-video-glide64mk2.git
+[submodule "emu/mupen64plus-video-z64"]
+	path = emu/mupen64plus-video-z64
+	url = https://github.com/mupen64plus/mupen64plus-video-z64.git
