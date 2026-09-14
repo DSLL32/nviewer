@@ -31,6 +31,10 @@ While the development server is running, research PNGs beneath `~/.ai-tmp/r49` a
 `/__artifacts/<relative-path>`. Set `NVIEWER_ARTIFACTS_DIR` to use a different artifact root. This
 read-only endpoint is development-only and serves PNG files without directory listings.
 
+The Report buttons also work in the self-contained `file://` build. Instead of posting to the development
+server, the browser downloads `<unix-timestamp>.zip` containing `view.png`, `highlight.png` and `details.json`.
+Development-server reports continue to be written to `reports/`.
+
 For side-by-side comparison, Shift-click a level to open it in a right-hand pane. Ordinary clicks
 continue to choose the left pane. The panes synchronize their cameras and every compatible View
 setting; options without a matching setup, lighting preset, or layer in the other level remain local.
