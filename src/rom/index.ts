@@ -9,6 +9,7 @@ import { openBugsLife } from './bugslife';
 import { openGex3 } from './gex/gex3';
 import { openGex64 } from './gex/gex64';
 import { openGoldenEye } from './goldeneye/goldeneye';
+import { openMarioKart64 } from './mk64/mk64';
 import { openOffRoadChallenge } from './offroad/offroad';
 import { openPilotwings } from './pilotwings/pilotwings';
 import { openPokemonSnap } from './pokemonsnap/pokemonsnap';
@@ -75,6 +76,12 @@ export function openRom(bytes: Uint8Array): Game {
       return openStarFox64(rom);
     case 'NGEE':
       return openGoldenEye(rom);
+    case 'NKTE':
+      if (rom[0x3f] !== 0) throw new Error(`Mario Kart 64 (U) V1.${rom[0x3f]} is not supported: only the V1.0 ROM (revision 0) is.`);
+      return openMarioKart64(rom);
+    case 'NKTP':
+    case 'NKTJ':
+      throw new Error(`Mario Kart 64 (${code === 'NKTP' ? 'E' : 'J'}) is not supported: only Mario Kart 64 (U) (V1.0) is.`);
     case 'NOFE':
     case 'NOFP':
       return openOffRoadChallenge(rom);
@@ -113,6 +120,7 @@ export function openRom(bytes: Uint8Array): Game {
         'Air Boarder 64 (J/E), ' +
         'Off Road Challenge (U/E), ' +
         'Pokémon Snap (U), ' +
+        'Mario Kart 64 (U) (V1.0), ' +
         'Pilotwings 64 (U/E/J), Spider-Man (U), Perfect Dark (U) (V1.0), ' +
         'The Legend of Zelda: Ocarina of Time and Majora\'s Mask.');
     }

@@ -5,7 +5,7 @@ A browser viewer for the levels of these N64 games (USA versions): *San Francisc
 *Bomberman Hero*, *BattleTanx*, *BattleTanx: Global Assault*, *Gex 64: Enter the Gecko*,
 *Gex 3: Deep Cover Gecko*, *Yoshi's Story* (Japan), *Star Fox 64* (V1.0 and V1.1), *GoldenEye 007*,
 *Off Road Challenge* (USA and Europe), *Air Boarder 64* (Japan and Europe), *Pilotwings 64* (USA, Europe and Japan), *Pokémon Snap*, *A Bug's Life* (USA and Europe), *Spider-Man*,
-*Perfect Dark* (V1.0), and *The Legend of Zelda: Ocarina of Time* and
+*Mario Kart 64* (USA, V1.0), *Perfect Dark* (V1.0), and *The Legend of Zelda: Ocarina of Time* and
 *Majora's Mask* (retail and debug builds, plus the 1997 Ocarina of Time prototype preserved on an F-Zero X development
 cartridge). Load one or more ROMs, pick a level in the sidebar, and fly around freely, with
 each game's soundtrack in the music box. ROMs are parsed entirely in the browser (in a Web Worker)
@@ -107,6 +107,10 @@ Z shows or hides collision · Shift+F collision wireframe · the View panel can 
     - `archive.ts`: 488-entry path manifest and RNC1/RNC2 decoding
     - `mesh.ts`, `texture.ts`, `all.ts`, `objects.ts`, `level.ts`: 17 stages, common static meshes, CI textures,
       finite collision, parallax strips and candidate creature markers; `music.ts`: 20 libmus songs and authored loops
+  - `mk64/`: Mario Kart 64 (USA V1.0; format notes in `docs/MARIOKART64.md`)
+    - `fs.ts`, `courses.ts`: structural course-table discovery, MIO0 resources, packed F3DEX lists and draw recipes
+    - `level.ts`, `collision.ts`, `objects.ts`, `environment.ts`: 20 courses and the award ceremony, course geometry,
+      collision surfaces, object markers and decoded static actors, continuous course-path overlays, start markers, skies and fog
   - `spiderman/`: Spider-Man (USA; format notes in `docs/SPIDERMAN.md`)
     - `fs.ts`: ERZ2 decompression and the eight-group master directory; `model.ts`, `texture.ts`: model shells,
       native render banks and the global texture dictionary
@@ -130,7 +134,7 @@ Z shows or hides collision · Shift+F collision wireframe · the View panel can 
     synthesizer shared by Rush 1, the Bomberman games and BattleTanx), `rush1.ts`, `libmus.ts`
     (Software Creations' libmus as used by Global Assault, Gex 3 and A Bug's Life), `libmus64.ts` (the older libmus
     revision in Gex 64), `nas.ts` (Nintendo EAD's "Nas" sequence driver, used by Yoshi's Story), `sf64.ts`
-    (Star Fox 64's EAD sequence driver)
+    (Star Fox 64's EAD sequence driver), `mk64.ts` (Mario Kart 64's SM64-lineage Nas driver and 29 songs)
 - `src/worker.ts`: parses the ROM and levels off the main thread
 - `src/render/`: WebGL2 renderer, free-fly camera and controls
 - `src/ui/`: React UI (landing page, sidebar, viewport)
