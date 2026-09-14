@@ -5,6 +5,8 @@
  - mupen64plus is available, see `EMULATOR.md`. Dispatch the emulator in a
    subagent with a concrete task or result, so as not to waste your context. Do
    not leave emulators running when they are no longer needed.
+ - Do not add AI or agent attribution, sign-offs, co-author trailers, generated-by
+   notices, or session metadata to commit messages.
 
 # Research investigations
 
