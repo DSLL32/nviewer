@@ -19,6 +19,7 @@ import { decodeRush2049Music, listRush2049Music } from './music/rush2049';
 import { normalizeByteOrder, RushRom } from './rom';
 import { openRush1 } from './rush1';
 import { openStarFox64 } from './sf64/sf64';
+import { openSpiderMan } from './spiderman/spiderman';
 import type { Game } from './types';
 import { isZeldaAlpha, openZeldaAlpha } from './zelda/alpha';
 import { findZeldaBuild } from './zelda/fs';
@@ -92,6 +93,8 @@ export function openRom(bytes: Uint8Array): Game {
     case 'NPWP':
     case 'NPWJ':
       return openPilotwings(rom);
+    case 'NSLE':
+      return openSpiderMan(rom);
     case 'NPDE':
       if (rom[0x3f] !== 0) throw new Error(`Perfect Dark (U) V1.${rom[0x3f]} is not supported: only the V1.0 ROM (revision 0) is.`);
       return openPerfectDark(rom);
@@ -110,7 +113,7 @@ export function openRom(bytes: Uint8Array): Game {
         'Air Boarder 64 (J/E), ' +
         'Off Road Challenge (U/E), ' +
         'Pokémon Snap (U), ' +
-        'Pilotwings 64 (U/E/J), Perfect Dark (U) (V1.0), ' +
+        'Pilotwings 64 (U/E/J), Spider-Man (U), Perfect Dark (U) (V1.0), ' +
         'The Legend of Zelda: Ocarina of Time and Majora\'s Mask.');
     }
   }
