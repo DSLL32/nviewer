@@ -104,12 +104,17 @@ function modelMatrix(translation: [number, number, number], angles: [number, num
   const r00 = cb * cc, r01 = -cb * sc, r02 = sb;
   const r10 = sa * sb * cc + ca * sc, r11 = -sa * sb * sc + ca * cc, r12 = -sa * cb;
   const r20 = -ca * sb * cc + sa * sc, r21 = ca * sb * sc + sa * cc, r22 = ca * cb;
-  return new Float32Array([
+  const matrix = new Float32Array([
     r00, r10, r20, 0,
     r01, r11, r21, 0,
     r02, r12, r22, 0,
     translation[0], translation[1], translation[2], 1,
   ]);
+  // The game's world uses +Y down relative to the viewer's Y-up frame.
+  // Vertices below are reflected by S=diag(1,-1,1), so conjugate
+  // the local transform (S*M*S) to produce the world-space reflection S*M*v.
+  for (const i of [1, 4, 6, 9, 13]) matrix[i] = -matrix[i];
+  return matrix;
 }
 
 function parseModel(
@@ -183,7 +188,7 @@ function parseModel(
       const order = corners === 3 ? [2, 1, 0] : [2, 1, 0, 3, 2, 0];
       for (const corner of order) {
         const [x, y, z, packed] = sourceVertices[indices[corner]];
-        out.positions.push(x, y, z);
+        out.positions.push(x, -y, z);
         const uv = p + corners * 2 + corner * 2;
         out.uvs.push(material ? data[uv] / (2 * material.width) : 0, material ? data[uv + 1] / (2 * material.height) : 0);
         out.colors.push((packed & 0xf800) >>> 8, (packed & 0x07e0) >>> 3, (packed & 0x001f) << 3, 255);
@@ -280,7 +285,7 @@ export function parseBugsLifeGeometry(
         cullingCenter: record.center.join(', '), translation: m.translation.join(', '), angles: m.angles.map(hex).join(', '),
       },
     });
-    centres.push(record.center);
+    centres.push([record.center[0], -record.center[1], record.center[2]]);
   }
 
   if (!centres.length) throw new Error(`${name}: no common model placements`);

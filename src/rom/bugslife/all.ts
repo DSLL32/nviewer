@@ -38,7 +38,7 @@ export function parseFiniteCollision(data: Uint8Array, name: string): BugsLifeCo
           const ox = x + dv.getInt16(p + 6), oy = y + dv.getInt16(p + 8), oz = z + dv.getInt16(p + 10);
           const bx = ox + dv.getInt16(p + 12), by = oy + dv.getInt16(p + 14), bz = oz + dv.getInt16(p + 16);
           const cx = ox + dv.getInt16(p + 18), cy = oy + dv.getInt16(p + 20), cz = oz + dv.getInt16(p + 22);
-          positions.push(ox, oy, oz, cx, cy, cz, bx, by, bz);
+          positions.push(ox, -oy, oz, cx, -cy, cz, bx, -by, bz);
           for (let i = 0; i < 3; i++) colors.push(kind === 8 ? 255 : 32, kind === 8 ? 160 : 210, kind === 8 ? 32 : 255, 96);
           sources.push(p); triangleCount++;
         }
