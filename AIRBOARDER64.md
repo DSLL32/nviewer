@@ -35,7 +35,7 @@ Offsets are hexadecimal byte offsets into a normalized big-endian `.z64` ROM unl
 | archive | 76 J / 77 P records `{storedSize, relativeOffset}`; P inserts one localized file at ID 3 |
 | compression | big-endian decoded size followed by headerless LH5-family data: 8 KiB dictionary, block/static Huffman, 509 character/length symbols |
 | courses | Tutorial/Lecture plus Green Park, Lost Forest, Snow Festival '64, Sunset Island and Giant House; Giant House has three simultaneous connected areas |
-| geometry | grid-binned old F3DLX 1.21 display lists, standard 16-byte vertices, Y-up identity scale; two geometry passes |
+| geometry | grid-binned old F3DLX 1.21 display lists, standard 16-byte vertices, Y-up identity scale; near/detail table plus optional far-LOD replacement table |
 | textures | CI8 texels with RGBA5551 TLUTs, 561 resolved image/TLUT source combinations (395 distinct decoded images by content and dimensions), from 16x16 through 128x16 |
 | collision | grid-binned 20-byte quad/plane records using a packed s16 XYZ bank; eight course/area meshes fully decoded |
 | setups | three static setup slots for Street Work, Time Attack and Coin; all 75 descriptor selections decoded. Two-player aliases Time/Coin data |
@@ -239,7 +239,9 @@ gridX*gridZ u32 auxiliary-cell offsets
 two final header-relative targets
 ```
 
-Parser `0x800CECC0` copies scalars, rebases pointers and initializes the grid; traversal/rendering is in `0x800CDDB4` and `0x800D2980`. Pass 0 binds header pointer `+0x24` as F3DLX segment 2; pass 1 binds `+0x28`; both bind texture/palette pointer `+0x20` as segment 3. Grid entries themselves are CPU/header-relative display-list pointers. **[V-ASM]**
+Parser `0x800CECC0` copies scalars, rebases pointers and initializes the grid; traversal/rendering is in `0x800CDDB4` and `0x800D2980`. Table 0 binds header pointer `+0x24` as F3DLX segment 2; table 1 binds `+0x28`; both bind texture/palette pointer `+0x20` as segment 3. Grid entries themselves are CPU/header-relative display-list pointers. **[V-ASM]**
+
+The tables are distance alternatives, not additive render passes. Runtime classifies cells into three groups: near cells use table 0, distant cells with a table-1 entry use table 1, and cells without a far entry fall back to table 0. Table 0 is the complete/high-detail representation. Table-0/table-1 triangle counts are Tutorial 4,409/4,409, Green Park 3,126/2,118, Lost Forest 10,687/10,515, Snow Festival '64 9,985/0, Sunset Island 7,987/7,633, with equal counts in each Giant House area. Green Park's far table includes a coarser retriangulation but fewer total faces; no table-1-only geometric surface is absent from table 0. The viewer therefore shows table 0 by default and preserves each nonempty table 1 as a hidden `far LOD` layer. **[V-ASM/V-ROM/V-TOOL/V-REPO]**
 
 ### 5.2 Vertices and display lists
 
@@ -268,7 +270,7 @@ Old F3DLX commands used include `04` VTX, `B1` TRI2, `BF` TRI1, `06` DL and `B8`
 
 The textured pass uses CI8 texels and RGBA5551 TLUTs from segment 3. Width/height come from `G_SETTILESIZE`; observed dimensions are 16x16, 16x32, 32x16, 32x32, 32x64, 64x8, 64x16, 64x32 and 128x16. Production display-list execution resolves 561 image/TLUT source combinations and 395 distinct decoded RGBA images by content and dimensions: Tutorial 72/36, Green Park 84/43, Lost Forest 80/80, Snow Festival '64 63/63, Sunset Island 80/80 and Giant House 182/93. The earlier 162-specification research census sampled texture state only when vertices were loaded; it missed later texture swaps used with cached vertices through `G_MODIFYVTX` and triangle commands. The production parser therefore associates material state at triangle emission. `levels/course_textures_sheet.png` visibly resolves grass, snow, pavement, metal, wood, signage and Giant House art, verifying palette/channel order. Raw row 0 is image top. **[V-ROM/V-TOOL/V-REPO]**
 
-Pass 0 is commonly vertex-colored/untextured; pass 1 contains CI/TLUT setup. A production parser must preserve display-list material state, UVs, tile masks/shifts/wrap, culling and blend/depth mode rather than flatten all triangles into one material. Exact state words and fog/light setup are in §7. **[V-ASM]**
+Both distance tables carry display-list material state. A production parser must preserve material state, UVs, tile masks/shifts/wrap, culling and blend/depth mode rather than flatten all triangles into one material, and must not draw both distance representations simultaneously. Exact state words and fog/light setup are in §7. **[V-ASM/V-REPO]**
 
 ## 6. Collision
 
@@ -453,7 +455,8 @@ Suggested modules and ownership:
 
 Level construction:
 
-- `main`: both course grid geometry passes, with all material state.
+- `main`: complete table-0 near/detail geometry, with all material state.
+- hidden `far LOD`: each nonempty table-1 distance replacement, never co-rendered by default.
 - `objects` (or sublayers `markers` and `coins`): chosen A/B setup.
 - `rooms` group for the three Giant House areas if independent toggling aids inspection.
 - hidden-by-default `collision`: all deduplicated quads.
