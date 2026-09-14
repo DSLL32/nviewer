@@ -176,9 +176,11 @@ function parseModel(
       if (indices.some((index) => index >= sourceVertices.length))
         throw new Error(`model ${hex(model)} face at ${hex(p)} references a vertex outside its ${count}-vertex stream`);
       const material = materialFor(page, refs[1] >>> 12), out = outputFor(material, flags);
-      // The runtime's G_TRI2 word at US 0x8003d06c emits (2,1,0) and
-      // (3,1,2) for each four-corner source record.
-      const order = corners === 3 ? [2, 1, 0] : [2, 1, 0, 3, 1, 2];
+      // The runtime's G_TRI2 word names dynamic cache slots, not source-record
+      // corners directly. US 0x8003c9cc..0x8003ca58 fills slots 0..3 from
+      // source refs 3,2,0,1; the command at 0x8003d06c therefore uses the
+      // source-record diagonal 0--2. Preserve that topology here.
+      const order = corners === 3 ? [2, 1, 0] : [2, 1, 0, 3, 2, 0];
       for (const corner of order) {
         const [x, y, z, packed] = sourceVertices[indices[corner]];
         out.positions.push(x, y, z);
