@@ -310,8 +310,12 @@ vertices are signed integers. `0x8001554C` uses the low 12 bits of each model
 angle as a 4096-step turn and builds a row-composed rotation matrix. Comparing
 the runtime-derived composition and its transpose against authored culling
 centres strongly selects the row form: in Tunnels its median normalized
-distance is 3.64 versus 45.30, and in Training 24.49 versus 114.91. The viewer
-uses the model-header XYZ as translation and preserves these source axes.
+distance is 3.64 versus 45.30, and in Training 24.49 versus 114.91. The common
+renderer explicitly negates the second component before emitting vertices
+(`0x8003D214/280/2F0/350`), proving that source +Y points down relative to the
+viewer's Y-up frame. The viewer uses model-header XYZ as translation and
+applies `Y -> -Y` consistently to geometry, transforms, collision, culling
+centres, creature markers, and derived cameras.
 
 ## 6. Collision and object containers
 
@@ -621,7 +625,7 @@ all 17 levels: 8,437 placements, 8,269 recognized common models, 333,678
 vertices, 218,802 face records, 3,297 finite collision groups, and 113,028
 collision triangles. It completed 34/34 transferred loads and 17/17 layer
 audits; the final focused render-data hash is
-`d4702f72e82c0f5fa693cba560716dd45abe1e77`. The same structural totals,
+`6c5e8731395791edc0431cb43107ae5f4571c4b4`. The same structural totals,
 transfer checks, and layer checks passed the E/F/G/I builds.
 
 All 20 US tracks rendered with finite stereo PCM at 22,047 Hz and exact
