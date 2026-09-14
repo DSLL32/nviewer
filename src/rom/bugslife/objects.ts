@@ -22,7 +22,7 @@ export function creatureMarkers(data: Uint8Array, levelId: number, layers: Level
     if (type < 1 || type > CREATURES.length) continue; // type zero remains intentionally unresolved
     markers.push({
       label: `candidate ${CREATURES[type - 1].split('/').at(-1)!}`,
-      position: [dv.getInt32(p), -dv.getInt32(p + 4), dv.getInt32(p + 8)],
+      position: [dv.getInt32(p), -dv.getInt32(p + 4), -dv.getInt32(p + 8)],
       layer,
       info: { file: `creat/creat${levelId.toString().padStart(2, '0')}.bin`, record, type,
         candidateModel: CREATURES[type - 1], mapping: 'hypothesis: +0x0c as one-based model type', animation: 'not decoded' },

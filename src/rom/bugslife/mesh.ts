@@ -110,10 +110,10 @@ function modelMatrix(translation: [number, number, number], angles: [number, num
     r02, r12, r22, 0,
     translation[0], translation[1], translation[2], 1,
   ]);
-  // The game's world uses +Y down relative to the viewer's Y-up frame.
-  // Vertices below are reflected by S=diag(1,-1,1), so conjugate
-  // the local transform (S*M*S) to produce the world-space reflection S*M*v.
-  for (const i of [1, 4, 6, 9, 13]) matrix[i] = -matrix[i];
+  // The common renderer emits (x,-y,-z) at 0x8003d1ec..0x8003d3a8.
+  // Vertices below use the same S=diag(1,-1,-1), so conjugate the local
+  // transform (S*M*S) to produce the runtime world coordinates S*M*v.
+  for (const i of [1, 2, 4, 8, 13, 14]) matrix[i] = -matrix[i];
   return matrix;
 }
 
@@ -149,11 +149,10 @@ function parseModel(
 
   const outputs = new Map<string, GroupOutput>();
   const outputFor = (material: BugsLifeMaterial | null, _flags: number) => {
-    // The common renderer branch at US 0x8003ce70 distinguishes 0x60 from
-    // all other values while generating vertex shade, but does not establish
-    // an alpha-test or framebuffer-blend mode. Keep the static level corpus
-    // opaque rather than letting palette low bits punch holes in terrain.
-    const blend = 'opaque';
+    // The containing level pass installs AA_ZB_TEX_EDGE2 (0xc8113078), whose
+    // CVG_X_ALPHA state makes RGBA5551 palette alpha a coverage mask. Group
+    // control bits affect vertex shading, not the RDP render class.
+    const blend = material ? 'cutout' : 'opaque';
     const texture = material?.texture ?? -1, key = `${texture}/${blend}`;
     let output = outputs.get(key);
     if (!output) {
@@ -188,9 +187,14 @@ function parseModel(
       const order = corners === 3 ? [2, 1, 0] : [2, 1, 0, 3, 2, 0];
       for (const corner of order) {
         const [x, y, z, packed] = sourceVertices[indices[corner]];
-        out.positions.push(x, -y, z);
+        out.positions.push(x, -y, -z);
         const uv = p + corners * 2 + corner * 2;
-        out.uvs.push(material ? data[uv] / (2 * material.width) : 0, material ? data[uv + 1] / (2 * material.height) : 0);
+        // 0x8003cd0c..0x8003cd58 emits unsigned byte<<4 as S10.5 vertex ST.
+        // The containing pass sets gSPTexture scale S/T to 0x8000 (one half),
+        // while 0x80013324 sets tile shifts 15/14 for 32/64 texels. Applying
+        // all three stages and normalising for WebGL gives byte/64 for either
+        // texture dimension; the dimension-dependent shift cancels the size.
+        out.uvs.push(material ? data[uv] / 64 : 0, material ? data[uv + 1] / 64 : 0);
         out.colors.push((packed & 0xf800) >>> 8, (packed & 0x07e0) >>> 3, (packed & 0x001f) << 3, 255);
       }
       for (let tri = 0; tri < order.length / 3; tri++) out.sources.push(p);
@@ -213,6 +217,7 @@ function parseModel(
     mesh: { name: `${levelName} model ${hex(model)}`, radius, batches, info: {
       file: 'level.dat', model: hex(model), stream: hex(stream), sourceVertices: count, faceRecords: faces,
       triSource: 'offset in decoded level.dat', scale: 1,
+      lod: 'authored level.dat stream (high-detail; lowres.n64 is not selected)',
     } },
     matrix: modelMatrix(translation, angles), translation, angles, stream, vertices: count, faces,
   };
@@ -285,7 +290,7 @@ export function parseBugsLifeGeometry(
         cullingCenter: record.center.join(', '), translation: m.translation.join(', '), angles: m.angles.map(hex).join(', '),
       },
     });
-    centres.push([record.center[0], -record.center[1], record.center[2]]);
+    centres.push([record.center[0], -record.center[1], -record.center[2]]);
   }
 
   if (!centres.length) throw new Error(`${name}: no common model placements`);
