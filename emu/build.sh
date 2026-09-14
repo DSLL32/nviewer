@@ -11,6 +11,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PREFIX="${PREFIX:-$ROOT/install}"
 JOBS="${JOBS:-$(nproc)}"
+OPTFLAGS="${OPTFLAGS:--O3 -flto -march=native -fomit-frame-pointer}"
 APIDIR="$ROOT/mupen64plus-core/src/api"
 
 # Core must be built first: the plugins and the UI compile against its headers.
@@ -78,6 +79,7 @@ run_make() {
   echo "==> $dir: $*"
   make -C "$ROOT/$dir/projects/unix" -j"$JOBS" \
     PREFIX="$PREFIX" APIDIR="$APIDIR" \
+    OPTFLAGS="$OPTFLAGS" \
     COREDIR="$PREFIX/lib/" \
     PLUGINDIR="$PREFIX/lib/mupen64plus" \
     SHAREDIR="$PREFIX/share/mupen64plus" \
@@ -112,6 +114,8 @@ done
 cmake -S "$ROOT/GLideN64/src" -B "$ROOT/_obj-GLideN64" \
   -DMUPENPLUSAPI=ON -DNOHQ=ON \
   -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_C_FLAGS_RELEASE="$OPTFLAGS -DNDEBUG" \
+  -DCMAKE_CXX_FLAGS_RELEASE="$OPTFLAGS -DNDEBUG" \
   -DCMAKE_INSTALL_PREFIX="$PREFIX" \
   -DCMAKE_INSTALL_LIBDIR=lib \
   -DCMAKE_INSTALL_DATADIR=share
