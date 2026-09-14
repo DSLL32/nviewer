@@ -3,6 +3,7 @@ import type { Backdrop, Batch, Fog, Level, Mesh, PanoramaSky, SkyPlane } from '.
 import type { FlyCamera } from './camera';
 import { applyTextureFilter, createProgram, uploadTexture, type TextureFilter } from './gl';
 import { mat4, vec3, type Mat4 } from './math';
+import { effectiveInstanceMatrix } from './picking';
 
 const VS = `#version 300 es
 layout(location = 0) in vec3 aPosition;
@@ -207,10 +208,11 @@ const SKY_OFFSET_ROWS_PER_NDC = 110;
 const HIGHLIGHT_VS = `#version 300 es
 layout(location = 0) in vec3 aPosition;
 uniform mat4 uViewProj;
+uniform mat4 uModel;
 uniform vec2 uOffset; // screen-space nudge in clip units per w: offset copies thicken 1-pixel lines
 out highp float vLogW;
 void main() {
-  gl_Position = uViewProj * vec4(aPosition, 1.0);
+  gl_Position = uViewProj * uModel * vec4(aPosition, 1.0);
   vLogW = 1.0 + gl_Position.w;
   gl_Position.xy += uOffset * gl_Position.w;
 }`;
@@ -458,6 +460,8 @@ interface DrawItem {
   index: number; // into Level.instances
   mesh: GpuMesh;
   model: Mat4;
+  matrix: Mat4; // authored source matrix; named to satisfy effectiveInstanceMatrix without a per-frame wrapper object
+  billboard: 'y' | undefined;
   animated: boolean;
   noFog: boolean; // the game draws this instance without fog even when fog is on
   mirrored: boolean; // negative determinant: winding is flipped
@@ -489,12 +493,16 @@ interface Scene {
 }
 
 const DEFAULT_CLEAR: [number, number, number] = [0.46, 0.64, 0.86];
+const IDENTITY_MODEL = mat4.create();
 
 /** What to draw over the scene for the current selection. */
 export interface Highlight {
-  lines: Float32Array; // world-space segments: xyz per vertex, two vertices per segment
-  fill?: Float32Array; // world-space triangles, shown translucent over everything
+  lines: Float32Array; // local-space segments: xyz per vertex, two vertices per segment
+  fill?: Float32Array; // local-space triangles, shown translucent over everything
   color: [number, number, number]; // 0..1
+  /** Source instance matrix; omitted when the supplied vertices are already in world space. */
+  model?: Mat4;
+  billboard?: 'y';
 }
 
 export interface FrameStats {
@@ -539,13 +547,15 @@ export class LevelRenderer {
   private readonly skyPlaneUniforms: Record<'ray0' | 'rayX' | 'rayY' | 'side' | 'height' | 'uvOrigin' | 'invUvScale' | 'color' | 'horizon' | 'water', WebGLUniformLocation | null>;
   private readonly highlightProgram: WebGLProgram;
   private readonly uHlViewProj: WebGLUniformLocation | null;
+  private readonly uHlModel: WebGLUniformLocation | null;
   private readonly uHlOffset: WebGLUniformLocation | null;
   private readonly uHlColor: WebGLUniformLocation | null;
   private readonly uHlLogDepthCoef: WebGLUniformLocation | null;
   private readonly uHlDepthBias: WebGLUniformLocation | null;
   private readonly highlightVao: WebGLVertexArrayObject;
   private readonly highlightBuffer: WebGLBuffer;
-  private highlight: { color: [number, number, number]; fillCount: number; lineCount: number } | null = null;
+  private highlight: { color: [number, number, number]; fillCount: number; lineCount: number; model?: Mat4; billboard?: 'y' } | null = null;
+  private readonly highlightModel = mat4.create();
   private wireframe = false;
   private collisionWireframe = false;
   private wireProgram: WireProgram | null = null;
@@ -605,6 +615,7 @@ export class LevelRenderer {
     const hp = createProgram(gl, HIGHLIGHT_VS, HIGHLIGHT_FS);
     this.highlightProgram = hp;
     this.uHlViewProj = gl.getUniformLocation(hp, 'uViewProj');
+    this.uHlModel = gl.getUniformLocation(hp, 'uModel');
     this.uHlOffset = gl.getUniformLocation(hp, 'uOffset');
     this.uHlColor = gl.getUniformLocation(hp, 'uColor');
     this.uHlLogDepthCoef = gl.getUniformLocation(hp, 'uLogDepthCoef');
@@ -756,7 +767,13 @@ export class LevelRenderer {
     const gl = this.gl;
     gl.bindBuffer(gl.ARRAY_BUFFER, this.highlightBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
-    this.highlight = { color: h.color, fillCount: Math.floor(fill.length / 3), lineCount: Math.floor(h.lines.length / 3) };
+    this.highlight = {
+      color: h.color,
+      fillCount: Math.floor(fill.length / 3),
+      lineCount: Math.floor(h.lines.length / 3),
+      ...(h.model ? { model: h.model } : {}),
+      ...(h.billboard ? { billboard: h.billboard } : {}),
+    };
   }
 
   setLevel(level: Level | null) {
@@ -801,8 +818,13 @@ export class LevelRenderer {
       if (inst.mesh < 0) continue;
       const mesh = getMesh(inst.mesh);
       if (!mesh) continue;
-      const m = inst.matrix;
-      items.push({ index, mesh, model: m, animated: inst.animated === true, noFog: inst.noFog === true, mirrored: det3(m) < 0, collision: collisionInstances.has(index), x: m[12], y: m[13], z: m[14], dist: 0 });
+      const matrix = inst.matrix;
+      const model = inst.billboard === 'y' ? new Float32Array(matrix) : matrix;
+      items.push({
+        index, mesh, model, matrix, billboard: inst.billboard,
+        animated: inst.animated === true, noFog: inst.noFog === true, mirrored: det3(matrix) < 0,
+        collision: collisionInstances.has(index), x: matrix[12], y: matrix[13], z: matrix[14], dist: 0,
+      });
     }
 
     const sky: GpuMesh[] = [];
@@ -1020,6 +1042,15 @@ export class LevelRenderer {
     const showAnimated = this.showAnimated;
     const hidden = this.hiddenInstances;
     const opacity = this.instanceOpacity;
+    const [cx, cy, cz] = camera.position;
+    // Compute one effective matrix per item per frame. All passes, wireframes and selection highlights observe the
+    // same camera-facing transform; ordinary instances retain their source matrix object without a copy.
+    for (const item of scene.items) {
+      if (item.billboard === 'y') {
+        effectiveInstanceMatrix(item, camera.position, item.model);
+        item.mirrored = det3(item.model) < 0;
+      }
+    }
 
     // Cutaway, first pass (normal program): the depth of the nearest opaque/cutout surface per pixel (the surfaces that
     // write depth; faded instances are see-through and take no part).
@@ -1036,7 +1067,6 @@ export class LevelRenderer {
     }
 
     // Sky: drawn first around the camera, without depth or fog; Level.skies retain their game-authored culling.
-    const [cx, cy, cz] = camera.position;
     if (scene.skies.length > 0) {
       // Level.skies positions are relative to the camera: only the camera rotation applies.
       if (activeSky?.kind === 'mesh') {
@@ -1129,7 +1159,7 @@ export class LevelRenderer {
 
     if (!peel && (this.wireframe || this.collisionWireframe)) drawCalls += this.drawWires(scene, logDepthCoef, false);
 
-    if (options.highlight !== false) drawCalls += this.drawHighlight(logDepthCoef);
+    if (options.highlight !== false) drawCalls += this.drawHighlight(logDepthCoef, camera);
 
     gl.bindVertexArray(null);
     this.lastFrame = { drawCalls };
@@ -1366,7 +1396,7 @@ export class LevelRenderer {
   }
 
   /** The selection overlay, after the whole scene. Returns the number of draw calls. */
-  private drawHighlight(logDepthCoef: number): number {
+  private drawHighlight(logDepthCoef: number, camera: FlyCamera): number {
     const h = this.highlight;
     if (!h) return 0;
     const gl = this.gl;
@@ -1374,6 +1404,10 @@ export class LevelRenderer {
     let calls = 0;
     gl.useProgram(this.highlightProgram);
     gl.uniformMatrix4fv(this.uHlViewProj, false, this.viewProj);
+    const model = h.model
+      ? effectiveInstanceMatrix({ matrix: h.model, billboard: h.billboard }, camera.position, this.highlightModel)
+      : IDENTITY_MODEL;
+    gl.uniformMatrix4fv(this.uHlModel, false, model);
     gl.uniform1f(this.uHlLogDepthCoef, logDepthCoef);
     gl.uniform1f(this.uHlDepthBias, HIGHLIGHT_DEPTH_BIAS);
     gl.bindVertexArray(this.highlightVao);

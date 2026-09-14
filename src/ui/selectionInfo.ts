@@ -1,7 +1,7 @@
 // The selection panel's content: what was picked, as labelled rows and as plain text for bug reports.
 import type { DebugInfo, Level } from '../rom';
 import type { Vec3 } from '../render/math';
-import { det3, instanceWorldBounds, transformPoint } from '../render/picking';
+import { det3, effectiveInstanceMatrix, instanceWorldBounds, transformPoint } from '../render/picking';
 
 export type Selection =
   | { kind: 'object'; instance: number; point: Vec3 }
@@ -63,7 +63,7 @@ function levelSection(level: Level, game: GameIdentity | null): InfoSection {
   };
 }
 
-export function describeSelection(level: Level, game: GameIdentity | null, sel: Selection): SelectionReport | null {
+export function describeSelection(level: Level, game: GameIdentity | null, sel: Selection, camera?: Vec3): SelectionReport | null {
   if (sel.kind === 'marker') {
     const marker = level.markers?.[sel.marker];
     if (!marker) return null;
@@ -83,7 +83,9 @@ export function describeSelection(level: Level, game: GameIdentity | null, sel: 
   const inst = level.instances[sel.instance];
   const mesh = inst && inst.mesh >= 0 ? level.meshes[inst.mesh] : undefined;
   if (!inst || !mesh) return null;
-  const m = inst.matrix;
+  // Billboard diagnostics describe the same camera-relative geometry that was drawn and picked, not the unrotated
+  // authored matrix stored on the instance.
+  const m = camera ? effectiveInstanceMatrix(inst, camera) : inst.matrix;
   const flags = [inst.animated ? 'animated' : '', inst.noFog ? 'noFog' : '', det3(m) < 0 ? 'mirrored' : ''].filter(Boolean);
   const identity: [string, string][] = [
     ['Instance', `#${sel.instance} ${inst.name}`],
@@ -97,7 +99,7 @@ export function describeSelection(level: Level, game: GameIdentity | null, sel: 
     const tris = mesh.batches.reduce((s, b) => s + Math.floor(b.positions.length / 9), 0);
     const textures = [...new Set(mesh.batches.map((b) => b.texture).filter((t) => t >= 0))].sort((a, b) => a - b);
     const untextured = mesh.batches.filter((b) => b.texture < 0).length;
-    const wb = instanceWorldBounds(level, sel.instance);
+    const wb = instanceWorldBounds(level, sel.instance, m);
     const rows: [string, string][] = [
       ...identity,
       ['Batches', String(mesh.batches.length)],

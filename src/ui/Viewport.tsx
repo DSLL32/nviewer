@@ -3,7 +3,7 @@ import type { Level, LevelLayer, Marker, SideView } from '../rom';
 import { FlyCamera } from '../render/camera';
 import { FlyControls, type ControlAction, type PickMode, type SideViewLimits } from '../render/controls';
 import { mat4, type Mat4 } from '../render/math';
-import { LevelPicker, orientedBoxLines, triangleWorld } from '../render/picking';
+import { LevelPicker, orientedBoxLines, triangleLocal } from '../render/picking';
 import { CUTAWAY_EPSILON, LevelRenderer } from '../render/renderer';
 import { computeStartView, type StartView } from '../render/startView';
 import { SelectionPanel } from './SelectionPanel';
@@ -150,6 +150,8 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
   const [pickMode, setPickMode] = useState<PickMode | null>(null);
   // Per-level UI state remembers its level, so a newly loaded level starts from its defaults.
   const [picked, setPicked] = useState<{ level: Level; sel: Selection } | null>(null);
+  const [selectionCamera, setSelectionCamera] = useState<[number, number, number] | null>(null);
+  const billboardSelectionRef = useRef(false);
   const [flyLevel, setFlyLevel] = useState<Level | null>(null); // level switched from side view to free fly
   const [layerState, setLayerState] = useState<{ level: Level; hidden: ReadonlySet<number> } | null>(null);
   const pickerRef = useRef<LevelPicker | null>(null);
@@ -337,8 +339,11 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
     }
     const hit = picker.pick(cam.position, dir, pickOptions);
     if (!hit) setPicked(null);
-    else if (mode === 'object') setPicked({ level, sel: { kind: 'object', instance: hit.instance, point: hit.point } });
-    else setPicked({ level, sel: { kind: 'face', instance: hit.instance, batch: hit.batch, tri: hit.tri, point: hit.point } });
+    else {
+      setSelectionCamera([...cam.position]);
+      if (mode === 'object') setPicked({ level, sel: { kind: 'object', instance: hit.instance, point: hit.point } });
+      else setPicked({ level, sel: { kind: 'face', instance: hit.instance, batch: hit.batch, tri: hit.tri, point: hit.point } });
+    }
   };
 
   const toggleView = (sync = true) => {
@@ -484,6 +489,10 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
         readoutStale = false;
         const [x, y, z] = camera.position;
         posRef.current.textContent = `${x.toFixed(0)}, ${y.toFixed(0)}, ${z.toFixed(0)}`;
+        // Billboard bounds and face coordinates in the selection panel are camera-relative too. Updating only while
+        // one is selected, at the HUD's existing 10 Hz cadence, keeps those diagnostics current without a 60 Hz
+        // React render loop.
+        if (billboardSelectionRef.current) setSelectionCamera([x, y, z]);
       }
     };
     raf = requestAnimationFrame(frame);
@@ -726,15 +735,20 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
       renderer.setHighlight(null);
     } else if (selection.kind === 'object') {
       const bounds = pickerFor(level).bounds(inst.mesh);
-      renderer.setHighlight(bounds ? { lines: orientedBoxLines(bounds, inst.matrix), color: OBJECT_HIGHLIGHT } : null);
+      renderer.setHighlight(bounds ? {
+        lines: orientedBoxLines(bounds, mat4.create()), color: OBJECT_HIGHLIGHT,
+        model: inst.matrix, billboard: inst.billboard,
+      } : null);
     } else {
-      const tri = triangleWorld(level, selection.instance, selection.batch, selection.tri);
+      const tri = triangleLocal(level, selection.instance, selection.batch, selection.tri);
       renderer.setHighlight(
         tri
           ? {
               fill: new Float32Array([...tri[0], ...tri[1], ...tri[2]]),
               lines: new Float32Array([...tri[0], ...tri[1], ...tri[1], ...tri[2], ...tri[2], ...tri[0]]),
               color: FACE_HIGHLIGHT,
+              model: inst.matrix,
+              billboard: inst.billboard,
             }
           : null,
       );
@@ -770,8 +784,11 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
   }, []);
 
   const report = useMemo(
-    () => (level && selection ? describeSelection(level, gameId && gameTitle ? { id: gameId, title: gameTitle } : null, selection) : null),
-    [level, selection, gameId, gameTitle],
+    () => (level && selection ? describeSelection(level, gameId && gameTitle ? { id: gameId, title: gameTitle } : null, selection, selectionCamera ?? undefined) : null),
+    [level, selection, selectionCamera, gameId, gameTitle],
+  );
+  billboardSelectionRef.current = !!(
+    level && selection && selection.kind !== 'marker' && level.instances[selection.instance]?.billboard === 'y'
   );
   const reportTexture = report && report.texture !== null && level ? (level.textures[report.texture] ?? null) : null;
 

@@ -1,5 +1,5 @@
 // CPU picking for bug reports: a camera ray against the triangles of the placed instances.
-import type { Batch, Level, Texture } from '../rom';
+import type { Batch, Instance, Level, Texture } from '../rom';
 import type { Vec3 } from './math';
 
 export interface PickHit {
@@ -36,6 +36,7 @@ export class LevelPicker {
   readonly level: Level;
   private readonly meshBounds = new Map<number, MeshBounds | null>();
   private readonly inverses = new Map<number, Affine | null>();
+  private readonly billboardMatrix = new Float32Array(16);
 
   constructor(level: Level) {
     this.level = level;
@@ -79,7 +80,8 @@ export class LevelPicker {
       const mesh = level.meshes[inst.mesh];
       const bounds = mesh ? this.bounds(inst.mesh) : null;
       if (!mesh || !bounds) continue;
-      const inv = this.inverse(ii);
+      const model = effectiveInstanceMatrix(inst, origin, this.billboardMatrix);
+      const inv = inst.billboard === 'y' ? invertAffine(model) : this.inverse(ii);
       if (!inv) continue;
       // Local ray; t keeps its world meaning because the transform is affine.
       for (let k = 0; k < 3; k++) {
@@ -87,7 +89,7 @@ export class LevelPicker {
         ld[k] = inv[k] * dir[0] + inv[3 + k] * dir[1] + inv[6 + k] * dir[2];
       }
       if (!rayHitsBox(lo, ld, bounds, opts.minT, bestT)) continue;
-      const mirrored = det3(inst.matrix) < 0;
+      const mirrored = det3(model) < 0;
       for (let bi = 0; bi < mesh.batches.length; bi++) {
         const bb = bounds.batches[bi];
         if (!bb || !rayHitsBox(lo, ld, bb, opts.minT, bestT)) continue;
@@ -112,6 +114,50 @@ export class LevelPicker {
     }
     return inv;
   }
+}
+
+/**
+ * Effective model matrix for an instance at the current camera position. Y-axis billboards keep their translation,
+ * basis scale and reflection parity, while rotating local +Z towards the camera in the horizontal plane.
+ * Non-billboards return their authored matrix without copying it.
+ */
+export function effectiveInstanceMatrix(
+  instance: Pick<Instance, 'matrix' | 'billboard'>,
+  camera: Vec3,
+  out: Float32Array = new Float32Array(16),
+): Float32Array {
+  const source = instance.matrix;
+  if (instance.billboard !== 'y') return source;
+
+  const scaleX = Math.hypot(source[0], source[1], source[2]);
+  const scaleY = Math.hypot(source[4], source[5], source[6]);
+  const scaleZ = Math.hypot(source[8], source[9], source[10]);
+  let nx = camera[0] - source[12];
+  let nz = camera[2] - source[14];
+  let length = Math.hypot(nx, nz);
+  if (length < 1e-12) {
+    // Yaw is undefined directly above the origin. Retain the source matrix's projected +Z direction if possible.
+    nx = source[8];
+    nz = source[10];
+    length = Math.hypot(nx, nz);
+    if (length < 1e-12) { nx = 0; nz = 1; length = 1; }
+  }
+  nx /= length;
+  nz /= length;
+  // world-up cross Z gives a right-handed yaw basis. Keep reflections on X so a flat sprite's visible winding is
+  // reflected too, rather than hiding the sign on its unused depth axis.
+  const sx = (det3(source) < 0 ? -1 : 1) * scaleX;
+  out.fill(0);
+  out[0] = nz * sx;
+  out[2] = -nx * sx;
+  out[5] = scaleY;
+  out[8] = nx * scaleZ;
+  out[10] = nz * scaleZ;
+  out[12] = source[12];
+  out[13] = source[13];
+  out[14] = source[14];
+  out[15] = 1;
+  return out;
 }
 
 function positionsBounds(p: Float32Array): Aabb | null {
@@ -255,13 +301,13 @@ export function transformPoint(m: Float32Array, x: number, y: number, z: number)
 }
 
 /** World-space bounds of an instance, from all of its transformed vertices. */
-export function instanceWorldBounds(level: Level, instanceIndex: number): Aabb | null {
+export function instanceWorldBounds(level: Level, instanceIndex: number, matrix?: Float32Array): Aabb | null {
   const inst = level.instances[instanceIndex];
   const mesh = inst && inst.mesh >= 0 ? level.meshes[inst.mesh] : undefined;
   if (!mesh) return null;
   const min: Vec3 = [Infinity, Infinity, Infinity];
   const max: Vec3 = [-Infinity, -Infinity, -Infinity];
-  const m = inst.matrix;
+  const m = matrix ?? inst.matrix;
   for (const b of mesh.batches) {
     const p = b.positions;
     for (let i = 0; i + 2 < p.length; i += 3) {
@@ -294,16 +340,24 @@ export function orientedBoxLines(box: Aabb, m: Float32Array): Float32Array {
   return out;
 }
 
-/** World-space corners of one triangle of an instance's batch. */
-export function triangleWorld(level: Level, instanceIndex: number, batchIndex: number, tri: number): [Vec3, Vec3, Vec3] | null {
+/** Local-space corners of one triangle of an instance's batch. */
+export function triangleLocal(level: Level, instanceIndex: number, batchIndex: number, tri: number): [Vec3, Vec3, Vec3] | null {
   const inst = level.instances[instanceIndex];
   const batch = inst && inst.mesh >= 0 ? level.meshes[inst.mesh]?.batches[batchIndex] : undefined;
   if (!batch || (tri + 1) * 9 > batch.positions.length) return null;
   const p = batch.positions;
   const i = tri * 9;
   return [
-    transformPoint(inst.matrix, p[i], p[i + 1], p[i + 2]),
-    transformPoint(inst.matrix, p[i + 3], p[i + 4], p[i + 5]),
-    transformPoint(inst.matrix, p[i + 6], p[i + 7], p[i + 8]),
+    [p[i], p[i + 1], p[i + 2]],
+    [p[i + 3], p[i + 4], p[i + 5]],
+    [p[i + 6], p[i + 7], p[i + 8]],
   ];
+}
+
+/** World-space corners of one triangle of an instance's batch. */
+export function triangleWorld(level: Level, instanceIndex: number, batchIndex: number, tri: number): [Vec3, Vec3, Vec3] | null {
+  const inst = level.instances[instanceIndex];
+  const local = triangleLocal(level, instanceIndex, batchIndex, tri);
+  if (!inst || !local) return null;
+  return local.map((p) => transformPoint(inst.matrix, p[0], p[1], p[2])) as [Vec3, Vec3, Vec3];
 }
