@@ -34,19 +34,18 @@ conversation.
 
 - **Reports watcher:** turned off at the user's request. Check `reports/` by hand
   for new `NNNN.json` files without a `.done` file, or restart a watcher.
-- **Research, five games:** each lead writes `WIP.md` in its scratch directory.
+- **Research, four games:** each lead writes `WIP.md` in its scratch directory.
   - Scratch directories:
     - The World Is Not Enough: `~/.ai-tmp/r49/twine/`
     - Banjo-Kazooie: `banjo/`
     - Glover: `glover/`
     - Mario Party (J): `mparty/`
-    - Mario Kart 64: `mk64/`
-  - None of these five specs is finished or committed.
-  - All five leads confirmed their `WIP.md` and that nothing is left running
+  - None of these four specs is finished or committed.
+  - All four leads confirmed their `WIP.md` and that nothing is left running
     (2026-09-11, about 22:05).
   - To resume, start a new lead per game from its `WIP.md` and the "Research
     investigations" procedure in AGENTS.md.
-  - Copies of the five unfinished `WIP.md` files as of the wind-down are in
+  - Copies of the four unfinished `WIP.md` files as of the wind-down are in
     `wip/research/<game>.md`. The scratch copy is authoritative if a resumed lead
     updates it, and the paths inside point into the scratch directories.
 
@@ -56,7 +55,6 @@ conversation.
   | Banjo-Kazooie | §0–10 drafted (from `spec/` parts via `assemble.py`), not proofread; §11 unused not written | merge emulator session 2, one short session, relaunch the unused stream |
   | Glover | all sections have content; music evidence, hygiene and open questions still DRAFT; the §6.1 volume claim is wrong | merge findings, one emulator session (sky, boss starts, SECRET CHEAT photos), proofread |
   | Mario Party (J) | §1–9 and §11.1–6 drafted, not proofread; §0, 10, 12 missing | fold in results, audio and visual emulator sessions |
-  | Mario Kart 64 | §1–6, 9, 10 drafted; §0, 7, 8, 11–14 placeholders | emulator session for start-grid dumps (debug-menu routes) |
 
 ## Dropped
 

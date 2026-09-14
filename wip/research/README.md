@@ -18,4 +18,3 @@ Verbatim copies of each interrupted research lead's `WIP.md`, taken from
 | `banjokazooie.md` | Banjo-Kazooie | `banjo/` |
 | `glover.md` | Glover | `glover/` |
 | `marioparty.md` | Mario Party (J) | `mparty/` |
-| `mariokart64.md` | Mario Kart 64 | `mk64/` |

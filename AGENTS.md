@@ -116,6 +116,7 @@ Research complete (spec under `docs/`, implementation pending):
 | Game | Research |
 |---|---|
 | Pilotwings 64 | `r49/pilotwings/` |
+| Mario Kart 64 | `r49/mk64/` |
 
 Research in progress (spec not yet under `docs/`):
 
@@ -125,7 +126,6 @@ Research in progress (spec not yet under `docs/`):
 | Banjo-Kazooie | `r49/banjo/` |
 | Glover | `r49/glover/` |
 | Mario Party (J) | `r49/mparty/` |
-| Mario Kart 64 | `r49/mk64/` |
 | Stunt Racer 64 | `r49/stuntracer64/` |
 
 Shared:

@@ -26,6 +26,7 @@ export default defineConfig({
           { text: "A Bug's Life", link: '/BUGSLIFE' },
           { text: 'Gex', link: '/GEX' },
           { text: 'GoldenEye 007', link: '/GOLDENEYE' },
+          { text: 'Mario Kart 64', link: '/MARIOKART64' },
           { text: 'Off Road Challenge', link: '/OFFROADCHALLENGE' },
           { text: 'Perfect Dark', link: '/PERFECTDARK' },
           { text: 'Pilotwings 64', link: '/PILOTWINGS64' },

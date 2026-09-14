@@ -11,6 +11,7 @@ open questions.
 - [A Bug's Life](./BUGSLIFE.md)
 - [Gex 64 and Gex 3](./GEX.md)
 - [GoldenEye 007](./GOLDENEYE.md)
+- [Mario Kart 64](./MARIOKART64.md)
 - [Off Road Challenge](./OFFROADCHALLENGE.md)
 - [Perfect Dark](./PERFECTDARK.md)
 - [Pilotwings 64](./PILOTWINGS64.md)
