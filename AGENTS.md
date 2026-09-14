@@ -103,6 +103,7 @@ Implemented (spec in the repo):
 | GoldenEye 007 | `r49/ge/` (unused content in `ge/unused/`, including the Citadel stan decoder) | |
 | Off Road Challenge | `r49/offroad/` | |
 | Air Boarder 64 | `r49/airboarder64/` | |
+| A Bug's Life | `r49/bugs_life/` | |
 | Perfect Dark | `r49/pd/` | |
 | Pokémon Snap | `r49/snap/` | |
 | Zelda 64 (OoT, MM, 1997 alpha) | `r49/zelda/` (alpha in `zelda/alpha/`) | |
@@ -112,7 +113,6 @@ Research complete (spec in the repo, implementation pending):
 | Game | Research |
 |---|---|
 | Pilotwings 64 | `r49/pilotwings/` |
-| A Bug's Life | `r49/bugs_life/` |
 
 Research in progress (spec not yet in the repo):
 

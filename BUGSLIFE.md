@@ -28,8 +28,8 @@ values are big-endian.
   story stages, and Bonus. No extra or cut 3-D map was found.
 - **[V-ASM/V-TOOL]** Visible geometry is a custom CPU-decoded mesh stream in
   `level.dat`; `terrain.all` is collision, not the visible terrain.
-- **[V-ROM/V-ASM]** Texture pages are custom `.tpg` files. Nine stages also
-  have raw 256x41 parallax panoramas; every stage has an envmap page.
+- **[V-ROM/V-ASM/V-TOOL]** Texture pages are custom `.tpg` files. Nine stages
+  also have ten-panel CI8 parallax strips; every stage has an envmap page.
 - **[V-RAM]** The live Training renderer uses F3DLX 1.23, a 75-degree vertical
   FOV, and a separate distant projection. A sampled pass uses blue fog.
 - **[V-ROM/V-ASM/V-AUDIO]** Music is Sound Tools/libmus song format `0x215`
@@ -39,9 +39,10 @@ values are big-endian.
   valid ADPCM waves are referenced by neither shipped song maps nor the
   93-entry sound-effect bank.
 
-Implementation difficulty is **medium-high** for levels and **medium** for
-music. RNC1/RNC2 decoding and the custom mesh/texture parsers are new work;
-the current `music/libmus.ts` renderer is reusable.
+The viewer now implements the archive, common static level meshes, textures,
+finite collision, parallax approximation, creature markers, all five retail
+profiles, and all 20 music files. Animated objects and the less common mesh
+families remain the principal high-difficulty gap.
 
 ## 1. ROM identification and versions
 
@@ -259,8 +260,10 @@ the first model payload.
 
 The loader relocates the normal variant's model pointer at runtime `+0x14`
 and builds its fixed-point 3x3 transform at `+0x18`. When placement flag bit
-`0x8` is set those locations become `+0x1C` and `+0x20`. Model halfwords
-`+0x0C/+0x0E/+0x10` are the three source angles.
+`0x8` is set those locations become `+0x1C` and `+0x20`. The model header's
+three signed words at `+0x00/+0x04/+0x08` are the runtime translation; the
+placement XYZ is its culling centre. Model halfwords `+0x0C/+0x0E/+0x10` are
+the three source angles.
 
 ### 5.2 Custom mesh stream
 
@@ -278,10 +281,21 @@ and builds its fixed-point 3x3 transform at `+0x18`. When placement flag bit
    12-byte triangle records. Kinds 5/7/13 use the renderer default branch.
 6. Quad/triangle vertex references are BE `u16`, masked with `0x0FFF`.
    Remaining bytes are per-corner U/V values, shifted left four by the game.
+7. For a quad, the generated `G_TRI2` nominally names cache slots
+   `(2,1,0),(3,1,2)`, but the runtime loads slots 0..3 from source references
+   3,2,0,1. The source-record split is therefore `(2,1,0),(3,2,0)`, using
+   diagonal 0--2.
 
 The all-level parser encountered successful common meshes using kinds
-0, 1, 2, 3, 4, and 6. Quads should be split consistently only after matching
-the game's winding/cull behavior.
+0, 1, 2, 3, 4, and 6. The slot remap and resulting quad split above were
+verified against the display-list builder and by rendering Training.
+
+**[V-ASM/V-TOOL]** Across the common visible corpus, `control & 0x60` occurs
+as 21,321 groups / 217,245 faces for `0x60`, 38 / 1,012 for `0x20`, and
+11 / 545 for `0x00`; `0x40` is absent. The traced branch proves that `0x60`
+changes generated vertex shade, but does not establish alpha compare or
+framebuffer blending. The viewer therefore renders these common static groups
+opaque rather than inventing a cutout rule from palette alpha bits.
 
 **[V-TOOL]** Across all 17 files, 8,437 placements resolve to 8,269 valid
 positive-count meshes: 333,678 vertices and 218,802 face records. The checker
@@ -291,14 +305,13 @@ valid engine variants, not corrupt data.
 
 ### 5.3 Coordinates and transforms
 
-**[V-ASM]** Stored placement positions and common-mesh vertices are signed
-integers. The runtime constructs a model transform from placement translation
-and three 16-bit model angles.
-
-**[OPEN]** The exact fixed-point angle-to-radian convention at `0x8001554C`,
-the viewer axis conversion, model scale, and front-face winding need a render
-comparison before they are frozen in implementation. The research OBJ export
-is structural and intentionally does not claim final world transforms.
+**[V-ASM/V-TOOL]** Stored culling centres, model translations, and common-mesh
+vertices are signed integers. `0x8001554C` uses the low 12 bits of each model
+angle as a 4096-step turn and builds a row-composed rotation matrix. Comparing
+the runtime-derived composition and its transpose against authored culling
+centres strongly selects the row form: in Tunnels its median normalized
+distance is 3.64 versus 45.30, and in Training 24.49 versus 114.91. The viewer
+uses the model-header XYZ as translation and preserves these source axes.
 
 ## 6. Collision and object containers
 
@@ -397,9 +410,12 @@ runtime allocation. Common descriptors 4/5/6/7 therefore have
 32x32, 64x32, 32x64, and 64x64. `0x80013324` emits the runtime texture-load and
 tile commands.
 
-**[OPEN]** Palette selection, exact CI/IA interpretation for each descriptor,
-and uncommon format bits need direct renderer-branch mapping. Do not infer
-them solely from file size or appearance.
+**[V-ASM/V-TOOL]** Runtime descriptor format bits are 4 = CI4, 8 = CI8, and
+12 = RGBA16. Format bits zero emit no static texture setup, so the viewer
+honors their payload extent but does not expose them as decoded textures.
+Bonus exercises descriptor 9 (CI8). Per-slot CI4 palettes and the shared CI8
+palette agree with focused renders, though their selection is less strongly
+proved than the format and payload sizes.
 
 ### 7.2 Envmap and parallax resources
 
@@ -408,14 +424,15 @@ bytes except level 09 (`0x8240`, one descriptor 10 plus fifteen descriptor-7
 slots).
 
 Stages 01, 06, 07, 08, 09, 10, 11, 12, and 17 additionally have a
-`parallax/levelNN.par`. Each is exactly 20,992 bytes, a raw 256x41 array of
-16-bit pixels. `0x80012FAC` retains its pointer and samples pixels at byte
-offsets 504 and 506 to seed backdrop/environment colors. The bit operations
-fit big-endian RGBA5551/RGB555-family storage.
+`parallax/levelNN.par`. Each is exactly `0x5200` bytes: a `0x200`-byte,
+256-entry RGBA16 palette followed by ten consecutive `0x800`-byte 64x32 CI8
+panels. `0x8000B358` loads the TLUT and `0x800620F8` uploads the panels.
+`0x80012FAC` also retains the resource pointer and samples it for backdrop or
+environment colors.
 
-Implement the panorama only for those nine packages; do not synthesize one
-from collision or envmap data for the other eight. **[OPEN]** Capture
-comparison should determine whether the low pixel bit is alpha or ignored.
+The viewer presents the ten panels as a thin camera-relative cylinder only for
+those nine packages. This preserves the panoramic behavior but approximates
+the game's exact screen-space strip and fill-band compositor.
 
 ### 7.3 Runtime camera, fog, and background
 
@@ -434,7 +451,8 @@ roughly near 550/far 1000.
 This verifies the engine capabilities and one Training frame only.
 **[OPEN]** Per-level fog colors/distances, the semantic camera eye/target
 derived from split runtime matrices, and camera-follow parameters remain to be
-mapped. The viewer should default to 75 degrees and offer normal free camera.
+mapped. The viewer uses the 75-degree value to reframe its Training overview;
+normal free flight retains the viewer's standard lens.
 
 ## 8. Music
 
@@ -542,16 +560,16 @@ is the newer `0x215` player used by Global Assault/Gex 3, not the older
 supported. The existing `AA` no-op is acceptable because every executed
 change-FX value is 2, the already-active BIGROOM mode.
 
-Decode `bugs.ptr` and the selected song with RNC1. Cache the parsed pointer and
-sample bank per source ROM. A shared overload accepting separate pointer-bank
-and sample-bank buffers would avoid concatenating roughly 2.91 MiB, but is not
-required for the first implementation.
+The implementation decodes `bugs.ptr` and the selected song with RNC1, then
+caches the parsed pointer and sample bank per source ROM. Its temporary
+contiguous bank assembly costs roughly 2.91 MiB and avoids a broader shared
+renderer API change.
 
 ## 9. Mapping onto nviewer
 
-### 9.1 Proposed module ownership
+### 9.1 Implemented modules
 
-Suggested new directory:
+The implementation lives in:
 
 ```text
 src/rom/bugslife/
@@ -560,69 +578,60 @@ src/rom/bugslife/
   mesh.ts          custom mesh stream -> viewer geometry
   all.ts           .all containers and finite collision
   texture.ts       .tpg and .par decoding
-  objects.ts       creature/object resource selection
+  objects.ts       candidate creature-position markers
   music.ts         tune list and libmus bank assembly
-  bugslife.ts      ROM detection, game/level/music API
+  index.ts         ROM detection and public game API
 ```
 
-Shared-file changes should be minimized. `src/rom/index.ts` must register
-`NBYE/NBYP/NBYF/NBYD/NBYI`. `types.ts` needs no speculative new contract if
-meshes, collision, backdrop, and objects are emitted as ordinary instances and
-layers. `music/libmus.ts` only needs an overload if avoiding the temporary
-contiguous bank copy is worth shared-file churn.
+`src/rom/index.ts` registers `NBYE/NBYP/NBYF/NBYD/NBYI`. No new level-data
+contract was needed. `music/libmus.ts` accepts independently verified loop
+bounds, while callers that omit them retain its existing bytecode probe.
 
 ### 9.2 Level assembly and layers
 
-For a selected internal ID:
+For a selected internal ID the viewer:
 
-1. Locate/decode its `levelNN/level.dat`, `levelNN/terrain.all`, texture pages,
+1. Locates/decodes its `levelNN/level.dat`, `levelNN/terrain.all`, texture pages,
    envmap, optional parallax, `creat/creatNN.bin`, and referenced object roots.
-2. Parse both placement lists and positive common meshes.
-3. Decode/bind `.tpg` slots and material/render-mode groups.
-4. Emit visible world geometry in a `main` layer.
-5. Emit discrete creatures/props in one or more `objects` layers; unsupported
-   animation/model variants should be named omissions, not malformed meshes.
-6. Decode finite terrain groups into a hidden-by-default `collision` layer.
-7. Emit `.par` as a `backdrop` layer only for its nine packages.
-8. Default camera FOV to 75 degrees; derive a useful overview camera from
-   visible bounds until per-level game cameras are mapped.
+2. Parses both placement lists and all recognized positive common meshes.
+3. Decodes/binds CI4, CI8, and RGBA16 `.tpg` slots.
+4. Emits visible world geometry in a `main` layer.
+5. Emits candidate creature positions as explicitly hypothetical markers.
+6. Decodes finite terrain groups into a hidden-by-default `collision` layer.
+7. Emits `.par` as a `backdrop` layer only for its nine packages.
+8. Supplies a robust placement-centre overview using the verified 75-degree
+   game lens as its framing input; normal free flight retains the viewer lens.
 
 Every drawn instance must belong to a layer. There is no evidence for room or
 setup variants, so do not create artificial duplicates in the level selector.
 
-### 9.3 Difficulty and implementation order
+### 9.3 Remaining difficulty
 
-| Piece | Difficulty | Main risk |
+| Remaining piece | Difficulty | Main risk |
 |---|---|---|
-| Detection/manifest | low | regional absolute offsets |
-| RNC1/RNC2 | medium | exact bitstream and bounds handling |
-| Common visible meshes | medium | material kinds, transforms, winding |
-| `.tpg` textures | medium-high | palette/format interpretation |
-| Finite collision | low-medium | coordinate conversion |
-| Parallax/envmap | medium | projection and pixel alpha semantics |
 | Full animated objects | high | non-common streams and `.anm` |
-| Music | medium | archive decode/bank assembly; synth exists |
+| Infinite collision | medium | ID `0x101` record semantics |
+| Exact backdrop compositor | medium | screen-space fill/strip behavior |
+| Per-stage environment | medium | authored fog, clear color and cameras |
 
-Recommended first vertical slice: US archive -> Training common meshes ->
-finite collision -> textures/parallax -> all 17 stages -> music -> animated
-objects -> regional detection. Run all-level structural validation after each
-parser change rather than fixing one reported stage in isolation.
+### 9.4 Implementation verification
 
-### 9.4 Required verification
+**[V-TOOL/V-REPO]** The focused US audit reads all 488 manifest records and
+all 17 levels: 8,437 placements, 8,269 recognized common models, 333,678
+vertices, 218,802 face records, 3,297 finite collision groups, and 113,028
+collision triangles. It completed 34/34 transferred loads and 17/17 layer
+audits; the final focused render-data hash is
+`d4702f72e82c0f5fa693cba560716dd45abe1e77`. The same structural totals,
+transfer checks, and layer checks passed the E/F/G/I builds.
 
-- `npm run typecheck`.
-- `npm run check:hashes`, compared with a clean HEAD worktree for all existing
-  games.
-- `npm run check:transfer`.
-- `npm run check:layers -- "Bug's Life"` and the global layer check.
-- Load and hash every one of the 17 entries for each supported build available.
-- Offline-render at least Training against `emulator/training-playable.png`,
-  then choose stages covering panorama/no-panorama, dynamic collision, dense
-  geometry, and uncommon texture descriptors.
-- Render/audition one zero-start loop, one long-intro loop, one one-shot, and
-  one high-reverb cue; verify exact PCM loop metadata.
-- In-app Chromium smoke: open ROM, enumerate 17 entries, load representative
-  levels, toggle every layer, switch levels repeatedly, and exercise music.
+All 20 US tracks rendered with finite stereo PCM at 22,047 Hz and exact
+researched loop metadata; every buffer transferred successfully. The Title cue
+also decoded in all five regions. Global Assault's 21 tracks and Gex 3's 15
+tracks were byte-identical to their pre-change shared-renderer baseline.
+
+Offline comparison covers Training and the parallax decode. Final in-app
+Chromium checks loaded Training and Tunnels, exercised sky and layers, started
+Title music, and produced no console, page, or request errors.
 
 ## 10. Verification evidence and limitations
 
@@ -668,17 +677,22 @@ it was stopped rather than reset or relaunched. No full level-load DMA or
 additional stage was captured. The child and lead both verified that no
 `mupen64plus` or `headless-*.sh` process remained.
 
-### 10.3 Open questions
+### 10.3 Open questions and explicit limitations
 
-1. Decode negative-vertex-count meshes and all non-common placement kinds.
-2. Resolve exact angle scaling, handedness, world scale, winding, and culling.
-3. Finish `.tpg` palette/format semantics and panorama low-bit behavior.
-4. Decode infinite-wall collision ID `0x0101` and name collision attributes.
-5. Decode `.anm` sufficiently for animated character/object previews.
-6. Map per-level fog, camera-follow, and any static light parameters.
-7. Identify the runtime context of `bugsb.bin`.
-8. Audition the shared renderer against captured game output during
-   implementation; this investigation retained task data but no raw audio.
+1. The 110 classified negative, non-common, or secondary model attempts are
+   omitted; malformed data after recognition of a common mesh still fails.
+2. Creature positions are markers. Their `creatNN.bin +0x0C` one-based model
+   mapping remains a hypothesis, and `.anm` animation is not decoded.
+3. Infinite-wall collision ID `0x0101` and collision attributes remain
+   undecoded; only finite IDs 6/8 are shown.
+4. The nine parallax skies use a labelled thin-cylinder approximation rather
+   than the game's exact screen-space strip and fill-band compositor.
+5. Per-stage environment values beyond verified Training fog and PAR-derived
+   clear colors use conservative defaults. Cameras are robust overview views,
+   not claimed authored cameras.
+6. CI4 and CI8 palette selection is visually supported but merits a second
+   direct runtime branch trace.
+7. The runtime context of `bugsb.bin` remains unidentified.
 
 ## 11. Unused and hidden content
 
