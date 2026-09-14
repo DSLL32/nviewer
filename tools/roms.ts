@@ -25,6 +25,7 @@ export const ROM_FILES = [
   'Pilotwings 64 (U) [!].z64',
   'Pilotwings 64 (E) (M3) [!].z64',
   'Pilotwings 64 (J) [!].z64',
+  'Mario Kart 64 (U) [!].z64',
   'Airboarder 64 (J) [!].z64',
   'Airboarder 64 (E) [!].z64',
   'Perfect Dark (U) (V1.0) [!].z64',
