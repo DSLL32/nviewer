@@ -14,7 +14,7 @@ export function mergeBatches(batches: Batch[]): Batch[] {
   const groups = new Map<string, Batch[]>();
   for (const b of batches) {
     if (b.positions.length === 0) continue;
-    const k = `${b.texture}/${b.blend}/${b.depthTest}/${b.depthWrite}/${b.cullBack}/${b.decal ?? false}`;
+    const k = `${b.texture}/${b.blend}/${b.depthTest}/${b.depthWrite}/${b.cullBack}/${b.decal ?? false}/${b.texture1 ?? -1}/${b.texBlend ?? ''}/${b.texMix ?? 0}`;
     const g = groups.get(k);
     if (g) g.push(b);
     else groups.set(k, [b]);
@@ -30,13 +30,28 @@ export function mergeBatches(batches: Batch[]): Batch[] {
       }
       return out;
     };
+    const preset = (b: Batch, i: number) => {
+      const colors = b.lightingColors?.[i];
+      return colors?.length === b.colors.length ? colors : b.colors;
+    };
+    const secondary = g[0].texture1 !== undefined && g[0].texBlend !== undefined
+      && (g[0].texBlend !== 'lerp' || g[0].texMix !== undefined)
+      && g.every((b) => b.texture1 === g[0].texture1 && b.texBlend === g[0].texBlend && b.texMix === g[0].texMix
+        && b.positions.length % 3 === 0 && b.uvs1?.length === (b.positions.length / 3) * 2);
     return {
       ...g[0],
       positions: cat((b) => b.positions, (n) => new Float32Array(n)),
       uvs: cat((b) => b.uvs, (n) => new Float32Array(n)),
       colors: cat((b) => b.colors, (n) => new Uint8Array(n)),
       ...(g.some((b) => b.unlitColors) ? { unlitColors: cat((b) => b.unlitColors ?? b.colors, (n) => new Uint8Array(n)) } : {}),
+      ...(g.some((b) => b.lightingColors) ? {
+        lightingColors: Array.from({ length: Math.max(...g.map((b) => b.lightingColors?.length ?? 0)) }, (_, i) =>
+          cat((b) => preset(b, i), (n) => new Uint8Array(n))),
+      } : {}),
       ...(g.every((b) => b.triSource) ? { triSource: cat((b) => b.triSource!, (n) => new Uint32Array(n)) } : { triSource: undefined }),
+      ...(secondary
+        ? { uvs1: cat((b) => b.uvs1!, (n) => new Float32Array(n)) }
+        : { texture1: undefined, uvs1: undefined, texBlend: undefined, texMix: undefined }),
     };
   });
 }
