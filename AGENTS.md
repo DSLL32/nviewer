@@ -104,6 +104,7 @@ Implemented (spec in the repo):
 | Off Road Challenge | `r49/offroad/` | |
 | Air Boarder 64 | `r49/airboarder64/` | |
 | A Bug's Life | `r49/bugs_life/` | |
+| Spider-Man | `r49/spiderman/` | |
 | Perfect Dark | `r49/pd/` | |
 | Pokémon Snap | `r49/snap/` | |
 | Zelda 64 (OoT, MM, 1997 alpha) | `r49/zelda/` (alpha in `zelda/alpha/`) | |
@@ -113,7 +114,6 @@ Research complete (spec in the repo, implementation pending):
 | Game | Research |
 |---|---|
 | Pilotwings 64 | `r49/pilotwings/` |
-| Spider-Man | `r49/spiderman/` |
 
 Research in progress (spec not yet in the repo):
 

@@ -4,7 +4,7 @@ A browser viewer for the levels of these N64 games (USA versions): *San Francisc
 *San Francisco Rush: Extreme Racing*, *Bomberman 64*, *Bomberman 64: The Second Attack!*,
 *Bomberman Hero*, *BattleTanx*, *BattleTanx: Global Assault*, *Gex 64: Enter the Gecko*,
 *Gex 3: Deep Cover Gecko*, *Yoshi's Story* (Japan), *Star Fox 64* (V1.0 and V1.1), *GoldenEye 007*,
-*Off Road Challenge* (USA and Europe), *Air Boarder 64* (Japan and Europe), *Pilotwings 64* (USA, Europe and Japan), *Pokémon Snap*, *A Bug's Life* (USA and Europe),
+*Off Road Challenge* (USA and Europe), *Air Boarder 64* (Japan and Europe), *Pilotwings 64* (USA, Europe and Japan), *Pokémon Snap*, *A Bug's Life* (USA and Europe), *Spider-Man*,
 *Perfect Dark* (V1.0), and *The Legend of Zelda: Ocarina of Time* and
 *Majora's Mask* (retail and debug builds, plus the 1997 Ocarina of Time prototype preserved on an F-Zero X development
 cartridge). Load one or more ROMs, pick a level in the sidebar, and fly around freely, with
@@ -97,6 +97,11 @@ Z shows or hides collision · Shift+F collision wireframe · the View panel can 
     - `archive.ts`: 488-entry path manifest and RNC1/RNC2 decoding
     - `mesh.ts`, `texture.ts`, `all.ts`, `objects.ts`, `level.ts`: 17 stages, common static meshes, CI textures,
       finite collision, parallax strips and candidate creature markers; `music.ts`: 20 libmus songs and authored loops
+  - `spiderman/`: Spider-Man (USA; format notes in `SPIDERMAN.md`)
+    - `fs.ts`: ERZ2 decompression and the eight-group master directory; `model.ts`, `texture.ts`: model shells,
+      native render banks and the global texture dictionary
+    - `trg.ts`, `level.ts`: campaign, training, demo, restart and hidden-studio views, placements, backgrounds,
+      markers and collision candidates; `music.ts`: 36 Sound Tools stem schedules and adaptive profiles
   - `perfectdark/`: Perfect Dark (format notes in `PERFECTDARK.md`)
     - `rom.ts`: data segment, file and stage tables, text; `texture.ts`: the global texture store and its two decoders
     - `gbi.ts`: Perfect Dark's display-list microcode; `bg.ts`: rooms and sky rooms; `environment.ts`: fog, sky planes;
@@ -483,6 +488,20 @@ Textures are uploaded with the RDP tile commands, not read in place.
 - **Music.** All 37 compressed-MIDI sequences use Snap's modified libultra sequence player. The viewer applies each
   song's extra-volume controller and renders each soundtrack entry on its own with its authored loops.
 
+### Spider-Man
+
+`SPIDERMAN.md` documents the formats in full; in short:
+- **Files.** The 32 MiB USA ROM contains a resident loader, an ERZ2-compressed main image, and an eight-group master
+  directory. The viewer decodes and caches logical model, TRG, render-bank, texture and audio files in the browser.
+- **Levels.** The sidebar exposes 34 campaign areas, Bank Approach's alternate, 17 training arenas, four attract demos,
+  and the unreferenced recording-studio model scene. Eighty-five total records preserve authored restart and alternate
+  setup cameras and environment states.
+- **Geometry and environment.** Model shells place recursive native render banks with transposed F3DEX2 vertices.
+  TRG commands provide placements, sky/fog colours, backgrounds and restart cameras. Main, objects, optional What-If,
+  background, marker and hidden collision-candidate layers are independently toggleable.
+- **Music.** The player exposes 36 production profiles assembled from Nintendo Sound Tools VADPCM stems: title/menu,
+  26 fixed schedules and nine adaptive active-loop previews, rendered at 22,047 Hz with authored loops.
+
 ## Known gaps
 
 - Rush 2049: scripted objects are shown frozen at the start of their paths.
@@ -541,3 +560,7 @@ Textures are uploaded with the RDP tile commands, not read in place.
 - Off Road Challenge: Random sky selection is exposed as its twelve deterministic choices rather than rerolled;
   specialized object models remain markers; collision is shown as object bounds rather than exact driveable surfaces;
   WESS reverb/effects and exact priority-based voice stealing are not modelled.
+- Spider-Man: actors and animated objects show their static/frame-zero models; full gameplay camera behavior is not
+  reproduced. Background meshes are placed correctly for each authored starting camera but do not follow later free-camera
+  translation. Kind-`0x0800` geometry is shown as a collision candidate, not proven physical collision. Fixed music-schedule
+  timing uses the researched 30 Hz hypothesis, and exact Sound Tools envelope/pan gain is not captured.

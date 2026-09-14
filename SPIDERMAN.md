@@ -629,7 +629,26 @@ Use the existing `Level`, `LevelLayer`, `Mesh`, `Batch`, `Instance`, `Marker`,
 `Texture`, `CameraView`, `MusicTrack` and `DecodedMusic` types. Add game id
 `spiderman` in the shared type/index only under main-session ownership.
 
-Suggested ownership/files:
+### 8.1 Implemented viewer coverage
+
+The implementation exposes 57 sidebar entries: the recommended 56 complete
+stage families plus the coherent slot-262 recording studio as an explicitly
+unreferenced diagnostic model scene. It expands authored restart state and the
+second Dem1 TRG into 85 total selectable setup records, preserving their
+separate cameras, backgrounds, sky/fog colours and command state. All emitted
+instances belong to `main`, `objects`, optional `objects (What If)`,
+`background`, `markers` or hidden `collision` layers. **Verified—repository/tool:**
+all 85 records load twice through transferable structured clones, the layer
+audit reports no loose instances, and the implementation hash is
+`1c065804200781e9bfae8d88d933acfcac605b36`.
+
+All 36 production music profiles are implemented with cached WBK/PTR/BFX
+parsing, ABI1 VADPCM decoding, the Sound Tools pitch calculation and resampler,
+fresh transferable stereo buffers and authored loops. **Verified—repository/tool.**
+The 30 Hz fixed-schedule duration conversion and exact final envelope/pan gain
+remain the §7.3 research limitations.
+
+Implemented ownership/files:
 
 | file | responsibility | difficulty |
 |---|---|---|
@@ -637,7 +656,7 @@ Suggested ownership/files:
 | `model.ts` | group-0 shells, group-2 recursive banks, transposed vertices, compact tokens and matrix placement | medium-high; cache/S-T updates and skipped groups need care |
 | `texture.ts` | global dictionary, TMEM row swap, CI palettes, I/IA/RGBA, wrap and authored render classes | medium |
 | `trg.ts` | TRG node records, restart/environment commands, model-file requests and bounded PLATFORM/MANIPOB stack bytecode | medium-high |
-| `level.ts` | 56-entry list/57 setups, G/O composition, backdrop, lighting, camera, layers and diagnostics | medium-high |
+| `level.ts` | 57 sidebar entries/85 setup records, G/O composition, backdrop, lighting, camera, layers and diagnostics | medium-high |
 | `music.ts` | PTR/WBK/BFX parsing, 36 profiles, ADPCM cache, resampling and schedule composition | medium |
 | `spiderman.ts` | game object and version/profile assertions | easy |
 
@@ -655,8 +674,8 @@ The loader should emit:
 - 36 production music profiles, with the 29 unused candidates optionally
   appended under explicit names.
 
-Implementation should cache decoded ERZ pages, textures and distinct music
-waves inside the opened game instance. Do not repeatedly decode the 14 MiB WBK
+The implementation caches decoded ERZ pages, textures and distinct music waves
+inside the opened game instance. It does not repeatedly decode the 14 MiB WBK
 or duplicate the same loop stem each time it appears in an arrangement. The
 filesystem extractor and `levels/stages.csv` are references, not runtime data
 files to bundle into the frontend.
