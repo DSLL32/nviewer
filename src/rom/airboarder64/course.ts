@@ -77,9 +77,9 @@ function lightingOf(h: CourseHeader): DlLighting {
   };
 }
 
-function visibleMesh(data: Uint8Array, h: CourseHeader, name: string, textures: Texture[], textureKeys: Map<string, number>): Mesh {
+function visibleMesh(data: Uint8Array, h: CourseHeader, name: string, pass: 0 | 1, textures: Texture[], textureKeys: Map<string, number>): Mesh {
   const batches: Batch[] = [], light = lightingOf(h);
-  for (let pass = 0; pass < 2; pass++) for (const [cell, relative] of h.lists[pass].entries()) {
+  for (const [cell, relative] of h.lists[pass].entries()) {
     if (relative === null) continue;
     const vertexBank = h.vertexBanks[pass];
     const resolve = (address: number): number => {
@@ -111,8 +111,8 @@ function visibleMesh(data: Uint8Array, h: CourseHeader, name: string, textures: 
   const mesh = meshFromBatches(name, batches);
   mesh.info = {
     header: hex(h.base), grid: `${h.nx}x${h.nz}`, textureBank: hex(h.textureBank),
-    vertexBank0: hex(h.vertexBanks[0]), vertexBank1: hex(h.vertexBanks[1]),
-    displayLists: h.lists[0].filter((p) => p !== null).length + h.lists[1].filter((p) => p !== null).length,
+    pass: pass === 0 ? 'near/detail' : 'far LOD', distanceSplit: h.split,
+    vertexBank: hex(h.vertexBanks[pass]), displayLists: h.lists[pass].filter((p) => p !== null).length,
     triSource: 'offset in decoded course archive',
   };
   return mesh;
@@ -136,9 +136,18 @@ export function buildAirBoarderCourse(rom: AirBoarderRom, course: number, preset
   const collisionInstances = new Map<string, number[]>();
   for (const [area, h] of headers.entries()) {
     const suffix = headers.length > 1 ? ` area ${area + 1}` : '';
-    const mesh = meshes.push(visibleMesh(data, h, `${name}${suffix}`, textures, textureKeys)) - 1;
-    const instance = instances.push({ name: `${name}${suffix}`, mesh, matrix: IDENTITY(), info: { archive: archiveId, header: hex(h.base), area } }) - 1;
+    const mesh = meshes.push(visibleMesh(data, h, `${name}${suffix}`, 0, textures, textureKeys)) - 1;
+    const instance = instances.push({ name: `${name}${suffix}`, mesh, matrix: IDENTITY(), info: { archive: archiveId, header: hex(h.base), area, pass: 0, distanceSplit: h.split } }) - 1;
     layers.push({ name: headers.length > 1 ? `area ${area + 1}` : 'course', kind: 'main', instances: [instance], ...(headers.length > 1 ? { group: 'areas' } : {}) });
+
+    // The second table is a lower-detail replacement selected by the game for distant cells, not an additive
+    // render pass. Keep it available for inspection without drawing it over the complete near/detail table.
+    const lod = visibleMesh(data, h, `${name}${suffix} far LOD`, 1, textures, textureKeys);
+    if (lod.batches.some((batch) => batch.positions.length !== 0)) {
+      const lodMesh = meshes.push(lod) - 1;
+      const lodInstance = instances.push({ name: `${name}${suffix} far LOD`, mesh: lodMesh, matrix: IDENTITY(), info: { archive: archiveId, header: hex(h.base), area, pass: 1, distanceSplit: h.split } }) - 1;
+      layers.push({ name: headers.length > 1 ? `area ${area + 1} far LOD` : 'far LOD', kind: 'main', instances: [lodInstance], visibleByDefault: false, ...(headers.length > 1 ? { group: 'far LODs' } : {}) });
+    }
 
     const collisionMesh = meshes.push(airBoarderCollision(data, { header: h.base, vertexBank: h.collisionVertexBank, cells: h.collisionCells }, `${name}${suffix} collision`)) - 1;
     const collisionInstance = instances.push({ name: `${name}${suffix} collision`, mesh: collisionMesh, matrix: IDENTITY(), noFog: true, info: { archive: archiveId, header: hex(h.base), area } }) - 1;
