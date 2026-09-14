@@ -101,7 +101,7 @@ function visibleMesh(data: Uint8Array, h: CourseHeader, name: string, textures: 
       renderMode: pass === 0 ? 0xc8113078 : 0x00552078,
       alphaCompare: pass === 0 ? 0 : 1,
       textureScale: [0.5, 0.5],
-      rspTextureCoords: true,
+      textureScaleAtVertex: true,
       otherModeH: pass === 0 ? 0x00108000 : 0x00008000,
       combineMode: pass === 0 ? [0xfc127fff, 0xfffff238] : [0xfc127e24, 0xfffff3f9],
       lighting: light, lightingPresets: [light], combiner: true,

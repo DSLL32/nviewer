@@ -56,9 +56,9 @@ export interface DisplayListContext {
   renderMode?: number;
   alphaCompare?: number;
   textureScale?: [number, number]; // initial G_TEXTURE S/T scales, default 1/1
-  // Apply G_TEXTURE scale when G_VTX loads ST, and treat G_MODIFYVTX ST as final transformed coordinates.
-  // Opt-in because existing loaders rely on the viewer's legacy triangle-time scaling.
-  rspTextureCoords?: boolean;
+  // When true, capture G_TEXTURE scale at G_VTX and treat G_MODIFYVTX ST as final. The default applies the
+  // current texture scale at triangle emission, preserving established loader output.
+  textureScaleAtVertex?: boolean;
   // Initial modelview. When given, G_MTX / G_POPMTX in the lists are applied too.
   matrix?: Mtx;
   // RSP lighting: with G_LIGHTING set, vertex colour bytes are a signed normal and the
@@ -272,7 +272,7 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
   const scale = ctx.vertexScale ?? VERTEX_SCALE;
   const mirrorX = ctx.mirrorX ?? true;
   const [scaleS, scaleT] = ctx.textureScale ?? [1, 1];
-  const rspTextureCoords = ctx.rspTextureCoords === true;
+  const textureScaleAtVertex = ctx.textureScaleAtVertex === true;
   const st: State = {
     vtx: [],
     geometryMode: ctx.geometryMode ?? (G_ZBUFFER | (ctx.cullBackByDefault ? G_CULL_BACK[ctx.ucode] : 0)),
@@ -433,17 +433,17 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
     const tile = rt ? { width: rt.width, height: rt.height, uls: rt.uls, ult: rt.ult, shiftS: 0, shiftT: 0 }
       : direct ? { ...st.tiles[0], width: st.tiles[0].texW, height: st.tiles[0].texH } : st.tiles[0];
     const shift = (s: number) => (s > 10 ? 1 << (16 - s) : 1 / (1 << s));
-    const su = texture < 0 ? 0 : rspTextureCoords
+    const su = texture < 0 ? 0 : textureScaleAtVertex
       ? shift(tile.shiftS) / (32 * tile.width)
       : (st.scaleS * shift(tile.shiftS)) / (32 * tile.width);
-    const sv = texture < 0 ? 0 : rspTextureCoords
+    const sv = texture < 0 ? 0 : textureScaleAtVertex
       ? shift(tile.shiftT) / (32 * tile.height)
       : (st.scaleT * shift(tile.shiftT)) / (32 * tile.height);
     const tile1 = st.tiles[1];
-    const su1 = texture1 < 0 ? 0 : rspTextureCoords
+    const su1 = texture1 < 0 ? 0 : textureScaleAtVertex
       ? shift(tile1.shiftS) / (32 * tile1.texW)
       : (st.scaleS * shift(tile1.shiftS)) / (32 * tile1.texW);
-    const sv1 = texture1 < 0 ? 0 : rspTextureCoords
+    const sv1 = texture1 < 0 ? 0 : textureScaleAtVertex
       ? shift(tile1.shiftT) / (32 * tile1.texH)
       : (st.scaleT * shift(tile1.shiftT)) / (32 * tile1.texH);
     const fold = ctx.combiner ? { prim: rgbaUnit(st.prim), env: rgbaUnit(st.env) } : null;
@@ -511,7 +511,7 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
       }
       const color = dv.getUint32(o + 12);
       let s = dv.getInt16(o + 8), t = dv.getInt16(o + 10);
-      if (rspTextureCoords) {
+      if (textureScaleAtVertex) {
         s *= st.scaleS;
         t *= st.scaleT;
       }
@@ -564,7 +564,7 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
     } else if (where === 0x14) {
       v.s = value >> 16;
       v.t = (value << 16) >> 16;
-      if (rspTextureCoords) v.gen = null;
+      if (textureScaleAtVertex) v.gen = null;
     }
   };
 
