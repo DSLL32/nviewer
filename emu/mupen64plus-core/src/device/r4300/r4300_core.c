@@ -64,6 +64,7 @@ void init_r4300(struct r4300_core* r4300, struct memory* mem, struct mi_controll
     r4300->rdram = rdram;
     r4300->randomize_interrupt = randomize_interrupt;
     r4300->start_address = start_address;
+    memset(&r4300->execution_trace, 0, sizeof(r4300->execution_trace));
     srand((unsigned int) time(NULL));
 }
 
@@ -281,7 +282,8 @@ unsigned int get_r4300_emumode(struct r4300_core* r4300)
     return r4300->emumode;
 }
 
-uint32_t *fast_mem_access(struct r4300_core* r4300, uint32_t address)
+uint32_t *fast_mem_access_with_paddr(struct r4300_core* r4300, uint32_t address,
+                                    uint32_t* physical_address)
 {
     /* This code is performance critical, specially on pure interpreter mode.
      * Removing error checking saves some time, but the emulator may crash. */
@@ -294,7 +296,15 @@ uint32_t *fast_mem_access(struct r4300_core* r4300, uint32_t address)
 
     address &= UINT32_C(0x1ffffffc);
 
+    if (physical_address != NULL)
+        *physical_address = address;
+
     return mem_base_u32(r4300->mem->base, address);
+}
+
+uint32_t *fast_mem_access(struct r4300_core* r4300, uint32_t address)
+{
+    return fast_mem_access_with_paddr(r4300, address, NULL);
 }
 
 /* Read aligned word from memory.

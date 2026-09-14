@@ -123,6 +123,9 @@ static int debugger_steps_pending = 0;
 // Keep track of the run state.
 static int cur_run_state = 0;
 
+// Shadow call-stack tracing is opt-in because it adds work to every interpreted jump.
+static int backtrace_enabled = 0;
+
 // Remember the current program counter.
 static unsigned int cur_pc = 0;
 
@@ -135,6 +138,7 @@ static int num_breakpoints = 0;
  */
 void dbg_frontend_init() {
     breakpoints = (m64p_breakpoint *) malloc(BREAKPOINTS_MAX_NUMBER * sizeof(m64p_breakpoint));
+    backtrace_enabled = 0;
     dbg_printf("Debugger initialized.\n");
 }
 
@@ -240,6 +244,68 @@ int debugger_print_registers() {
     return 0;
 }
 
+static void debugger_print_backtrace(void)
+{
+    enum { MAX_BACKTRACE_FRAMES = 256 };
+    m64p_dbg_backtrace_frame frames[MAX_BACKTRACE_FRAMES];
+    int count;
+    int i;
+
+    if (DebugGetBacktrace == NULL || DebugSetBacktraceEnabled == NULL) {
+        dbg_printf("Backtraces are not supported by this core.\n");
+        return;
+    }
+
+    if (!backtrace_enabled) {
+        dbg_printf("Backtrace tracing is disabled; use 'bt on' before running.\n");
+        return;
+    }
+
+    count = (*DebugGetBacktrace)(frames, MAX_BACKTRACE_FRAMES);
+    if (count <= 0) {
+        dbg_printf("No backtrace is available.\n");
+        return;
+    }
+
+    dbg_printf("Backtrace:\n");
+    for (i = 0; i < count; ++i) {
+        const m64p_dbg_backtrace_frame *frame = &frames[i];
+        dbg_printf("#%-3d 0x%08x", i, frame->pc);
+        if (frame->has_entry) {
+            dbg_printf(" in 0x%08x%s $sp=%08x {%08x, %08x, %08x, %08x}",
+                       frame->entry_pc, frame->tail ? " (tail)" : "       ",
+                       frame->stack_pointer, frame->arguments[0],
+                       frame->arguments[1], frame->arguments[2],
+                       frame->arguments[3]);
+        }
+        dbg_printf("\n");
+    }
+}
+
+static void debugger_print_execution_history(void)
+{
+    enum { HISTORY_SIZE = 256 };
+    uint32_t pcs[HISTORY_SIZE];
+    uint32_t instructions[HISTORY_SIZE];
+    int count;
+    int i;
+
+    if (DebugGetExecutionHistory == NULL) {
+        dbg_printf("Execution history is not supported by this core.\n");
+        return;
+    }
+
+    count = (*DebugGetExecutionHistory)(pcs, instructions, HISTORY_SIZE);
+    if (count <= 0) {
+        dbg_printf("Execution history is empty.\n");
+        return;
+    }
+
+    dbg_printf("Execution history (oldest to newest):\n");
+    for (i = 0; i < count; ++i)
+        dbg_printf("0x%08x: %08x\n", pcs[i], instructions[i]);
+}
+
 typedef enum {
     M64P_ASM_FLAG_INDEX = 0x01,
     M64P_ASM_FLAG_ADDR = 0x02,
@@ -298,6 +364,70 @@ int debugger_loop(void *arg) {
         }
         else if (strcmp(input, "pc-1") == 0) {
             dbg_printf("Previous PC: %08X\n", debugger_get_prev_pc());
+        }
+        else if (strcmp(input, "bt on") == 0) {
+            m64p_error rval;
+            if (DebugSetBacktraceEnabled == NULL || DebugGetBacktrace == NULL) {
+                dbg_printf("Backtraces are not supported by this core.\n");
+                continue;
+            }
+            rval = (*DebugSetBacktraceEnabled)(1);
+            if (rval != M64ERR_SUCCESS) {
+                dbg_printf("Could not enable backtraces: %s\n", (*CoreErrorMessage)(rval));
+            } else {
+                backtrace_enabled = 1;
+                dbg_printf("Backtrace tracing enabled; existing trace state was cleared.\n");
+            }
+        }
+        else if (strcmp(input, "bt off") == 0) {
+            m64p_error rval;
+            if (DebugSetBacktraceEnabled == NULL) {
+                dbg_printf("Backtraces are not supported by this core.\n");
+                continue;
+            }
+            rval = (*DebugSetBacktraceEnabled)(0);
+            if (rval != M64ERR_SUCCESS) {
+                dbg_printf("Could not disable backtraces: %s\n", (*CoreErrorMessage)(rval));
+            } else {
+                backtrace_enabled = 0;
+                dbg_printf("Backtrace tracing disabled.\n");
+            }
+        }
+        else if (strcmp(input, "bt") == 0) {
+            debugger_print_backtrace();
+        }
+        else if (strcmp(input, "history") == 0) {
+            debugger_print_execution_history();
+        }
+        else if (strcmp(input, "visited reset") == 0) {
+            m64p_error rval;
+            if (DebugResetVisitedRDRAM == NULL) {
+                dbg_printf("RDRAM execution coverage is not supported by this core.\n");
+                continue;
+            }
+            rval = (*DebugResetVisitedRDRAM)();
+            if (rval != M64ERR_SUCCESS)
+                dbg_printf("Could not reset RDRAM execution coverage: %s\n",
+                           (*CoreErrorMessage)(rval));
+            else
+                dbg_printf("RDRAM execution coverage reset.\n");
+        }
+        else if (strcmp(input, "visited break") == 0) {
+            int enabled;
+            m64p_error rval;
+            if (DebugSetBreakOnUnvisited == NULL ||
+                DebugGetBreakOnUnvisited == NULL) {
+                dbg_printf("RDRAM execution coverage is not supported by this core.\n");
+                continue;
+            }
+            enabled = !(*DebugGetBreakOnUnvisited)();
+            rval = (*DebugSetBreakOnUnvisited)(enabled);
+            if (rval != M64ERR_SUCCESS)
+                dbg_printf("Could not change unvisited-code breaking: %s\n",
+                           (*CoreErrorMessage)(rval));
+            else
+                dbg_printf("Break on unvisited RDRAM code %s.\n",
+                           enabled ? "enabled" : "disabled");
         }
         else if (strncmp(input, "asm", 3) == 0) {
             // simple linear sweep disassembly
@@ -650,4 +780,3 @@ int debugger_loop(void *arg) {
 
     return -1;
 }
-

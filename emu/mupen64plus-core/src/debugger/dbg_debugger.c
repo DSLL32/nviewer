@@ -20,10 +20,13 @@
  *   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.          *
  * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 
+#include <inttypes.h>
+
 #include <SDL.h>
 
 #include "api/callbacks.h"
 #include "api/debugger.h"
+#include "dbg_backtrace.h"
 #include "dbg_breakpoints.h"
 #include "dbg_debugger.h"
 #include "dbg_memory.h"
@@ -54,6 +57,7 @@ void init_debugger()
     
     g_DebuggerActive = 1;
     g_dbg_runstate = M64P_DBG_RUNSTATE_PAUSED;
+    debugger_backtrace_set_enabled(0);
 
     DebuggerCallback(DEBUG_UI_INIT, 0); /* call front-end to initialize user interface */
 
@@ -104,6 +108,18 @@ void update_debugger(uint32_t pc)
 void debugger_step()
 {
     SDL_SemPost(sem_pending_steps);
+}
+
+void debugger_break_on_unvisited(uint32_t pc)
+{
+    if (!g_DebuggerActive || g_dbg_runstate != M64P_DBG_RUNSTATE_RUNNING)
+        return;
+
+    DebugMessage(M64MSG_INFO, "Execution reached unvisited RDRAM code at 0x%08" PRIX32, pc);
+    breakpointAccessed = pc;
+    breakpointFlag = M64P_BKP_FLAG_EXEC;
+    g_dbg_runstate = M64P_DBG_RUNSTATE_PAUSED;
+    update_debugger(pc);
 }
 
 #endif

@@ -727,7 +727,8 @@ endif
 
 ifeq ($(DEBUGGER), 1)
   SOURCE += \
-    $(SRCDIR)/debugger/dbg_debugger.c \
+      $(SRCDIR)/debugger/dbg_backtrace.cpp \
+      $(SRCDIR)/debugger/dbg_debugger.c \
     $(SRCDIR)/debugger/dbg_decoder.c \
     $(SRCDIR)/debugger/dbg_memory.c \
     $(SRCDIR)/debugger/dbg_breakpoints.c

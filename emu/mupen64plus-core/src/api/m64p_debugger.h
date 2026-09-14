@@ -214,9 +214,41 @@ typedef uint32_t (*ptr_DebugVirtualToPhysical)(uint32_t);
 EXPORT uint32_t CALL DebugVirtualToPhysical(uint32_t);
 #endif
 
+/* DebugSetBacktraceEnabled(), DebugGetBacktrace()
+ *
+ * Enable or disable pure-interpreter shadow call-stack tracing. DebugGetBacktrace
+ * writes frames from the innermost to outermost and returns the number written.
+ */
+typedef struct {
+    uint32_t pc;             /* live PC, or transfer PC for an enclosing frame */
+    uint32_t entry_pc;       /* inferred function entry */
+    uint32_t stack_pointer;  /* SP presented on entry */
+    uint32_t arguments[4];   /* A0 through A3 presented on entry */
+    int has_entry;           /* entry PC, SP and arguments were observed */
+    int tail;                /* this frame tail-called the next inner frame */
+} m64p_dbg_backtrace_frame;
+
+typedef m64p_error (*ptr_DebugSetBacktraceEnabled)(int);
+typedef int (*ptr_DebugGetBacktrace)(m64p_dbg_backtrace_frame *, int);
+#if defined(M64P_CORE_PROTOTYPES)
+EXPORT m64p_error CALL DebugSetBacktraceEnabled(int);
+EXPORT int CALL DebugGetBacktrace(m64p_dbg_backtrace_frame *, int);
+#endif
+
+/* Pure-interpreter execution history and RDRAM coverage controls. */
+typedef m64p_error (*ptr_DebugResetVisitedRDRAM)(void);
+typedef m64p_error (*ptr_DebugSetBreakOnUnvisited)(int);
+typedef int (*ptr_DebugGetBreakOnUnvisited)(void);
+typedef int (*ptr_DebugGetExecutionHistory)(uint32_t *, uint32_t *, int);
+#if defined(M64P_CORE_PROTOTYPES)
+EXPORT m64p_error CALL DebugResetVisitedRDRAM(void);
+EXPORT m64p_error CALL DebugSetBreakOnUnvisited(int);
+EXPORT int CALL DebugGetBreakOnUnvisited(void);
+EXPORT int CALL DebugGetExecutionHistory(uint32_t *, uint32_t *, int);
+#endif
+
 #ifdef __cplusplus
 }
 #endif
 
 #endif /* #define M64P_DEBUGGER_H */
-

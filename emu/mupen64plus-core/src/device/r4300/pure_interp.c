@@ -33,7 +33,27 @@
 #include "osal/preproc.h"
 
 #ifdef DBG
+#include "debugger/dbg_backtrace.h"
 #include "debugger/dbg_debugger.h"
+#define BACKTRACE_JUMP_BEGIN(r4300) \
+      const uint32_t backtrace_pc = (r4300)->interp_PC.addr
+#define BACKTRACE_JUMP_END(r4300, op, target, completed) \
+      do { \
+         const uint32_t backtrace_arguments[4] = { \
+            (uint32_t) r4300_regs(r4300)[4], \
+            (uint32_t) r4300_regs(r4300)[5], \
+            (uint32_t) r4300_regs(r4300)[6], \
+            (uint32_t) r4300_regs(r4300)[7], \
+         }; \
+         debugger_backtrace_record_jump( \
+            backtrace_pc, (op), (target), \
+            (uint32_t) r4300_regs(r4300)[29], \
+            (uint32_t) r4300_regs(r4300)[31], \
+            backtrace_arguments, (completed)); \
+      } while (0)
+#else
+#define BACKTRACE_JUMP_BEGIN(r4300)
+#define BACKTRACE_JUMP_END(r4300, op, target, completed)
 #endif
 
 
@@ -46,6 +66,7 @@ static void InterpretOpcode(struct r4300_core* r4300);
 #define DECLARE_JUMP(name, destination, condition, link, likely, cop1) \
    static void name(struct r4300_core* r4300, uint32_t op) \
    { \
+      BACKTRACE_JUMP_BEGIN(r4300); \
       const int take_jump = (condition); \
       const uint32_t jump_target = (destination); \
       int64_t *link_register = (link); \
@@ -71,6 +92,7 @@ static void InterpretOpcode(struct r4300_core* r4300);
          r4300->interp_PC.addr += 8; \
          cp0_update_count(r4300); \
       } \
+      BACKTRACE_JUMP_END(r4300, op, jump_target, take_jump && !r4300->skip_jump); \
       r4300->cp0.last_addr = r4300->interp_PC.addr; \
       if (*r4300_cp0_cycle_count(&r4300->cp0) >= 0) gen_interrupt(r4300); \
    } \
@@ -164,10 +186,30 @@ static void InterpretOpcode(struct r4300_core* r4300);
 
 void InterpretOpcode(struct r4300_core* r4300)
 {
-	uint32_t* op_address = fast_mem_access(r4300, *r4300_pc(r4300));
+	const uint32_t pc = *r4300_pc(r4300);
+	uint32_t physical_address;
+	uint32_t* op_address = fast_mem_access_with_paddr(r4300, pc, &physical_address);
 	if (op_address == NULL)
 		return;
 	uint32_t op = *op_address;
+
+	if (physical_address < r4300->rdram->dram_size)
+	{
+		const uint32_t rdram_word = physical_address >> 2;
+		uint8_t* visited = &r4300->execution_trace.visited_rdram[rdram_word >> 3];
+		const uint8_t mask = (uint8_t) (UINT8_C(1) << (rdram_word & 7));
+#ifdef DBG
+		if ((*visited & mask) == 0 && r4300->execution_trace.break_on_unvisited)
+			debugger_break_on_unvisited(pc);
+#endif
+		*visited |= mask;
+	}
+
+	const uint8_t history_index = r4300->execution_trace.head++;
+	r4300->execution_trace.pc[history_index] = pc;
+	r4300->execution_trace.insn[history_index] = op;
+	if (r4300->execution_trace.head == 0)
+		r4300->execution_trace.wrapped = 1;
 
 	switch ((op >> 26) & 0x3F) {
 	case 0: /* SPECIAL prefix */
@@ -760,6 +802,11 @@ void run_pure_interpreter(struct r4300_core* r4300)
 
    while (!*r4300_stop(r4300))
    {
+#ifdef DBG
+     debugger_backtrace_begin_instruction(
+         (uint32_t) r4300_regs(r4300)[29],
+         (r4300_cp0_regs(&r4300->cp0)[CP0_STATUS_REG] & CP0_STATUS_EXL) != 0);
+#endif
 #ifdef COMPARE_CORE
      CoreCompareCallback();
 #endif

@@ -24,11 +24,13 @@
  */
 
 #include <stdlib.h>
+#include <string.h>
 
 #define M64P_CORE_PROTOTYPES 1
 #include "callbacks.h"
 #include "debugger.h"
 #include "debugger/dbg_breakpoints.h"
+#include "debugger/dbg_backtrace.h"
 #include "debugger/dbg_debugger.h"
 #include "debugger/dbg_decoder.h"
 #include "debugger/dbg_memory.h"
@@ -458,5 +460,99 @@ EXPORT uint32_t CALL DebugVirtualToPhysical(uint32_t address)
 #else
     DebugMessage(M64MSG_ERROR, "Bug: DebugVirtualToPhysical() called, but Debugger not supported in Core library");
     return address;
+#endif
+}
+
+EXPORT m64p_error CALL DebugSetBacktraceEnabled(int enabled)
+{
+#ifdef DBG
+    struct r4300_core* r4300 = &g_dev.r4300;
+
+    if (enabled && get_r4300_emumode(r4300) != EMUMODE_PURE_INTERPRETER)
+        return M64ERR_UNSUPPORTED;
+
+    debugger_backtrace_set_enabled(enabled);
+    return M64ERR_SUCCESS;
+#else
+    return M64ERR_UNSUPPORTED;
+#endif
+}
+
+EXPORT int CALL DebugGetBacktrace(m64p_dbg_backtrace_frame *frames, int capacity)
+{
+#ifdef DBG
+    if (frames == NULL || capacity <= 0)
+        return 0;
+    return debugger_backtrace_get(*r4300_pc(&g_dev.r4300), frames, capacity);
+#else
+    return 0;
+#endif
+}
+
+EXPORT m64p_error CALL DebugResetVisitedRDRAM(void)
+{
+#ifdef DBG
+    struct r4300_execution_trace* trace = &g_dev.r4300.execution_trace;
+    if (get_r4300_emumode(&g_dev.r4300) != EMUMODE_PURE_INTERPRETER)
+        return M64ERR_UNSUPPORTED;
+    memset(trace->visited_rdram, 0, sizeof(trace->visited_rdram));
+    return M64ERR_SUCCESS;
+#else
+    return M64ERR_UNSUPPORTED;
+#endif
+}
+
+EXPORT m64p_error CALL DebugSetBreakOnUnvisited(int enabled)
+{
+#ifdef DBG
+    if (get_r4300_emumode(&g_dev.r4300) != EMUMODE_PURE_INTERPRETER)
+        return M64ERR_UNSUPPORTED;
+    g_dev.r4300.execution_trace.break_on_unvisited = enabled != 0;
+    return M64ERR_SUCCESS;
+#else
+    return M64ERR_UNSUPPORTED;
+#endif
+}
+
+EXPORT int CALL DebugGetBreakOnUnvisited(void)
+{
+#ifdef DBG
+    return g_dev.r4300.execution_trace.break_on_unvisited != 0;
+#else
+    return 0;
+#endif
+}
+
+EXPORT int CALL DebugGetExecutionHistory(uint32_t *pcs, uint32_t *instructions,
+                                         int capacity)
+{
+#ifdef DBG
+    const struct r4300_execution_trace* trace = &g_dev.r4300.execution_trace;
+    const unsigned int available = trace->wrapped
+        ? R4300_EXECUTION_HISTORY_SIZE
+        : trace->head;
+    unsigned int count;
+    unsigned int start;
+    unsigned int index;
+
+    if (pcs == NULL || instructions == NULL || capacity <= 0)
+        return 0;
+
+    count = available;
+    if (count > (unsigned int) capacity)
+        count = (unsigned int) capacity;
+    start = trace->wrapped
+        ? (trace->head + available - count) % R4300_EXECUTION_HISTORY_SIZE
+        : available - count;
+
+    for (index = 0; index != count; ++index) {
+        const unsigned int source =
+            (start + index) % R4300_EXECUTION_HISTORY_SIZE;
+        pcs[index] = trace->pc[source];
+        instructions[index] = trace->insn[source];
+    }
+    return (int) count;
+#else
+    return 0;
 #endif
 }

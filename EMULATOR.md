@@ -103,6 +103,9 @@ whole session is in `emu/run/debug.log`. When a breakpoint pauses the emulator, 
 |---|---|
 | `run`, `pause`, `step [N]` | resume, pause, or execute N instructions (only while paused) |
 | `regs`, `pc`, `asm [ADDR [COUNT]]` | registers, the PC, or disassembly (at the PC by default) |
+| `bt on`, `bt`, `bt off` | enable shadow call-stack tracing, print it, or disable it |
+| `history` | dump the 256 most recently executed pure-interpreter PC/instruction pairs |
+| `visited reset`, `visited break` | clear RDRAM execution coverage, or toggle breaking before unvisited RDRAM code (off by default) |
 | `mem ADDR`, `write ADDR VALUE`, `dumpmem ADDR LEN FILE` | read, write, or dump memory (hex) |
 | `translate ADDR` | convert a virtual address to a physical one |
 | `bp add ADDR [SIZE [FLAGS]]` | break on ADDR up to ADDR+SIZE; FLAGS: 2 read, 4 write, 8 execute (default: all) |

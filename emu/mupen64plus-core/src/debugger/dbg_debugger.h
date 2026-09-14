@@ -38,6 +38,6 @@ void init_debugger(void);
 void update_debugger(uint32_t pc);
 void destroy_debugger(void);
 void debugger_step(void);
+void debugger_break_on_unvisited(uint32_t pc);
 
 #endif /* __DBG_DEBUGGER_H__ */
-

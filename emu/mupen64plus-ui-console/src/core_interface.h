@@ -107,6 +107,11 @@ extern ptr_DebugBreakpointCommand DebugBreakpointCommand;
 
 extern ptr_DebugBreakpointTriggeredBy DebugBreakpointTriggeredBy;
 extern ptr_DebugVirtualToPhysical     DebugVirtualToPhysical;
+extern ptr_DebugSetBacktraceEnabled   DebugSetBacktraceEnabled;
+extern ptr_DebugGetBacktrace          DebugGetBacktrace;
+extern ptr_DebugResetVisitedRDRAM     DebugResetVisitedRDRAM;
+extern ptr_DebugSetBreakOnUnvisited   DebugSetBreakOnUnvisited;
+extern ptr_DebugGetBreakOnUnvisited   DebugGetBreakOnUnvisited;
+extern ptr_DebugGetExecutionHistory   DebugGetExecutionHistory;
 
 #endif /* #define CORE_INTERFACE_H */
-

@@ -67,6 +67,22 @@ enum {
     EMUMODE_DYNAREC          = 2,
 };
 
+enum {
+    R4300_EXECUTION_HISTORY_SIZE = 256,
+    /* One bit per 32-bit word in the maximum 8 MiB of RDRAM. */
+    R4300_VISITED_RDRAM_BITMAP_SIZE = 0x40000,
+};
+
+struct r4300_execution_trace
+{
+    uint8_t head;
+    uint8_t wrapped;
+    uint8_t break_on_unvisited;
+    uint32_t pc[R4300_EXECUTION_HISTORY_SIZE];
+    uint32_t insn[R4300_EXECUTION_HISTORY_SIZE];
+    uint8_t visited_rdram[R4300_VISITED_RDRAM_BITMAP_SIZE];
+};
+
 
 struct r4300_core
 {
@@ -201,6 +217,9 @@ struct r4300_core
     uint32_t randomize_interrupt;
 
     uint32_t start_address;
+
+    /* Instructions fetched by the pure interpreter. */
+    struct r4300_execution_trace execution_trace;
 };
 
 #define R4300_KSEG0 UINT32_C(0x80000000)
@@ -234,6 +253,8 @@ unsigned int get_r4300_emumode(struct r4300_core* r4300);
  * Can access RDRAM, SP_DMEM, SP_IMEM and ROM, using TLB if necessary
  * Useful for getting fast access to a zone with executable code. */
 uint32_t *fast_mem_access(struct r4300_core* r4300, uint32_t address);
+uint32_t *fast_mem_access_with_paddr(struct r4300_core* r4300, uint32_t address,
+                                    uint32_t* physical_address);
 
 int r4300_read_aligned_word(struct r4300_core* r4300, uint32_t address, uint32_t* value);
 int r4300_read_aligned_dword(struct r4300_core* r4300, uint32_t address, uint64_t* value);

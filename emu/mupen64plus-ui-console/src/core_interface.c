@@ -114,6 +114,12 @@ ptr_DebugBreakpointCommand DebugBreakpointCommand = NULL;
 
 ptr_DebugBreakpointTriggeredBy DebugBreakpointTriggeredBy = NULL;
 ptr_DebugVirtualToPhysical     DebugVirtualToPhysical = NULL;
+ptr_DebugSetBacktraceEnabled   DebugSetBacktraceEnabled = NULL;
+ptr_DebugGetBacktrace          DebugGetBacktrace = NULL;
+ptr_DebugResetVisitedRDRAM     DebugResetVisitedRDRAM = NULL;
+ptr_DebugSetBreakOnUnvisited   DebugSetBreakOnUnvisited = NULL;
+ptr_DebugGetBreakOnUnvisited   DebugGetBreakOnUnvisited = NULL;
+ptr_DebugGetExecutionHistory   DebugGetExecutionHistory = NULL;
 
 /* global variables */
 m64p_dynlib_handle CoreHandle = NULL;
@@ -309,6 +315,12 @@ m64p_error AttachCoreLib(const char *CoreLibFilepath)
 
     DebugBreakpointTriggeredBy = (ptr_DebugBreakpointTriggeredBy) osal_dynlib_getproc(CoreHandle, "DebugBreakpointTriggeredBy");
     DebugVirtualToPhysical = (ptr_DebugVirtualToPhysical) osal_dynlib_getproc(CoreHandle, "DebugVirtualToPhysical");
+    DebugSetBacktraceEnabled = (ptr_DebugSetBacktraceEnabled) osal_dynlib_getproc(CoreHandle, "DebugSetBacktraceEnabled");
+    DebugGetBacktrace = (ptr_DebugGetBacktrace) osal_dynlib_getproc(CoreHandle, "DebugGetBacktrace");
+    DebugResetVisitedRDRAM = (ptr_DebugResetVisitedRDRAM) osal_dynlib_getproc(CoreHandle, "DebugResetVisitedRDRAM");
+    DebugSetBreakOnUnvisited = (ptr_DebugSetBreakOnUnvisited) osal_dynlib_getproc(CoreHandle, "DebugSetBreakOnUnvisited");
+    DebugGetBreakOnUnvisited = (ptr_DebugGetBreakOnUnvisited) osal_dynlib_getproc(CoreHandle, "DebugGetBreakOnUnvisited");
+    DebugGetExecutionHistory = (ptr_DebugGetExecutionHistory) osal_dynlib_getproc(CoreHandle, "DebugGetExecutionHistory");
 
     return M64ERR_SUCCESS;
 }
@@ -380,6 +392,12 @@ m64p_error DetachCoreLib(void)
 
     DebugBreakpointTriggeredBy = NULL;
     DebugVirtualToPhysical = NULL;
+    DebugSetBacktraceEnabled = NULL;
+    DebugGetBacktrace = NULL;
+    DebugResetVisitedRDRAM = NULL;
+    DebugSetBreakOnUnvisited = NULL;
+    DebugGetBreakOnUnvisited = NULL;
+    DebugGetExecutionHistory = NULL;
 
     /* detach the shared library */
     osal_dynlib_close(CoreHandle);
@@ -387,5 +405,3 @@ m64p_error DetachCoreLib(void)
 
     return M64ERR_SUCCESS;
 }
-
-
