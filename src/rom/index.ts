@@ -5,6 +5,7 @@ import { openBattleTanxGA } from './battletanxga';
 import { openBomberman64 } from './bomberman/bm64';
 import { openBomberman64SA } from './bomberman/bm64sa';
 import { openBombermanHero } from './bomberman/bmhero';
+import { openBugsLife } from './bugslife';
 import { openGex3 } from './gex/gex3';
 import { openGex64 } from './gex/gex64';
 import { openGoldenEye } from './goldeneye/goldeneye';
@@ -53,6 +54,12 @@ export function openRom(bytes: Uint8Array): Game {
       return openBombermanHero(rom);
     case 'NBVE':
       return openBomberman64SA(rom);
+    case 'NBYE':
+    case 'NBYP':
+    case 'NBYF':
+    case 'NBYD':
+    case 'NBYI':
+      return openBugsLife(rom);
     case 'NBXE':
       return openBattleTanx(rom);
     case 'NBQE':
@@ -99,6 +106,7 @@ export function openRom(bytes: Uint8Array): Game {
         'Supported: San Francisco Rush 2049 (U), San Francisco Rush: Extreme Racing (U), Bomberman 64 (U), ' +
         'Bomberman 64: The Second Attack! (U), Bomberman Hero (U), BattleTanx (U), BattleTanx: Global Assault (U), ' +
         'Gex 64: Enter the Gecko (U), Gex 3: Deep Cover Gecko (U), Yoshi\'s Story (J), Star Fox 64 (U), GoldenEye 007 (U), ' +
+        `A Bug's Life (U/E/F/G/I), ` +
         'Air Boarder 64 (J/E), ' +
         'Off Road Challenge (U/E), ' +
         'Pokémon Snap (U), ' +
