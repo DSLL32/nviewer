@@ -18,6 +18,7 @@ export const ROM_FILES = [
   'Yoshi Story (J) [!].z64',
   'Star Fox 64 (U) (V1.1) [!].z64',
   'GoldenEye 007 (U) [!].z64',
+  "Bug's Life, A (U) [!].z64",
   'Off Road Challenge (U) [!].z64',
   'Off Road Challenge (E) [!].z64',
   'Pokemon Snap (U) [!].z64',
