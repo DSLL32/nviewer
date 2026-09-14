@@ -1,16 +1,22 @@
 // Layer audit (AGENTS.md): every drawn instance must be in a layer, so the user can toggle it,
 // and every game except Star Fox 64 must have a collision layer.
-// usage: npx tsx tools/layeraudit.ts [rom name filter ...] [--sample]
+// usage: npx tsx tools/layeraudit.ts [rom name filter ...] [--sample] [--jobs N]
 // Exits 1 if any level has drawable instances outside every layer, or a game has no collision layer.
 import { readFileSync } from 'node:fs';
 import { openRom } from '../src/rom';
+import { parseJobArguments, runRomJobs } from './jobs';
 import { romPaths } from './roms';
 
 const GAMES_WITHOUT_COLLISION = new Set(['sf64']); // excluded by the user: a rail shooter, collision tells us little
 
-const args = process.argv.slice(2);
+const jobArgs = parseJobArguments(process.argv.slice(2));
+const args = jobArgs.args;
 const sample = args.includes('--sample'); // every eighth level, for a quick pass
-const roms = romPaths(args.filter((a) => !a.startsWith('--')));
+const roms = jobArgs.workerRom ? [jobArgs.workerRom] : romPaths(args.filter((a) => !a.startsWith('--')));
+if (!jobArgs.workerRom && jobArgs.jobs > 1 && roms.length > 1) {
+  const ok = await runRomJobs(roms, jobArgs.jobs, sample ? ['--sample'] : []);
+  process.exit(ok ? 0 : 1);
+}
 let failed = false;
 
 for (const rom of roms) {

@@ -1,5 +1,5 @@
 // Hash every level of every game, so a change to one loader can be shown not to touch the others.
-// usage: npx tsx tools/hashall.ts [rom name filter ...] [--src <root>]
+// usage: npx tsx tools/hashall.ts [rom name filter ...] [--src <root>] [--jobs N]
 // --src loads the loaders from another checkout (e.g. a worktree of HEAD) instead of this one:
 //   npx tsx tools/hashall.ts --src /path/to/worktree > base.txt
 //   npx tsx tools/hashall.ts > new.txt && diff base.txt new.txt
@@ -7,18 +7,27 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { Game } from '../src/rom/types';
+import { parseJobArguments, runRomJobs } from './jobs';
 import { romPaths } from './roms';
 
-const args = process.argv.slice(2);
+const jobArgs = parseJobArguments(process.argv.slice(2));
+const args = jobArgs.args;
 const srcAt = args.indexOf('--src');
 const src = srcAt >= 0 ? args[srcAt + 1] : null;
+if (srcAt >= 0 && !src) throw new Error('--src requires a checkout path');
 const filters = args.filter((a, i) => !a.startsWith('--') && !(srcAt >= 0 && i === srcAt + 1));
 
 const openRom: (b: Uint8Array) => Game = src
   ? (await import(`${resolve(src)}/src/rom/index.ts`)).openRom
   : (await import('../src/rom')).openRom;
 
-for (const rom of romPaths(filters)) {
+const roms = jobArgs.workerRom ? [jobArgs.workerRom] : romPaths(filters);
+if (!jobArgs.workerRom && jobArgs.jobs > 1 && roms.length > 1) {
+  const ok = await runRomJobs(roms, jobArgs.jobs, src ? ['--src', src] : []);
+  process.exit(ok ? 0 : 1);
+}
+
+for (const rom of roms) {
   const game = openRom(new Uint8Array(readFileSync(rom)));
   const h = createHash('sha1');
   for (const info of game.levels) {

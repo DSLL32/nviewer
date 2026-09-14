@@ -1,9 +1,10 @@
 // Load every level twice, moving each Level through structuredClone with all of its whole-buffer typed
 // arrays transferred. The web worker does exactly this, so a loader that shares a buffer between levels
 // (a texture cache, a shared identity matrix) breaks on the second load with a detached ArrayBuffer.
-// usage: npx tsx tools/transfer.ts [rom name filter ...]
+// usage: npx tsx tools/transfer.ts [rom name filter ...] [--jobs N]
 import { readFileSync } from 'node:fs';
 import { openRom } from '../src/rom';
+import { parseJobArguments, runRomJobs } from './jobs';
 import { romPaths } from './roms';
 
 /** Every distinct ArrayBuffer fully owned by a typed array in the level (the worker transfers these). */
@@ -21,7 +22,15 @@ function buffers(value: unknown, romBuffer: ArrayBufferLike, out = new Set<Array
 }
 
 let failed = false;
-for (const rom of romPaths(process.argv.slice(2))) {
+const jobArgs = parseJobArguments(process.argv.slice(2));
+const filters = jobArgs.args.filter((arg) => !arg.startsWith('--'));
+const roms = jobArgs.workerRom ? [jobArgs.workerRom] : romPaths(filters);
+if (!jobArgs.workerRom && jobArgs.jobs > 1 && roms.length > 1) {
+  const ok = await runRomJobs(roms, jobArgs.jobs, []);
+  process.exit(ok ? 0 : 1);
+}
+
+for (const rom of roms) {
   const bytes = new Uint8Array(readFileSync(rom));
   const game = openRom(bytes);
   let loads = 0;
