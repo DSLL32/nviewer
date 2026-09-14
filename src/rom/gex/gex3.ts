@@ -19,7 +19,7 @@ import { parseLibmusBank, renderLibmusSong, type Wave } from '../music/libmus';
 import { view } from '../util';
 import {
   addOverlayLayers, animatedMaterial, collisionBatch, type CollisionFace, cstr, gex3ObjectMesh, histogram, instanceMatrix, isMarkerMesh, LEVEL_BASE,
-  objectClass, ObjectTable, startCamera, SyntheticList, titleCase, toRom, volumeBatches, Z_UP,
+  objectClass, ObjectTable, scaleSkyHeight, startCamera, SyntheticList, titleCase, toRom, volumeBatches, Z_UP,
 } from './common';
 
 const LEVEL_TABLE = 0x8013c;
@@ -195,7 +195,7 @@ function loadLevel(rom: Uint8Array, objects: ObjectTable, def: LevelDef): Level 
   const instances: Instance[] = [{ name: 'world', mesh: 0, matrix: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]) }];
   const extra: Partial<Level> = {};
   if (skyStart >= 0) {
-    const sky = meshFromBatches('sky', run(skyStart));
+    const sky = scaleSkyHeight(meshFromBatches('sky', run(skyStart)));
     if (sky.batches.length) extra.skies = [{ name: 'Sky', mesh: meshes.push(sky) - 1 }];
   }
 

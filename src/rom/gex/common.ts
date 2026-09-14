@@ -17,6 +17,19 @@ export const toRom = (vaddr: number) => vaddr - 0x7ffff400;
 // Game (x, y, z) -> viewer (x, z, -y), as a row-vector matrix (a rotation: winding is kept).
 export const Z_UP: Mtx = [1, 0, 0, 0, 0, 0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1];
 
+// Both games draw their camera-relative sky with a fixed 45-degree vertical projection, while the
+// viewer's free camera uses 60 degrees. Stretch the authored sky's height so that its vertical screen
+// coverage at the viewer default matches the game's dedicated projection instead of becoming a short
+// band around the horizon. Horizontal positions are left alone so the panorama remains a closed ring.
+const SKY_HEIGHT_SCALE = Math.tan(Math.PI / 6) / Math.tan(Math.PI / 8);
+
+export function scaleSkyHeight(mesh: Mesh): Mesh {
+  for (const batch of mesh.batches) {
+    for (let i = 1; i < batch.positions.length; i += 3) batch.positions[i] *= SKY_HEIGHT_SCALE;
+  }
+  return mesh;
+}
+
 export function cstr(rom: Uint8Array, o: number): string {
   let s = '';
   while (o >= 0 && o < rom.length && rom[o]) s += String.fromCharCode(rom[o++]);

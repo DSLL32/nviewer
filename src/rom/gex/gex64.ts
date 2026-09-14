@@ -18,7 +18,7 @@ import { decodeGex64Music, listGex64Music } from '../music/libmus64';
 import { view } from '../util';
 import {
   addOverlayLayers, animatedMaterial, collisionBatch, type CollisionFace, cstr, gex64ObjectMesh, histogram, instanceMatrix, LEVEL_BASE, objectClass,
-  ObjectTable, startCamera, SyntheticList, titleCase, toRom, volumeBatches, Z_UP,
+  ObjectTable, scaleSkyHeight, startCamera, SyntheticList, titleCase, toRom, volumeBatches, Z_UP,
 } from './common';
 
 const LEVEL_TABLE = 0x708e0;
@@ -166,7 +166,7 @@ function loadLevel(rom: Uint8Array, objects: ObjectTable, def: LevelDef): Level 
   const instances: Instance[] = [{ name: 'world', mesh: 0, matrix: new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]) }];
   const extra: Partial<Level> = {};
   if (skyStart >= 0) {
-    const sky = meshFromBatches('sky', run(skyStart, 0));
+    const sky = scaleSkyHeight(meshFromBatches('sky', run(skyStart, 0)));
     if (sky.batches.length) extra.skies = [{ name: 'Sky', mesh: meshes.push(sky) - 1 }];
   }
 
