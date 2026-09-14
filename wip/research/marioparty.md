@@ -131,7 +131,7 @@ e1_emu verified results (RAM, breakpoints, frames; not yet in the spec):
 
 ## 6. Emulator recipes that worked (from e1_emu; details in notes/e1_emu.md)
 
-- Start with the debugger: `M64P_RUN_DIR=<own run dir> ~/mupen64plus/headless.sh --debug '/data/software/ai-scratch/Mario Party (J) [!].z64'` (background), then `headless-debug.sh 'run'`.
+- Start with the debugger: `M64P_RUN_DIR=<own run dir> /home/n64/nviewer/emu/headless.sh --debug '/data/software/ai-scratch/Mario Party (J) [!].z64'` (background), then `M64P_RUN_DIR=<own run dir> /home/n64/nviewer/emu/headless-debug.sh 'run'`.
 - **Jump to any overlay:** break at 0x8005E414 (object-manager main loop, before OvlLoad), `write` u32 0x800EFE54 = overlay index, `run`. 0x83 opens the debug mini-game menu (which lists every mini-game, the boards MB01-MB08, stadium, island, staff roll). Script `e1_emu/tools/boot_to.sh`.
 - Camera: breakpoints 0x8001D528 / 0x8001D56C catch guPerspective / guLookAt arguments; camera slot 0 at *(0x800C2870) (eye +0, target +0xC, up +0x18, fov/near/far +0x40..0x48).
 - Board RAM: spaces array *(0x800D75B8) (32 bytes per space), count u16 0x800D75B0; HVQ scroll s16 0x800D5BE2/E4; tile cache 0x800D5BF0 (40 × 0x14).

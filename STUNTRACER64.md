@@ -899,9 +899,10 @@ installed z64 video and CXD4 RSP LLE plugins exited immediately before logging o
 drawing. Neither was retried in-place. Both run directories contain exact commands and
 cleanup notes. **[V-EMU]**
 
-A third, separately authorized fresh session set
-`M64P_GFX_PLUGIN=/home/n64/mupen64plus/install/lib/mupen64plus/mupen64plus-video-GLideN64.so`
-and retained RSP-HLE. GLideN64
+A third, separately authorized fresh session used GLideN64 and retained RSP-HLE.
+The equivalent current setting is
+`M64P_GFX_PLUGIN="$PWD/emu/install/lib/mupen64plus/mupen64plus-video-GLideN64.so"`.
+GLideN64
 rev.41c7ba27 rendered a correct 320×240 legal/title frame after startup black. A
 second frame about 105 seconds later was byte-identical. The preserved frame is
 `emulator/gliden64_1/selected/title.png`, SHA-256
