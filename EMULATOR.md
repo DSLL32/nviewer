@@ -1,10 +1,12 @@
 # Running N64 games headless (mupen64plus)
 
-A patched mupen64plus in `~/mupen64plus` runs a ROM with no display or audio. It saves a
+A patched Mupen64Plus stack in `emu/` runs a ROM with no display or audio. Initialize its
+submodules with `git submodule update --init --recursive`, then build it with `./emu/build.sh`.
+It saves a
 screenshot about once per emulated second and reads controller 1 input from a FIFO.
 
 Each emulator keeps all its files (input FIFO, status, screenshots, saves, config, pid) in one run
-directory: `$M64P_RUN_DIR`, default `~/mupen64plus/run`. Nothing in `~/.config/mupen64plus` is
+directory: `$M64P_RUN_DIR`, default `emu/run`. Nothing in `~/.config/mupen64plus` is
 read or written. The examples below use the default. To run
 your own instance next to others, see [Running several at once](#running-several-at-once).
 
@@ -13,30 +15,30 @@ your own instance next to others, see [Running several at once](#running-several
 It keeps running until the emulator exits, so start it in the background: use your shell tool's
 background mode if it has one (such as Claude Code's `run_in_background`), or a plain `&`:
 
-    ~/mupen64plus/headless.sh '/path/to/game.z64' &
+    ./emu/headless.sh '/path/to/game.z64' &
 
 Glide64mk2 is the default video plugin. Override it for games that require another dynamically
 loaded plugin, for example GLideN64:
 
-    M64P_GFX_PLUGIN=~/mupen64plus/install/lib/mupen64plus/mupen64plus-video-GLideN64.so \
-      ~/mupen64plus/headless.sh '/path/to/game.z64' &
+    M64P_GFX_PLUGIN="$PWD/emu/install/lib/mupen64plus/mupen64plus-video-GLideN64.so" \
+      ./emu/headless.sh '/path/to/game.z64' &
 
-Its output goes to `~/mupen64plus/run/emulator.log`, which is recreated at each start.
+Its output goes to `emu/run/emulator.log`, which is recreated at each start.
 
-It's ready once `~/mupen64plus/run/shots/*-latest.png` exists, usually within a few seconds. If new
-screenshots stop appearing (`ls -lt ~/mupen64plus/run/shots`), the game isn't running, so check the
+It's ready once `emu/run/shots/*-latest.png` exists, usually within a few seconds. If new
+screenshots stop appearing (`ls -lt emu/run/shots`), the game isn't running, so check the
 log. `input.status` can't tell you that, because it only changes when the input queue becomes busy
 or idle.
 
 ## Send input and look
 
-    ~/mupen64plus/headless-send.sh 'press START' 'wait 60'
+    ./emu/headless-send.sh 'press START' 'wait 60'
 
 This queues the commands, waits until the game has received all of them, waits for a newer
 screenshot, and prints its path. View that PNG (320x240) to see the result. It returns only after
 everything queued has been delivered, and gives up after 120s. Loading screens can run far slower
 than real time, so raise the limit for long sequences, e.g. `M64P_SEND_TIMEOUT=600`. To send
-without waiting: `echo 'clear' > ~/mupen64plus/run/input`.
+without waiting: `echo 'clear' > emu/run/input`.
 
 Pass one command per argument:
 
@@ -58,7 +60,7 @@ Pass one command per argument:
 
 ## Screenshots and saves
 
-`~/mupen64plus/run/shots/` holds `<rom>-latest.png` and the last 60 shots as `<rom>-ring-NNNN.png`.
+`emu/run/shots/` holds `<rom>-latest.png` and the last 60 shots as `<rom>-ring-NNNN.png`.
 It's cleared at each start. `ls -t` lists them newest first, which is useful for seeing what
 happened between your commands.
 
@@ -76,25 +78,25 @@ whenever a new scene needs shaders compiled.
 
 ## Stop
 
-    pkill -x -F ~/mupen64plus/run/pid mupen64plus
+    pkill -x -F emu/run/pid mupen64plus
 
 This stops only the emulator belonging to that run directory. Don't use `pkill mupen64plus` or
 `kill $(pgrep mupen64plus)`: those stop every agent's emulator. An emulator paused in the debugger
-ignores `pkill`; stop it with `~/mupen64plus/headless-debug.sh quit` instead.
+ignores `pkill`; stop it with `./emu/headless-debug.sh quit` instead.
 
 ## Debugging
 
 `--debug` swaps in a core built with mupen64plus's debugger, which runs somewhat slower:
 
-    ~/mupen64plus/headless.sh --debug '/path/to/game.z64' &
+    ./emu/headless.sh --debug '/path/to/game.z64' &
 
 The emulator starts paused at its first instruction. While it's paused, no screenshots are taken
 and no input is read, so `headless-send.sh` just waits. Send debugger commands with:
 
-    ~/mupen64plus/headless-debug.sh 'bp add 0x04800004 4 4' 'run'
+    ./emu/headless-debug.sh 'bp add 0x04800004 4 4' 'run'
 
 This waits until the console has handled every command, then prints what the console wrote. The
-whole session is in `~/mupen64plus/run/debug.log`. When a breakpoint pauses the emulator, a
+whole session is in `emu/run/debug.log`. When a breakpoint pauses the emulator, a
 `PC at 0x...` line appears there, and `bp trig` shows what triggered it.
 
 | Command | Effect |
@@ -127,18 +129,18 @@ whole session is in `~/mupen64plus/run/debug.log`. When a breakpoint pauses the 
   - Use an absolute filename: relative ones land in the directory `headless.sh` was started from.
     Filenames are limited to 63 characters, with no spaces.
 - **More formats:** `mem` and `write` accept more; see
-  `~/mupen64plus/mupen64plus-ui-console/src/debugger.c`.
+  `emu/mupen64plus-ui-console/src/debugger.c`.
 
 ## Running several at once
 
 Give each emulator its own run directory, and set `M64P_RUN_DIR` on every command for it. Shell
 variables usually don't survive between separate tool calls, so repeat it each time:
 
-    M64P_RUN_DIR=~/mupen64plus/run-rush ~/mupen64plus/headless.sh '/path/to/game.z64' &
-    M64P_RUN_DIR=~/mupen64plus/run-rush ~/mupen64plus/headless-send.sh 'press START' 'wait 60'
-    pkill -x -F ~/mupen64plus/run-rush/pid mupen64plus
+    M64P_RUN_DIR="$PWD/emu/run-rush" ./emu/headless.sh '/path/to/game.z64' &
+    M64P_RUN_DIR="$PWD/emu/run-rush" ./emu/headless-send.sh 'press START' 'wait 60'
+    pkill -x -F emu/run-rush/pid mupen64plus
 
-Everything else in this file then applies with `~/mupen64plus/run` replaced by your directory.
+Everything else in this file then applies with `emu/run` replaced by your directory.
 Each emulator uses roughly one CPU core for software rendering.
 
 ## Tips

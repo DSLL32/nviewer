@@ -56,6 +56,7 @@ check_deps() {
     fi
   done
   command -v nasm >/dev/null 2>&1 || missing+=(nasm)
+  command -v cmake >/dev/null 2>&1 || missing+=(cmake)
   # The debugger build of the core disassembles with libopcodes.
   [ -e /usr/include/dis-asm.h ] || missing+=(binutils-dev)
 
@@ -86,6 +87,9 @@ run_make() {
 if [ "${1:-}" = "clean" ]; then
   for m in "$CORE" "${MODULES[@]}"; do run_make "$m" clean; done
   run_make "$CORE" clean POSTFIX=-dbg
+  if [ -f "$ROOT/_obj-GLideN64/CMakeCache.txt" ]; then
+    cmake --build "$ROOT/_obj-GLideN64" --target clean
+  fi
   exit 0
 fi
 
@@ -103,6 +107,16 @@ for m in "${MODULES[@]}"; do
   run_make "$m" all
   run_make "$m" install
 done
+
+# GLideN64 uses CMake rather than the standard Mupen64Plus makefile layout.
+cmake -S "$ROOT/GLideN64/src" -B "$ROOT/_obj-GLideN64" \
+  -DMUPENPLUSAPI=ON -DNOHQ=ON \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+  -DCMAKE_INSTALL_LIBDIR=lib \
+  -DCMAKE_INSTALL_DATADIR=share
+cmake --build "$ROOT/_obj-GLideN64" --parallel "$JOBS"
+cmake --install "$ROOT/_obj-GLideN64"
 
 cat <<MSG
 

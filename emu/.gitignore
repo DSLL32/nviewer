@@ -1,0 +1,6 @@
+/install/
+/run/
+/run-*/
+/_obj*/
+**/_obj*/
+*.so
