@@ -6,7 +6,11 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "build:site": "npm run build && npm run docs:build",
     "build:single": "tsc --noEmit && tsx tools/bundle.ts",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "check:layers": "tsx tools/layeraudit.ts",
@@ -21,7 +25,8 @@
     "@types/react-dom": "^19.3.0",
     "tsx": "^4.23.13",
     "typescript": "^7.0.2",
-    "vite": "^8.3.0"
+    "vite": "^8.3.0",
+    "vitepress": "2.0.0-alpha.20"
   },
   "dependencies": {
     "react": "^19.3.0",

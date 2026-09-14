@@ -40,6 +40,12 @@ jobs:
       - name: Build static site
         run: npm run build -- --base "${{ steps.pages.outputs.base_path }}/"
 
+      - name: Build game specifications
+        run: npm run docs:build
+        env:
+          NVIEWER_PAGES_BASE: ${{ steps.pages.outputs.base_path }}
+          NVIEWER_VIEWER_URL: ${{ steps.pages.outputs.base_url }}/
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with:

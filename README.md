@@ -18,6 +18,12 @@ allowlist; it does not upload or enumerate the folder, and it does not cache the
 Firefox does not currently provide this directory-handle API, so source-folder mode requires a
 supporting browser such as Chromium. Normal ROM loading continues to work in Firefox.
 
+## Game specifications
+
+The authoritative ROM format specifications are in [`docs/`](docs/). Run
+`npm run docs:dev` to browse them locally. The GitHub Pages workflow publishes
+them alongside the viewer under `/wiki/`.
+
 ## Run
 
     npm install
