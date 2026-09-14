@@ -8,7 +8,7 @@ import { CUTAWAY_EPSILON, LevelRenderer } from '../render/renderer';
 import { computeStartView, type StartView } from '../render/startView';
 import { SelectionPanel } from './SelectionPanel';
 import { describeSelection, type Selection } from './selectionInfo';
-import { BUILD_TIME, captureFrame, reportEndpointAvailable, sendReport } from './report';
+import { BUILD_TIME, captureFrame, reportDeliveryAvailable, sendReport } from './report';
 import { loadViewState, saveViewState, viewStateKey, type ViewState } from './viewState';
 
 const OBJECT_HIGHLIGHT: [number, number, number] = [1, 0.2, 0.95]; // magenta
@@ -142,7 +142,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
   const [skyPref, setSkyPref] = useState<string>(() => readString(SKY_KEY) ?? '');
   const [showBackdrop, setShowBackdrop] = useState(() => readString(BACKDROP_KEY) !== '0');
   const [helpOpen, setHelpOpen] = useState(true);
-  // Bug reports (report.ts): offered when the dev server's endpoint answers; the last outcome is shown briefly.
+  // Bug reports (report.ts): sent to the dev server when available, otherwise downloaded; the outcome is shown briefly.
   const [reportAvailable, setReportAvailable] = useState(false);
   const [reportStatus, setReportStatus] = useState<{ kind: 'busy' | 'ok' | 'error'; text: string } | null>(null);
   const actionRef = useRef<(a: ControlAction) => void>(() => {});
@@ -743,7 +743,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
 
   useEffect(() => {
     let alive = true;
-    void reportEndpointAvailable().then((ok) => {
+    void reportDeliveryAvailable().then((ok) => {
       if (alive) setReportAvailable(ok);
     });
     return () => {
@@ -875,7 +875,7 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
     };
   };
 
-  // Report the selection (withSelection) or the plain view: describe, capture both frames, send.
+  // Report the selection (withSelection) or the plain view: describe, capture both frames, send or download.
   const submitReport = async (withSelection: boolean) => {
     const engine = engineRef.current;
     if (!engine || !level || reportStatus?.kind === 'busy') return;
@@ -883,13 +883,16 @@ export const Viewport = forwardRef<ViewportHandle, ViewportProps>(function Viewp
     const description = answer?.trim() ?? '';
     if (!description) return;
     const sel = withSelection ? selection : null;
-    setReportStatus({ kind: 'busy', text: 'Sending report…' });
+    setReportStatus({ kind: 'busy', text: 'Preparing report…' });
     try {
       const view = await captureFrame(engine.renderer, engine.camera, false);
       const highlight = sel && sel.kind !== 'marker' ? await captureFrame(engine.renderer, engine.camera, true) : view;
       engine.renderer.dirty = true;
-      const serial = await sendReport(view, highlight, reportDetails(description, withSelection));
-      setReportStatus({ kind: 'ok', text: `Saved report ${String(serial).padStart(4, '0')}` });
+      const result = await sendReport(view, highlight, reportDetails(description, withSelection));
+      setReportStatus({
+        kind: 'ok',
+        text: result.kind === 'server' ? `Saved report ${String(result.serial).padStart(4, '0')}` : `Downloaded report ${result.filename}`,
+      });
     } catch (e) {
       engine.renderer.dirty = true;
       setReportStatus({ kind: 'error', text: `Report not saved: ${e instanceof Error ? e.message : String(e)}` });
