@@ -17,7 +17,5 @@ Verbatim copies of each interrupted research lead's `WIP.md`, taken from
 | `worldisnotenough.md` | The World Is Not Enough | `~/.ai-tmp/r49/twine/` |
 | `banjokazooie.md` | Banjo-Kazooie | `banjo/` |
 | `glover.md` | Glover | `glover/` |
-| `pokemonsnap.md` | Pokémon Snap | `snap/` |
 | `marioparty.md` | Mario Party (J) | `mparty/` |
 | `mariokart64.md` | Mario Kart 64 | `mk64/` |
-| `pilotwings64.md` | Pilotwings 64 | `pilotwings/` |

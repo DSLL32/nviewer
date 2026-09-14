@@ -32,35 +32,21 @@ conversation.
 
 ## In flight at wind-down
 
-- **GoldenEye Citadel collision:** committed as dcabac1. The old float stan
-  format is decoded into the hidden collision layer for "Citadel (unused)".
-  - Checks passed:
-    - tsc in a clean worktree;
-    - hashall (other games identical);
-    - only GoldenEye level 32 changed;
-    - structuredClone loads;
-    - layeraudit reports collision in 33/33.
-  - Not done: an in-app screenshot. The offline top view doesn't show collision
-    on the hub and outer ring, probably because roofs cover them in that view;
-    check it in the app.
-  - Notes: `wip/goldeneye-citadel-collision.md`.
 - **Reports watcher:** turned off at the user's request. Check `reports/` by hand
   for new `NNNN.json` files without a `.done` file, or restart a watcher.
-- **Research, seven games:** each lead writes `WIP.md` in its scratch directory.
+- **Research, five games:** each lead writes `WIP.md` in its scratch directory.
   - Scratch directories:
     - The World Is Not Enough: `~/.ai-tmp/r49/twine/`
     - Banjo-Kazooie: `banjo/`
     - Glover: `glover/`
-    - Pokémon Snap: `snap/`
     - Mario Party (J): `mparty/`
     - Mario Kart 64: `mk64/`
-    - Pilotwings 64: `pilotwings/`
-  - None of the specs is finished or committed.
-  - All seven leads confirmed their `WIP.md` and that nothing is left running
+  - None of these five specs is finished or committed.
+  - All five leads confirmed their `WIP.md` and that nothing is left running
     (2026-09-11, about 22:05).
   - To resume, start a new lead per game from its `WIP.md` and the "Research
     investigations" procedure in AGENTS.md.
-  - Copies of the seven `WIP.md` files as of the wind-down are in
+  - Copies of the five unfinished `WIP.md` files as of the wind-down are in
     `wip/research/<game>.md`. The scratch copy is authoritative if a resumed lead
     updates it, and the paths inside point into the scratch directories.
 
@@ -69,14 +55,8 @@ conversation.
   | The World Is Not Enough | §1–5 and most of §8 proofread; §6, 7, 10 drafts; §11 unused not written | fold in audio findings and corrections, write §11 |
   | Banjo-Kazooie | §0–10 drafted (from `spec/` parts via `assemble.py`), not proofread; §11 unused not written | merge emulator session 2, one short session, relaunch the unused stream |
   | Glover | all sections have content; music evidence, hygiene and open questions still DRAFT; the §6.1 volume claim is wrong | merge findings, one emulator session (sky, boss starts, SECRET CHEAT photos), proofread |
-  | Pokémon Snap | §0–12 written and proofread; §13 unused and §11.6 not written | finish the unused pass, write §13, apply two corrections |
   | Mario Party (J) | §1–9 and §11.1–6 drafted, not proofread; §0, 10, 12 missing | fold in results, audio and visual emulator sessions |
   | Mario Kart 64 | §1–6, 9, 10 drafted; §0, 7, 8, 11–14 placeholders | emulator session for start-grid dumps (debug-menu routes) |
-  | Pilotwings 64 | §1–5 written, music in `part_music.md`; §6–8, 10–14 missing | run the task-level builder, visual then audio emulator sessions |
-
-  Pilotwings found that `libultra.ts` drops 424 hi-hat notes because it doesn't
-  handle velocity layers. The one-line fix affects every game using that player,
-  so re-check their music when it goes in.
 
 ## Dropped
 
