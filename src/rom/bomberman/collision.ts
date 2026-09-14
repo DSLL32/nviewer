@@ -1,4 +1,4 @@
-// Collision overlays for the three Bomberman games (BOMBERMAN.md 5.2.7 Hero, 5.3.11 The Second Attack, 5.4.7
+// Collision overlays for the three Bomberman games (docs/BOMBERMAN.md 5.2.7 Hero, 5.3.11 The Second Attack, 5.4.7
 // Bomberman 64): translucent world-space triangles in a hidden "collision" layer, one mesh per surface type so
 // picking one shows its attribute in the debug info.
 import type { Batch, DebugInfo, Instance, LevelLayer, Mesh } from '../types';
@@ -72,7 +72,7 @@ export function shade(rgb: [number, number, number], type: number): [number, num
 
 export const hex = (v: number) => `0x${v.toString(16)}`;
 
-// ---- The Second Attack: collision file (scene descriptor +0x04), BOMBERMAN.md 5.3.11 ----
+// ---- The Second Attack: collision file (scene descriptor +0x04), docs/BOMBERMAN.md 5.3.11 ----
 
 export interface SaPolygon {
   offset: number; // in the file
@@ -140,7 +140,7 @@ export function saCollisionGroups(c: SaCollision, file: DebugInfo): CollisionGro
   });
 }
 
-// ---- Bomberman Hero: collision planes in the stage blob, BOMBERMAN.md 5.2.7 ----
+// ---- Bomberman Hero: collision planes in the stage blob, docs/BOMBERMAN.md 5.2.7 ----
 
 const HERO_BLOB = 0x802d0000; // load (and link) address of stage blob A
 const HERO_CELL = 960; // 16 x 16 tiles of 60 units
@@ -298,7 +298,7 @@ export function heroCollisionGroups(c: HeroCollision, file: DebugInfo): { top: C
   return { top, under };
 }
 
-// ---- Bomberman 64: attribute grid, BOMBERMAN.md 5.4.7 ----
+// ---- Bomberman 64: attribute grid, docs/BOMBERMAN.md 5.4.7 ----
 
 const CELL = 100; // cell size along x and z, and one layer unit along y
 const FILL = 0x2010; // parser fill and out-of-grid value

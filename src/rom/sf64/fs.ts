@@ -1,5 +1,5 @@
 // Star Fox 64 (US V1.0 and V1.1) file system: the DMA file table, the MIO0 codec, per-version tables in main and
-// the scene structs that map asset files to RSP segments (STARFOX.md §2-§4, §7.5).
+// the scene structs that map asset files to RSP segments (docs/STARFOX.md §2-§4, §7.5).
 import { view } from '../util';
 
 // Addresses in main (RAM) that differ per version.

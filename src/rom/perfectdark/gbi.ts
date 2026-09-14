@@ -1,4 +1,4 @@
-// Perfect Dark display lists (PERFECTDARK.md §4.5, §5.4): Rare's GBI1-family microcode (glide64 "ucode 7", Fast3D /
+// Perfect Dark display lists (docs/PERFECTDARK.md §4.5, §5.4): Rare's GBI1-family microcode (glide64 "ucode 7", Fast3D /
 // F3DEX 1.x numbering) with 12-byte vertices, colour arrays, TRI4 and the file-only C0 texture macro, interpreted into
 // viewer batches. The viewer's displaylist.ts can't run these lists; the combiner fold and the render-mode rules here follow
 // it, with one addition for PD's pass-through forced-blend sky mode.

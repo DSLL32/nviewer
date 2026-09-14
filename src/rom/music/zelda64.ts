@@ -1,5 +1,5 @@
 // The Legend of Zelda: Ocarina of Time and Majora's Mask: the Zelda revision of Nintendo EAD's sequence driver
-// (ZELDA64.md §8), rendered offline. Same family as Star Fox 64 (sf64.ts) and Yoshi's Story (nas.ts): three-level
+// (docs/ZELDA64.md §8), rendered offline. Same family as Star Fox 64 (sf64.ts) and Yoshi's Story (nas.ts): three-level
 // scripts, soundfonts, a note pool with stealing, point-list ADSR, 3 driver updates per video frame and maxTempo 10770,
 // but with the OoT opcode layout (channel arguments from sSeqInstructionArgsTable, 8 IO ports, dynamic tables, LDSEQ,
 // RUNSEQ), sound-effect instruments, random variances, the OoT decay table and vibrato, and the "NEAD OoT/MM" RSP mixer

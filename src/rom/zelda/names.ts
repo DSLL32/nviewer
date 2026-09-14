@@ -1,4 +1,4 @@
-// Level names and sidebar groups (ZELDA64.md §4.3-§4.4: decomp scene names, MM area titles) and actor names
+// Level names and sidebar groups (docs/ZELDA64.md §4.3-§4.4: decomp scene names, MM area titles) and actor names
 // (decomp include/tables/actor_table.h; ids are the same in every version of a game). Generated from the spec.
 
 import type { LevelKind } from '../types';

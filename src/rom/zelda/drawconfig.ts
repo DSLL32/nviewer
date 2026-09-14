@@ -1,4 +1,4 @@
-// Scene draw configs at a static frame (ZELDA64.md §5.4): what segments 6 and 8-0xD hold and the prim/env colours
+// Scene draw configs at a static frame (docs/ZELDA64.md §5.4): what segments 6 and 8-0xD hold and the prim/env colours
 // left set when the room lists draw, separately for the opaque (OPA) and translucent (XLU) display buffers.
 // OoT: the 53 sSceneDrawConfigs functions of z_scene_table.c, keyed by the scene table's drawConfig byte. MM: the
 // scene's AnimatedMaterial list (command 0x1A).

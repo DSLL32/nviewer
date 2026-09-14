@@ -1,4 +1,4 @@
-// Which BG rooms the game can show from where the player can be (PERFECTDARK.md §4.3, §4.8; notes/bg.md §2.6).
+// Which BG rooms the game can show from where the player can be (docs/PERFECTDARK.md §4.3, §4.8; notes/bg.md §2.6).
 //
 // The game draws the camera's room, the rooms its portal walk reaches (bg_tick_portals: a portal is followed when its screen
 // box intersects the current clip box, which then shrinks to the intersection), the sky rooms, and rooms the BG command

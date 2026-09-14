@@ -5,7 +5,7 @@ import type { Batch, BlendMode, Texture, WrapMode } from './types';
 import { view } from './util';
 
 // 'f3d': Fast3D (RSP 2.0G) as GoldenEye stores its lists, with Rare's B1 (four triangles) and C0 (texture number)
-// commands, which the game expands before drawing (GOLDENEYE.md §3.3).
+// commands, which the game expands before drawing (docs/GOLDENEYE.md §3.3).
 export type Ucode = 'f3dex' | 'f3dex2' | 'f3d';
 
 // What a C0 command resolves to: a texture already in DisplayListContext.textures and its level-0 size.
@@ -84,7 +84,7 @@ export interface DisplayListContext {
   // Added to every vertex position before scaling (GoldenEye's room position).
   vertexOffset?: [number, number, number];
 
-  // Zelda 64 (ZELDA64.md §5.3.3): textures are the whole images G_SETTIMG points at instead of the 4 KB RDP texture
+  // Zelda 64 (docs/ZELDA64.md §5.3.3): textures are the whole images G_SETTIMG points at instead of the 4 KB RDP texture
   // memory. The G_SETTILE of render tile 0 or 1 after a G_LOADBLOCK shows that load's image with its format, wrap and
   // shifts; the first G_SETTILESIZE after it gives the image size, later ones only move the window (texture scroll).
   // Texture coordinates are normalised by the image size. G_LOADTLUT writes its entries into a 256-entry TLUT memory

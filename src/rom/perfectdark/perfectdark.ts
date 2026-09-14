@@ -1,4 +1,4 @@
-// Perfect Dark (U) V1.0: levels from the stage table's BG, pads and setup files (PERFECTDARK.md §3, §4, §7).
+// Perfect Dark (U) V1.0: levels from the stage table's BG, pads and setup files (docs/PERFECTDARK.md §3, §4, §7).
 //
 // Space: BG units (world = room position + vertex), right-handed, +Y up, no mirroring. The stages the game draws at half
 // scale (stage table +0x18 = 0.5) are shown unscaled: BG, pads and setups share one space, and only the fog's near/far

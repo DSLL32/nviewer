@@ -1,4 +1,4 @@
-// Perfect Dark setup objects and characters as level instances (PERFECTDARK.md §5, §7.4 step 3): one mesh per model file
+// Perfect Dark setup objects and characters as level instances (docs/PERFECTDARK.md §5, §7.4 step 3): one mesh per model file
 // (characters: per body, head and stand pose), one instance per placed record, in the layers props, doors, glass, weapons,
 // vehicles and characters; spawn and multiplayer pads, pad effects, cutscene cameras and records that can't be drawn as
 // markers in hidden layers. Difficulty Agent.

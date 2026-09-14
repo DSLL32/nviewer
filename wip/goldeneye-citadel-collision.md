@@ -1,6 +1,6 @@
 # GoldenEye: Citadel collision (old-format stan file)
 
-**Committed as dcabac1** (stan.ts and GOLDENEYE.md; the main session checked tsc in a clean worktree). The notes below
+**Committed as dcabac1** (stan.ts and docs/GOLDENEYE.md; the main session checked tsc in a clean worktree). The notes below
 describe the state at wind-down. The only item left is the optional in-app screenshot. In the offline top view, the
 central hub and the outer ring don't show collision, probably because roofs cover them in that view; check it in the
 app if it matters.
@@ -15,7 +15,7 @@ app if it matters.
 - The Citadel (level 32, "Citadel (unused)") now has the usual hidden `collision` layer: 485 tiles, 606 triangles. It has
   the same colours and 2-unit lift as retail, world units at an identity instance, and `triSource` = tile file offset.
   `goldeneye.ts` needed no change: it already calls `collisionBatch` whenever the stan file has tiles.
-- GOLDENEYE.md:
+- docs/GOLDENEYE.md:
   - §4.10: a compact byte layout of the old format, replacing the line "Tbg_cat doesn't follow this layout".
   - §8: the Citadel stan row now says the viewer decodes the file and shows it in the collision layer.
 
@@ -60,7 +60,7 @@ but doesn't describe the name table.
 
 ## Left
 
-- The main session reviews and commits the stan.ts and GOLDENEYE.md hunks.
+- The main session reviews and commits the stan.ts and docs/GOLDENEYE.md hunks.
 - Optional, if wanted: an in-app Playwright screenshot of the Citadel with the collision layer on, from a clean worktree
   build on a free port (not 5174).
 - Skipped by scope: what `w` and b1–b3 mean, tile names in the selection info, deeper link work.
@@ -76,7 +76,7 @@ but doesn't describe the name table.
 
 ## Next steps
 
-1. `git diff src/rom/goldeneye/stan.ts GOLDENEYE.md` and review.
+1. `git diff src/rom/goldeneye/stan.ts docs/GOLDENEYE.md` and review.
 2. Re-run the checks, now all in the repo: `npm run typecheck`; `npm run check:layers -- goldeneye`;
    `npm run check:transfer -- goldeneye`; and `npm run check:hashes` against a baseline from a worktree of HEAD
    (`npx tsx tools/hashall.ts --src <worktree>`).

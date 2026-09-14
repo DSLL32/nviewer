@@ -1,7 +1,7 @@
 // Pokémon Snap (U) soundtrack: all 37 sequences in the game's ALSeqFile, rendered with the
 // stock libultra compressed-MIDI path. Snap replaces each sound's sample volume with a
 // player-wide extra volume controlled by MIDI CC 21; cloning the bank with that value preserves
-// the game's calculation without changing the shared renderer (POKEMONSNAP.md §9).
+// the game's calculation without changing the shared renderer (docs/POKEMONSNAP.md §9).
 import { parseCompressedSequence } from '../music/cseq';
 import { type Bank, parseBank, renderSequence } from '../music/libultra';
 import type { DecodedMusic, MusicTrack } from '../types';

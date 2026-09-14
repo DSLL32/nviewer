@@ -1,4 +1,4 @@
-// Coplanar overlapping room triangles (PERFECTDARK.md §4.11): surfaces the game shows only one of, by back-face culling or by
+// Coplanar overlapping room triangles (docs/PERFECTDARK.md §4.11): surfaces the game shows only one of, by back-face culling or by
 // draw order, but that z-fight in the viewer, which draws BG double-sided by default and depth-tests differently.
 // Resolved as for GoldenEye's BG (goldeneye/bg.ts), following what the game does:
 // - Opposite-facing coplanar overlaps (a wall or floor modelled from both sides, e.g. between two rooms): the lists draw them

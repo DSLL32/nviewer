@@ -4,7 +4,7 @@
 // +8 u32 nKinds, +0xC u32 nObjects, then 32-byte kind records and 76-byte placements. The
 // environment record (lights, fog, clear colour) comes from the world's area-info file (2036 +
 // world, 2045 for battle), the camera from the camera files (2046 + world, 2055 for battle).
-// Some stages draw a 2D backdrop bitmap first (BOMBERMAN.md 5.3.9).
+// Some stages draw a 2D backdrop bitmap first (docs/BOMBERMAN.md 5.3.9).
 import type { Backdrop, CameraView, Game, Instance, Level, LevelInfo, LevelLayer, Mesh, Texture } from '../types';
 import { view } from '../util';
 import { type Archive, bm64saResources } from './archive';

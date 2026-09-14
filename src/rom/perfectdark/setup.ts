@@ -1,4 +1,4 @@
-// Perfect Dark setup files Usetup<code>Z / Ump_setup<code>Z (PERFECTDARK.md §5.3): the props list with its object and
+// Perfect Dark setup files Usetup<code>Z / Ump_setup<code>Z (docs/PERFECTDARK.md §5.3): the props list with its object and
 // character records, and the intro commands.
 //
 // Header: +0x0C intro offset, +0x10 props offset. Props: commands until type 0x34, the low byte of the first word is the

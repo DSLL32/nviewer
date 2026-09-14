@@ -1,4 +1,4 @@
-// GoldenEye 007 (U): the compressed data segment, the file table, text banks and the stage tables (GOLDENEYE.md §1-§2).
+// GoldenEye 007 (U): the compressed data segment, the file table, text banks and the stage tables (docs/GOLDENEYE.md §1-§2).
 //
 // The game code is uncompressed but TLB-mapped; every table lives in one "1172" stream (two tag bytes + raw DEFLATE)
 // that boot inflates to 0x80020D90. Accessors here take those virtual addresses.

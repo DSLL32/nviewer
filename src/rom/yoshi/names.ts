@@ -1,5 +1,5 @@
 // Names from the Yoshi's Story source leak (J cast and world tables matched entry by entry; see
-// YOSHISTORY.md §4.1 and §5.7): cast id (hex) -> actor name, and world table index -> world name.
+// docs/YOSHISTORY.md §4.1 and §5.7): cast id (hex) -> actor name, and world table index -> world name.
 
 const CAST_NAME_TEXT = `
 4001:yoshi 4002:tamago 4003:aim 4004:st_tamago 4005:st_tamago 4006:dummyYoshi 4007:shadow 4008:coinget1

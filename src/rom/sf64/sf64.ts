@@ -1,4 +1,4 @@
-// Star Fox 64 (US V1.0 and V1.1): levels built from the placement lists (STARFOX.md §4-§5).
+// Star Fox 64 (US V1.0 and V1.1): levels built from the placement lists (docs/STARFOX.md §4-§5).
 //
 // Each level is a scene (overlay + up to 15 asset files, one per RSP segment) and a list of 0x14-byte object records.
 // Object display lists carry no render state: the game calls one of 88 presets from main first, so every draw is a

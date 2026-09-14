@@ -1,5 +1,5 @@
 // Perfect Dark global textures: 3,503 entries by number in two codec families, decoded to level-0 RGBA as the RDP samples
-// them (PERFECTDARK.md §4.6).
+// them (docs/PERFECTDARK.md §4.6).
 //
 // A port of the game's loader (tex_load 0x7F172DD0: zlib path 0x7F16E5D8, bit-stream path 0x7F16FBA4) that reproduces the
 // bytes the game writes into its texture pool, game bugs included (texels verified against RDRAM), cut down to level 0:

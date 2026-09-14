@@ -1,4 +1,4 @@
-// GoldenEye 007 (U): levels from the BG, environment, setup and clipping files (GOLDENEYE.md §2, §3, §6).
+// GoldenEye 007 (U): levels from the BG, environment, setup and clipping files (docs/GOLDENEYE.md §2, §3, §6).
 //
 // Space: world units = BG units / the stage scale f0C (every stage at the same scale, about 1 unit per cm); right-handed,
 // +Y up, no mirroring. Each BG room is one mesh centred on the room, placed by a translation (bg.ts RoomGeometry.center).

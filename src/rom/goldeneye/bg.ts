@@ -1,4 +1,4 @@
-// GoldenEye BG files bg/bg_<code>_all_p.seg: the world geometry as rooms (GOLDENEYE.md §3.1-§3.5).
+// GoldenEye BG files bg/bg_<code>_all_p.seg: the world geometry as rooms (docs/GOLDENEYE.md §3.1-§3.5).
 //
 // Stored raw; pointers are segment 0x0F, file-relative. Header: +0 0; +4 rooms; +8 portals; +C visibility commands.
 // Room entries (0x18 bytes, from +0x14): {vertices; primary DL; secondary DL or 0; f32 x, y, z}, each a 1172 stream;

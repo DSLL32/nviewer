@@ -1,5 +1,5 @@
 // Perfect Dark (U) V1.0: the data segment, the file table and names, the stage table, the menu tables and the text banks
-// (PERFECTDARK.md §1-§3).
+// (docs/PERFECTDARK.md §1-§3).
 //
 // Compression is "rarezip 1173": 11 73, a 24-bit big-endian inflated size, then raw DEFLATE (§2.1). The data segment is
 // one such stream that boot inflates to 0x80059FE0; accessors here take those virtual addresses.

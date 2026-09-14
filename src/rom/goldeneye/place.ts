@@ -1,4 +1,4 @@
-// GoldenEye object placement from setup records (GOLDENEYE.md §4.8), in world units (BG units / the stage scale f0C).
+// GoldenEye object placement from setup records (docs/GOLDENEYE.md §4.8), in world units (BG units / the stage scale f0C).
 // Verified against the runtime object structs of 8 stages: rotation × scale matrices exact for standard objects, doors,
 // tinted glass and nearly all monitors; positions exact except where the game stacks objects on other objects.
 //

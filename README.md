@@ -62,56 +62,56 @@ Z shows or hides collision · Shift+F collision wireframe · the View panel can 
   - `rom.ts`, `level.ts`: Rush 2049 file table and level containers
   - `rush1.ts`: Rush (Extreme Racing) file tables and track containers
   - `rushcollision.ts`: both Rush games' collision polygons (hidden overlay layers)
-  - `bomberman/`: the Bomberman games (full format notes in `BOMBERMAN.md`)
+  - `bomberman/`: the Bomberman games (full format notes in `docs/BOMBERMAN.md`)
     - `codecs.ts`, `archive.ts`: LZSS (1 KB and 4 KB rings), Yay0, file archives
     - `container64.ts`, `bm64.ts`, `bmhero.ts`: "64" model containers, Bomberman 64 and Hero levels
     - `niff.ts`, `bm64sa.ts`: NIFF models and The Second Attack scenes
     - `music.ts`: song tables and compressed MIDI
   - `lzari.ts`, `battletanx.ts`, `battletanxga.ts`: BattleTanx and Global Assault (format notes
-    in `BATTLETANX.md`)
-  - `gex/`: Gex 64 and Gex 3 (format notes in `GEX.md`)
+    in `docs/BATTLETANX.md`)
+  - `gex/`: Gex 64 and Gex 3 (format notes in `docs/GEX.md`)
     - `common.ts`: object table, synthetic display lists, Z-up transform, object meshes
     - `gex64.ts`, `gex3.ts`: level tables, render trees, skies, placements
-  - `yoshi/`: Yoshi's Story (format notes in `YOSHISTORY.md`)
+  - `yoshi/`: Yoshi's Story (format notes in `docs/YOSHISTORY.md`)
     - `slide.ts`: the CMPR/SMSR00 slide-LZ codec
     - `yoshi.ts`: world list, tile layers at parallax depths, collision overlay, sprites and markers
     - `yoshicell.ts`: Yoshi's animation cells; `music.ts`: song table; `names.ts`: leak cast and world names
-  - `sf64/`: Star Fox 64 (format notes in `STARFOX.md`)
+  - `sf64/`: Star Fox 64 (format notes in `docs/STARFOX.md`)
     - `fs.ts`: DMA file table, MIO0, scene segment maps, per-version tables, the display-list address space
     - `sf64.ts`: level list, placement lists, render-preset recipes, skeletons, event actors, grounds, Titania
       terrain, environment; `names.ts`: object and event-actor names from the decompilation
-  - `goldeneye/`: GoldenEye 007 (format notes in `GOLDENEYE.md`)
+  - `goldeneye/`: GoldenEye 007 (format notes in `docs/GOLDENEYE.md`)
     - `rom.ts`: data segment, file table, text banks, stage tables; `textures.ts`: the zlib and bit-packed texture codecs
     - `bg.ts`: BG rooms; `environment.ts`: fog, clear colour, sky planes; `setup.ts`, `stan.ts`: setup files, floors
     - `models.ts`, `place.ts`: prop and character models at rest, object placement; `goldeneye.ts`: levels;
       `music.ts`: songs and their loop rules
-  - `pilotwings/`: Pilotwings 64 (USA, Europe and Japan; format notes in `PILOTWINGS64.md`)
+  - `pilotwings/`: Pilotwings 64 (USA, Europe and Japan; format notes in `docs/PILOTWINGS64.md`)
     - `fs.ts`, `tables.ts`: UVRM/TABL filesystem, FORM/MIO0 decoding, task and environment tables
     - `texture.ts`, `model.ts`, `objects.ts`: UVTX textures, UVMD/UVCT/UVTR geometry, UPWT/UPWL objects and paths
     - `environment.ts`, `pilotwings.ts`: island assembly, skies, fog, layers and levels; `music.ts`: songs and loops
-  - `offroad/`: Off Road Challenge (USA and Europe; format notes in `OFFROADCHALLENGE.md`)
+  - `offroad/`: Off Road Challenge (USA and Europe; format notes in `docs/OFFROADCHALLENGE.md`)
     - `fs.ts`: regional file tables, raw file views and RAM-pointer resolution
     - `level.ts`, `texture.ts`: sectors, placements, float meshes, packed-CI4/RGBA16 materials, objects, collision candidates
     - `offroad.ts`: nine tracks and game assembly; `music.ts`: WESS songs and authored loops
-  - `airboarder64/`: Air Boarder 64 (Japan and Europe; format notes in `AIRBOARDER64.md`)
+  - `airboarder64/`: Air Boarder 64 (Japan and Europe; format notes in `docs/AIRBOARDER64.md`)
     - `archive.ts`: regional archive tables and headerless LH5 decoding
     - `course.ts`, `collision.ts`, `objects.ts`, `level.ts`: six courses, selectable challenge setups, course geometry,
       collision and placement objects; `music.ts`: eight old-libmus songs and authored loops
-  - `bugslife/`: A Bug's Life (USA and European localizations; format notes in `BUGSLIFE.md`)
+  - `bugslife/`: A Bug's Life (USA and European localizations; format notes in `docs/BUGSLIFE.md`)
     - `archive.ts`: 488-entry path manifest and RNC1/RNC2 decoding
     - `mesh.ts`, `texture.ts`, `all.ts`, `objects.ts`, `level.ts`: 17 stages, common static meshes, CI textures,
       finite collision, parallax strips and candidate creature markers; `music.ts`: 20 libmus songs and authored loops
-  - `spiderman/`: Spider-Man (USA; format notes in `SPIDERMAN.md`)
+  - `spiderman/`: Spider-Man (USA; format notes in `docs/SPIDERMAN.md`)
     - `fs.ts`: ERZ2 decompression and the eight-group master directory; `model.ts`, `texture.ts`: model shells,
       native render banks and the global texture dictionary
     - `trg.ts`, `level.ts`: campaign, training, demo, restart and hidden-studio views, placements, backgrounds,
       markers and collision candidates; `music.ts`: 36 Sound Tools stem schedules and adaptive profiles
-  - `perfectdark/`: Perfect Dark (format notes in `PERFECTDARK.md`)
+  - `perfectdark/`: Perfect Dark (format notes in `docs/PERFECTDARK.md`)
     - `rom.ts`: data segment, file and stage tables, text; `texture.ts`: the global texture store and its two decoders
     - `gbi.ts`: Perfect Dark's display-list microcode; `bg.ts`: rooms and sky rooms; `environment.ts`: fog, sky planes;
       `pads.ts`: pads and spawns; `setup.ts`, `models.ts`, `anim.ts`, `place.ts`, `objects.ts`: setup records, model
       files, animations (standing poses), placement and object layers; `perfectdark.ts`: levels; `music.ts`: songs
-  - `zelda/`: Ocarina of Time and Majora's Mask (format notes in `ZELDA64.md`)
+  - `zelda/`: Ocarina of Time and Majora's Mask (format notes in `docs/ZELDA64.md`)
     - `fs.ts`, `tables.ts`: build detection, Yaz0 filesystem, code tables; `scene.ts`: scene and room headers
     - `elf.ts`, `source.ts`, `sourceManifest.ts`: bounded MIPS ELF relocation and the explicit bbgames
       hidden-map allowlist/source loader
@@ -281,7 +281,7 @@ Textures are uploaded with the RDP tile commands, not read in place.
 
 ### Bomberman 64, The Second Attack!, Bomberman Hero
 
-`BOMBERMAN.md` documents the formats in full; in short:
+`docs/BOMBERMAN.md` documents the formats in full; in short:
 - **Files.** Bomberman 64 keeps assets in an indexed archive at ROM 0x300000 (1 KB-ring LZSS), The
   Second Attack in a resource block at 0x2A0000 (LZSS or Yay0). Hero's files are 4 KB-ring LZSS
   streams addressed by ROM offset.
@@ -308,7 +308,7 @@ Textures are uploaded with the RDP tile commands, not read in place.
 
 ### BattleTanx, BattleTanx: Global Assault
 
-`BATTLETANX.md` documents the formats in full; in short:
+`docs/BATTLETANX.md` documents the formats in full; in short:
 - **Files.** Both games have uncompressed code with file ranges hard-coded in it; LZARI is the only
   asset codec. Level files hold placements, models and references into raw ROM pools of small
   display-list chunks (texture/render state and geometry) with chunk-relative addresses.
@@ -334,7 +334,7 @@ Textures are uploaded with the RDP tile commands, not read in place.
 
 ### Gex 64: Enter the Gecko, Gex 3: Deep Cover Gecko
 
-`GEX.md` documents the formats in full; in short:
+`docs/GEX.md` documents the formats in full; in short:
 - **Files.** Every compressed file is raw DEFLATE. A level inflates to one image linked at 0x8024B000
   (absolute pointers); objects are relocatable files named in an 8-character object table.
 - **Space.** World units, right-handed with Z up, no mirroring; the viewer turns Z up into Y up.
@@ -367,7 +367,7 @@ Textures are uploaded with the RDP tile commands, not read in place.
 
 ### Yoshi's Story (Japan)
 
-`YOSHISTORY.md` documents the formats in full; in short:
+`docs/YOSHISTORY.md` documents the formats in full; in short:
 - **Files.** No file table: cast and world records are read through segmented pointers (castData at ROM
   0x528430, worldDatabase at 0xB16170), and image records may be CMPR/SMSR00 slide-LZ compressed.
 - **Levels.** A world (one room) lists actors in world pixels; actors 0x8xxx are tile layers (16 × 16 CI8 units
@@ -385,7 +385,7 @@ Textures are uploaded with the RDP tile commands, not read in place.
 
 ### Star Fox 64
 
-`STARFOX.md` documents the formats in full; in short:
+`docs/STARFOX.md` documents the formats in full; in short:
 - **Files.** A DMA table (found by content) lists 64 files, 51 of them MIO0-compressed. A level is a scene: up
   to 15 asset files loaded into RSP segments, whose pointers are segment-relative.
 - **Levels.** Placement lists of 0x14-byte records place scenery, sprites, actors, items and event actors
@@ -405,7 +405,7 @@ Textures are uploaded with the RDP tile commands, not read in place.
 
 ### Perfect Dark
 
-`PERFECTDARK.md` documents the formats in full; in short:
+`docs/PERFECTDARK.md` documents the formats in full; in short:
 - **Files.** Game code is paged from compressed 4 KiB pages; files and sections are "rarezip" streams (`11 73`, a 24-bit
   size, raw DEFLATE). A stage record names its BG, pads and setups.
 - **Levels.** BG files hold rooms (block trees with display lists, 12-byte vertices, colour arrays), portals and
@@ -424,7 +424,7 @@ Textures are uploaded with the RDP tile commands, not read in place.
 
 ### Zelda 64
 
-`ZELDA64.md` documents the formats in full; in short:
+`docs/ZELDA64.md` documents the formats in full; in short:
 - **Detection.** Ocarina of Time and Majora's Mask, retail and debug builds, are found by structure: the `zelda@`
   build string next to the file table, and the scene table's record size.
 - **Levels.** Scenes (with their alternate layers or setups as sub-levels) and rooms, F3DEX2 display lists with
@@ -436,12 +436,12 @@ Textures are uploaded with the RDP tile commands, not read in place.
 - **The 1997 prototype.** The upper half of an F-Zero X development ROM (`F-ZERO X [CFZE].z64`, identified by its MD5)
   holds 52 scenes of a Spaceworld 97-era Ocarina of Time, stored raw without a file table, code, objects, skyboxes or
   audio. They use F3DEX display lists, no palette textures, 12-byte waterboxes and raw RGBA16 prerendered
-  backgrounds; actor ids are shifted by one from 0x24. The level list follows `ZELDA64.md` §11.4, and each room's
+  backgrounds; actor ids are shifted by one from 0x24. The level list follows `docs/ZELDA64.md` §11.4, and each room's
   info names its retail counterpart and how much collision and texture data it shares with it.
 
 ### GoldenEye 007
 
-`GOLDENEYE.md` documents the formats in full; in short:
+`docs/GOLDENEYE.md` documents the formats in full; in short:
 - **Files.** The game code is uncompressed; a compressed data segment holds the tables. Files, rooms, textures and
   songs are "1172" streams: two tag bytes and raw DEFLATE.
 - **Levels.** A BG file is a set of rooms with room-relative vertices and Fast3D display lists with two Rare commands
@@ -461,7 +461,7 @@ Textures are uploaded with the RDP tile commands, not read in place.
 
 ### Off Road Challenge
 
-`OFFROADCHALLENGE.md` documents the formats in full; in short:
+`docs/OFFROADCHALLENGE.md` documents the formats in full; in short:
 - **Files.** Forty-one raw, uncompressed files are accessed through the regional ROM table. One bounded parser supports
   the USA and European releases and resolves their absolute RAM pointers against each file's load address.
 - **Levels.** All nine tracks are shown, including unlockable Flagstaff, El Cajon and Guadalupe. The viewer walks every
@@ -476,7 +476,7 @@ Textures are uploaded with the RDP tile commands, not read in place.
 
 ### Pokémon Snap
 
-`POKEMONSNAP.md` documents the formats in full; in short:
+`docs/POKEMONSNAP.md` documents the formats in full; in short:
 - **Files.** The game has no filesystem: fixed ROM ranges hold overlays and position-dependent segments. The viewer
   resolves each course's load list into one address space. Identified level assets are stored uncompressed; the VPK0
   streams used by menus and the boot intro are outside the course loader.
@@ -494,7 +494,7 @@ Textures are uploaded with the RDP tile commands, not read in place.
 
 ### Spider-Man
 
-`SPIDERMAN.md` documents the formats in full; in short:
+`docs/SPIDERMAN.md` documents the formats in full; in short:
 - **Files.** The 32 MiB USA ROM contains a resident loader, an ERZ2-compressed main image, and an eight-group master
   directory. The viewer decodes and caches logical model, TRG, render-bank, texture and audio files in the browser.
 - **Levels.** The sidebar exposes 34 campaign areas, Bank Approach's alternate, 17 training arenas, four attract demos,

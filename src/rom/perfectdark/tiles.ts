@@ -1,4 +1,4 @@
-// Perfect Dark collision tiles bgdata/bg_<code>_tilesZ (PERFECTDARK.md §4.8): parser and the collision overlay.
+// Perfect Dark collision tiles bgdata/bg_<code>_tilesZ (docs/PERFECTDARK.md §4.8): parser and the collision overlay.
 //
 // File (inflated): u32 room count (BG rooms + 1); u32 offset[count + 1] (file-relative); room r's records span
 // offset[r]..offset[r + 1]. Record {u8 type; u8 vertex count n; u16 flags}:

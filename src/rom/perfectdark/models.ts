@@ -1,4 +1,4 @@
-// Perfect Dark model files P*Z (props), C*Z (bodies and heads) (PERFECTDARK.md §5.4), their tables, and meshes built from
+// Perfect Dark model files P*Z (props), C*Z (bodies and heads) (docs/PERFECTDARK.md §5.4), their tables, and meshes built from
 // their display lists with gbi.ts.
 //
 // Pointers are 0x05000000 + file offset. Header: +0 ptr root node; +4 u32 skeleton; +0x0E s16 matrix slots. Node (0x18):

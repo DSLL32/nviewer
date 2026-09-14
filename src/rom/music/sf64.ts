@@ -1,5 +1,5 @@
 // Star Fox 64 (US V1.0 and V1.1) soundtrack: 43 tracks from the 44 music sequences, rendered offline with a port of the game's audio
-// engine, Nintendo EAD's sequence driver between Super Mario 64 and Ocarina of Time (STARFOX.md §6). Three-level scripts
+// engine, Nintendo EAD's sequence driver between Super Mario 64 and Ocarina of Time (docs/STARFOX.md §6). Three-level scripts
 // (sequence player, channel, layer), a note pool shared by priority with stealing, point-list ADSR, vibrato, and the
 // "NEAD SF" RSP mixer: VADPCM, the 4-tap resampler, HILOGAIN, 8-sample linear volume ramps with 16-bit clamping on every
 // add, and each audio spec's delay-line reverbs. Ported from the research renderer, whose sequence state matches game

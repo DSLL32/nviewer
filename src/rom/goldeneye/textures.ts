@@ -1,5 +1,5 @@
 // GoldenEye textures: the global table of 2,698 entries in two codec families, decoded to level-0 RGBA
-// (GOLDENEYE.md §3.4). A port of the game's loader 0x7F0CBC18, verified texel-exact against RAM; only level 0 is
+// (docs/GOLDENEYE.md §3.4). A port of the game's loader 0x7F0CBC18, verified texel-exact against RAM; only level 0 is
 // decoded (mip levels are stored after it or generated from it and never change it).
 //
 // Entry byte 0: bit 6 = zlib path (CI formats), bit 7 = all mip levels stored, low 6 bits = level count.

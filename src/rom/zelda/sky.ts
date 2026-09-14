@@ -1,4 +1,4 @@
-// Skyboxes as camera-centred Sky meshes (ZELDA64.md §7.1-§7.2; z_vr_box.c). The game blends two CI8 textures by a
+// Skyboxes as camera-centred Sky meshes (docs/ZELDA64.md §7.1-§7.2; z_vr_box.c). The game blends two CI8 textures by a
 // constant (and MM tints the result with prim/env colours): the viewer bakes that into one texture per face. Skies are
 // opaque in game; the baked textures get alpha 255 because the viewer blends sky meshes.
 import { decodeRows, ImFmt, ImSiz, Tlut } from '../texture';

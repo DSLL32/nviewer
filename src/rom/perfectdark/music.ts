@@ -1,5 +1,5 @@
 // Perfect Dark (U V1.0) soundtrack: 117 of the 119 music sequences (0 is 400 s of silence, 95 a single test note),
-// rendered with libultra.ts. The game uses libultra's n_audio (PERFECTDARK.md §6.1): one ALBankFile instrument bank and
+// rendered with libultra.ts. The game uses libultra's n_audio (docs/PERFECTDARK.md §6.1): one ALBankFile instrument bank and
 // the compressed-MIDI player n_alCSPlayer, whose envelope mixer takes the voice volume linearly rather than squared
 // and ramps it linearly (n_env.c _getRate), which keeps slow attacks and long releases audible.
 // Ported from the research prototype, whose renders match captured game audio in tempo, pitch and level (§6.5). Tracks

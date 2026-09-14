@@ -3,7 +3,7 @@
 Resume file for the Pilotwings 64 (N64, USA) research investigation for the viewer at `/home/n64/nviewer`. The rules are
 in "Research investigations" in `/home/n64/nviewer/AGENTS.md`. The repo is read-only for this investigation.
 - **Workspace:** `/home/n64/.ai-tmp/r49/pilotwings/`.
-- **Deliverable:** `PILOTWINGS64.md` in the workspace.
+- **Deliverable:** `docs/PILOTWINGS64.md` in the workspace.
 - **Limits set by the user:** at most 3 subagents at a time (including sub-subagents), at most one emulator at a time,
   and each emulator session in a fresh subagent with its own run directory under the workspace. Subagents are told
   not to spawn agents.
@@ -13,7 +13,7 @@ in "Research investigations" in `/home/n64/nviewer/AGENTS.md`. The repo is read-
 `BRIEF.md` is the shared brief every subagent reads first: rules, ROM md5s, known facts, and agent A's results. Keep
 it current when resuming.
 
-## 1. State of PILOTWINGS64.md
+## 1. State of docs/PILOTWINGS64.md
 
 | section | state |
 |---|---|
@@ -33,7 +33,7 @@ it current when resuming.
 | 13 Open questions | **missing** |
 | 14 Unused and hidden content | **missing**; agent F (and music.md §7) |
 
-The planned structure follows STARFOX.md: 0 glance, 1 ROM, 2 boot, 3 fs, 4 levels, 5 geometry, 6 environment,
+The planned structure follows docs/STARFOX.md: 0 glance, 1 ROM, 2 boot, 3 fs, 4 levels, 5 geometry, 6 environment,
 7 objects, 8 collision, 9 music, 10 versions, 11 mapping, 12 verification, 13 open questions, 14 unused.
 Proofreading is still to be done for the whole document.
 

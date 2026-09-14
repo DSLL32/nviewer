@@ -79,7 +79,7 @@ const MODEL_FIELD: Record<number, number> = {
   0: 2, 1: 2, 2: 2, 11: 2, 14: 2, 22: 2, 34: 2, 35: 2, 43: 2, 44: 2, 12: 4, 13: 12,
   3: 2, 4: 2, 5: 2, 10: 2, 15: 2, 21: 2, 24: 2, 26: 6, 28: 2, 29: 2, 31: 2, 32: 2, 36: 2, 40: 2,
 };
-// Layers of the drawn objects by kind, split along their collision (BATTLETANX.md 5.1.4): the surface boxes and flat
+// Layers of the drawn objects by kind, split along their collision (docs/BATTLETANX.md 5.1.4): the surface boxes and flat
 // ground, scenery that registers nothing, walls, see-through fences, the 5000-high edge walls and the spawned objects.
 const LAYERS: KindLayer[] = [
   { name: 'terrain', kind: 'main', kinds: [2, 11, 22, 34, 44] },
@@ -367,7 +367,7 @@ function loadLevel(rom: Uint8Array, index: number): Level {
   return level;
 }
 
-// Collision (BATTLETANX.md 5.1.4): a flat list of boxes (40-byte entries at 0x803978E0), added by the spawn switch
+// Collision (docs/BATTLETANX.md 5.1.4): a flat list of boxes (40-byte entries at 0x803978E0), added by the spawn switch
 // through 0x800B1898. Model-based entries take the model's bounds at the placement (vertical span y + minY .. y + maxY),
 // kind 30 its own box relative to the placement. No triangle collision or heightfield: platform, mound and ramp boxes
 // give the ground height.

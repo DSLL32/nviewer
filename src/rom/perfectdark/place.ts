@@ -1,4 +1,4 @@
-// Perfect Dark object placement (PERFECTDARK.md §5.5): setup record + pad + model box → the world matrix the game gives a
+// Perfect Dark object placement (docs/PERFECTDARK.md §5.5): setup record + pad + model box → the world matrix the game gives a
 // prop (setup 0x7F00CEE4, objInit 0x7F06A730 / 0x7F06AB60), a door (0x7F00E368) or a character (0x7F02D4FC). Matrices are
 // column-major (model units → world), world = BG units.
 import type { Box, M4 } from './models';

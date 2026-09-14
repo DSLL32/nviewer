@@ -68,7 +68,7 @@ export const BATTLETANX_LEVELS: LevelInfo[] = DEFS.map((d, index) => ({ index, n
 const MARKER_KINDS = new Set([10, 21, 22, 23, 24, 25]);
 const PLAYER_START = 25;
 
-// Collision (BATTLETANX.md 5.1.3). At load the object handlers (table 0x800718D8) insert one entry per collidable
+// Collision (docs/BATTLETANX.md 5.1.3). At load the object handlers (table 0x800718D8) insert one entry per collidable
 // object into the grid (0x80106D18; 1300 entries at 0x803B8248): the hdr3 footprint of its model, grown by `margin`,
 // at the truncated (x, z), turned by the yaw like the draw matrix. Tanks query entries with grid flag 0x10, shells 0x04.
 type CollisionClass = 'static' | 'destructible' | 'low' | 'tankOnly' | 'passable' | 'conditional';
@@ -93,7 +93,7 @@ const COLLISION_CLASSES: { cls: CollisionClass; label: string; color: [number, n
 // Overlay prisms stand this far outside the footprint and above the model, so they do not z-fight with its faces.
 const COLLISION_GROW = 1;
 
-// Layers of the drawn objects by kind (BATTLETANX.md 5.1.2), split along how the game treats them: the ground (draw
+// Layers of the drawn objects by kind (docs/BATTLETANX.md 5.1.2), split along how the game treats them: the ground (draw
 // pass 0, never collides), static collision, scenery without collision, the destructible and tank-only kinds.
 const LAYERS: KindLayer[] = [
   { name: 'ground', kind: 'main', kinds: [0, 16, 17] },

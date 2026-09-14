@@ -1,4 +1,4 @@
-// Perfect Dark BG files bgdata/bg_<code>.seg: the world geometry as rooms (PERFECTDARK.md §4.2-§4.4, §4.9, §4.11).
+// Perfect Dark BG files bgdata/bg_<code>.seg: the world geometry as rooms (docs/PERFECTDARK.md §4.2-§4.4, §4.9, §4.11).
 //
 // Container (read in parts by the game): +0 u32 primary inflated size P; +4 u32 S1 = bytes from +0x0C to section 2;
 // +8 u32 primary stream length; +0x0C the primary data (a 1173 stream); then one 1173 stream per room, room r at

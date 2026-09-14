@@ -1,4 +1,4 @@
-// GoldenEye setup files: Usetup<code>Z (solo) and Ump_setup<code>Z (multiplayer), inflated (GOLDENEYE.md §4.1-§4.4).
+// GoldenEye setup files: Usetup<code>Z (solo) and Ump_setup<code>Z (multiplayer), inflated (docs/GOLDENEYE.md §4.1-§4.4).
 //
 // The header is ten u32 file offsets. Pads are in BG units (the game divides positions and boxes by the stage scale
 // f0C at load). Object records are variable-sized by type (byte +3) and end with type 0x30, which is followed by the

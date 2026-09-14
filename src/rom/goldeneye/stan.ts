@@ -1,5 +1,5 @@
 // GoldenEye clipping ("stan") files Tbg_<code>_all_p_stanZ: the walkable floor as convex polygon tiles, for floor
-// heights under objects and the start camera (GOLDENEYE.md §4.10). Coordinates are s16 BG units.
+// heights under objects and the start camera (docs/GOLDENEYE.md §4.10). Coordinates are s16 BG units.
 //
 //   +00 u32 0; +04 u32 sectionOffset[] … 0      tiles run contiguously from the first section to the file end
 //   tile (8 + 8n bytes): u32 id << 8 | room; u16 flags; u16 n << 12 | i0 << 8 | i1 << 4 | i2
@@ -48,7 +48,7 @@ export function parseStan(b: Uint8Array): Stan {
     });
     o += 8 + 8 * n;
   }
-  // Older format, only in the Citadel's Tbg_cat (GOLDENEYE.md §4.10): u32 0; u32 0xC; u32 0; then tiles
+  // Older format, only in the Citadel's Tbg_cat (docs/GOLDENEYE.md §4.10): u32 0; u32 0xC; u32 0; then tiles
   //   {u32 name (file offset of an 8-byte string, "p502a2" …); u16 flags; u16 room; u8 n; u8 i0, i1, i2;
   //    n × {f32 x, y, z (BG units); u32 link (file offset of the neighbour tile across edge k → k+1, 0 = none)}}
   // up to an all-zero record, followed by the table of names. The retail layout reads no tiles from it.

@@ -1,4 +1,4 @@
-// Perfect Dark environment records: fog, clear colour and the code-drawn cloud and water planes (PERFECTDARK.md §4.9).
+// Perfect Dark environment records: fog, clear colour and the code-drawn cloud and water planes (docs/PERFECTDARK.md §4.9).
 //
 // envChoose (0x7F165D40) looks the stage up in the fog table, else in the no-fog table (else its default record, id -1).
 //   fog table 0x80081164 (0x2C bytes, s16 id, zero-terminated):

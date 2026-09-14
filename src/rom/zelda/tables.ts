@@ -1,4 +1,4 @@
-// Tables in `code`, all found by structure (ZELDA64.md §2, §5.1.1, §5.4, §6.1, §7): the scene table (its record size
+// Tables in `code`, all found by structure (docs/ZELDA64.md §2, §5.1.1, §5.4, §6.1, §7): the scene table (its record size
 // tells OoT from MM), object and actor overlay tables, the OoT day/night texture pointers, sky and area texture files.
 import { type ZeldaFile, type ZeldaFs } from './fs';
 

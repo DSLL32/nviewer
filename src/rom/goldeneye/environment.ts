@@ -1,4 +1,4 @@
-// GoldenEye environment records: fog, clear colour and the code-drawn cloud and water planes (GOLDENEYE.md §3.6).
+// GoldenEye environment records: fog, clear colour and the code-drawn cloud and water planes (docs/GOLDENEYE.md §3.6).
 //
 // Table A 0x80044E10 (0x5C bytes, zero-terminated):
 //   +00 s32 id; +04 f32 near; +08 f32 far (render units); +20/+24 s32 fog min/max; +28 u8 r, g, b; +2B u8 sky on;

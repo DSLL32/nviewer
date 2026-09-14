@@ -2,14 +2,14 @@
 
 Paused on the coordinator's instruction. This file lets the research resume without the conversation. Everything lives under `/home/n64/.ai-tmp/r49/snap/`. The repo `/home/n64/nviewer` was only read; nothing was changed or committed there.
 
-The task (from the user, via the coordinator): follow the "Research investigations" section of `/home/n64/nviewer/AGENTS.md` and `EMULATOR.md`. The deliverable is `POKEMONSNAP.md` (US ROM `/data/software/ai-scratch/Pokemon Snap (U) [!].z64`, md5 fc3c9329b7cdd67cf7650abf63b9a580). Constraints:
+The task (from the user, via the coordinator): follow the "Research investigations" section of `/home/n64/nviewer/AGENTS.md` and `EMULATOR.md`. The deliverable is `docs/POKEMONSNAP.md` (US ROM `/data/software/ai-scratch/Pokemon Snap (U) [!].z64`, md5 fc3c9329b7cdd67cf7650abf63b9a580). Constraints:
 - at most 3 subagents at a time, and at most one emulator at a time;
 - each emulator session in a fresh subagent with its own run directory, stopped at the end, with a check for leftover processes;
 - every claim labelled verified (and how) or hypothesis;
 - an unused and hidden content section after the rest of the spec is done;
 - report only once the spec is proofread and every subagent has finished.
 
-## 1. State of POKEMONSNAP.md
+## 1. State of docs/POKEMONSNAP.md
 
 | section | state |
 |---|---|
@@ -69,8 +69,8 @@ Not yet done: §13, the §0 unused row, §11.6, a final proofread of those addit
 
 ## 3. Open questions and hypotheses
 
-The full list is POKEMONSNAP.md §12. The most important:
-- (answered by the unused pass: 0xAE0510 is Snap Station preset photo data; 0xAAA610 is a dead anti-piracy check. POKEMONSNAP.md §3, §4.1 and §12.1 still say "unknown" and must be updated);
+The full list is docs/POKEMONSNAP.md §12. The most important:
+- (answered by the unused pass: 0xAE0510 is Snap Station preset photo data; 0xAAA610 is a dead anti-piracy check. docs/POKEMONSNAP.md §3, §4.1 and §12.1 still say "unknown" and must be updated);
 - the roles of scene 24 (`unk_end_level_8`) and `unk_segment_AA18E0` (Snap Station printing is a hypothesis);
 - which credits variant goes with which completion flag; which of songs 11 and 36 is the first ending;
 - (answered: the 0x80280xxx words are flame texture pixels; J `cave_assets` differs only in the Cave opening rail camera script, 53 words);
@@ -151,7 +151,7 @@ Unfinished, in its notes' order:
 ## 9. Prioritised next steps
 
 1. Finish the unused and hidden content pass from `notes/unused.md`, resuming at the unfinished items in §8. Optionally check community leads (TCRF) and verify each against ROM bytes.
-2. Write POKEMONSNAP.md §13 and the §0 unused row from `notes/unused.md`. Correct §3 (0xAAA610 row: a dead anti-piracy check), §4.1 (0xAE0510 row: Snap Station preset photos), §1.1/§12.1 (E does not differ in 0xAE0510; the J cave difference is a camera script), and §12 (remove the answered questions).
+2. Write docs/POKEMONSNAP.md §13 and the §0 unused row from `notes/unused.md`. Correct §3 (0xAAA610 row: a dead anti-piracy check), §4.1 (0xAE0510 row: Snap Station preset photos), §1.1/§12.1 (E does not differ in 0xAE0510; the J cave difference is a camera script), and §12 (remove the answered questions).
 3. Add §11.6 emulator hygiene: runs in `mus/run-mus` (stopped with pkill -F, checked) and `rt/run-rt` (stopped with quit, checked); the unused pass ran no emulator; add the lead's final `pgrep` check (at pause time: none from `r49/snap`).
 4. Proofread the additions, then report to the coordinator: formats, difficulty, notable unused content, hygiene.
 5. Optional depth: decode the opening's landscape in `main_menu_vpk0` (DObj trees, a possible extra level) and Rainbow Cloud's intro camera; check the Butterfree path over time and Tunnel props 1012/1013 in RAM.

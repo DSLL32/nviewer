@@ -1,4 +1,4 @@
-// Perfect Dark pads (bgdata/bg_<code>_padsZ) and the setup intro's spawn pads (PERFECTDARK.md §5.2, §5.3, §5.5).
+// Perfect Dark pads (bgdata/bg_<code>_padsZ) and the setup intro's spawn pads (docs/PERFECTDARK.md §5.2, §5.3, §5.5).
 //
 // Pads file: +0 s32 pad count; +4 s32 cover count; +8/+C/+10 s32 waypoint, waygroup, cover offsets; +14 u16 pad offsets.
 // Pad (padUnpack 0x7F115A30): u32 header, flags = header >> 14, room = sign-extended bits 13..4 (always -1 in the ROM),

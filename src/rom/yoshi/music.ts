@@ -1,7 +1,7 @@
 // Yoshi's Story (J) soundtrack: 61 music sequences for the EAD "Nas" driver (sequence 0 is sound effects).
 // Tables in the code image: Audiobank 0xB9E80, sequence -> bank map 0xBA270, Audioseq 0xBA370, sample banks
 // 0xBA760; 32 kHz, 3 driver updates per video frame. Names are the source leak's NA_SCENE_* scene names; the
-// uses come from world records, event constants in code and RAM at run time (YOSHISTORY.md §7.4).
+// uses come from world records, event constants in code and RAM at run time (docs/YOSHISTORY.md §7.4).
 import { type NasConfig, nasRenderer } from '../music/nas';
 import type { DecodedMusic, MusicTrack } from '../types';
 

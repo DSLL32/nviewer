@@ -1,7 +1,7 @@
 // Nintendo EAD "Nas" sound driver (VerH, the Super Mario 64 / Ocarina of Time family), rendered offline:
 // three-level sequence scripts (sequence -> channel -> layer), instrument banks with drum kits, VADPCM
 // samples, point-list envelopes, vibrato, squared volume and equal-power pan, mixed with the RSP 4-tap
-// resampler. Ported from the Yoshi's Story research renderer (YOSHISTORY.md §7), whose semantics follow
+// resampler. Ported from the Yoshi's Story research renderer (docs/YOSHISTORY.md §7), whose semantics follow
 // the driver code; tempo and loop points match captured game audio.
 import type { DecodedMusic } from '../types';
 import { view } from '../util';

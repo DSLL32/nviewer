@@ -1,4 +1,4 @@
-// Zelda 64 filesystem (ZELDA64.md §1-§3): the `zelda@` build string, the dmadata file table after it, Yaz0 and the
+// Zelda 64 filesystem (docs/ZELDA64.md §1-§3): the `zelda@` build string, the dmadata file table after it, Yaz0 and the
 // Master Quest debug ROM's file name table. Game data addresses files by VROM ({vromStart, vromEnd} pairs).
 
 export interface ZeldaBuild {

@@ -1,4 +1,4 @@
-// The Legend of Zelda: Ocarina of Time and Majora's Mask soundtracks (ZELDA64.md §8, §9.4), rendered with
+// The Legend of Zelda: Ocarina of Time and Majora's Mask soundtracks (docs/ZELDA64.md §8, §9.4), rendered with
 // music/zelda64.ts from Audiobank / Audioseq / Audiotable (dmadata files 3-5) and the `code` file. The game comes from
 // the scene table's record size (tables.ts); the four supported ROMs (OoT US 1.0, OoT Master Quest debug, MM US, MM
 // debug PAL) share the sequence ids, names and settings below.

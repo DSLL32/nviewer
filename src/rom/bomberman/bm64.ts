@@ -3,7 +3,7 @@
 // Every stage area is a code overlay that loads its map container from the asset archive
 // (ROM 0x300000) and sets up the scene: extra map parts, fog, clear colour, light
 // direction/colour and a 2D background picture. Those calls are hard-coded in the
-// overlays, so the tables below list their arguments (see BOMBERMAN.md 4.1 and 5.4).
+// overlays, so the tables below list their arguments (see docs/BOMBERMAN.md 4.1 and 5.4).
 // Map vertices are world coordinates (scale 1, right-handed, Y up).
 import type { DlLighting } from '../displaylist';
 import type { Backdrop, CameraView, Game, Instance, Level, LevelInfo, LevelLayer, Marker, Mesh, Texture } from '../types';

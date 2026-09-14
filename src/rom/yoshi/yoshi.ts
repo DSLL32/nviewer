@@ -1,4 +1,4 @@
-// Yoshi's Story (Japan, NYSJ revision 0): a side-scroller built from 2D tile layers (YOSHISTORY.md).
+// Yoshi's Story (Japan, NYSJ revision 0): a side-scroller built from 2D tile layers (docs/YOSHISTORY.md).
 //
 // Assets are read piecemeal through segmented pointers: 0x03xxxxxx = castData at ROM 0x528430, 0x04xxxxxx =
 // worldDatabase at ROM 0xB16170. A world (one room) has a 0x118-byte record, a scene table and 12-byte actor
@@ -40,7 +40,7 @@ const US_TITLES = [
 const PAGE_THEMES = ['Grassland', 'Cave', 'Mountain', 'Jungle', 'Sea', 'Castle'];
 
 // Worlds of each course in play order: the start world, its areas and rooms, then worlds of the course that
-// no exit reaches (boss arenas and rooms entered by code). YOSHISTORY.md §4.4.
+// no exit reaches (boss arenas and rooms entered by code). docs/YOSHISTORY.md §4.4.
 const range = (a: number, b: number) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
 const COURSE_WORLDS: number[][] = [
   [43, 81], [51, 85, 148], [13, 104, 119, 160], [18, 90, 91, 92, 152],

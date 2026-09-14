@@ -1,4 +1,4 @@
-// Perfect Dark animations (PERFECTDARK.md §5.6): the ROM table, per-part headers, bit-packed frames, and the joint
+// Perfect Dark animations (docs/PERFECTDARK.md §5.6): the ROM table, per-part headers, bit-packed frames, and the joint
 // matrices of lib model.c for one frame, plus the stand animation chrStand (0x7F02E6DC) gives a character.
 //
 // Table ROM 0x7CD1A0: u32 count, then 12-byte records {u16 frames; u16 bytes per frame; u32 data offset (from ROM

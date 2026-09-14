@@ -1,4 +1,4 @@
-// GoldenEye 007 models: props (P*Z), characters and heads (C*Z) as meshes in their rest pose (GOLDENEYE.md §4.5-§4.7).
+// GoldenEye 007 models: props (P*Z), characters and heads (C*Z) as meshes in their rest pose (docs/GOLDENEYE.md §4.5-§4.7).
 //
 // The ModelFileHeader lives in the data segment (+0C s16 numSwitches, +0E s16 numMatrices, +16 s16 numTextures). The
 // file holds numSwitches u32 slots and numTextures 12-byte texture records, then the nodes, rodata, vertices and display

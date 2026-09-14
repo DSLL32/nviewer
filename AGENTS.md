@@ -21,19 +21,19 @@ When asked to investigate a game (ROM formats for the viewer):
  - At most one emulator session may be live per game investigation, including
    sessions launched by nested agents. Emulator tasks run serially, with
    process cleanup verified before the next session starts.
- - Deliverable: `<GAME>.md`, structured like the existing specs (`STARFOX.md`,
-   `GOLDENEYE.md`, `ZELDA64.md`): ROM identification and versions, filesystem
-   and compression, level list, geometry and textures, environment (fog, sky,
-   camera), objects, music (every game gets a music player: driver, song list,
-   loops), mapping onto `src/rom/` with difficulty, verification evidence, open
-   questions. Label every claim verified (and how: ROM bytes, disassembly, RAM,
-   frames, audio) or hypothesis.
+ - Deliverable: `docs/<GAME>.md`, structured like the existing specs
+   (`docs/STARFOX.md`, `docs/GOLDENEYE.md`, `docs/ZELDA64.md`): ROM identification
+   and versions, filesystem and compression, level list, geometry and textures,
+   environment (fog, sky, camera), objects, music (every game gets a music
+   player: driver, song list, loops), mapping onto `src/rom/` with difficulty,
+   verification evidence, open questions. Label every claim verified (and how:
+   ROM bytes, disassembly, RAM, frames, audio) or hypothesis.
  - Unless told otherwise, finish the spec first, then surface unused and hidden
    content (cut levels, debug features, unreferenced assets, text, music) in
    its own section.
  - The lead reports only when the spec is proofread and every subagent has
-   finished. The main session then copies the spec into the repo, commits it,
-   relays the findings and checks for leftover processes.
+   finished. The main session then copies the spec to `docs/<GAME>.md`, commits
+   it, relays the findings and checks for leftover processes.
 
 # Implementing a game
 
@@ -89,10 +89,10 @@ repo root (or `$NVIEWER_REPORTS_DIR`), ignored by git:
 
 `~/.ai-tmp/r49` is a symlink to `~/.ai-tmp/4e5bcc90-63d3-4729-b96c-d3f32b8822ea`;
 either path works. Each research directory holds the lead's working copy of the
-spec (the repo copy is authoritative once committed), extracted files, notes,
-tools, emulator run directories and captures.
+spec (the copy under `docs/` is authoritative once committed), extracted files,
+notes, tools, emulator run directories and captures.
 
-Implemented (spec in the repo):
+Implemented (spec under `docs/`):
 
 | Game | Research | Other |
 |---|---|---|
@@ -111,13 +111,13 @@ Implemented (spec in the repo):
 | Pokémon Snap | `r49/snap/` | |
 | Zelda 64 (OoT, MM, 1997 alpha) | `r49/zelda/` (alpha in `zelda/alpha/`) | |
 
-Research complete (spec in the repo, implementation pending):
+Research complete (spec under `docs/`, implementation pending):
 
 | Game | Research |
 |---|---|
 | Pilotwings 64 | `r49/pilotwings/` |
 
-Research in progress (spec not yet in the repo):
+Research in progress (spec not yet under `docs/`):
 
 | Game | Research |
 |---|---|
@@ -138,8 +138,9 @@ Shared:
    build output and an old copy of `src/rom`.
  - `r49/yoshicol/`: abandoned (Yoshi's Story collision gaps, not pursued).
 
-New research goes in `r49/<game>/`; add it to this list when it starts, and move
-it to the implemented table when its loader lands.
+New research goes in `r49/<game>/`; add it to this list when it starts. Move it
+to "Research complete" when its proofread spec is committed as `docs/<GAME>.md`,
+then to "Implemented" when its loader lands.
 
 # Techniques
 

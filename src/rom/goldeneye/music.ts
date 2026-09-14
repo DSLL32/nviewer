@@ -1,5 +1,5 @@
 // GoldenEye 007 (U) soundtrack: 59 of the 63 music sequences (0, 20, 30 and 39 are silent stubs), rendered with
-// libultra.ts. The game uses stock libultra audio (GOLDENEYE.md §5): one ALBankFile instrument bank and the
+// libultra.ts. The game uses stock libultra audio (docs/GOLDENEYE.md §5): one ALBankFile instrument bank and the
 // compressed-MIDI sequence player alCSPlayer (tracks loop independently, music/cseq.ts), so only the sequence
 // container and the song list are its own. Ported from the research prototype, whose renders match captured game audio
 // in tempo, pitch and level (§5.6).
