@@ -113,6 +113,7 @@ Research complete (spec in the repo, implementation pending):
 | Game | Research |
 |---|---|
 | Pilotwings 64 | `r49/pilotwings/` |
+| Spider-Man | `r49/spiderman/` |
 
 Research in progress (spec not yet in the repo):
 
@@ -123,7 +124,6 @@ Research in progress (spec not yet in the repo):
 | Glover | `r49/glover/` |
 | Mario Party (J) | `r49/mparty/` |
 | Mario Kart 64 | `r49/mk64/` |
-| Spider-Man | `r49/spiderman/` |
 | Stunt Racer 64 | `r49/stuntracer64/` |
 
 Shared:
