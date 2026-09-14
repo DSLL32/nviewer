@@ -119,7 +119,8 @@ Z shows or hides collision · Shift+F collision wireframe · the View panel can 
   - `levelstats.ts rom.z64 [sheetDir]`: parse all levels, print stats, write texture contact sheets
   - `extract.ts rom.z64 outDir`: dump every decompressed asset file (Rush 2049 only)
   - checking scripts, over every supported ROM (`roms.ts`; the ROM directory is `$NVIEWER_ROMS`,
-    default `/data/software/ai-scratch`; each takes optional ROM name filters):
+    default `/data/software/ai-scratch`; each takes optional ROM name filters and `--jobs N` for
+    bounded per-ROM parallelism, with deterministic output; the default is one job and the maximum is 32):
     - `npm run check:hashes` (`hashall.ts`): hash every level of every game, to show that a change to
       one loader leaves the others bit-identical. `--src <checkout>` loads the loaders from another
       checkout, e.g. a worktree of HEAD, for the baseline.
