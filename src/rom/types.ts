@@ -76,6 +76,7 @@ export interface Instance {
   name: string;
   mesh: number; // index into Level.meshes, -1 when no object of that name exists
   matrix: Float32Array; // 4x4 column-major, object -> world
+  billboard?: 'y'; // rotate about world Y each frame so the local front faces the camera
   animated?: boolean; // scripted object, shown at the start of its motion path
   noFog?: boolean; // the game draws this instance without fog, even when the level has fog
   info?: DebugInfo;
