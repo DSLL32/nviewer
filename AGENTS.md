@@ -107,6 +107,7 @@ Implemented (spec under `docs/`):
 | Air Boarder 64 | `r49/airboarder64/` | |
 | A Bug's Life | `r49/bugs_life/` | |
 | Spider-Man | `r49/spiderman/` | |
+| Mario Kart 64 | `r49/mk64/` | archive course audit: `r49/mk64/archive_cut/` |
 | Perfect Dark | `r49/pd/` | |
 | Pokémon Snap | `r49/snap/` | |
 | Zelda 64 (OoT, MM, 1997 alpha) | `r49/zelda/` (alpha in `zelda/alpha/`) | |
@@ -116,7 +117,6 @@ Research complete (spec under `docs/`, implementation pending):
 | Game | Research |
 |---|---|
 | Pilotwings 64 | `r49/pilotwings/` |
-| Mario Kart 64 | `r49/mk64/` |
 
 Research in progress (spec not yet under `docs/`):
 

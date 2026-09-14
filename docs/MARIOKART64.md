@@ -1,6 +1,6 @@
 # Mario Kart 64 (N64, USA): ROM format specification for the level viewer
 
-This document specifies everything needed to add *Mario Kart 64* to the viewer:
+This document specifies the *Mario Kart 64* formats used by the viewer and records the implemented representation:
 
 - ROM identification, code layout, and how assets are located (there is no file table) with the MIO0 codec;
 - the course list and how a course is loaded;
@@ -37,6 +37,7 @@ This document specifies everything needed to add *Mario Kart 64* to the viewer:
 | `mus/` | music: prototype renderer and WAVs |
 | `mus2/` | comparison of existing game audio with the offline renderer |
 | `unused2/` | final unused/hidden-content audit |
+| `archive_cut/` | bbgames/Kimura non-retail and alternate-course audit |
 | `*/notes/*.md` | detailed notes per topic |
 
 Unless marked, addresses are US. RAM addresses are KSEG0 (0x80...), ROM offsets are into the big-endian `.z64`, and a segmented address `0xSSoooooo` is offset `oooooo` into segment `SS` as loaded for a race (§3.4).
@@ -56,11 +57,11 @@ and include small geometry and texture changes. Course display lists use F3DEX 0
 `displaylist.ts` understands every opcode they execute. Collision is reconstructed from tagged display-list groups,
 not loaded from a separate file. Object placement comes from segment-6 spawn lists, code tables, and the course paths.
 
-The implementation is moderate rather than format-risky: the filesystem/geometry/collision prototypes already decode
-and render every course. The main new renderer capability is the game's screen-space two-part sky gradient; camera-yaw
-cloud/star sprites and Y-axis billboard objects benefit from small explicit contracts but can initially be approximated.
-Music is the largest isolated task: its EAD/Nas driver resembles Star Fox 64 structurally but differs enough in files,
-bytecode and synthesis semantics to warrant a dedicated `music/mk64.ts` based on the completed research renderer.
+The implemented viewer supports the USA revision-0 ROM: all twenty courses plus the award ceremony, hidden course-path
+and collision layers, decoded static objects with runtime Y-axis billboards, a camera-centred approximation of the
+screen-space sky gradient, and all 29 music sequences. PAL and Japanese revisions are rejected explicitly: Japanese
+draw addresses differ, and PAL's 50 Hz music timing/envelope branches have not been verified. **Verified** by all-level
+hash, transfer and layer audits, offline renders of all 21 entries, exact report-camera renders, and browser checks.
 
 ## 1. ROM identification
 
@@ -767,10 +768,11 @@ paths separately named and path point 0 marked as the start.
 
 ### 7.5 Viewer scope
 
-The useful first implementation includes all spawn-list actors with decoded models, hard-coded signs/egg/balloon,
-start-position vehicles, all paths and markers for code-created objects. It need not simulate actor state machines,
-particle systems, splines, item respawning, vehicle motion or karts. Add `Instance.billboard: 'y'` for authored
-billboards; without it, orienting them only for the default camera is a documented approximation.
+The implemented static scope includes decoded spawn-list foliage and item boxes, hard-coded static actors where their
+retail models and placements are reconstructable, continuous path ribbons, path starts, and markers for the remaining
+code-created or moving objects. It does not simulate actor state machines, particles, splines, item respawning,
+vehicle motion or karts. Authored flat sprites use `Instance.billboard: 'y'`; rendering, picking, highlights and
+selection diagnostics all derive the same camera-facing matrix.
 
 ## 8. Environment: sky, fog, clouds, camera
 
@@ -1100,10 +1102,11 @@ Recommendation: **US primary**. EU V1.0 and V1.1 can be accepted cheaply (course
 
 ### 11.1 Detection and files
 
-Add `mk64` to `Game.id`, accept `NKTE` revision 0 first, and locate `gCourseTable` with the structural test in §3.2.
-Optionally accept `NKTP` revisions 0 and 1 immediately because all viewer-facing course and music data is byte-identical
-to US; use the PAL timing constants for music. Reject Japanese ROMs explicitly until their recipe addresses are
-supplied. **Verified basis:** the detector and decoder in `fs/proto/mk64fs.ts` find all five known revisions by structure.
+The implementation adds `mk64` to `Game.id`, accepts `NKTE` revision 0, and locates `gCourseTable` with the structural
+test in §3.2. It rejects PAL despite largely shared course data because its 50 Hz driver timing and envelope branches
+are not yet verified, and rejects Japanese ROMs until their relocated recipe addresses are supplied. **Verified basis:**
+the research detector finds all five known revisions structurally; the shipped loader deliberately exposes only the
+fully verified USA revision.
 
 Suggested ownership:
 
@@ -1124,43 +1127,46 @@ but do not parameterize `sf64.ts`: §9.8 lists engine differences that would put
 
 ### 11.2 Level assembly and layers
 
-For each course, create a `SegmentSpace` for 2/4/5/6/7/9/D, execute the steps in its recipe, and union all section-table
-directions. Deduplicate a triangle by source command and vertex positions; retain it without culling if any real route
-draws it without culling. The recommended layers are:
+For each race course, the implementation creates a `SegmentSpace` for 2/4/5/6/7/9/D and executes the retail
+`render_course_credits` whole-course root. This is the game's coherent unsplit static model: each course part appears
+once and inherited texture/material state remains intact. The section tables are camera-section × direction
+alternatives, not additive chunks; unioning them caused duplicate surfaces, mutually exclusive route geometry,
+all-direction overlays and texture-state restarts during implementation. Battle arenas use their explicit draw recipes,
+and genuinely camera-dependent extras remain inspectable in a hidden layer. The implemented layers are:
 
 | layer | kind | default | contents |
 |---|---|---|---|
-| `main` | main | on | opaque/cut-out course recipe, including every section/direction needed for a whole-level view |
-| `translucent` | foreground | on | water, ice, Rainbow Road and stadium overlays from the second pass |
-| `objects` | objects | on | item boxes, foliage, signs, static actor models and start-position vehicles |
-| `paths` | markers | off | track path(s), optional boundaries, train/ferry paths and start point |
+| `main` | main | on | opaque/cut-out geometry from the coherent whole-course root or battle recipe |
+| `translucent` | foreground | on | translucent geometry emitted by that same root/recipe |
+| `objects` | objects | on | decoded item boxes, foliage and static actor models |
+| `paths` | markers | off | continuous main/secondary/boundary ribbons, train/ferry/ceremony paths and start markers |
 | `camera-dependent` | foreground | off | the conditional black SHADE lists whose exact gameplay purpose remains open |
 | `collision` | collision | off | one coloured mesh per surface type, including collision-only triangles |
 
-Every instance belongs to one of these layers. Put decoded but unplaced actor models in `Level.unplaced`. Mark moving
-objects `animated` and show their deterministic initial position. Until a line primitive exists, render paths as thin
-quads or sampled markers. `Batch.triSource` and `Mesh.info` should retain segmented display-list addresses, surface ids,
-section ids and source tables for reports.
+Every instance belongs to one of these layers. Moving/static-frame objects are marked `animated` where applicable.
+Paths use thin quad ribbons because the renderer has no line primitive. `Batch.triSource`, `Mesh.info` and
+`Instance.info` retain segmented display-list addresses, surface ids, section ids, object records and presentation
+notes for reports.
 
-Recommended `runDisplayList` defaults are `ucode: 'f3dex'`, scale 1, no mirror, initial geometry mode
+Implemented `runDisplayList` defaults are `ucode: 'f3dex'`, scale 1, no mirror, initial geometry mode
 `G_ZBUFFER | G_SHADE | G_CULL_BACK | G_SHADING_SMOOTH`, render mode AA_ZB_OPA_SURF, SHADE combiner, combiners and
 decals enabled, and lighting disabled for course geometry. The recipe supplies inherited texture/render state; never
 execute packed segment-7 leaf lists in isolation.
 
 ### 11.3 Contract additions and approximations
 
-The faithful additions are:
+The relevant renderer additions and deferred features are:
 
-- `Instance.billboard?: 'y'` for trees, cacti, cows, Piranha Plants and similar actor art;
+- implemented `Instance.billboard?: 'y'` for camera-facing actor art;
 - a screen-space sky-gradient structure holding four colours and the world horizon point `(0,0,30000)`; the renderer
   projects that point using the level camera and splits two vertical gradients at its screen row;
 - optional camera-yaw screen sprites for clouds and stars;
 - optional per-batch UV scroll for water and other animated textures.
 
-The sky gradient materially affects every course and should be implemented with the game. Billboards can temporarily
-use fixed start-camera orientation, and clouds/stars may initially be omitted or approximated on a camera-centred sky
-mesh if those contracts are deferred. A static first-frame texture offset is acceptable. The framebuffer-fed screens
-on Luigi Raceway and Wario Stadium necessarily show their ROM texture in an offline viewer.
+The current loader represents the four-colour sky on a camera-centred mesh; this is not pixel-equivalent to the game's
+screen-space split. Clouds/stars are omitted, and animated textures use a static frame. Billboards are fully dynamic,
+not fixed to the start camera. The framebuffer-fed screens on Luigi Raceway and Wario Stadium necessarily show their
+ROM texture in an offline viewer.
 
 ### 11.4 Camera, fog and music
 
@@ -1172,13 +1178,16 @@ Expose music sequences 1-29 with the descriptive names in §9.6. `decodeMusic` c
 (Raceway uses preset 5 for Mario/Luigi and preset 4 for Royal/Wario; use preset 5 for the standalone track) and returns
 the loop points in §9.7 at 26,800 Hz. Do not include sequence 0, which is sound effects.
 
-### 11.5 Implementation risk
+### 11.5 Implementation outcome and remaining risk
 
-The static level core is small-medium risk because exhaustive ROM decoding and offline renders already exist and no
-shared display-list changes are required. Object completeness is medium-large due to several placement systems and
-billboards. Environment is medium because the sky is screen-space rather than a world dome. Music is medium-large but
-self-contained: the renderer already parses and renders every sequence. Supporting Japanese revisions is a separate
-medium task; PAL-perfect music timing is a small follow-up after the US implementation.
+The USA implementation passes all-level hashes, transfer and layer audits, all 21 offline renders, report-camera
+regressions and browser integration checks. It uses no shared display-list special case. Remaining fidelity risk is
+concentrated in dynamic objects, the approximate sky, omitted cloud/star sprites and texture animation. Bowser's Castle
+lava deliberately receives a material-wide planar presentation at the median authored texel density: the retail data's
+per-face UV bases decode correctly, but their independently rotated orientations create dominant radial seams from
+unrestricted overhead viewer angles. This is labelled as a presentation normalization in debug metadata, not as a
+decoder correction. Supporting Japanese revisions remains a separate task; PAL support additionally requires verified
+50 Hz music timing and envelope behavior.
 
 ## 12. Verification evidence
 
@@ -1263,10 +1272,9 @@ exhaustive ROM/resource checks.
 
 The following gaps do not block a useful US viewer implementation:
 
-- **Geometry:** some Moo Moo Farm and D.K.'s Jungle Parkway leaf lists inherit different texture/render state from
-  different section directions. The prototype retains the first real route; a camera-specific comparison would decide
-  which state best represents each triangle in a whole-level union. The conditional black SHADE lists appear near
-  track edges, but the exact visual purpose of `func_80290C20` is unresolved. (**Hypothesis/open.**)
+- **Camera-dependent geometry:** the section-direction ambiguity is resolved by using the retail whole-course credits
+  roots rather than a union. Conditional SHADE lists remain hidden and inspectable; the exact visual purpose of
+  `func_80290C20` is unresolved. (**Implementation verified; conditional purpose open.**)
 - **Dynamic screens and animation:** the exact segment-5 rectangles overwritten by Luigi Raceway's TV and Wario
   Stadium's jumbotron, and frame-zero offsets for scrolling textures, are not independently checked in RAM. A static
   ROM texture and zero scroll are the proposed viewer representation. (**Decomp-supported; runtime open.**)
@@ -1365,3 +1373,19 @@ The extra segment-6 load therefore supplies the animated Cheep Cheep used in the
 
 - **Hypothesis/Open:** individual addresses in the conservative `coverage.txt` `never` sets may include truly dead display-list fragments, but no candidate was proven to be a complete object or scene. Classifying them requires command-by-command ownership and every runtime mode, not merely rendering the raw address.
 - **Hypothesis/Open:** an arbitrary orphan texture or tiny geometry fragment could exist outside all known filesystem records. The complete twenty-entry course table and matching leak build units rule out an additional normal course package, not every possible byte-level remnant.
+
+### 14.9 Development-archive course material
+
+A read-only audit of `~/bbgames/mk64` and its original `kimura.lzh` is recorded in
+`archive_cut/ARCHIVE_COURSE_AUDIT.md`. **Leak-supported:** `TOWN` is the only distinct non-retail course identity.
+Its static-art package is nearly complete—5,699 vertices, 2,817 triangles, opaque and translucent roots, and all 73
+texture streams survive; two stale texture-size entries are recoverable. It is not a complete playable build: no
+course-table/draw slot, collision classifications, placements, environment, camera or dedicated music survives, and
+its two 296-entry route arrays are renamed copies of Luigi Raceway's paths.
+
+The archives also retain self-contained earlier visual revisions of Mario Raceway, Banshee Boardwalk, Yoshi Valley
+and Rainbow Road without matching gameplay data; smaller old recipes/metadata; an orphan Mario Raceway route with a
+likely erroneous `z=7680` point; and an incomplete loose `dokan` pipe model. Every archived packed `KT1`--`KT20`
+course model matches a shipped ROM revision (the unusual Kimura KT3 and KT9 files are Japanese retail data), and no
+alternate award ceremony was found. These distinctions were verified by the reusable
+`archive_cut/audit_course_builds.ts` structural and binary comparison.
