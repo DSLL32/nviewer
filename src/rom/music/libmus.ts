@@ -857,34 +857,46 @@ export function decodeGaMusic(rom: Uint8Array, index: number): DecodedMusic {
 export interface LibmusOptions {
   masterVolume: number; // song master volume, 0..0x7FFF
   reverb: boolean; // mix the effect sends through libultra's BIGROOM reverb
+  // Exact loop bounds in output samples. Omit to derive them from the song's
+  // bytecode; callers with independently verified bounds can bypass that
+  // bounded probe for unusually long control-flow streams.
+  loopSamples?: readonly [start: number, end: number];
 }
 
 // Renders a libmus song (version 0x215) to PCM at 22047 Hz, with its loop region.
 export function renderLibmusSong(rom: Uint8Array, waves: Wave[], songData: Uint8Array, opts: LibmusOptions): DecodedMusic {
   const song = parseSong(songData);
 
-  // Dry run without mixing: every looping channel wraps its bytecode in `for 255 ... next`, all with
-  // the same length; the loop region is known once each has reached its `next`.
-  const probe = new Player(rom, waves, song, opts.masterVolume);
-  let ticks = 0;
-  for (; ticks < FPS * 60 * 15; ticks++) {
-    probe.tick();
-    const live = probe.channels.filter((c) => c.pdata);
-    if (!live.length || live.every((c) => c.loopLen >= 0 || c.gotos > 0)) break;
-  }
-  const live = probe.channels.filter((c) => c.pdata);
-  const inc = probe.channels[0].tempoInc;
   let loopStart: number | undefined;
   let loopEnd: number | undefined;
-  let total = ticks + TAIL_TICKS;
-  if (live.length && live.every((c) => c.loopLen >= 0) && inc > 0) {
-    const startTicks = Math.max(...live.map((c) => c.loopStart)) / inc;
-    // Notes start on whole ticks, so the output repeats after a whole number of ticks (Gex 3's title
-    // song loops every 1130 ticks in game audio; the exact 1129.93 drifts 25 samples per pass).
-    const lenTicks = Math.round(Math.max(...live.map((c) => c.loopLen)) / inc);
-    loopStart = Math.round(startTicks * TICK_SAMPLES);
-    loopEnd = Math.round((startTicks + lenTicks) * TICK_SAMPLES);
-    total = Math.ceil(startTicks + lenTicks) + TAIL_TICKS;
+  let total: number;
+  if (opts.loopSamples) {
+    [loopStart, loopEnd] = opts.loopSamples;
+    if (!Number.isSafeInteger(loopStart) || !Number.isSafeInteger(loopEnd) || loopStart < 0 || loopEnd <= loopStart)
+      throw new Error(`Invalid libmus output-sample loop ${loopStart}..${loopEnd}`);
+    total = Math.ceil(loopEnd / TICK_SAMPLES) + TAIL_TICKS;
+  } else {
+    // Dry run without mixing: every looping channel wraps its bytecode in `for 255 ... next`, all with
+    // the same length; the loop region is known once each has reached its `next`.
+    const probe = new Player(rom, waves, song, opts.masterVolume);
+    let ticks = 0;
+    for (; ticks < FPS * 60 * 15; ticks++) {
+      probe.tick();
+      const live = probe.channels.filter((c) => c.pdata);
+      if (!live.length || live.every((c) => c.loopLen >= 0 || c.gotos > 0)) break;
+    }
+    const live = probe.channels.filter((c) => c.pdata);
+    const inc = probe.channels[0].tempoInc;
+    total = ticks + TAIL_TICKS;
+    if (live.length && live.every((c) => c.loopLen >= 0) && inc > 0) {
+      const startTicks = Math.max(...live.map((c) => c.loopStart)) / inc;
+      // Notes start on whole ticks, so the output repeats after a whole number of ticks (Gex 3's title
+      // song loops every 1130 ticks in game audio; the exact 1129.93 drifts 25 samples per pass).
+      const lenTicks = Math.round(Math.max(...live.map((c) => c.loopLen)) / inc);
+      loopStart = Math.round(startTicks * TICK_SAMPLES);
+      loopEnd = Math.round((startTicks + lenTicks) * TICK_SAMPLES);
+      total = Math.ceil(startTicks + lenTicks) + TAIL_TICKS;
+    }
   }
 
   const player = new Player(rom, waves, song, opts.masterVolume);
