@@ -124,6 +124,7 @@ Research in progress (spec not yet in the repo):
 | Mario Kart 64 | `r49/mk64/` |
 | Spider-Man | `r49/spiderman/` |
 | Stunt Racer 64 | `r49/stuntracer64/` |
+| A Bug's Life | `r49/bugs_life/` |
 
 Shared:
  - `r49/impl/`: per-agent check directories (`ge_core`, `pd_obj`, `zelda_mus`,
