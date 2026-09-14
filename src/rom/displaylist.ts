@@ -429,11 +429,11 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
     const tile = rt ? { width: rt.width, height: rt.height, uls: rt.uls, ult: rt.ult, shiftS: 0, shiftT: 0 }
       : direct ? { ...st.tiles[0], width: st.tiles[0].texW, height: st.tiles[0].texH } : st.tiles[0];
     const shift = (s: number) => (s > 10 ? 1 << (16 - s) : 1 / (1 << s));
-    const su = texture >= 0 ? (st.scaleS * shift(tile.shiftS)) / (32 * tile.width) : 0;
-    const sv = texture >= 0 ? (st.scaleT * shift(tile.shiftT)) / (32 * tile.height) : 0;
+    const su = texture >= 0 ? shift(tile.shiftS) / (32 * tile.width) : 0;
+    const sv = texture >= 0 ? shift(tile.shiftT) / (32 * tile.height) : 0;
     const tile1 = st.tiles[1];
-    const su1 = texture1 >= 0 ? (st.scaleS * shift(tile1.shiftS)) / (32 * tile1.texW) : 0;
-    const sv1 = texture1 >= 0 ? (st.scaleT * shift(tile1.shiftT)) / (32 * tile1.texH) : 0;
+    const su1 = texture1 >= 0 ? shift(tile1.shiftS) / (32 * tile1.texW) : 0;
+    const sv1 = texture1 >= 0 ? shift(tile1.shiftT) / (32 * tile1.texH) : 0;
     const fold = ctx.combiner ? { prim: rgbaUnit(st.prim), env: rgbaUnit(st.env) } : null;
     // The Rush worlds are mirrored relative to a right-handed, Y-up frame: negate X
     // (see mirrorPlacementX). The winding then follows OpenGL (counter-clockwise front).
@@ -499,7 +499,7 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
       }
       const color = dv.getUint32(o + 12);
       const v: Vertex = {
-        x, y, z, s: dv.getInt16(o + 8), t: dv.getInt16(o + 10), c: color,
+        x, y, z, s: dv.getInt16(o + 8) * st.scaleS, t: dv.getInt16(o + 10) * st.scaleT, c: color,
         unlit: lit ? ((0xffffff00 | (color & 0xff)) >>> 0) : color, lighting: [], lit, gen: null,
       };
       if (lit || gen) {
@@ -547,6 +547,7 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
     } else if (where === 0x14) {
       v.s = value >> 16;
       v.t = (value << 16) >> 16;
+      v.gen = null;
     }
   };
 
