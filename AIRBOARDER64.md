@@ -36,7 +36,7 @@ Offsets are hexadecimal byte offsets into a normalized big-endian `.z64` ROM unl
 | compression | big-endian decoded size followed by headerless LH5-family data: 8 KiB dictionary, block/static Huffman, 509 character/length symbols |
 | courses | Tutorial/Lecture plus Green Park, Lost Forest, Snow Festival '64, Sunset Island and Giant House; Giant House has three simultaneous connected areas |
 | geometry | grid-binned old F3DLX 1.21 display lists, standard 16-byte vertices, Y-up identity scale; two geometry passes |
-| textures | CI8 texels with RGBA5551 TLUTs, 162 resolved specifications, dimensions from 16x16 through 128x16 |
+| textures | CI8 texels with RGBA5551 TLUTs, 561 resolved image/TLUT source combinations (395 distinct decoded images by content and dimensions), from 16x16 through 128x16 |
 | collision | grid-binned 20-byte quad/plane records using a packed s16 XYZ bank; eight course/area meshes fully decoded |
 | setups | three static setup slots for Street Work, Time Attack and Coin; all 75 descriptor selections decoded. Two-player aliases Time/Coin data |
 | objects | 24-byte transformed disk-marker records and 10-byte view-facing animated star-coin records; board/rider assets are separate player equipment |
@@ -266,7 +266,7 @@ Old F3DLX commands used include `04` VTX, `B1` TRI2, `BF` TRI1, `06` DL and `B8`
 
 ### 5.3 Textures/materials
 
-The textured pass uses CI8 texels and RGBA5551 TLUTs from segment 3. Width/height come from `G_SETTILESIZE`; observed dimensions are 16x16, 16x32, 32x16, 32x32, 32x64, 64x8, 64x16, 64x32 and 128x16. All 162 unique texture/TLUT/dimension specifications decode cleanly. `levels/course_textures_sheet.png` visibly resolves grass, snow, pavement, metal, wood, signage and Giant House art, verifying palette/channel order. Raw row 0 is image top. **[V-ROM/V-TOOL]**
+The textured pass uses CI8 texels and RGBA5551 TLUTs from segment 3. Width/height come from `G_SETTILESIZE`; observed dimensions are 16x16, 16x32, 32x16, 32x32, 32x64, 64x8, 64x16, 64x32 and 128x16. Production display-list execution resolves 561 image/TLUT source combinations and 395 distinct decoded RGBA images by content and dimensions: Tutorial 72/36, Green Park 84/43, Lost Forest 80/80, Snow Festival '64 63/63, Sunset Island 80/80 and Giant House 182/93. The earlier 162-specification research census sampled texture state only when vertices were loaded; it missed later texture swaps used with cached vertices through `G_MODIFYVTX` and triangle commands. The production parser therefore associates material state at triangle emission. `levels/course_textures_sheet.png` visibly resolves grass, snow, pavement, metal, wood, signage and Giant House art, verifying palette/channel order. Raw row 0 is image top. **[V-ROM/V-TOOL/V-REPO]**
 
 Pass 0 is commonly vertex-colored/untextured; pass 1 contains CI/TLUT setup. A production parser must preserve display-list material state, UVs, tile masks/shifts/wrap, culling and blend/depth mode rather than flatten all triangles into one material. Exact state words and fog/light setup are in §7. **[V-ASM]**
 
@@ -469,7 +469,7 @@ Regional contract: select table/ID/overlay/audio offsets from `NABJ` vs `NABP`; 
 
 - `fs/extract.py` validates every regional table recurrence and decodes 44/45 compressed entries to exact declared sizes.
 - `fs/make_disasm.py` derives resident/overlay bounds structurally; `archive_xrefs.py` inventories archive calls across every mapped text image.
-- `levels/analyze.py` parses all course headers, eight collision contexts and all 75 placement selections; `decode_geometry.py` reports zero malformed lists/vertex references and decodes 162 texture specs.
+- `levels/analyze.py` parses all course headers, eight collision contexts and all 75 placement selections; the original `decode_geometry.py` census reports zero malformed lists/vertex references and 162 texture states sampled at vertex loads. The implemented full display-list execution resolves 561 image/TLUT source combinations and 395 distinct decoded images, including swaps preceding `G_MODIFYVTX` or triangle emission.
 - normal-course decoded packages match J/P byte-for-byte; all eight collision OBJ hashes match across versions.
 - `environment/scan_env.py` reproduces every environment scalar and regional header identity.
 - `music/analyze_audio.py` parses all eight songs, 303 waves, 257 indexed effects, regional timing and every loop; the audition player completes all tracks.
@@ -488,6 +488,7 @@ Session1 produced no game evidence: `headless.sh` was backgrounded in a short-li
 5. Determine whether the flag-controlled path to board resources 8–11 is retail-reachable, residual or debug, and recover their display names.
 6. Determine whether any non-libmus direct code path selects one of the 52 wave records not referenced by the eight songs or 257 indexed effects (§12.4).
 7. The likely unused controller recording can be substituted into the used demo path to identify its intended course/character, but this is optional hidden-content work, not loader work.
+8. Exact star-coin presentation still needs viewer support for spherical billboards and a nine-frame material clock; the loader preserves all frames and source metadata but currently displays frame 0 in the authored quad orientation.
 
 ## 12. Unused and hidden content
 
