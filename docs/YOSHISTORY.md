@@ -13,7 +13,7 @@ interpretations are labelled hypotheses.
 | Asset organization | no file table: two ROM segments addressed by segmented pointers. Segment 3 castData (0x528430) holds cast records, sprite/tile "units", Yoshi cells and messages; segment 4 worldDatabase (0xB16170) holds world records |
 | Compression | `CMPR` + `SMSR00` slide-LZ (16-bit control words, separate literal stream), 702 records, all image data (*Compression: `CMPR` + `SMSR00` slide-LZ (verified bit-exact)*) |
 | Graphics microcode | S2DEX 1.06 (task microcode) with in-list switches to F3DEX.NoN 1.23 |
-| Geometry | 0x118-byte world record + one scene + 12-byte actor records `{castId, serial, x, y}` in world pixels (*Level format*) |
+| Geometry | 0x118-byte world record + one scene + 12-byte actor records in world pixels (*Level format*) |
 | Textures | **2D tile layers**: 16 × 16 CI8 tiles, RGBA5551 palette, 256 px blocks, 1 to 3 layers per world. Composed on the CPU into 336 × 256 buffers and drawn with S2DEX `G_BG_1CYC` (*Layers*, *How the game builds a frame*) |
 | Collision | per-unit u16 map on the main layer: kind/attr bits plus one of 128 16 × 16 shape masks (*Tile maps and collision (verified pixel-exact against the game's BG buffers)*) |
 | Music driver | Nintendo EAD “Nas” sequence engine; 62 sequences and 62 banks at 32 kHz. |
@@ -73,8 +73,13 @@ segmented, VROM, and file-relative addresses are named at each use.
   - Malloc'd memory follows. Level data, sprites and overlays are allocated from the top of the 8 MB, just below
     0x80800000.
 - **Game state root:** `__Game` (the leak's `struct game_born`, `yoshi_Gameh_and_message/main.h`) is at 0x800FC0B0.
-  Around the page fields, J offsets are the leak's plus 8: `page` at +0x3EC, `newPage` at +0x3F0,
-  `birthEntry.entryCnt` at +0x992 (verified by disassembling `change_gamePage` at 0x80066E48).
+  Around the page fields, J offsets are the leak's plus 8 (verified by disassembling change_gamePage at 0x80066E48). Storage widths were not established in this description:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x3EC | Unknown | Unknown | page | Current page. |
+| 0x3F0 | Unknown | Unknown | newPage | New page. |
+| 0x992 | Unknown | Unknown | birthEntry.entryCnt | Entry count. |
 
 #### Overlays (verified)
 
@@ -86,19 +91,44 @@ leak's `ovlsegment1..6.o` files are only `ld -r` groupings used by the build.
 
 Module layout (big-endian):
 
-| Offset | Content |
-|---|---|
-| +0 | `.text` (textSize) |
-| +textSize | `.data` |
-| +textSize+dataSize | `.rodata` |
-| then | relocation header: u32 textSize, dataSize, rodataSize, bssSize, nRelocs, then nRelocs × u32 `(section << 30) \| (type << 24) \| offset24` |
-| last 4 bytes | u32 = moduleEnd − header offset |
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | textSize | u8[] | text | Executable section. |
+| textSize | dataSize | u8[] | data | Initialized data. |
+| textSize + dataSize | rodataSize | u8[] | rodata | Read-only data. |
+| Following | 0x14 + 4 × nRelocs | RelocationHeader | relocations | Header and packed words below. |
+| moduleEnd − 4 | 4 | u32 | headerDistance | moduleEnd minus relocation-header offset. |
+
+Relocation header, 20 bytes plus counted relocation words:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | textSize | Stored .text size. |
+| 0x04 | 4 | u32 | dataSize | Stored .data size. |
+| 0x08 | 4 | u32 | rodataSize | Stored .rodata size. |
+| 0x0C | 4 | u32 | bssSize | Unstored .bss size. |
+| 0x10 | 4 | u32 | nRelocs | Relocation count. |
+| 0x14 | 4 × nRelocs | u32[] | relocations | Packed relocation words. |
+
+Relocation-word fields:
+
+| Bits | Mask | Field | Description |
+|---:|---:|---|---|
+| 31–30 | 0xC0000000 | section | Section selector. |
+| 29–24 | 0x3F000000 | type | Relocation type. |
+| 23–0 | 0x00FFFFFF | offset | Byte offset in section. |
 
 - **Relocation entries:** section 1 = `.text`, 2 = `.data`, 3 = `.rodata`. Type 2 = R_MIPS_32, 4 = R_MIPS_26,
   5 = HI16, 6 = LO16. `.bss` isn't stored; its size in RAM is ROM size + bssSize.
-- **Descriptors:** a 16-byte `{romStart, romEnd, vramStart, vramEnd}` record in castData, usually at `castdt + 0x08`
-  (leak: `castDataObj1.o` relocations `_ovlActor_*SegmentRomStart…`). Four modules are empty stubs with no
-  descriptor.
+**Overlay descriptor (0x10 bytes).** In castData, usually at `castdt + 0x08` (source archive: `castDataObj1.o` relocations `_ovlActor_*SegmentRomStart…`). Four modules are empty stubs without descriptors.
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | romStart | Inclusive ROM start |
+| 0x04 | 4 | u32 | romEnd | Exclusive ROM end |
+| 0x08 | 4 | u32 | vramStart | Linked RAM start |
+| 0x0C | 4 | u32 | vramEnd | Linked RAM end |
+
 - **Loader:**
   - `LoadFragment2` (0x80085DD4) → `LoadFragmentFix2` (0x80085D28) → `dmacopy_fg`, then `relocate_fragment`
     (0x80085650), `bzero` of the bss, and a cache flush.
@@ -172,23 +202,23 @@ source).
 
 **CMPR wrapper**
 
-| Offset | Type | Field |
-|---|---|---|
-| 0x00 | char[4] | `CMPR` |
-| 0x04 | u32 | compsize: bytes the game reads after this header (the stream length + 16, rounded up to even) |
-| 0x08 | u32 | origsize: decompressed size |
-| 0x0C | u32 | 0 |
-| 0x10 | … | SMSR stream |
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u8[4] | magic | ASCII CMPR. |
+| 0x04 | 4 | u32 | storedSize | compsize: bytes the game reads after this header (the stream length + 16, rounded up to even) |
+| 0x08 | 4 | u32 | decodedSize | origsize: decompressed size |
+| 0x0C | 4 | u32 | reserved | 0 |
+| 0x10 | Variable | u8[] | stream | SMSR stream |
 
 **SMSR00 stream**
 
-| Offset | Type | Field |
-|---|---|---|
-| 0x00 | char[8] | `SMSR00\0\0` |
-| 0x08 | u32 | decompressed size |
-| 0x0C | u32 | literal offset, relative to +0x10 |
-| 0x10 | u16[] | stream A: control words and match words, interleaved, big-endian |
-| 0x10 + literal offset | u8[] | stream B: literal bytes |
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 8 | u8[8] | magic | `SMSR00\0\0` |
+| 0x08 | 4 | u32 | decodedSize | decompressed size |
+| 0x0C | 4 | u32 | literalOffset | literal offset, relative to +0x10 |
+| 0x10 | literalOffset | u16[] | controlAndMatches | stream A: control words and match words, interleaved, big-endian |
+| 0x10 + literal offset | Variable | u8[] | literals | stream B: literal bytes |
 
 ```
 a = 0x10; b = 0x10 + litOffset; out = 0; bits = 0
@@ -272,11 +302,27 @@ There is no end marker; decoding stops when the output reaches the size.
 
 | Table | ROM | RAM | Layout |
 |---|---|---|---|
-| World table | 0xACB60 | 0x800ABF60 | `{u32 attr, u32 world}` × 176. `attr` = 0x01000000 for course and test worlds, 0 for menus. `world` = segment-4 pointer to the world struct (*World struct (0x118 bytes, segment 4)*) |
+| World table | 0xACB60 | 0x800ABF60 | 176 eight-byte world-table records (below) |
 | Course start/warp rows | 0xACA90 | 0x800ABE90 | `u8[4]` × 26, indexed by course number; rows 0 and 25 are dummies (0x0B). Byte 0 = the course's start world; the 4 slots are the destinations of the in-course warp actors 0x4507–0x450A (slot meaning: hypothesis). Identical to the leak's `warpManager.o` `.data+0x60` |
 | Warp EXITIF template | 0xACA30 | 0x800ABE30 | 4 × 24-byte EXITIF (*Exits (EXITIF, 24 bytes; verified)*) |
-| Cast table | 0xA6520 | 0x800A5920 | `{u16 id, u16 0, u32 castdt, u32 attribute}` × 1,572 (the leak's `castDBManager.o` has 1,582; J lacks 0x473A–0x473F, 0x8129/0x812A and 0x42C0/0x42C1) |
+| Cast table | 0xA6520 | 0x800A5920 | 1,572 twelve-byte cast-table records (below); the leak has 1,582, with six extra 0x473A–0x473F entries plus 0x8129/0x812A and 0x42C0/0x42C1 |
 | Collision shape masks | pointer table 0xA5EB4 | 0x800A52B4 | 128 pointers to `u16[16]` masks (*Tile maps and collision (verified pixel-exact against the game's BG buffers)*) |
+
+World-table record, eight bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | attr | 0x01000000 for course/test worlds; zero for menus. |
+| 0x04 | 4 | u32 | world | Segment-4 pointer to the world structure. |
+
+Cast-table record, 12 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | u16 | id | Cast identifier. |
+| 0x02 | 2 | u16 | zero02 | Zero. |
+| 0x04 | 4 | u32 | castdt | Segmented cast-data pointer. |
+| 0x08 | 4 | u32 | attribute | Segmented attribute pointer. |
 
 **Placeholder slots.** 32 world-table slots point at the placeholder record 0x04000CD8, which is also slot 11
 `worldTester`: IDs 33, 38, 41, 42, 44, 45, 47–50, 53–65, 67–74 and 77. Slot 80 is an alias of 4 (`worldPanorama`). The viewer
@@ -288,7 +334,16 @@ should list each distinct world struct once.
    the world ID in 0x800FC648. It then schedules `setAll_restart(deconst_sceneInfo, const_sceneInfo,
    init2_gameproc)` (names from the leak).
 2. On restart, `const1_worldInfo` (0x8006C3B0) reads the 0x118-byte world struct from segment 4 into a
-   worldInfo entry (`{u8 used, u8 worldId, u16}` followed by the copy; the pointer is at 0x800FC64C). It then
+   worldInfo entry (pointer at 0x800FC64C). Its layout is:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | used | Used flag |
+| 0x01 | 1 | u8 | worldId | World ID |
+| 0x02 | 2 | u16 | unknown_02 | Unresolved |
+| 0x04 | 0x118 | World | world | Copy of the world structure |
+
+   It then
    reads the scene table, the scene and the actor array. Actors are expanded to 16-byte RAM records carrying a
    `castInfo*`.
 3. Observed Story-mode chain (a breakpoint on `nextTo_newScene`):
@@ -314,8 +369,18 @@ should list each distinct world struct once.
 | 0x800FC648 (u8) | current world ID (player 0) |
 | 0x800FC64C (u32) | pointer to the current worldInfo entry (world copy at +4) |
 | 0x800FC664 (u32) | current course number |
-| 0x800FC52C (f32 x, y, z) | camera frame position: left/top edge in world pixels, z = 500 |
-| 0x800FC4A8 | view info: +0 f32 fovy = 40.0, +4 f32 tan(fovy/2) = 0.36397, +16 f32 camera plane z = 500 |
+| 0x800FC52C (f32) | Camera-frame X: left edge in world pixels |
+| 0x800FC530 (f32) | Camera-frame Y: top edge in world pixels |
+| 0x800FC564 (f32) | Camera-frame Z: 500 |
+| 0x800FC4A8 | View-info structure, known fields below |
+
+View-info fields at 0x800FC4A8 (verified against RAM; the rendering notes explicitly identify the camera-plane offset as 0x10):
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | f32 | fovy | 40.0 degrees. |
+| 0x04 | 4 | f32 | tanHalfFovy | 0.36397. |
+| 0x10 | 4 | f32 | cameraPlaneZ | 500.0. |
 
 `__Game` is at 0x800FC0B0. For these fields the J offsets are the leak's (`main.h: struct game_born`) plus 8;
 `+1` (mode) is not shifted.
@@ -393,7 +458,7 @@ a world that no warp row or exit record reaches (entered by code, or unused).
 
 | Item | Where | Evidence | Conf. |
 |---|---|---|---|
-| **29 cut world IDs.** IDs 33, 38, 45, 47–50, 53–65, 67–74 and 77 all point at the placeholder record 0x04000CD8, the same record as ID 11 `worldTester`. The numbering was kept after the worlds were removed | world ID table, ROM 0xACB60 (176 entries of `{u8 flag, pad, u32 seg-4 pointer}`) | J pointer histogram (0x04000CD8 × 33); the leak `worldManager.o` `.rel.data` names the same slots `worldTester` | verified, high |
+| **29 cut world IDs.** IDs 33, 38, 45, 47–50, 53–65, 67–74 and 77 all point at the placeholder record 0x04000CD8, the same record as ID 11 `worldTester`. The numbering was kept after the worlds were removed | world ID table, ROM 0xACB60 (176 world-table entries, defined under Tables) | J pointer histogram (0x04000CD8 × 33); the leak `worldManager.o` `.rel.data` names the same slots `worldTester` | verified, high |
 | IDs **41, 42, 44** are placeholders in J; the leak's US build fills them with `worldPcAmerica`, `worldPcFrench`, `worldPcGermany` (region screens, with `unit_pc*` art) | same table | J table vs leak table; `unit_pc*` not in J (≤0.7% match) | verified, high |
 | Leak ID 176, `world_6_4_6`, has no J counterpart. Only `world_6_4_6_US.wdt` exists, so the course gained a sub-area for the US release | leak `files.txt`, `worldDatabase.o` `.mdebug` | J table has only IDs 0–175 | verified, high |
 | **`worldTester`** is real data in J: a world record with camera floats (500.0, 1.0), a code pointer 0x8006AA10 and a 0xFFFF-terminated list of about 60 16-bit IDs (0x4002…0x4035). In the leak it is an empty 280-byte `.bss` object whose source was being edited on 19 March 1998 | ROM 0xB16E48 (seg 4 +0xCD8) | J bytes; leak symbols | bytes verified; meaning (an actor/cast test list) hypothesis, medium |
@@ -439,30 +504,57 @@ pointers are J RAM addresses. **A parser needs no relocation.**
 The layout is verified: all 143 worlds parse, and the RAM copies are byte-identical apart from +0x5C. Meanings are
 leak-only unless marked.
 
-| Offset | Type | Meaning |
-|---|---|---|
-| 0x00 | f32[3] | camera position (0, 0, 500 in every course) |
-| 0x0C, 0x18 | f32[3] × 2 | further view vectors (0) |
-| 0x24 | code* | projection function: 0x8006AA10 `standardPrj_motionView` (menus), 0x8006B524 `yoshiZoom_projection` (courses), 0x8006B560 `bossZoom_projection`, 0x8006AAF0 and 0x8006B5B4 (others) |
-| 0x28 | f32 | initial camera frame X, left edge in px (**verified**) |
-| 0x2C | f32 | initial camera frame Y, top edge in px (**verified**: 1-1 has 272) |
-| 0x30 | f32 | initial frame Z (500) |
-| 0x34–0x57 | f32 × 9 | view and zoom parameters (1-1: 0, 1, 1, 0, 8300, 500, 1500, 0, 480; menus: 0, 1, 1, 0, 320, 500, 1500, 0, 240). The meaning is open. Hypothesis: 0x48 = 500 and 0x4C = 1500 are depth bounds, and 0x44/0x54 are view extents |
-| 0x58, 0x59 | u8, u8 | scene grid width and height (always 1 × 1 in J) |
-| 0x5C | u32 | scene table pointer (seg 4); the only field relocated in RAM |
-| 0x60 | u16[] | cast preload list, 0xFFFF-terminated, zero-padded to 0x100 |
-| 0x100 | u32 | **sound scene id** (`NA_SCENE_*`), passed to `Na_SceneChange`, which selects the song (*Song list*). Verified at run time: 1-1 = 1 (seq 1), `worldP_select` = 0x24 (seq 12) |
-| 0x104, 0x108 | u32 × 2 | 0x3E, 0x60000000 in typical courses (meaning open) |
-| 0x10C | code* | spawn policy: 0x80058D30 `anotherActor_OnStage` (spawn when entering the frame; almost all courses), 0x80058BB4 `setup_onStage` (spawn everything; 5-1-3, 6-2-2), 0 |
-| 0x110 | s16 | course number 1–24 (page = (n−1)/4+1, course = (n−1)%4+1), 25 Bowser, 26 test, 0 none (**verified**) |
-| 0x112, 0x114 | u16, u32 | unknown |
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 12 | f32[3] | cameraPosition | camera position (0, 0, 500 in every course) |
+| 0x0C | 12 | f32[3] | viewVector0 | first further view vector (0) |
+| 0x18 | 12 | f32[3] | viewVector1 | second further view vector (0) |
+| 0x24 | 4 | u32 | projection | projection function: 0x8006AA10 `standardPrj_motionView` (menus), 0x8006B524 `yoshiZoom_projection` (courses), 0x8006B560 `bossZoom_projection`, 0x8006AAF0 and 0x8006B5B4 (others) |
+| 0x28 | 4 | f32 | cameraX | initial camera frame X, left edge in px (**verified**) |
+| 0x2C | 4 | f32 | cameraY | initial camera frame Y, top edge in px (**verified**: 1-1 has 272) |
+| 0x30 | 4 | f32 | cameraZ | initial frame Z (500) |
+| 0x34 | 36 | f32[9] | viewParameters | view and zoom parameters (1-1: 0, 1, 1, 0, 8300, 500, 1500, 0, 480; menus: 0, 1, 1, 0, 320, 500, 1500, 0, 240). The meaning is open. Hypothesis: 0x48 = 500 and 0x4C = 1500 are depth bounds, and 0x44/0x54 are view extents |
+| 0x58 | 1 | u8 | gridWidth | scene grid width (always 1 in J) |
+| 0x59 | 1 | u8 | gridHeight | scene grid height (always 1 in J) |
+| 0x5C | 4 | u32 | scenes | scene table pointer (seg 4); the only field relocated in RAM |
+| 0x60 | 0xA0 | u16[0x50] | preloadCasts | cast preload list, 0xFFFF-terminated, zero-padded to 0x100 |
+| 0x100 | 4 | u32 | soundScene | **sound scene id** (`NA_SCENE_*`), passed to `Na_SceneChange`, which selects the song (*Song list*). Verified at run time: 1-1 = 1 (seq 1), `worldP_select` = 0x24 (seq 12) |
+| 0x104 | 4 | u32 | unknown_104 | unknown_104: 0x3E in typical courses |
+| 0x108 | 4 | u32 | unknown_108 | unknown_108: 0x60000000 in typical courses |
+| 0x10C | 4 | u32 | spawnPolicy | spawn policy: 0x80058D30 `anotherActor_OnStage` (spawn when entering the frame; almost all courses), 0x80058BB4 `setup_onStage` (spawn everything; 5-1-3, 6-2-2), 0 |
+| 0x110 | 2 | s16 | course | course number 1–24 (page = (n−1)/4+1, course = (n−1)%4+1), 25 Bowser, 26 test, 0 none (**verified**) |
+| 0x112 | 2 | u16 | unknown_112 | unknown_112 |
+| 0x114 | 4 | u32 | unknown_114 | unknown_114 |
 
 #### Scene table, scene and actor records (verified)
 
-- **Scene table:** `u32 scene[w·h]`, then a 0. In ROM, a world's records are ordered actorData, scene, scene
-  table, world struct.
-- **Scene:** `{s16 count; u16 pad; u32 actorData}`, with count < 150 (asserted in code).
-- **Actor record, 12 bytes:** `{u16 castId; u16 serial; f32 x; f32 y}`.
+
+**Scene-pointer table.**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 × w × h | u32[] | scene | Segment-4 scene pointers |
+| 4 × w × h | 4 | u32 | terminator | Zero |
+
+In ROM, a world's records are ordered actorData, scene, scene table, world structure.
+
+**Scene (8 bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | s16 | count | Actor count; asserted below 150 |
+| 0x02 | 2 | u16 | padding | Reserved |
+| 0x04 | 4 | u32 | actorData | Segment-4 actor-array pointer |
+
+**Actor (0x0C bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | u16 | castId | Cast-table key |
+| 0x02 | 2 | u16 | serial | Instance number per cast ID |
+| 0x04 | 4 | f32 | x | World pixels |
+| 0x08 | 4 | f32 | y | World pixels; downward positive |
+
   - `x`, `y` are world pixels, y down, origin at the top-left of the main layer. For sprite objects the anchor is
     the base (bottom-centre). Verified on screen: 1-1 coins at (200, 392) and (232, 392) appear at screen
     (145, 120) and (177, 120) with the camera frame at (54.6, 272).
@@ -477,32 +569,51 @@ leak-only unless marked.
 
 **BG castdt (0x64 bytes)**
 
-| Offset | Type | Meaning |
-|---|---|---|
-| 0x08 | code* | boot function: 0x8006CB38 `boot_mainBG_scaling2ZrationScroll` (267 of 273 layers), 0x8006C9C0 `boot_BG_speedScroll` (`_kinkei` ×3), 0x8001BBC0 `boot_switchscalingZrationmainScrollBG` (`_mask` ×2), 0x8006C8F0 `boot_mainBG_Scroll` (`damybg`) |
-| 0x18 | u16 | cast ID |
-| 0x1C | `{u32 12, u32 rec}` × 8 | slots: 0 `bii`, 1 `ut`, 2 `utPal`, 3 `utID`, 4 `utIdBk`, 5 `utAdd`, 6 `crUtID`, 7 unused |
-| 0x5C, 0x5E | u16, u16 | viewW, viewH of the composition buffer (0 → 320 × 240; 480 × 352/368 and 576 × 416 in zoomed arenas) |
-| 0x60 | u8 | wrap flag (0 in every J layer) |
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x08 | 4 | u32 | boot | boot function: 0x8006CB38 `boot_mainBG_scaling2ZrationScroll` (267 of 273 layers), 0x8006C9C0 `boot_BG_speedScroll` (`_kinkei` ×3), 0x8001BBC0 `boot_switchscalingZrationmainScrollBG` (`_mask` ×2), 0x8006C8F0 `boot_mainBG_Scroll` (`damybg`) |
+| 0x18 | 2 | u16 | castId | cast ID |
+| 0x1C | 0x40 | DataSlot[8] | slots | slots: 0 `bii`, 1 `ut`, 2 `utPal`, 3 `utID`, 4 `utIdBk`, 5 `utAdd`, 6 `crUtID`, 7 unused |
+| 0x5C | 2 | u16 | viewW | viewW: composition-buffer width (0 → 320) |
+| 0x5E | 2 | u16 | viewH | viewH: composition-buffer height (0 → 240); zoomed arenas use 480 × 352/368 or 576 × 416 buffers |
+| 0x60 | 1 | u8 | wrap | wrap flag (0 in every J layer) |
 
-**Object castdt** uses the same record system:
-- +0x04 = 0x01000000.
-- +0x08–0x17 = overlay `{romStart, romEnd, vramStart, vramEnd}`.
-- +0x18 = the ID.
-- Slots hold cell dimensions, CI8 frames (`ut_*`), palette (`utPal_*`), cell table (`utID_*`) and animation
-  records. For example `castdt_apple` has 24 × 21-pixel frames. *How the game builds a frame* covers sprite decoding.
+DataSlot, eight bytes:
 
-**Data record** (12 bytes): `{u32 size; u32 storedSize; u32 data}`. If `data` starts with `CMPR`, it decompresses
-to `size` (*Compression: `CMPR` + `SMSR00` slide-LZ (verified bit-exact)*); otherwise it is raw.
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | recordSize | 12, the DataRecord size. |
+| 0x04 | 4 | u32 | record | Segmented DataRecord pointer. |
+
+**Object castdt** uses the same data-slot system.
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x04 | 4 | u32 | tag | 0x01000000 |
+| 0x08 | 0x10 | OverlayDescriptor | overlay | Descriptor defined under Overlays |
+| 0x18 | 2 | u16 | castId | Cast identifier |
+
+Slots hold cell dimensions, CI8 frames (`ut_*`), palette (`utPal_*`), cell table (`utID_*`) and animation records. For example, `castdt_apple` has 24 × 21-pixel frames. *How the game builds a frame* covers sprite decoding.
+
+**Data record (0x0C bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | size | Decoded byte count |
+| 0x04 | 4 | u32 | storedSize | Stored byte count |
+| 0x08 | 4 | u32 | data | Segmented payload pointer |
+
+If data begins with `CMPR`, it decompresses to size bytes (*Compression: `CMPR` + `SMSR00` slide-LZ*); otherwise it is raw.
 
 **Attribute** (0x54 bytes, all actors)
 
-| Offset | Type | Meaning |
-|---|---|---|
-| +0 | u8 | kind: 5 BG, 2 door, 0 pipe, … |
-| +4 | f32 | z: depth, and for layers the parallax (*Layers*) |
-| +0x14 | f32[3] | scale |
-| +0x30, +0x34 | u32, u32 | size of and pointer to an extra block `{u32 len, u32 0, payload}`; for exits the payload is an EXITIF |
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | kind | kind: 5 BG, 2 door, 0 pipe, … |
+| 0x04 | 4 | f32 | z | z: depth, and for layers the parallax (*Layers*) |
+| 0x14 | 12 | f32[3] | scale | scale |
+| 0x30 | 4 | u32 | extraSize | Extra-block size |
+| 0x34 | 4 | u32 | extra | Extra-block pointer; its eight-byte length/zero header and EXITIF payload are defined under Exits |
 
 #### Layers
 
@@ -550,10 +661,16 @@ to `size` (*Compression: `CMPR` + `SMSR00` slide-LZ (verified bit-exact)*); othe
   - `P` is the layer pixel shown at screen (0, 0). The screen shows layer pixels P … P + (320, 240).
   - `cam` is the camera frame (the top-left of the screen in main-layer pixels; RAM 0x800FC52C/30).
   - `cam0` is the world's start frame (world +0x28/+0x2C).
-  - `a = (s16 ax, s16 ay)` is stored **16 bytes before the BG cast's attribute record** (the attribute starts
-    `05 00 01 00 {f32 z}`).
+  - The anchor pair a is stored 16 bytes before the BG cast's attribute record; its fields are listed below. The attribute has kind 5 and supplies the layer depth z.
   - `floor16` rounds down to a multiple of 16.
   - Main layers (z 500.x, a = 0) give `P = cam` exactly.
+
+  Anchor fields, offsets relative to the BG attribute record:
+
+  | Offset | Size | Type | Field | Description |
+  |---:|---:|---|---|---|
+  | −0x10 | 2 | s16 | ax | Horizontal anchor. |
+  | −0x0E | 2 | s16 | ay | Vertical anchor. |
 - **Checks:**
   - 1-1: enkei a = (0, −100) gives c_y = floor16(169.30 + 100) − 169.30 = +86.70; chukan a = (0, 200) gives −208.70.
     Both equal RAM (+0x24 of the layer's scroll struct).
@@ -595,9 +712,29 @@ to `size` (*Compression: `CMPR` + `SMSR00` slide-LZ (verified bit-exact)*); othe
 
 #### Exits (EXITIF, 24 bytes; verified)
 
-`{u32 uniqueName (u16 destActorId, u16 param); u8 destWorld, pad[3]; f32 x; f32 y; f32 z (500); u8 gameMode; u8 effect; u16 exitType}`
 
-- Found through the exit cast's attribute (+0x34 → `{u32 0x20, u32 0, EXITIF}`).
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | u16 | destActorId | Upper half of uniqueName |
+| 0x02 | 2 | u16 | param | Lower half of uniqueName |
+| 0x04 | 1 | u8 | destWorld | Destination world |
+| 0x05 | 3 | u8[3] | padding | Alignment |
+| 0x08 | 4 | f32 | x | Destination x |
+| 0x0C | 4 | f32 | y | Destination y |
+| 0x10 | 4 | f32 | z | 500 |
+| 0x14 | 1 | u8 | gameMode | Destination mode |
+| 0x15 | 1 | u8 | effect | Transition effect |
+| 0x16 | 2 | u16 | exitType | Exit type |
+
+
+The exit cast's attribute pointer at +0x34 targets this 0x20-byte wrapper:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | size | 0x20 |
+| 0x04 | 4 | u32 | reserved | Zero |
+| 0x08 | 0x18 | EXITIF | exit | Exit record above |
+
 - The arrival actor is usually 0x44CA `cyberGate`.
 - All 227 links are in `level/worlds_J.json` (`links`); the reachability closure is in `level/reachability.json`.
 
@@ -608,29 +745,69 @@ address after the argument):
 - **Variable-length value:** `b0 & 0x80 ? ((b0 & 0x7F) << 8) | b1 : b0`.
 - **Script state** (per sequence, channel and layer): `pc`, a 4-deep call/loop stack with u8 loop counters, and an
   s8 `value`.
-- **Common commands** (all levels): FF end/return, FE delay 1, FD var delay, FC call, FB jump, FA/F9/F5 jump if
-  value == 0 / < 0 / ≥ 0, F8 n loop start, F7 loop end, F6 break, F4/F3/F2 relative jumps.
-- **Channel-level argument sizes** come from `SCOM_TABLE` (ROM 0x9E0A0; one byte per opcode 0xB0–0xFF: `argc =
-  flags & 3`, arg k is u16 if `flags & (0x80 >> k)`).
-- **At layer level**, any delay or end command ends the layer's command run.
+**Common commands (all script levels).**
 
-**Sequence level** (the commands music uses; full table in `notes/music.md` section 3.2):
-- Channels: `9n u16` / `An s16` start channel n; `4n` stop channel n.
-- Mix: `DB u8` volume a/127, `DA mode t` fade, `DD bpm` tempo, `DC s8` tempo change, `DE/DF` transpose.
-- Note tables: `D1/D2 u16` short-note gate and velocity tables.
-- Channel set-up: `D7 u16` copies player settings into the masked channels; `D3/D4/D5` mute behaviour.
+| Opcode | Operands | Effect |
+|---|---|---|
+| FF | None | End or return |
+| FE | None | Delay one tick |
+| FD | var delay | Delay |
+| FC | Address | Call |
+| FB | Address | Jump |
+| FA / F9 / F5 | Address | Jump if value = 0 / < 0 / ≥ 0 |
+| F8 | u8 count | Start loop |
+| F7 | None | End loop |
+| F6 | None | Break loop |
+| F4 / F3 / F2 | Relative address | Relative jumps |
 
-**Channel level** (*Inside castData (segment 3; boundaries from leak objects matched byte for byte)* of the notes):
-- `0n` delay n.
-- Layers: `8n u16` / `7n s16` start layer n (0–3); `9n` free layer n.
-- Sound: `C1 u8` instrument (0–126 bank instrument, **127 = drum kit**), `C3`/`C4` short or large notes (the flag
-  persists across channel restarts), `C6 u8` bank.
-- Mix: `DF u8` volume a/127, `E0 u8` volume scale a/128, `DD u8` pan, `DC u8` pan weight, `D4 u8` reverb.
-- Pitch: `D3 u8` bend 2^(a/127) (±1 octave), `EE u8` fine bend (±2 semitones), `DE u16` frequency scale a/32768,
-  `DB s8` transpose.
-- Vibrato: `D7`, `D8`, `E1`, `E2`, `E3`.
-- Envelopes and misc: `D9 u8` release rate, `DA u16` envelope, `E7`/`E8` 8-parameter set-up, `EB u8 u8`
-  bank + instrument, `EA` halt script.
+Channel argument metadata is one byte per opcode B0–FF in `SCOM_TABLE` (ROM 0x9E0A0):
+
+| Bits | Mask | Field | Meaning |
+|---|---|---|
+| 0–1 | 0x03 | argc | Argument count |
+| 7−k | 0x80 >> k | wide[k] | Argument k is u16 when set |
+
+At layer level, any delay or end command ends that layer's command run.
+
+**Sequence commands used by music** (full table: `notes/music.md`, section 3.2):
+
+| Opcode | Operands | Effect |
+|---|---|---|
+| 9n / An | u16 / s16 address | Start channel n |
+| 4n | None | Stop channel n |
+| DB | u8 a | Volume a/127 |
+| DA | mode, time | Fade |
+| DD | bpm | Tempo |
+| DC | s8 delta | Tempo change |
+| DE / DF | Transpose | Change transposition |
+| D1 / D2 | u16 address | Short-note gate / velocity table |
+| D7 | u16 mask | Copy player settings to masked channels |
+| D3 / D4 / D5 | Behavior parameter | Mute behavior |
+
+**Channel commands.**
+
+| Opcode | Operands | Effect |
+|---|---|---|
+| 0n | None | Delay n |
+| 8n / 7n | u16 / s16 address | Start layer n (0–3) |
+| 9n | None | Free layer n |
+| C1 | u8 instrument | 0–126 = bank instrument; 127 = drums |
+| C3 / C4 | None | Short / large notes; persists across restarts |
+| C6 | u8 bank | Select bank |
+| DF | u8 a | Volume a/127 |
+| E0 | u8 a | Volume scale a/128 |
+| DD / DC | u8 a | Pan / pan weight |
+| D4 | u8 a | Reverb |
+| D3 | u8 a | Pitch bend 2^(a/127), ±1 octave |
+| EE | u8 a | Fine bend, ±2 semitones |
+| DE | u16 a | Frequency scale a/32768 |
+| DB | s8 transpose | Transposition |
+| D7 / D8 / E1 / E2 / E3 | Command-specific | Vibrato |
+| D9 | u8 rate | Release rate |
+| DA | u16 address | Envelope |
+| E7 / E8 | Eight parameters | Channel setup |
+| EB | u8 bank, u8 instrument | Set bank and instrument |
+| EA | None | Halt script |
 
 **Layer level** (`__Command_Seq`):
 - **Notes** (note = op & 0x3F):
@@ -641,9 +818,24 @@ address after the argument):
   | `40–7F` | var delay, u8 velocity | uses the C3 default delay |
   | `80–BF` | u8 velocity, u8 gate | uses the last delay |
 
-- **Other commands:** `C0 var` rest, `C1` velocity, `C2` transpose, `C3` default delay, `C4/C5` legato, `C6`
-  instrument (127 drums, 255 channel's), `C9` gate, `CA` pan, `CB` envelope + release, `CE` bend, `CF` release,
-  `D0–DF` velocity from table, `E0–EF` gate from table.
+**Other layer commands.**
+
+| Opcode | Operands | Effect |
+|---|---|---|
+| C0 | var delay | Rest |
+| C1 | Velocity | Set velocity |
+| C2 | Transpose | Set transpose |
+| C3 | Delay | Set default delay |
+| C4 / C5 | None | Legato on/off |
+| C6 | Instrument | 127 = drums; 255 = channel instrument |
+| C9 | Gate | Set gate |
+| CA | Pan | Set pan |
+| CB | Envelope, release | Set envelope and release |
+| CE | Bend | Set pitch bend |
+| CF | Release | Set release |
+| D0–DF | None | Velocity-table index in low nibble |
+| E0–EF | None | Gate-table index in low nibble |
+
 - **Default tables:** velocity `0C 19 26 33 39 40 47 4C 53 59 60 66 6D 73 79 7F`; gate
   `E5 CB B1 97 8B 7E 71 64 57 4A 3D 30 24 17 0A 00`.
 - **Timing:** `velocitySquare = vel² / 16129`, `duration = gate × delay >> 8`, and the note is released once the
@@ -652,24 +844,97 @@ address after the argument):
 - **Checked:** a static walk of all 62 sequences (`music/ys_audio.py`) finds 0 unknown opcodes and no out-of-range
   addresses.
 
-**Bank** (offsets relative to the bank start):
-```
-+0x00 u32 drumListOffset (0 = none) ; +0x04 u32 instrumentOffset[numInstruments] (0 = empty)
-Drum list:  u32 drumOffset[64]
-Instrument (32 B): u8 loaded; u8 rangeLo; u8 rangeHi; u8 releaseRate; u32 envelope;
-                   {u32 sample; f32 tuning} low, mid, high          (note < rangeLo → low; > rangeHi → high)
-Drum (16 B):       u8 releaseRate; u8 pan; u8 loaded; u8 pad; u32 sample; f32 tuning; u32 envelope
-Sample (16 B):     u32 flags (codec >> 28 = 0 ADPCM for all 1,025; size = & 0xFFFFFF); u32 addr (into its sample bank);
-                   u32 loop; u32 book
-Loop:              u32 start; u32 end; s32 count (−1 forever, 0 none); u32 0; s16 state[16] if count ≠ 0
-Book:              s32 order (2); s32 npredictors (2); s16 coef[order × npredictors × 8]
-Envelope:          s16 pairs (delay, arg): delay > 0 ramps to (arg/32767)² over max(1, trunc(delay × 0.75)) updates;
-                   0 disable; −1 hang; −2 goto arg; −3 restart. DEFAULT_ENV = (1, 32000) (1000, 32000) (−1, 0)
-```
+**Bank formats.** Offsets are relative to the bank start.
+
+**Bank header (4 + 4 × numInstruments bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | drumListOffset | Zero = no drums |
+| 0x04 | 4 × numInstruments | u32[] | instrumentOffset | Zero = empty instrument |
+
+**Drum pointer list (0x100 bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 0x100 | u32[64] | drumOffset | Bank-relative drum offsets |
+
+**TunedSample (8 bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | sample | Bank-relative Sample offset |
+| 0x04 | 4 | f32 | tuning | Pitch multiplier |
+
+**Instrument (0x20 bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | loaded | Relocation flag |
+| 0x01 | 1 | u8 | rangeLo | Low-note boundary |
+| 0x02 | 1 | u8 | rangeHi | High-note boundary |
+| 0x03 | 1 | u8 | releaseRate | Release rate |
+| 0x04 | 4 | u32 | envelope | Bank-relative envelope offset |
+| 0x08 | 8 | TunedSample | low | Used below rangeLo |
+| 0x10 | 8 | TunedSample | mid | Normal range |
+| 0x18 | 8 | TunedSample | high | Used above rangeHi |
+
+**Drum (0x10 bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | releaseRate | Release rate |
+| 0x01 | 1 | u8 | pan | Pan |
+| 0x02 | 1 | u8 | loaded | Relocation flag |
+| 0x03 | 1 | u8 | padding | Alignment |
+| 0x04 | 8 | TunedSample | sample | Sample and tuning |
+| 0x0C | 4 | u32 | envelope | Bank-relative envelope offset |
+
+**Sample (0x10 bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | flagsSize | High nibble = codec (zero/VADPCM for all 1,025); low 24 bits = size |
+| 0x04 | 4 | u32 | address | Offset into the sample bank |
+| 0x08 | 4 | u32 | loop | Bank-relative Loop offset |
+| 0x0C | 4 | u32 | book | Bank-relative Book offset |
+
+**Loop (0x10 or 0x30 bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | start | First loop sample |
+| 0x04 | 4 | u32 | end | Loop end |
+| 0x08 | 4 | s32 | count | −1 = forever; 0 = none |
+| 0x0C | 4 | u32 | reserved | Zero |
+| 0x10 | 32 if count ≠ 0 | s16[16] | state | Predictor history |
+
+**Book (0x48 bytes for order 2 and two predictors).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | s32 | order | 2 |
+| 0x04 | 4 | s32 | numPredictors | 2 |
+| 0x08 | 16 × order × numPredictors | s16[] | coefficients | Predictor coefficients |
+
+**Envelope point (4 bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | s16 | delay | Positive = ramp; 0 disable; −1 hang; −2 jump to arg; −3 restart |
+| 0x02 | 2 | s16 | arg | Ramp target or point index |
+
+Positive delays ramp to `(arg/32767)^2` over `max(1, trunc(delay × 0.75))` updates. Default points are `(1,32000)`, `(1000,32000)`, `(−1,0)`.
 
 **VADPCM:**
-- **Frames:** 9-byte frames → 16 samples. The header byte gives the scale (high nibble) and the predictor (low
-  nibble).
+
+**Frame (9 bytes; 16 decoded samples).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | header | High nibble = scale; low nibble = predictor |
+| 0x01 | 8 | packed s4[16] | residuals | High nibble first |
+
 - **Decoder:** the same as `src/rom/music/libultra.ts` `decodeVadpcm`.
 - **Loops:** playback restarts from the frame that contains loopStart, with the loop's `state` as history. The
   decoded frames match the stored loop states for 590 of 595 looped samples; the other 5 differ by at most ±1.
@@ -713,7 +978,16 @@ Envelope:          s16 pairs (delay, arg): delay > 0 ramps to (arg/32767)² over
   `imageY = (P.y + floor(P.x/336)) mod 256`; the 1-D ring wrap explains the apparent 15→16→17 px drift.
 - **Beyond the layer's extent** the unit buffer holds unit 0, the transparent tile, on both axes (*Parallax and scrolling*).
 - **Pixel check:** in 1-1 the buffers equal the level decoder's layers pixel for pixel.
-- **Scroll state:** per-layer scroll struct with P at +0x20/+0x24 and ratios at +0x34/+0x38.
+Per-layer scroll-state known fields:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x20 | 4 | f32 | Px | Layer pixel X at screen origin. |
+| 0x24 | 4 | f32 | Py | Layer pixel Y at screen origin. |
+| 0x34 | 4 | f32 | ratioX | Horizontal ratio. |
+| 0x38 | 4 | f32 | ratioY | Vertical ratio. |
+
+- **Scroll-state functions:**
   - `set_bgScreenWPos` (0x8004E13C, breakpoint-verified);
   - `set_bgScrPosProc(obj, cam0x, cam0y, z)` (0x8004EBB8) computes `r` and the anchor at world load;
   - `bgScrProc` (0x8004F1C0) runs every frame;
@@ -740,8 +1014,15 @@ Envelope:          s16 pairs (delay, arg): delay > 0 ramps to (arg/32767)² over
   - Leak `frameManager World_to_3DWorld` (0x800578A0): `X = wx − camX − 160`, `Y = 120 − (wy − camY)`,
     `Z = wz − camZ + 500`, with frameInfo at 0x800FC52C.
 - **Yoshi mesh:** a per-frame animation blob addressed as segment 3 (1-1: 0x806CC950).
-  - Display list at +0: `G_VTX` with 24 vertices at +0x200 (s16 xyz, s16 st, RGBA FFFFFFFF), a 256-colour TLUT at
-    +0x400, and CI8 texels from +0x2E00.
+  The animation blob contains:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x0000 | Variable | Gfx[] | displayList | G_VTX loads 24 vertices. |
+| 0x0200 | 24 × 16 | Vtx[] | vertices | Standard vertices with signed XYZ/ST and white RGBA. |
+| 0x0400 | 0x200 | u16[256] | palette | 256-color TLUT. |
+| 0x2E00 | Variable | u8[] | texels | CI8 texels. |
+
   - 6 quads, 24 × 14 to 32 × 25 texels, each drawn as SETTIMG/LOADBLOCK/SETTILESIZE/TRI2.
   - Combiner `0x127E24/0xFFFFF3F9`, render mode `0x0F0A7008`.
   - Built each frame by copying one of Yoshi's cells (display list, vertices, TLUT and part textures) from ucellData
@@ -832,14 +1113,14 @@ Everything here is verified against the running game unless marked: RSP task bre
 
 **Segments** (the per-frame header in segment 13, the RCP dynamic buffer):
 
-| Segment 13 offset | Contents |
-|---|---|
-| +0x070 | projection `Mtx` |
-| +0x0B0 | viewport (320 × 240, centred) |
-| +0x0C0 | segment-table list (`BC00xx06` for segments 0–15) |
-| +0x150 | `G_SETCIMG` (segment 15) |
-| +0x168 | `G_SETZIMG` (segment 14) |
-| +0x180 | scissor 0,0–320,240 |
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x070 | 0x40 | Mtx | projection | N64 fixed-point matrix. |
+| 0x0B0 | 0x10 | Viewport | viewport | 320 × 240, centered. |
+| 0x0C0 | 0x80 | Gfx[16] | segments | BC00xx06 commands for segments 0–15. |
+| 0x150 | 8 | Gfx | colorImage | G_SETCIMG using segment 15. |
+| 0x168 | 8 | Gfx | depthImage | G_SETZIMG using segment 14. |
+| 0x180 | 8 | Gfx | scissor | 0,0 to 320,240. |
 
 - Segment values: seg1 = 0x0020BEB0; seg14 = the Z buffer (0x0020DE40 on the title and in menus, **0 in courses**);
   seg15 = the colour frame buffer (0x0013CAC0).
@@ -964,7 +1245,13 @@ for by in 0..worldH/256-1, bx in 0..worldW/256-1:
 ```
 
 **Collision value** (`crUtID` u16 v; structure verified from code, semantics partly open):
-- Fields: `kind = v >> 11`, `attr = (v >> 8) & 7`, `lo = v & 0xFF`.
+
+| Bits | Mask | Field | Meaning |
+|---|---|---|---|
+| 11–15 | 0xF800 | kind | Collision kind |
+| 8–10 | 0x0700 | attr | Surface attributes |
+| 0–7 | 0x00FF | lo | Shape or coin index, as below |
+
 - If `lo >> 6` is 0 or 1, `lo` selects a shape: `mask = shapes[(lo >> 6) · 64 + (lo & 0x3F)]`, 16 u16 rows with
   bit 15 the leftmost pixel and 1 = solid. There are 128 pointers and 33 distinct masks (empty, full, halves, and
   1:1, 1:2 and 2:1 slopes); they are dumped to `level/shapes_J.json`.
@@ -982,7 +1269,7 @@ for by in 0..worldH/256-1, bx in 0..worldW/256-1:
 
 | Quantity | Value | Where |
 |---|---|---|
-| Camera frame (top-left of the screen in main-layer px) | f32 x, y at 0x800FC52C / 0x800FC530; z at 0x800FC564 (500) | frameInfo |
+| Camera frame (top-left of the screen in main-layer px) | Fields listed under Run-time variables | frameInfo |
 | Start frame | world +0x28/+0x2C | *World struct (0x118 bytes, segment 4)* |
 | Field of view | 40° vertical, aspect 4/3 | `persInfo` 0x800FC4A8 |
 | Eye distance from the main plane | K = 120 / tan(20°) = 329.67 px | projection matrix |
@@ -1103,12 +1390,54 @@ C200002F <uObjTxSprite*>       G_OBJ_LDTX_SPRITE (HUD digits: C400002F G_OBJ_LDT
 
 **Structures** (big-endian; S2DEX 1.x layouts):
 
-| Structure | Layout |
-|---|---|
-| `uObjTxtr` (24 bytes) | `u32 type; u32 image; u16 a, b, c, sid; u32 flag; u32 mask`. TXTRBLOCK `0x00001033`: a = tmem, b = bytes/8 − 1, c = 0x4000/W (e.g. 32×32 CI8 → `0000 007F 0200`). TXTRTILE `0x00FC1034`: a tmem, b width, c height. TLUT `0x00000030`: a = phead, b = pnum − 1 |
-| `uObjSprite` (24 bytes) | `s16 objX (s10.2); u16 scaleW (5.10); s16 imageW (10.5); u16 pad; s16 objY; u16 scaleH; s16 imageH; u16 pad; u16 imageStride; u16 imageAdrs; u8 fmt (0 RGBA, 2 CI, 3 IA, 4 I); u8 siz (0 4-bit, 1 8-bit, 2 16-bit); u8 pal; u8 flags` |
-| `uObjTxSprite` | `uObjTxtr` + `uObjSprite` (48 bytes) |
-| `uObjMtx` (24 bytes) | `s32 A, B, C, D (16.16); s16 X, Y (10.2); u16 BaseScaleX, BaseScaleY` |
+uObjTxtr, 24 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | type | TXTRBLOCK 0x00001033; TXTRTILE 0x00FC1034; TLUT 0x00000030. |
+| 0x04 | 4 | u32 | image | Image or palette pointer. |
+| 0x08 | 2 | u16 | a | Block/tile: TMEM address; TLUT: palette head. |
+| 0x0A | 2 | u16 | b | Block: bytes/8 − 1; tile: width; TLUT: color count − 1. |
+| 0x0C | 2 | u16 | c | Block: 0x4000/width; tile: height. |
+| 0x0E | 2 | u16 | sid | Status identifier. |
+| 0x10 | 4 | u32 | flag | Status flag. |
+| 0x14 | 4 | u32 | mask | Status mask. |
+
+uObjSprite, 24 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | s16 | objX | S10.2 X. |
+| 0x02 | 2 | u16 | scaleW | U5.10 horizontal scale. |
+| 0x04 | 2 | s16 | imageW | S10.5 width. |
+| 0x06 | 2 | u16 | padding06 | Padding. |
+| 0x08 | 2 | s16 | objY | Y. |
+| 0x0A | 2 | u16 | scaleH | Vertical scale. |
+| 0x0C | 2 | s16 | imageH | Height. |
+| 0x0E | 2 | u16 | padding0E | Padding. |
+| 0x10 | 2 | u16 | imageStride | Image stride. |
+| 0x12 | 2 | u16 | imageAdrs | TMEM address. |
+| 0x14 | 1 | u8 | fmt | 0 RGBA; 2 CI; 3 IA; 4 I. |
+| 0x15 | 1 | u8 | siz | 0: 4-bit; 1: 8-bit; 2: 16-bit. |
+| 0x16 | 1 | u8 | pal | Palette. |
+| 0x17 | 1 | u8 | flags | Flags. |
+
+uObjTxSprite, 48 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 24 | uObjTxtr | texture | Texture load record. |
+| 0x18 | 24 | uObjSprite | sprite | Sprite record. |
+
+uObjMtx, 24 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 16 | s32[4] | linear | A,B,C,D in 16.16. |
+| 0x10 | 4 | s16[2] | translation | X,Y in 10.2. |
+| 0x14 | 4 | u16[2] | baseScale | BaseScaleX, BaseScaleY. |
+
+For a 32×32 CI8 TXTRBLOCK, a/b/c are 0x0000/0x007F/0x0200.
 
 About `uObjMtx`:
 - X, Y are the screen position of the sprite origin.
@@ -1150,9 +1479,51 @@ About `uObjMtx`:
 |---|---|---|
 | `yoshi_outpalette` | 8 × 256 × u16 RGBA5551 at ROM 0x944370 + 0x200·k | k = 0 green, 1 red, 2 yellow, 3 blue, 4 light blue, 5 pink, 6 white, 7 black. Palettes 0 and 1 equal the in-game TLUTs of green and red Yoshi (256 of 256 entries) |
 | 904 part images `{part}_outtexture` | after the palettes (e.g. `head_kihon` 800 bytes at 0x965130, `body_kihon` at 0x9A78C8) | CI8 |
-| 1,187 cells (`.shp`) | – | `{Gfx dl[]; Vtx v[24]}`, i.e. 6 textured quads. The list uses translucent textured-edge render mode, TLUT RGBA16, bilinear, decal combiner, `gsSPVertex(24)`, `gsDPLoadTLUT_pal256`, then 6 × (`gsDPLoadTextureBlock` CI8 W×H + `gsSP2Triangles`). Vertices are `{x, y, z = 0, flag, s, t, rgba}`: units are pixels, y up, origin at the centre of the feet, s/t ×32 with texture scale 0.5 |
-| Cell table (`.tbl`) | – | `{&shape, nparts = 6, {partnum, bytes = W·H, texture} × 6}` |
-| Face sequences (`.idx`, 114) | – | `{duration in frames, head texture}` lists (e.g. `ashibumi` = 8 × `{3, head_furi_eat_*}`) |
+| 1,187 cells (`.shp`) | – | Shape record below, containing six textured quads. The list uses translucent textured-edge render mode, TLUT RGBA16, bilinear, decal combiner, `gsSPVertex(24)`, `gsDPLoadTLUT_pal256`, then 6 × (`gsDPLoadTextureBlock` CI8 W×H + `gsSP2Triangles`). Vertices use the Vtx layout below with z = 0: units are pixels, y up, origin at the centre of the feet, s/t ×32 with texture scale 0.5 |
+| Cell table (`.tbl`) | – | 0x80-byte cell records below |
+| Face sequences (`.idx`, 114) | – | Face-sequence records below; for example ashibumi has eight three-frame head_furi_eat entries |
+
+Shape payload (source archive and nviewer yoshicell.ts):
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 0x200 | Gfx[] | displayList | F3DEX 1.x commands. |
+| 0x200 | 24 × 16 | Vtx[] | vertices | Twenty-four vertices. |
+
+Vtx, 16 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 6 | s16[3] | position | X,Y,Z; Z is zero. |
+| 0x06 | 2 | u16 | flag | Vertex flag. |
+| 0x08 | 4 | s16[2] | texcoord | S,T. |
+| 0x0C | 4 | u8[4] | color | R,G,B,A. |
+
+Cell record, 0x80 bytes (nviewer yoshicell.ts):
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | shape | Segmented shape pointer. |
+| 0x04 | 1 | u8 | nparts | 6. |
+| 0x05 | 3 | u8[3] | padding05 | Alignment. |
+| 0x08 | 6 × 8 | part[] | parts | Six part records. |
+| 0x38 | 0x48 | u8[] | unknown38 | Not consumed by the viewer. |
+
+Part record, eight bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | partnum | Part number. |
+| 0x01 | 1 | u8 | unknown01 | Unknown. |
+| 0x02 | 2 | u16 | bytes | Width × height. |
+| 0x04 | 4 | u32 | texture | Segmented CI8 texture pointer. |
+
+Face-sequence record, sequential fields; duration storage width is not established here:
+
+| Order | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 1 | Unknown | Unknown | duration | Frame count. |
+| 2 | 4 | u32 | headTexture | Head-texture pointer. |
 
 - **Animations,** as cell ranges in table order: `playA_stand`, `walk` (16), `ashibumi` (9), `runTWO` (16), `playB`
   crouch/stretch/turn, `playC` jump (12), flutter `bataStwo/bataLtwo` (16), damage, fall, `playD` tongue, `playE`
@@ -1223,15 +1594,41 @@ opcode tables and tools are in `notes/music.md` and `music/`.
 
 The entries tile each segment exactly, with no gaps.
 
-**Table records**
-- **Header** (16 bytes): `s16 count; s16 0; u32 romAddr (0 = linked segment start); u8 pad[8]`.
-- **Entry** (16 bytes): `u32 offset (from segment start); u32 size; u8 medium (2 = cartridge); u8 cachePolicy;
-  u16 shortData1..3`.
-  - Bank entries: `shortData1 = sampleBank << 8 | 0xFF` (banks 0–3 use sample bank 0; 4–61 use bank 1),
-    `shortData2 = numInstruments << 8 | numDrums`.
-- **Sequence → bank map:** `u16 offset[62]`, then at each offset `u8 count; u8 bank[count]`.
-  - Seq 0 → {1, 3, 2, 0}; seq n → {n + 3}, except seqs 26–29 → {29}.
-  - Channel command `C6 a` selects `bank[count − a]`.
+**AudioTable header (0x10 bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | s16 | count | Entry count |
+| 0x02 | 2 | s16 | reserved_02 | Zero |
+| 0x04 | 4 | u32 | romAddr | Zero = linked segment start |
+| 0x08 | 8 | u8[8] | padding | Reserved |
+
+**AudioTable entry (0x10 bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | offset | Segment-relative data offset |
+| 0x04 | 4 | u32 | size | Byte count |
+| 0x08 | 1 | u8 | medium | 2 = cartridge |
+| 0x09 | 1 | u8 | cachePolicy | Cache policy |
+| 0x0A | 2 | u16 | shortData1 | For banks: sampleBank << 8, low byte 0xFF; banks 0–3 use sample bank 0, 4–61 use bank 1 |
+| 0x0C | 2 | u16 | shortData2 | For banks: numInstruments << 8 plus numDrums |
+| 0x0E | 2 | u16 | shortData3 | Additional metadata |
+
+**Sequence-to-bank map.**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 124 | u16[62] | offset | Map-relative list offsets |
+
+**Bank list (1 + count bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | count | Bank count |
+| 0x01 | count | u8[] | bank | Bank IDs |
+
+Sequence 0 selects banks 1, 3, 2, 0. Sequence n selects n + 3, except 26–29 select 29. Channel command `C6 a` selects `bank[count − a]`.
 
 **Compared with the leak:**
 - No sequence is byte-identical, and J has 62 against the leak's 65.

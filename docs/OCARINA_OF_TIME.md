@@ -64,16 +64,22 @@ segmented, VROM, and file-relative addresses are named at each use.
 
 | table | record | OoT US 1.0 (code offset, VRAM, count) | OoT MQ debug | MM US | MM debug PAL | how to find |
 |---|---|---|---|---|---|---|
-| scene table | OoT 0x14 `{RomFile scene; RomFile title; u8 unk10; u8 drawConfig; u8 unk12; u8 pad}`, MM 0x10 `{RomFile scene; u16 titleTextId; u8 unkA; u8 drawConfig; u8 unkC; pad}` | +0xEA440, 0x800FB4E0, 101 | +0x10CBB0, 0x80129A10, 110 | +0x11E1E0, 0x801C3CA0, 113 (102 set) | +0x1562B0, 0x8020CD70, 113 | run of records whose RomFile is a dmadata file; OoT drawConfig < 0x40 |
-| entrance table (OoT) | 4: `{s8 scene; s8 spawn; u16 flags}` | +0xE8BF0, 1556 | +0x10B360, 1556 | - | - | ends at the scene table; first record `00 00 41 02` |
-| scene entrance tables (MM) | 0xC: `{u8 count; ptr table; ptr name}` | - | - | +0x11FC60, 110 | +0x157D38, 110 | run of such records with pointers into `code` |
+| scene table | OoT 0x14 / MM 0x10; scene-table field layouts below | +0xEA440, 0x800FB4E0, 101 | +0x10CBB0, 0x80129A10, 110 | +0x11E1E0, 0x801C3CA0, 113 (102 set) | +0x1562B0, 0x8020CD70, 113 | run of records whose RomFile is a dmadata file; OoT drawConfig < 0x40 |
+| entrance table (OoT) | 4-byte EntranceTableEntry; see Entrances | +0xE8BF0, 1556 | +0x10B360, 1556 | - | - | ends at the scene table; first record `00 00 41 02` |
+| scene entrance tables (MM) | 0x0C-byte descriptor; see Entrances | - | - | +0x11FC60, 110 | +0x157D38, 110 | run of such records with pointers into `code` |
 | actor overlay table | 0x20 (*Where actors come from*) | +0xD7490, 471 | +0xF9440, 471 | +0x109510, 690 | +0x140A50, 690 | run starting with the 3 internal actors' records |
 | object table | 8: RomFile | +0xE7F58, 402 | +0x10A6C8, 402 | +0x11CC80, 643 | +0x154D50, 643 | longest RomFile run; entry 0 empty |
 | effect overlay table | 0x1C | 37 | 37 | 39 | 39 | similar to the actor table (do not confuse) |
 | game state table | 0x30 | 6 | 6 | 7 | 7 | contains the map select overlay (state 1) |
 
-The map select overlay (`ovl_select`, game state 1) is present in all four ROMs, including retail, and holds the map select
-list: 12-byte records `{char* name; func; u32 entrance}` (OoT US: 118 entries, MQ debug: 126, MM: 143). **Verified** (`fs/maps.py`).
+The map select overlay (`ovl_select`, game state 1) is present in all four ROMs, including retail. Its list has 12-byte records (OoT US: 118 entries, MQ debug: 126, MM: 143). **Verified** (`fs/maps.py`).
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | name | Linked pointer to name string |
+| 0x04 | 4 | u32 | function | Linked entry function |
+| 0x08 | 4 | u32 | entrance | Entrance identifier |
+
 
 ### 2.2 Memory and address mapping
 
@@ -85,8 +91,15 @@ list: 12-byte records `{char* name; func; u32 entrance}` (OoT US: 118 entries, M
 
 **dmadata** (**verified**, `fs/verify_dma.py` decodes every file with an independent Yaz0 decoder and compares with the extraction):
 
-- 16-byte records `{u32 vromStart, vromEnd, romStart, romEnd}`, terminated by a record with vromStart = vromEnd = 0 (after
-  record 0). Entry 2 describes the table itself.
+The directory has 16-byte records and terminates when vromStart = vromEnd = 0 after record 0. Entry 2 describes the directory itself.
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | vromStart | Inclusive virtual-ROM start |
+| 0x04 | 4 | u32 | vromEnd | Exclusive virtual-ROM end |
+| 0x08 | 4 | u32 | romStart | Stored ROM start; 0xFFFFFFFF = absent |
+| 0x0C | 4 | u32 | romEnd | Stored ROM end; zero = raw file |
+
 - `romEnd == 0`: stored uncompressed, `romStart` .. `romStart + size`. `romStart == 0xFFFFFFFF` (and `romEnd == 0xFFFFFFFF`):
   file absent from this ROM (MM: 17 entries, e.g. indices 8, 9, 21, 652, 1539-1551 in MM US). Otherwise Yaz0 data at
   `romStart .. romEnd` decompressing to `vromEnd - vromStart` bytes.
@@ -97,10 +110,23 @@ list: 12-byte records `{char* name; func; u32 entrance}` (OoT US: 118 entries, M
 - Compressed ROMs store files in ROM order with `romStart != vromStart` for most raw files (OoT US: 47 of 54).
 - Compressed sizes are multiples of 4.
 
-**Yaz0** (**verified** by decoding all 4488 compressed files): header `"Yaz0"`, `u32` decompressed size, 8 zero bytes; then
-groups of a code byte (MSB first; 1 = copy one literal byte, 0 = back-reference) and references `b1 b2`: distance
-`((b1 & 0x0F) << 8 | b2) + 1`, length `b1 >> 4` + 2, or when `b1 >> 4 == 0` a third byte + 0x12. This is the same Yaz0 as
-other Nintendo EAD games; `src/rom/` has no Yaz0 decoder yet (small; the SF64 module uses MIO0).
+**Yaz0** (**verified** by decoding all 4488 compressed files).
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | char[4] | magic | Yaz0 |
+| 0x04 | 4 | u32 | decodedSize | Output byte count |
+| 0x08 | 8 | u8[8] | reserved | Zero |
+| 0x10 | Variable | u8[] | stream | Control bytes and token payloads |
+
+| Token | Stored bytes | Meaning |
+|---|---|---|
+| Control | One byte, MSB first | Each bit: 1 = literal, 0 = back-reference |
+| Literal | One byte | Copy directly |
+| Short reference | b1, b2 | Distance = ((b1 & 0x0F) << 8 \| b2) + 1; length = (b1 >> 4) + 2 |
+| Long reference | b1, b2, b3; b1 >> 4 = 0 | Same distance; length = b3 + 0x12 |
+
+Copies may overlap. This is Nintendo EAD's standard Yaz0 format.
 
 **File names:** only OoT MQ debug has them: a table of string pointers in `boot` (find the string `makerom\0`, then the
 pointer to it in `boot` at its load address 0x80000460 - 0x1060; 1532 names, identical to the decomp's list). MM debug PAL
@@ -192,8 +218,16 @@ with one room and 9 non-cutscene setups; not examined further).
 Names from the game's own data:
 
 - **MM:** each scene-table record has a message id (`titleTextId`, 0x100-0x149) of the area name shown on entry. The English
-  message table is in `code` (8-byte records `{u16 id; u8 typePos; u8 0; u32 0x08xxxxxx offset}`, ascending, ended by id
-  0xFFFF; MM US: code +0x1210D8, 4589 messages) pointing into `message_data_static` (dmadata 29); text starts 11 bytes into
+  message table is in `code` (MM US: code +0x1210D8, 4589 messages), sorted by ID and terminated by 0xFFFF. It points into `message_data_static` (dmadata 29):
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | u16 | id | Message ID; 0xFFFF terminates |
+| 0x02 | 1 | u8 | typePos | Type and position |
+| 0x03 | 1 | u8 | reserved | Zero |
+| 0x04 | 4 | u32 | text | Segment-8 text pointer |
+
+  Text starts 11 bytes into
   a message and ends at byte 0xBF. This names 70 of the 102 MM scenes (e.g. 0x6F "South Clock Town", 0x2D "Termina Field");
   the rest have no title (boss rooms, moon, cutscene maps) or share one (Zora Cape shows "Great Bay Coast"). **Verified**
   (ROM bytes, `lead/levels.py`). The MM debug PAL ROM keeps its message tables in another layout (not located; its scene
@@ -351,8 +385,37 @@ dungeons with overlapping rooms. **Doc** (z_room.c); **verified** by the scene r
 
 | game | entry | layout | location (by structure) |
 |---|---|---|---|
-| OoT | 0x14 | `RomFile scene {vs, ve}; RomFile title {vs, ve} or 0; u8 unk10; u8 drawConfig; u8 unk12; u8 0` | US code +0xEA440 (101 entries), MQ code +0x10CBB0 (110) |
-| MM | 0x10 | `RomFile scene; u16 titleTextId; u8; u8 drawConfig; u8; u8` | US code +0x11E1E0, dbg PAL code +0x1562B0 (113 each; unset slots are {0,0}) |
+| OoT | 0x14 | OoT scene-table entry below | US code +0xEA440 (101 entries), MQ code +0x10CBB0 (110) |
+| MM | 0x10 | MM scene-table entry below | US code +0x11E1E0, dbg PAL code +0x1562B0 (113 each; unset slots are {0,0}) |
+
+RomFile, eight bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | vromStart | Inclusive virtual-ROM start. |
+| 0x04 | 4 | u32 | vromEnd | Exclusive virtual-ROM end. |
+
+OoT scene-table entry, 0x14 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 8 | RomFile | scene | Scene file. |
+| 0x08 | 8 | RomFile | title | Title-card file or zero. |
+| 0x10 | 1 | u8 | unknown10 | Unknown. |
+| 0x11 | 1 | u8 | drawConfig | Draw-configuration index. |
+| 0x12 | 1 | u8 | unknown12 | Unknown. |
+| 0x13 | 1 | u8 | padding | Zero. |
+
+MM scene-table entry, 0x10 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 8 | RomFile | scene | Scene file; zero pair marks an unset slot. |
+| 0x08 | 2 | u16 | titleTextId | Title text identifier. |
+| 0x0A | 1 | u8 | unknown0A | Unknown. |
+| 0x0B | 1 | u8 | drawConfig | Draw-configuration index. |
+| 0x0C | 1 | u8 | unknown0C | Unknown. |
+| 0x0D | 3 | u8[] | unknown0D | Remaining bytes. |
 
 Finder (**verified**, `scenes/zscene.ts findSceneTable`, used by every render of all four ROMs): scan files ≥ 64 KB for a
 run of ≥ 60 entries whose (vromStart, vromEnd) equals a filesystem file whose first bytes parse as a header containing
@@ -362,20 +425,28 @@ byte +0x11 (0..52), MM byte +0x0B (0..7). MM dbg PAL fills the 11 slots that are
 
 ##### Commands
 
-8 bytes: `u8 code, u8 data1, u16 pad, u32 data2`; pointers are segment 2 in scene files and segment 3 in room files. A
-header ends at 0x14 (loader: at most 64 commands; no other terminator). Layouts **doc** (`oot-decomp/include/scene.h`,
+Commands are eight bytes; pointers use segment 2 in scene files and segment 3 in room files.
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | code | Command ID |
+| 0x01 | 1 | u8 | data1 | Immediate/count argument |
+| 0x02 | 2 | u16 | padding | Reserved |
+| 0x04 | 4 | u32 | data2 | Immediate value or segmented pointer |
+
+A header ends at command 0x14 (loader: at most 64 commands; no other terminator). Layouts **doc** (`oot-decomp/include/scene.h`,
 `src/code/z_scene.c`; `mm-decomp/include/z64scene.h`, `src/code/z_scene.c`); usage counts **verified** for OoT US by
 `scene-oot/census.py` → `scene-oot/census-oot-us10.txt` (main headers, 101 scenes / 388 room headers).
 
 | id | OoT name / MM name | data1 | data2 / bytes 4-7 | where | viewer use |
 |---|---|---|---|---|---|
-| 00 | PLAYER_ENTRY_LIST / SPAWN_LIST | count | ptr ActorEntry[0x10] `{s16 id; Vec3s pos; Vec3s rot; s16 params}` | scene (101/101) | start positions |
+| 00 | PLAYER_ENTRY_LIST / SPAWN_LIST | count | ptr ActorEntry[0x10]; layout under Where actors come from | scene (101/101) | start positions |
 | 01 | ACTOR_LIST | count | ptr ActorEntry[0x10] | room (369/388) | actors (*Actors and objects*) |
 | 02 | UNUSED_2 / ACTOR_CUTSCENE_CAM_LIST | — / count | ptr | scene (MM) | no |
 | 03 | COLLISION_HEADER | 0 | ptr CollisionHeader (*Collision and waterboxes*) | scene (101) | collision/water overlay, bg cameras |
-| 04 | ROOM_LIST | count | ptr RomFile[8] `{vs, ve}` | scene (101) | rooms |
-| 05 | WIND | 0 | bytes s8 x, y, z, u8 strength | room (7) | no |
-| 06 | SPAWN_LIST / ENTRANCE_LIST | 0 | ptr `{u8 playerEntryIndex; u8 room}[]`, no count | scene (101) | start room + position |
+| 04 | ROOM_LIST | count | Pointer to eight-byte RomFile records (layout under ROM map and asset organization) | scene (101) | rooms |
+| 05 | WIND | 0 | Four-byte wind payload; fields below | room (7) | no |
+| 06 | SPAWN_LIST / ENTRANCE_LIST | 0 | Pointer to two-byte entrance-list entries below; no count | scene (101) | start room + position |
 | 07 | SPECIAL_FILES | navi hint file | u32 keep object id (→ segment 5) | scene (93) | actors (*Actors and objects*) |
 | 08 | ROOM_BEHAVIOR | room type | bits 0-7 env type, 8 lens mode, 10 disable warp songs; MM +11 enablePosLights, +12 storm | room (388) | MM point lights (hypothesis: ignore) |
 | 09 | undefined | | | | |
@@ -383,7 +454,7 @@ header ends at 0x14 (loader: at most 64 commands; no other terminator). Layouts 
 | 0B | OBJECT_LIST | count | ptr s16[] | room (388) | actors (*Actors and objects*) |
 | 0C | LIGHT_LIST (positional) | count | ptr LightInfo[0x0E] | room | no (see *Lights used for rooms*) |
 | 0D | PATH_LIST | 0 | ptr Path[8] | scene (30) | optional markers |
-| 0E | TRANSITION_ACTOR_LIST | count | ptr [0x10] `{s8 room, s8 bgCam}×2; s16 id; Vec3s pos; s16 rotY; s16 params}` | scene (62) | doors (*Actors and objects*) |
+| 0E | TRANSITION_ACTOR_LIST | count | ptr TransitionActorEntry[0x10]; layout under Where actors come from | scene (62) | doors (*Actors and objects*) |
 | 0F | LIGHT_SETTINGS_LIST | count | ptr EnvLightSettings[0x16] (*Light settings (command 0x0F)*) | scene (101) | lights, fog, zFar |
 | 10 | TIME_SETTINGS | 0 | bytes hour, min, speed (0xFF = keep) | room (388) | fixed-time rooms |
 | 11 | SKYBOX_SETTINGS | OoT 0; MM area texture file (0-8) | OoT bytes skyboxId, skyboxConfig, lightMode; MM byte4 & 3 = skyboxId | scene (101) | sky, light mode, MM segment 6 |
@@ -392,13 +463,22 @@ header ends at 0x14 (loader: at most 64 commands; no other terminator). Layouts 
 | 14 | END | | | | |
 | 15 | SOUND_SETTINGS | spec | byte6 ambience, byte7 sequence | scene (101) | music (*Music*) |
 | 16 | ECHO | 0 | byte7 | room | no |
-| 17 | CUTSCENE_DATA / CUTSCENE_SCRIPT_LIST | — / count | OoT ptr script; MM ptr `{script*, s16 nextEntrance, u8 spawn, u8 flags}[8]` | scene alt headers | no |
+| 17 | CUTSCENE_DATA / CUTSCENE_SCRIPT_LIST | — / count | OoT script pointer; MM pointer to eight-byte cutscene-script entries | scene alt headers | no |
 | 18 | ALTERNATE_HEADER_LIST | 0 | ptr to header pointers (*Alternate headers (layers)*) | scene (32) and room (83) | layers |
 | 19 | MISC_SETTINGS / SET_REGION_VISITED | camera type | world map area | scene | no |
 | 1A | — / ANIMATED_MATERIAL_LIST | 0 | ptr AnimatedMaterial[8] (*MM: draw configs and animated materials*) | MM scene | segments 8-0xD |
 | 1B | — / ACTOR_CUTSCENE_LIST | count | ptr [0x10] | MM scene | no |
 | 1C | — / MAP_DATA | 0 | ptr | MM scene | no |
 | 1E | — / MAP_DATA_CHESTS | count | ptr | MM scene | no |
+
+Wind payload within scene command 0x05 (the complete command remains eight bytes):
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x04 | 1 | s8 | x | Wind X component. |
+| 0x05 | 1 | s8 | y | Wind Y component. |
+| 0x06 | 1 | s8 | z | Wind Z component. |
+| 0x07 | 1 | u8 | strength | Wind strength. |
 
 ##### Alternate headers (layers)
 
@@ -486,12 +566,88 @@ moon (En_Fall).
 Layouts **doc** (`oot-decomp/include/room.h`, `mm-decomp/include/z64scene.h`), parser **verified** on every rendered
 room (`scenes/zscene.ts parseMesh`).
 
-| type | layout | draw |
+| Type | Entry layout | Draw order |
 |---|---|---|
-| 0 normal | `u8 0; u8 n; ptr entries; ptr entriesEnd`; entry `{Gfx* opa; Gfx* xlu}` (8) | all entries in order |
-| 1 image | `u8 1; u8 amount (1 single, 2 multi); ptr entry {opa, xlu}`; single: `+8 source, +0xC unk, +0x10 tlut, +0x14 u16 w, h, +0x18 u8 fmt, siz, +0x1A u16 tlutMode, tlutCount` (0x20); multi: `+8 u8 n, +0xC ptr bg[0x1C] {u16 unk, u8 bgCamIndex, source, unk, tlut, u16 w, h, u8 fmt, siz, u16 tlutMode, tlutCount}` | opa, 2D background, xlu |
-| 2 cullable | `u8 2; u8 n (≤ 64); ptr entries; ptr end`; entry `{Vec3s center; s16 radius; Gfx* opa; Gfx* xlu}` (0x10) | entries sorted near to far, skipped when the sphere is behind the eye or beyond zFar |
-| 3 (MM) none | nothing drawn | |
+| 0 normal | Normal entries | All entries in order. |
+| 1 image | Single- or multiple-image header | Opaque, background image, translucent. |
+| 2 cullable | Cullable entries | Near to far; skip spheres behind the eye or beyond zFar. |
+| 3 (MM) | No geometry | Nothing. |
+
+Types 0 and 2 header, 0x0C bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | type | 0 normal; 2 cullable. |
+| 0x01 | 1 | u8 | count | Entry count; type 2 maximum 64. |
+| 0x02 | 2 | u8[2] | padding | Alignment. |
+| 0x04 | 4 | u32 | entries | Segmented entry pointer. |
+| 0x08 | 4 | u32 | entriesEnd | Segmented end pointer. |
+
+Normal entry, eight bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | opaque | Opaque display-list pointer or zero. |
+| 0x04 | 4 | u32 | translucent | Translucent display-list pointer or zero. |
+
+Cullable entry, 0x10 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 6 | s16[3] | center | Bounding-sphere X,Y,Z. |
+| 0x06 | 2 | s16 | radius | Bounding-sphere radius. |
+| 0x08 | 4 | u32 | opaque | Opaque display-list pointer. |
+| 0x0C | 4 | u32 | translucent | Translucent display-list pointer. |
+
+Image-header common prefix, eight bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | type | 1. |
+| 0x01 | 1 | u8 | amount | 1 single image; 2 multiple images. |
+| 0x02 | 2 | u8[2] | padding | Alignment. |
+| 0x04 | 4 | u32 | entry | Pointer to one normal entry. |
+
+Single-image header tail; complete header 0x20 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x08 | 4 | u32 | source | Image source pointer. |
+| 0x0C | 4 | u32 | unknown0C | Unknown. |
+| 0x10 | 4 | u32 | tlut | Palette pointer. |
+| 0x14 | 2 | u16 | width | Image width. |
+| 0x16 | 2 | u16 | height | Image height. |
+| 0x18 | 1 | u8 | format | Image format. |
+| 0x19 | 1 | u8 | size | Texel-size code. |
+| 0x1A | 2 | u16 | tlutMode | Palette mode. |
+| 0x1C | 2 | u16 | tlutCount | Palette count. |
+| 0x1E | 2 | u8[2] | padding | Alignment. |
+
+Multiple-image header tail; complete header 0x10 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x08 | 1 | u8 | count | Background record count. |
+| 0x09 | 3 | u8[3] | padding | Alignment. |
+| 0x0C | 4 | u32 | backgrounds | Pointer to background records. |
+
+Background record, 0x1C bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | u16 | unknown00 | Unknown. |
+| 0x02 | 1 | u8 | bgCamIndex | Background-camera index. |
+| 0x03 | 1 | u8 | padding03 | Alignment. |
+| 0x04 | 4 | u32 | source | Image source pointer. |
+| 0x08 | 4 | u32 | unknown08 | Unknown. |
+| 0x0C | 4 | u32 | tlut | Palette pointer. |
+| 0x10 | 2 | u16 | width | Width. |
+| 0x12 | 2 | u16 | height | Height. |
+| 0x14 | 1 | u8 | format | Image format. |
+| 0x15 | 1 | u8 | size | Texel-size code. |
+| 0x16 | 2 | u16 | tlutMode | Palette mode. |
+| 0x18 | 2 | u16 | tlutCount | Palette count. |
+| 0x1A | 2 | u8[2] | padding1A | Alignment. |
 
 Either list pointer may be 0 (US: 1621 null list pointers). The game draws all OPA lists (after `SETUPDL_25`) into the
 opaque buffer and all XLU lists (after `SETUPDL_25` on the XLU buffer) into the translucent buffer, which is drawn after
@@ -749,22 +905,104 @@ XMLs; only needed for night views.
 Same layout in both games (**doc** `bgcheck.h`, MM `z64bgcheck.h`; **verified** parser `scenes/zscene.ts parseCollision`,
 `scenes/camcheck.ts`; overlay render below):
 
-```
-CollisionHeader (0x2C): Vec3s min, max; u16 numVertices @0x0C; Vec3s* vertices @0x10; u16 numPolys @0x14;
-  CollisionPoly* polys @0x18; SurfaceType* surfaceTypes @0x1C; BgCamInfo* bgCams @0x20; u16 numWaterBoxes @0x24;
-  WaterBox* waterBoxes @0x28
-CollisionPoly (0x10): u16 type (surface type index); u16 vIA (bits 13-15 ignore flags camera/entity/projectile);
-  u16 vIB (bit 13 conveyor flag); u16 vIC; Vec3s normal (/0x7FFF); s16 dist
-SurfaceType (8): u32 w0: bgCamIndex 0-7, exit 8-12, floorType 13-17, wallType 21-25, floorProperty 26-29, soft 30,
-  horse block 31; u32 w1: material 0-3, floorEffect 4-5, lightSetting 6-10, echo 11-16, hookshot 17, conveyor speed
-  18-20 / direction 21-26, wall damage 27
-BgCamInfo (8): u16 setting; s16 count; ptr data (0 = no data). No count: size = highest bgCamIndex used by surface
-  types or waterboxes + 1
-BgCamFuncData (0x12): Vec3s pos; Vec3s rot; s16 fov; s16 flags/roomImageOverrideBgCamIndex; s16 unused
-  (crawlspace settings point at `count` Vec3s points instead)
-WaterBox (0x10): s16 xMin, ySurface, zMin, xLength, zLength; u32 properties: bgCam 0-7, light setting 8-12
-  (0x1F none), room 13-18 (0x3F all rooms), bit 19 disabled
-```
+
+**CollisionHeader (0x2C bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 6 | s16[3] | min | Minimum world coordinates |
+| 0x06 | 6 | s16[3] | max | Maximum world coordinates |
+| 0x0C | 2 | u16 | numVertices | Vertex count |
+| 0x0E | 2 | u8[2] | padding_0E | Alignment |
+| 0x10 | 4 | u32 | vertices | Segmented pointer to s16[3] vertices |
+| 0x14 | 2 | u16 | numPolys | Polygon count |
+| 0x16 | 2 | u8[2] | padding_16 | Alignment |
+| 0x18 | 4 | u32 | polys | Segmented pointer to CollisionPoly array |
+| 0x1C | 4 | u32 | surfaceTypes | Segmented pointer to SurfaceType array |
+| 0x20 | 4 | u32 | bgCams | Segmented pointer to BgCamInfo array |
+| 0x24 | 2 | u16 | numWaterBoxes | Water-box count |
+| 0x26 | 2 | u8[2] | padding_26 | Alignment |
+| 0x28 | 4 | u32 | waterBoxes | Segmented pointer to WaterBox array |
+
+**CollisionPoly (0x10 bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | u16 | type | SurfaceType index |
+| 0x02 | 2 | u16 | vIA | Vertex A index in bits 0–12; bits 13–15 ignore camera/entity/projectile |
+| 0x04 | 2 | u16 | vIB | Vertex B index; bit 13 is conveyor flag |
+| 0x06 | 2 | u16 | vIC | Vertex C index |
+| 0x08 | 6 | s16[3] | normal | Divide components by 0x7FFF |
+| 0x0E | 2 | s16 | distance | Plane distance |
+
+**SurfaceType (8 bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | w0 | Bitfields below |
+| 0x04 | 4 | u32 | w1 | Bitfields below |
+
+| Word | Bits | Name | Meaning |
+|---|---|---|---|
+| w0 | 0–7 | bgCamIndex | Background-camera index |
+| w0 | 8–12 | exit | Exit index |
+| w0 | 13–17 | floorType | Floor behavior |
+| w0 | 18–20 | unknown_18 | Unresolved |
+| w0 | 21–25 | wallType | Wall behavior |
+| w0 | 26–29 | floorProperty | Floor property |
+| w0 | 30 | soft | Soft-surface flag |
+| w0 | 31 | horseBlock | Blocks horses |
+| w1 | 0–3 | material | Material index |
+| w1 | 4–5 | floorEffect | Floor effect |
+| w1 | 6–10 | lightSetting | Light-setting index |
+| w1 | 11–16 | echo | Echo amount |
+| w1 | 17 | hookshot | Hookshot flag |
+| w1 | 18–20 | conveyorSpeed | Conveyor speed |
+| w1 | 21–26 | conveyorDirection | Conveyor direction |
+| w1 | 27 | wallDamage | Damaging wall |
+| w1 | 28–31 | unknown_28 | Unresolved |
+
+**BgCamInfo (8 bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | u16 | setting | Camera setting |
+| 0x02 | 2 | s16 | count | Point count |
+| 0x04 | 4 | u32 | data | Segmented pointer; 0 = no data |
+
+The BgCamInfo array has no stored count: its length is the highest camera index used by surface types or waterboxes plus one.
+
+**BgCamFuncData (0x12 bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 6 | s16[3] | position | Camera position |
+| 0x06 | 6 | s16[3] | rotation | Camera rotation |
+| 0x0C | 2 | s16 | fov | Field of view |
+| 0x0E | 2 | s16 | flags | Also roomImageOverrideBgCamIndex |
+| 0x10 | 2 | s16 | unused | Unused |
+
+Crawlspace settings instead point to count three-component s16 points.
+
+**WaterBox (0x10 bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | s16 | xMin | Minimum x |
+| 0x02 | 2 | s16 | ySurface | Water surface height |
+| 0x04 | 2 | s16 | zMin | Minimum z |
+| 0x06 | 2 | s16 | xLength | Extent along x |
+| 0x08 | 2 | s16 | zLength | Extent along z |
+| 0x0A | 2 | u8[2] | padding | Alignment |
+| 0x0C | 4 | u32 | properties | Bitfields below |
+
+| Bits | Name | Meaning |
+|---|---|---|
+| 0–7 | bgCam | Background-camera index |
+| 8–12 | lightSetting | 0x1F = none |
+| 13–18 | room | 0x3F = all rooms |
+| 19 | disabled | Disable flag |
+| 20–31 | unknown_20 | Unresolved |
 
 Examples (**verified**, `camcheck.ts`): Hyrule Field 1 162 vertices, 1 579 polys, 61 surface types, 4 bg cams, 6
 waterboxes (ySurface −60 / −315); Kokiri Forest 1 081 / 1 692 / 46 / 15 bg cams / 1 waterbox; Deku Tree 1 399 / 2 321 /
@@ -828,9 +1066,21 @@ exactly with the room geometry. Dynamic collision (actors) is not in the scene f
 
 #### Light settings (command 0x0F)
 
-`EnvLightSettings` (0x16 bytes, same in both games): `u8 ambient[3]; s8 light1Dir[3]; u8 light1Color[3]; s8 light2Dir[3];
-u8 light2Color[3]; u8 fogColor[3]; s16 blendRate<<10 | fogNear (10 bits); s16 zFar`. **Verified**: `env/zenv.py`'s layout
-reproduces RAM `envCtx.lightSettings` exactly for every capture (via `scenes/env.ts`, *Lights used for rooms*); blend rate = bits 10-15 × 4.
+
+**EnvLightSettings (0x16 bytes; both games).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 3 | u8[3] | ambient | Ambient RGB |
+| 0x03 | 3 | s8[3] | light1Dir | First light direction |
+| 0x06 | 3 | u8[3] | light1Color | First light RGB |
+| 0x09 | 3 | s8[3] | light2Dir | Second light direction |
+| 0x0C | 3 | u8[3] | light2Color | Second light RGB |
+| 0x0F | 3 | u8[3] | fogColor | Fog RGB |
+| 0x12 | 2 | s16 | blendFog | Low 10 bits = fogNear; bits 10–15 × 4 = blend rate |
+| 0x14 | 2 | s16 | zFar | Far clip distance |
+
+**Verified**: `env/zenv.py` reproduces RAM `envCtx.lightSettings` exactly for every capture (via `scenes/env.ts`, *Lights used for rooms*).
 
 Which entry (**doc** `z_kankyo.c Environment_Update`; MM `Environment_UpdateLights`):
 - `lightMode` (command 0x11 byte 6) **1 (settings)**: entry `lightSetting`, 0 at scene start; changed at run time by floor
@@ -1050,21 +1300,89 @@ draw function source of the 40 most used static actors), `actors/zdata.py`, `act
 
 | data | command / table | record | notes |
 |---|---|---|---|
-| room actor list | room cmd 0x01: count in byte 1, segment-3 pointer | 0x10: `s16 id; Vec3s pos; Vec3s rot; s16 params` | per room and per layer (room files have their own alternate headers, cmd 0x18) |
-| transition actors | scene cmd 0x0E | 0x10: `s8 frontRoom, s8 frontCam, s8 backRoom, s8 backCam; s16 id; Vec3s pos; s16 rotY; s16 params` | doors and loading planes between two rooms; belong to the scene, draw once |
+| room actor list | room cmd 0x01: count in byte 1, segment-3 pointer | 0x10-byte ActorEntry below | per room and per layer (room files have their own alternate headers, cmd 0x18) |
+| transition actors | scene cmd 0x0E | 0x10-byte TransitionActorEntry below | doors and loading planes between two rooms; belong to the scene, draw once |
 | player entries (spawns) | scene cmd 0x00 | ActorEntry with id 0 (Player); params = start mode | e.g. OoT Kokiri Forest has 12 |
-| entrance list | scene cmd 0x06 | 2 bytes: `u8 playerEntryIndex; u8 room` | indexed by the spawn number of an entrance |
+| entrance list | scene cmd 0x06 | Two-byte entrance-list entry below | indexed by the spawn number of an entrance |
 | object list | room cmd 0x0B: count, pointer to `u16` object ids | | objects loaded for the room (plus the keep objects) |
 | special files | scene cmd 0x07: byte 1 = OoT Navi hint file, `u16` keep object id | | 2 = gameplay_field_keep, 3 = gameplay_dangeon_keep, loaded as segment 5; gameplay_keep (object 1) is always segment 4 |
-| object table | in `code` | 8: RomFile {vromStart, vromEnd} | OoT 402 ids, MM 643 ids; entry 0 empty |
-| actor overlay table | in `code` | 0x20: RomFile; vramStart; vramEnd; loadedRamAddr (0 in ROM); profile pointer; name pointer (debug builds only); u16 allocType; s8 numLoaded | OoT 471 ids, MM 690 ids; 3 internal actors (in `code`) have no RomFile |
-| actor profile | pointed to by the table | `s16 id; u8 category; u32 flags; s16 objectId; u32 size; init; destroy; update; draw` | category and objectId are readable generically from the ROM |
+| object table | in `code` | 8-byte RomFile (layout under ROM map and asset organization) | OoT 402 ids, MM 643 ids; entry 0 empty |
+| actor overlay table | in `code` | 0x20-byte ActorOverlay below | OoT 471 ids, MM 690 ids; 3 internal actors (in `code`) have no RomFile |
+| actor profile | pointed to by the table | 0x20-byte ActorProfile below | category and objectId are readable generically from the ROM |
 
 **Verified** (ROM bytes: `lead/dumpscene.py oot-us10 0x55` Kokiri Forest and `lead/dumpscene.py mm-us 0x6F` South Clock Town
 give plausible positions inside the rooms, actor ids that match the rooms' object lists, and rotations as described below;
 table locations and counts from `fs/tables.py`, where the profile id equals the table index for 420 of 426 OoT and 571 of 573 MM
 overlays; the debug ROMs carry name pointers for 429 (OoT) and 575 (MM) actors, the retail ROMs none).
 Record layouts: **doc** (`oot-decomp/include/scene.h`, `mm-decomp/include/z64scene.h`, `z64actor.h`).
+
+ActorEntry, 0x10 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | s16 | id | Actor identifier. |
+| 0x02 | 6 | s16[3] | position | X,Y,Z. |
+| 0x08 | 6 | s16[3] | rotation | X,Y,Z; game-specific packing below. |
+| 0x0E | 2 | s16 | params | Actor parameters. |
+
+TransitionActorEntry, 0x10 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | s8 | frontRoom | Front room. |
+| 0x01 | 1 | s8 | frontCam | Front camera. |
+| 0x02 | 1 | s8 | backRoom | Back room. |
+| 0x03 | 1 | s8 | backCam | Back camera. |
+| 0x04 | 2 | s16 | id | Actor identifier. |
+| 0x06 | 6 | s16[3] | position | X,Y,Z. |
+| 0x0C | 2 | s16 | rotY | Y rotation. |
+| 0x0E | 2 | s16 | params | Actor parameters. |
+
+Entrance-list entry, two bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | playerEntryIndex | Player-entry index. |
+| 0x01 | 1 | u8 | room | Room index. |
+
+ActorOverlay, 0x20 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 8 | RomFile | file | Overlay VROM range. |
+| 0x08 | 4 | u32 | vramStart | Linked start. |
+| 0x0C | 4 | u32 | vramEnd | Linked end. |
+| 0x10 | 4 | u32 | loadedRamAddr | Zero in ROM. |
+| 0x14 | 4 | u32 | profile | Linked profile pointer. |
+| 0x18 | 4 | u32 | name | Name pointer in debug builds; zero in retail. |
+| 0x1C | 2 | u16 | allocType | Allocation type. |
+| 0x1E | 1 | s8 | numLoaded | Loaded-instance count. |
+| 0x1F | 1 | u8 | padding | Alignment. |
+
+ActorProfile, 0x20 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | s16 | id | Actor identifier. |
+| 0x02 | 1 | u8 | category | Actor category. |
+| 0x03 | 1 | u8 | padding03 | Alignment. |
+| 0x04 | 4 | u32 | flags | Actor flags. |
+| 0x08 | 2 | s16 | objectId | Object-bank identifier. |
+| 0x0A | 2 | u8[2] | padding0A | Alignment. |
+| 0x0C | 4 | u32 | size | Instance allocation size. |
+| 0x10 | 4 | u32 | init | Initialization function pointer. |
+| 0x14 | 4 | u32 | destroy | Destructor pointer. |
+| 0x18 | 4 | u32 | update | Update function pointer. |
+| 0x1C | 4 | u32 | draw | Draw function pointer. |
+
+MM cutscene-script entry, eight bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | script | Segmented script pointer. |
+| 0x04 | 2 | s16 | nextEntrance | Next entrance. |
+| 0x06 | 1 | u8 | spawn | Spawn selector. |
+| 0x07 | 1 | u8 | flags | Flags. |
 
 ##### Rotation and id encoding
 
@@ -1087,17 +1405,32 @@ Record layouts: **doc** (`oot-decomp/include/scene.h`, `mm-decomp/include/z64sce
 
 ##### Entrances (for markers and the default spawn)
 
-- **OoT:** `gEntranceTable` in `code`, 1556 records `{s8 sceneId, s8 spawn, u16 flags}`, ending exactly where the scene
+- **OoT:** `gEntranceTable` in `code`, 1556 four-byte EntranceTableEntry records, ending exactly where the scene
   table begins (found by structure: a run of records with sceneId <= 0x6E and spawn < 0x20 before the scene table; first
   record `00 00 41 02`). Entrance numbers come in groups of four for the layers child day, child night, adult day, adult
   night, followed by cutscene entrances. **Verified** (both OoT ROMs: `lead/levels.py`), **doc** (`include/tables/entrance_table.h`).
   37 records of the US ROM (4 of the MQ debug ROM) name scene 0x6E, which does not exist (test scenes absent from retail).
 - **MM:** entrance = `(sceneEntranceIndex << 9) | (spawn << 4) | layer`; per-scene tables in `code`: 110 records
-  `{u8 count, EntranceTableEntry** table, char* name}`, each entry `{s8 sceneId, s8 spawn, u16 flags}` (a negative scene id
-  is stored for some scenes; use its absolute value). **Verified** (`fs/maps.py` maps every map-select entrance of both
+  with this 0x0C-byte descriptor; each pointed entry uses EntranceTableEntry below:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | count | Entrance count |
+| 0x01 | 3 | u8[3] | padding | Alignment |
+| 0x04 | 4 | u32 | table | Linked pointer to entrance-pointer table |
+| 0x08 | 4 | u32 | name | Linked string pointer |
+
+A negative scene id is stored for some scenes; use its absolute value. **Verified** (`fs/maps.py` maps every map-select entrance of both
   MM ROMs to a scene), **doc** (`mm-decomp` z_play/entrance code).
 - For a level view, spawn 0 (player entry referenced by entrance list entry 0) is the natural start marker; OoT and MM
   also start Link there when a scene is entered from the map select. **Doc** (z_select.c).
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | s8 | sceneId | Scene ID |
+| 0x01 | 1 | s8 | spawn | Spawn ID |
+| 0x02 | 2 | u16 | flags | Entrance flags |
+
 
 #### How the game draws an actor
 
@@ -1246,7 +1579,7 @@ Offsets are into the decompressed `code` file.
 | gSawtoothWaveSample / gWaveSamples (9 pointers) | 0xEE300 / 0xEF300 | 0x111230 / 0x112230 | 0x12E2D0 / 0x12F2D0 | 0x15F130 / 0x160130 | |
 
 **Finding them generically.**
-- The four AudioTables (header `s16 count; s16 0; u32 0; 8 bytes 0`, then 16-byte entries) are the tables whose
+- The four AudioTables (header and entry layouts below) are the tables whose
   entries tile a file exactly (gaps ≤ 0x100): the one with > 64 entries tiling Audioseq is the sequence table, the
   one tiling Audiobank the font table, the one with < 16 entries tiling Audiotable the sample-bank table. Order in
   `code`: font table, seq→font map (starts at font table + 16 + 16·count), sequence table, sample-bank table.
@@ -1254,22 +1587,49 @@ Offsets are into the decompressed `code` file.
   0.716228; 1.0/0.999924), byte tables by content, the envelope and filter tables by their first words.
 - `gWaveSamples`: 9 pointers whose last two are equal; `RAM base = pointer[0] − offset(gSawtoothWaveSample)`, where
   the sawtooth starts `0, 1023, 2047, 3071`.
-- `gAudioSpecs`: ≥ 16 consecutive 0x38-byte records `{u32 32000|22050; u8 1; u8 numNotes 8..32; u8 players 2..5;
-  u8 0; u8 0; u8 numReverbs 1..3; ptr reverbSettings}`.
+- `gAudioSpecs`: at least 16 consecutive records in the AudioSpec format below; sampling frequency 32000 or 22050, 8–32 notes, 2–5 players and 1–3 reverbs.
 
 ##### AudioTable, aliases, seq→font map (verified; doc `include/audio.h`)
 
-```
-header (16): s16 numEntries; s16 unkMediumParam; u32 romAddr (0 = start of the file); 8 bytes 0
-entry  (16): u32 offset (in its file); u32 size; u8 medium (2 = cart); u8 cachePolicy; u16 shortData1..3
-```
+
+**AudioTable header (0x10 bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | s16 | numEntries | Number of entries |
+| 0x02 | 2 | s16 | unkMediumParam | Medium parameter |
+| 0x04 | 4 | u32 | romAddr | 0 = file start |
+| 0x08 | 8 | u8[8] | reserved | Zero |
+
+**AudioTable entry (0x10 bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | offset | File-relative offset, or alias index when size is zero |
+| 0x04 | 4 | u32 | size | Stored byte count; zero marks alias |
+| 0x08 | 1 | u8 | medium | 2 = cartridge |
+| 0x09 | 1 | u8 | cachePolicy | Cache policy |
+| 0x0A | 6 | u16[3] | shortData | Bank-specific data described below |
+
 - **size 0 = alias**: `offset` is the real index (`AudioLoad_GetRealTableIndex`). Sequence aliases:
   OoT 87 (NA_BGM_FILE_SELECT) → 40 (NA_BGM_GREAT_FAIRY); MM 35 → 22, 40 → 24 (NA_BGM_FAIRY_FOUNTAIN → FILE_SELECT),
   86 → 60, 96 → 87, 97 → 81. Sample bank 1 is an alias of bank 0 in both games (music fonts name bank 1).
 - **Font entries:** `shortData1 = sampleBankId1 << 8 | sampleBankId2` (0xFF = none), `shortData2 = numInstruments << 8
   | numDrums`, `shortData3 = numSfx`.
-- **seq→font map:** `u16 offset[numSeqs]` indexed by the requested id (aliases have their own row), then at each
-  offset `u8 count, u8 fontId[count]`. Every sequence lists 1 font except the SFX sequences (0 and 109 in OoT: fonts
+**Sequence-to-font map.** Offsets are map-relative and indexed by the requested ID, so aliases have separate entries.
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 × numSeqs | u16[] | offset | Map-relative list offsets |
+
+**Font list (1 + count bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | count | Font count |
+| 0x01 | count | u8[] | fontId | Font IDs |
+
+Every sequence lists 1 font except the SFX sequences (0 and 109 in OoT: fonts
   1, 0; 0 in MM: 1, 0). The player's default font is the **last** entry; channel commands C6/EB pick
   `fontId[count − 1 − index]`. OoT US and MQ debug maps are identical, MM US and debug identical (**verified**,
   `out/compare.txt`).
@@ -1277,21 +1637,97 @@ entry  (16): u32 offset (in its file); u32 size; u8 medium (2 = cart); u8 cacheP
 ##### Soundfonts and samples (verified: `render/zdata.ts` parses all fonts; doc `load.c` AudioLoad_RelocateFont)
 
 Offsets are relative to the font's start in Audiobank unless stated.
-```
-Font:        u32 drumListOffset; u32 sfxListOffset; u32 instrumentOffset[numInstruments] (0 = empty; ids ≥ 126 unusable)
-Drum list:   u32 drumOffset[numDrums]
-Sfx list:    numSfx × {u32 sampleOffset; f32 tuning}           (inline TunedSamples)
-Instrument:  u8 isRelocated; u8 normalRangeLo; u8 normalRangeHi; u8 adsrDecayIndex; u32 envelopeOffset;
-             {u32 sampleOffset; f32 tuning} low, normal, high  (low used below rangeLo if lo ≠ 0; high above rangeHi if hi ≠ 127)
-Drum (0x10): u8 adsrDecayIndex; u8 pan; u8 isRelocated; pad; u32 sampleOffset; f32 tuning; u32 envelopeOffset
-Sample (0x10): u32 bits {unk 31, codec 30..28, medium 27..26, bit 25, isRelocated 24, size 23..0};
-             u32 sampleAddr (offset in the sample bank named by medium: 0 → bank 1 of the font, 1 → bank 2);
-             u32 loopOffset; u32 bookOffset
-Loop:        u32 start; u32 end; s32 count (0 = none, −1 = forever; MM: 2 = loop until note off, then play to sampleEnd);
-             u32 sampleEnd; s16 predictorState[16] only if count ≠ 0
-Book:        s32 order (2); s32 numPredictors; s16 book[8 · order · numPredictors]
-Envelope:    s16 pairs {delay, arg}: delay > 0 ramp; 0 disable; −1 hang; −2 goto arg; −3 restart
-```
+
+**Font header (8 + 4 × numInstruments bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | drumListOffset | Font-relative drum pointer list |
+| 0x04 | 4 | u32 | sfxListOffset | Font-relative inline TunedSample array |
+| 0x08 | 4 × numInstruments | u32[] | instrumentOffset | Font-relative offsets; 0 = empty; IDs ≥ 126 unusable |
+
+**Drum pointer list.**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 × numDrums | u32[] | drumOffset | Font-relative drum offsets |
+
+**TunedSample (8 bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | sampleOffset | Font-relative Sample offset |
+| 0x04 | 4 | f32 | tuning | Pitch multiplier |
+
+The SFX list contains numSfx inline TunedSample records.
+
+**Instrument (0x20 bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | isRelocated | Runtime relocation flag |
+| 0x01 | 1 | u8 | normalRangeLo | Low note boundary |
+| 0x02 | 1 | u8 | normalRangeHi | High note boundary |
+| 0x03 | 1 | u8 | adsrDecayIndex | Decay index |
+| 0x04 | 4 | u32 | envelopeOffset | Font-relative envelope |
+| 0x08 | 8 | TunedSample | low | Used below normalRangeLo if that boundary is nonzero |
+| 0x10 | 8 | TunedSample | normal | Normal note range |
+| 0x18 | 8 | TunedSample | high | Used above normalRangeHi if that boundary is not 127 |
+
+**Drum (0x10 bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | adsrDecayIndex | Decay index |
+| 0x01 | 1 | u8 | pan | Pan |
+| 0x02 | 1 | u8 | isRelocated | Runtime relocation flag |
+| 0x03 | 1 | u8 | padding | Alignment |
+| 0x04 | 8 | TunedSample | sample | Sample offset and tuning |
+| 0x0C | 4 | u32 | envelopeOffset | Font-relative envelope |
+
+**Sample (0x10 bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | flagsSize | Bitfields below |
+| 0x04 | 4 | u32 | sampleAddr | Sample-bank-relative offset; medium 0 uses font bank 1, medium 1 uses bank 2 |
+| 0x08 | 4 | u32 | loopOffset | Font-relative Loop offset |
+| 0x0C | 4 | u32 | bookOffset | Font-relative Book offset |
+
+| Bits | Name | Meaning |
+|---|---|---|
+| 31 | unknown_31 | Unresolved |
+| 28–30 | codec | 0 = VADPCM; 3 = SMALL_ADPCM |
+| 26–27 | medium | Sample-bank selector |
+| 25 | unknown_25 | Unresolved |
+| 24 | isRelocated | Relocation flag |
+| 0–23 | size | Stored sample bytes |
+
+**Loop (0x10 or 0x30 bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | start | First loop sample |
+| 0x04 | 4 | u32 | end | Loop end |
+| 0x08 | 4 | s32 | count | 0 = none; −1 = forever; MM 2 = loop until note-off, then continue to sampleEnd |
+| 0x0C | 4 | u32 | sampleEnd | Sample end |
+| 0x10 | 32 if count ≠ 0 | s16[16] | predictorState | Predictor history; omitted for count zero |
+
+**Book (variable size).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | s32 | order | 2 |
+| 0x04 | 4 | s32 | numPredictors | Predictor count |
+| 0x08 | 16 × order × numPredictors | s16[] | coefficients | Eight coefficients per predictor order |
+
+**Envelope point (4 bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | s16 | delay | Positive = ramp; 0 disable; −1 hang; −2 jump to arg; −3 restart |
+| 0x02 | 2 | s16 | arg | Ramp target or jump index |
+
 - Sample data address = `Audiotable + sampleBankTable[realIndex(bank)].offset + sampleAddr`.
 - Differences from SF64: fonts gained the **sfx list** (second word, SF64 had instruments from word 1); the sample
   header's codec field is 3 bits; loops gained `sampleEnd`.
@@ -1305,8 +1741,15 @@ Envelope:    s16 pairs {delay, arg}: delay > 0 ramp; 0 disable; −1 hang; −2 
 | book sizes (entries) | 64, 128 (4 or 8 predictors) | same | same |
 
 - **VADPCM (codec 0):** 9-byte frames → 16 samples, as SF64/libultra.
-- **SMALL_ADPCM (codec 3):** 5-byte frames: 1 header byte (scale high nibble, predictor low nibble) + 4 bytes of
-  2-bit residuals, MSB first; residual = `((code << 14) as s16) >> (14 − scale)` (scale ≥ 14 → no shift), then the
+**Sample frame layouts.** Both codecs produce 16 samples per frame.
+
+| Codec | Offset | Size | Type | Field | Description |
+|---|---:|---:|---|---|---|
+| Both | 0x00 | 1 | u8 | header | High nibble = scale; low nibble = predictor |
+| VADPCM (0) | 0x01 | 8 | packed s4[16] | residuals | High nibble first |
+| SMALL_ADPCM (3) | 0x01 | 4 | packed s2[16] | residuals | MSB first |
+
+For SMALL_ADPCM, residual = `((code << 14) as s16) >> (14 − scale)` (scale ≥ 14 → no shift), then the
   same order-2 predictor as VADPCM (doc `synthesis.c` `aADPCMdec(flags | 4)`; rsp-hle `adpcm_predict_frame_2bits`).
 - **Loops:** restart from the frame containing `start` with `predictorState` as history (**verified** by the table
   above).
@@ -1314,10 +1757,39 @@ Envelope:    s16 pairs {delay, arg}: delay > 0 ramp; 0 disable; −1 hang; −2 
 ##### Audio specs and reverbs (verified: `render/probe.ts` decodes all specs; values equal
 `src/audio/game/session_config.c` (OoT) / `src/audio/session_config.c` (MM), doc)
 
-Record: `{u32 samplingFrequency; u8 unk_04 (1); u8 numNotes; u8 numSequencePlayers; u8 0; u8 0; u8 numReverbs;
-ptr reverbSettings; …cache sizes}`. ReverbSettings (0x18): `u8 downsampleRate; u16 windowSize (×64 samples);
-u16 decayRatio; u16 subDelay (OoT unk_6); u16 subVolume; u16 volume; u16 leakRtl; u16 leakLtr; s8 mixReverbIndex;
-u16 mixReverbStrength; s16 lowPassCutoffLeft; s16 lowPassCutoffRight`.
+
+**AudioSpec (0x38 bytes; known fields).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | samplingFrequency | 32000 or 22050 Hz |
+| 0x04 | 1 | u8 | unknown_04 | 1 |
+| 0x05 | 1 | u8 | numNotes | Voice limit |
+| 0x06 | 1 | u8 | numSequencePlayers | Sequence-player count |
+| 0x07 | 2 | u8[2] | unknown_07 | Zero |
+| 0x09 | 1 | u8 | numReverbs | Reverb count |
+| 0x0A | 2 | u8[2] | padding | Alignment |
+| 0x0C | 4 | u32 | reverbSettings | Runtime pointer to ReverbSettings array |
+| 0x10 | 0x28 | u8[0x28] | cacheSettings | Cache-size fields; not expanded here |
+
+**ReverbSettings (0x18 bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | downsampleRate | Downsample ratio |
+| 0x01 | 1 | u8 | padding_01 | Alignment |
+| 0x02 | 2 | u16 | windowSize | Units of 64 samples |
+| 0x04 | 2 | u16 | decayRatio | Feedback decay |
+| 0x06 | 2 | u16 | subDelay | OoT unk_6 |
+| 0x08 | 2 | u16 | subVolume | Sub-volume |
+| 0x0A | 2 | u16 | volume | Volume |
+| 0x0C | 2 | u16 | leakRtl | Right-to-left leakage |
+| 0x0E | 2 | u16 | leakLtr | Left-to-right leakage |
+| 0x10 | 1 | s8 | mixReverbIndex | Reverb mix target |
+| 0x11 | 1 | u8 | padding_11 | Alignment |
+| 0x12 | 2 | u16 | mixReverbStrength | Mix amount |
+| 0x14 | 2 | s16 | lowPassCutoffLeft | Left low-pass cutoff |
+| 0x16 | 2 | s16 | lowPassCutoffRight | Right low-pass cutoff |
 
 | game | specs | notes / players | reverb 0 (every spec) | reverb 1 (per spec) |
 |---|---|---|---|---|
@@ -1761,10 +2233,53 @@ Water Temple (92) loops after 154 s (143.05 s loop) in a 1100 s render with spec
    these set pieces.
 2. **Skeletal models** (NPCs, enemies, chests, flags, doors with a skeleton): markers by default. Optional later: draw the
    skeleton in its bind pose or frame 0 of the actor's idle animation. Formats (**doc**, `include/animation.h`):
-   `SkeletonHeader {Limb** limbs; u8 limbCount}`, `FlexSkeletonHeader {SkeletonHeader; u8 dListCount}`,
-   `StandardLimb {Vec3s jointPos; u8 child; u8 sibling; Gfx* dList}` (0x0C), `LodLimb` (0x10, near/far display lists),
-   `AnimationHeader {s16 frameCount; s16* frameData; JointIndex* jointIndices; u16 staticIndexMax}` with
-   `JointIndex {u16 x, y, z}` (index < staticIndexMax: a constant from frameData). Flex skeletons (most NPCs) pass limb
+
+**SkeletonHeader (8 bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | limbs | Segmented pointer to limb-pointer array |
+| 0x04 | 1 | u8 | limbCount | Limb count |
+| 0x05 | 3 | u8[3] | padding | Alignment |
+
+**FlexSkeletonHeader (0x0C bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 8 | SkeletonHeader | skeleton | Base header |
+| 0x08 | 1 | u8 | dListCount | Display-list matrix count |
+| 0x09 | 3 | u8[3] | padding | Alignment |
+
+**StandardLimb (0x0C bytes) and LodLimb (0x10 bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 6 | s16[3] | jointPos | Local joint position |
+| 0x06 | 1 | u8 | child | Child limb index |
+| 0x07 | 1 | u8 | sibling | Sibling limb index |
+| 0x08 | 4 | u32 | dList | Segmented display-list pointer; near list in LodLimb |
+| 0x0C | 4, LodLimb only | u32 | farDList | Far display-list pointer |
+
+**AnimationHeader (0x10 bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | s16 | frameCount | Frame count |
+| 0x02 | 2 | u8[2] | padding_02 | Alignment |
+| 0x04 | 4 | u32 | frameData | Segmented pointer to s16 values |
+| 0x08 | 4 | u32 | jointIndices | Segmented pointer to JointIndex array |
+| 0x0C | 2 | u16 | staticIndexMax | Indices below this threshold select constants |
+| 0x0E | 2 | u8[2] | padding_0E | Alignment |
+
+**JointIndex (6 bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | u16 | x | X channel index into frameData |
+| 0x02 | 2 | u16 | y | Y channel index |
+| 0x04 | 2 | u16 | z | Z channel index |
+
+   Flex skeletons (most NPCs) pass limb
    matrices to their skinned meshes; that is the hard part. Wooden doors (En_Door) and chests (En_Box) are skeletal but
    their closed pose is the bind pose plus a per-scene door display list (**hypothesis** for the closed pose).
 3. **Invisible logic actors** (class `none`: loading planes En_Holl, En_Wonder_Item, Elf_Msg*, En_River_Sound, Obj_Mure*,

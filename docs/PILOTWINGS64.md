@@ -89,7 +89,19 @@ E and J have the same structure, shifted (E app ROM 0x51F10 → 0x802CCFC0, J 0x
 | `levelLoad` / `levelLoadMapObjects` | 8030B6C0 / 8030BDC8 | 8030E220 / 8030E928 | 802FDFF0 / 802FE6F8 | island load |
 | `taskInit` / `taskInitTest` / `taskLoadCommObj` | 803449B0 / 80344FC8 / 80345CE4 | 80348520 / 80348B38 / 80349854 | 80337330 / 80337948 / 80338664 | task table, task start |
 | `envGetCurrentId` / `envLoadTerrainPal` | 802E12B4 / 802E1990 | 802E3A54 / 802E4130 | 802D3DE4 / 802D44C0 | environment id, night palettes |
-| game state pointer `D_80362690` | 80362690 | – | – | +4 map, +6 terraId, +8 envId, +0xC pilot, +0xE vehicle, +0x10 class, +0x12 test |
+| game state pointer `D_80362690` | 80362690 | – | – | game-state fields listed below |
+
+Known game-state fields relative to `D_80362690`:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x04` | 2 | unknown | `map` | Current map. |
+| `0x06` | 2 | unknown | `terrainId` | Current terrain ID. |
+| `0x08` | 2 | unknown | `environmentId` | Current environment ID. |
+| `0x0C` | 2 | unknown | `pilot` | Pilot selection. |
+| `0x0E` | 2 | unknown | `vehicle` | Vehicle selection. |
+| `0x10` | 2 | unknown | `class` | Class selection. |
+| `0x12` | 2 | unknown | `test` | Test-mode field. |
 
 E/J addresses come from masked-instruction matching of the US functions (`fs/tools/xmatch.py`, unique matches).
 
@@ -120,7 +132,14 @@ and task resolution does not.
 
 #### File table and addressing
 
-- **TABL.** `FORM UVRM` holds `PAD PAD GZIP(TABL)`. TABL is `N × {char[4] type, u32 size}` with size = FORM size + 8, rounded up to 4. N is 1272 (US), 1434 (E) and 1281 (J).
+- **TABL.** `FORM UVRM` holds `PAD PAD GZIP(TABL)`. TABL contains `N` eight-byte records:
+
+  | Offset | Size | Type | Field | Description |
+  |---:|---:|---|---|---|
+  | `0x00` | 4 | `char[4]` | `type` | FORM type tag. |
+  | `0x04` | 4 | `u32` | `size` | FORM size plus eight bytes, rounded up to a four-byte boundary. |
+
+  `N` is 1,272 in US, 1,434 in Europe, and 1,281 in Japan.
 - **File offsets.** File i starts at `base + Σ size[0..i−1]`.
   - `base` is a link-time constant: 0xDF5B0 in US, loaded at 0x802246F4 next to 0xDE720.
   - A loader finds it as the first `FORM` at or after the end of UVRM, past zero padding (true in all three ROMs).
@@ -148,12 +167,19 @@ and task resolution does not.
 
 #### Container
 
-```
-file  := 'FORM' u32 size char[4] type chunk*     size counts the bytes after the size field; files are padded to 4 bytes
-chunk := char[4] tag, u32 size, payload           payload sizes are multiples of 8 (all 36,722 US chunks)
-GZIP  := 'GZIP' u32 size, char[4] innerTag, u32 decompressedSize, MIO0 stream
-PAD   := 'PAD ' u32 4, 00000000                   every file starts with one or two PAD chunks
-```
+| Structure | Offset | Size | Type | Field | Description |
+|---|---:|---:|---|---|---|
+| File | `0x00` | 4 | `char[4]` | `magic` | `FORM`. |
+| File | `0x04` | 4 | `u32` | `size` | Bytes after this field; the file is padded to four bytes. |
+| File | `0x08` | 4 | `char[4]` | `type` | FORM type. |
+| File | `0x0C` | variable | chunks | `chunks` | Sequential chunks. |
+| Chunk | `0x00` | 4 | `char[4]` | `tag` | Chunk tag. |
+| Chunk | `0x04` | 4 | `u32` | `size` | Payload size; all 36,722 US payloads are multiples of eight. |
+| Chunk | `0x08` | variable | bytes | `payload` | Chunk data. |
+| `GZIP` payload | `0x00` | 4 | `char[4]` | `innerTag` | Tag exposed after decompression. |
+| `GZIP` payload | `0x04` | 4 | `u32` | `decompressedSize` | Output byte count. |
+| `GZIP` payload | `0x08` | variable | MIO0 | `stream` | MIO0 stream, despite the outer tag. |
+| `PAD ` payload | `0x00` | 4 | `u32` | `zero` | Zero; each file starts with one or two PAD chunks of size four. |
 
 - **Reading.** The reader keeps one open file `{address, tag, length, offset}` and starts at +0xC. A `GZIP` chunk is decompressed to a scratch buffer, and the reader returns the inner tag and size in place of `GZIP`, so callers never see compression.
 - **Naming.** Despite the tag, the payload is **MIO0**, not DEFLATE.
@@ -161,7 +187,15 @@ PAD   := 'PAD ' u32 4, 00000000                   every file starts with one or 
 
 #### MIO0
 
-- **Header:** `+0 "MIO0"` (the magic is not checked), `+4 u32 size`, `+8 u32 back-reference offset`, `+0xC u32 literal offset`, `+0x10` control words.
+- **Header:**
+
+  | Offset | Size | Type | Field | Description |
+  |---:|---:|---|---|---|
+  | `0x00` | 4 | `char[4]` | `magic` | `MIO0`; the game does not check it. |
+  | `0x04` | 4 | `u32` | `size` | Decoded size. |
+  | `0x08` | 4 | `u32` | `backrefOffset` | Back-reference stream offset. |
+  | `0x0C` | 4 | `u32` | `literalOffset` | Literal stream offset. |
+  | `0x10` | variable | `u32[]` | `controls` | MSB-first control words. |
 - **Control words:** 32 bits, MSB first. Bit 1 copies one literal byte. Bit 0 reads a u16 `v` and copies `(v >> 12) + 3` bytes from `out − ((v & 0xFFF) + 1)` one byte at a time, so overlapping copies act as runs.
 - **Stop:** when `size` bytes have been written.
 
@@ -393,18 +427,26 @@ copied into 18 unrelated tasks, and a truncated B_RP_3 description. [ROM bytes t
 
 Models and terrain cells store geometry as a compact command stream that the parser expands into Fast3D:
 
-```
-u16 count
-count × {
-  u16 w
-  if (w & 0x4000)  triangle on slots (w>>8)&15, (w>>4)&15, w&15    → BF000000, a*10<<16 | b*10<<8 | c*10   (G_TRI1)
-  else             u8 b: load (b>>4)+1 vertices, starting at vertex (w & 0x3FFF), into slots from (b & 15)
-                                                                  → 04 | (b>>4)<<20 | (b&15)<<16 | ((b>>4)+1)*16   (G_VTX)
-}
-→ B8000000 00000000 (G_ENDDL)
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 2 | `u16` | `count` | Number of packed commands. |
+| `0x02` | variable | command array | `commands` | `count` commands encoded as below. |
 
-Vertices are the standard 16-byte `Vtx {s16 x, y, z; u16 flag; s16 s, t; u8 r, g, b, a}`:
+| Condition | Stored bytes | Fields | Expanded Fast3D command |
+|---|---:|---|---|
+| `word & 0x4000` | 2 | Vertex slots `a=(word>>8)&15`, `b=(word>>4)&15`, `c=word&15` | `G_TRI1` (`BF000000`, `a*10<<16 \| b*10<<8 \| c*10`). |
+| Otherwise | 3 | `word: u16`, `control: u8`; source vertex `word & 0x3FFF`, count `(control>>4)+1`, first slot `control&15` | `G_VTX` (`04 \| (control>>4)<<20 \| (control&15)<<16 \| ((control>>4)+1)*16`). |
+
+The expanded list ends with `G_ENDDL` (`B8000000 00000000`); that command is not stored in the packed stream.
+
+Vertices use the standard 16-byte layout:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 6 | `s16[3]` | `position` | X, Y, and Z. |
+| `0x06` | 2 | `u16` | `flag` | Zero in models and 1 or 3 in terrain; meaning unknown and unused by the RSP. |
+| `0x08` | 4 | `s16[2]` | `texcoord` | S and T texture coordinates. |
+| `0x0C` | 4 | `u8[4]` | `color` | Prelit RGBA color. |
 - colours are prelit, and no stored state enables lighting;
 - `flag` is 0 in models and 1 or 3 in terrain (meaning unknown, unused by the RSP).
 
@@ -429,22 +471,53 @@ records have not yet confirmed type/id packing [open question].
 
 #### Geometry and textures: UVMD models
 
-```
-u16 nverts; u8 nLods; u8 nParts; u8 nVolumes; u8 flag119; u16 nTri6
-Vtx[nverts]
-nLods × {
-  u8 nParts; u8 lodFlag (1 = billboard: yaw towards the camera; 27 LODs of 22 models: trees, palms)
-  nParts × { u8 nMaterials; u8 partIndex; u8 depth
-             nMaterials × { u32 state; u16 nv; u16 nt; packed list } }
-  f32 distance            LOD switch distance
-}
-nParts × f32[16]          part matrices, row-major row-vector (translation in row 3), relative to the parent
-nVolumes × 36 bytes       collision volumes {u8 part; pad3; f32 × 6; u16 n @+28; ...} (*Collision*)
-f32 radius                bounding radius, world units
-f32 scaleDiv              vertex units per world unit: 10 (360 models), 20 (1), 100 (2); 1.0 for 352-362
-f32 f3c                   0 / 1 / 0.5 / 0.1, unknown
-nTri6 × {u16, u16, u16}   vertex-index triples used by volumes (*Collision*)
-```
+Header (`0x08` bytes):
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 2 | `u16` | `vertexCount` | Number of standard 16-byte vertices immediately following the header. |
+| `0x02` | 1 | `u8` | `lodCount` | Number of LOD records. |
+| `0x03` | 1 | `u8` | `partCount` | Number of part matrices. |
+| `0x04` | 1 | `u8` | `volumeCount` | Number of collision-volume records. |
+| `0x05` | 1 | `u8` | `flag119` | Bit 0 selects an alternate draw path; its effect remains unknown. |
+| `0x06` | 2 | `u16` | `tri6Count` | Number of collision vertex-index triples. |
+
+The remaining model data is serialized in this order:
+
+| Order | Count | Type | Field | Description |
+|---:|---:|---|---|---|
+| 1 | `vertexCount` | `Vtx` | `vertices` | Standard 16-byte vertices. |
+| 2 | `lodCount` | variable record | `lods` | LOD records defined below. |
+| 3 | `partCount` | `f32[16]` | `partMatrices` | Row-major row-vector matrices, relative to the parent; translation is in row 3. |
+| 4 | `volumeCount` | 36-byte record | `volumes` | Collision volumes; see *Collision*. |
+| 5 | 1 | `f32` | `radius` | Bounding radius in world units. |
+| 6 | 1 | `f32` | `scaleDiv` | Vertex units per world unit: 10 for 360 models, 20 for one, 100 for two, and 1.0 for models 352–362. |
+| 7 | 1 | `f32` | `unknownScale` | Observed values are 0, 1, 0.5, and 0.1. |
+| 8 | `tri6Count` | `u16[3]` | `volumeTriangles` | Vertex-index triples used by collision volumes. |
+
+Each LOD record is variable-length:
+
+| Order | Count | Type | Field | Description |
+|---:|---:|---|---|---|
+| 1 | 1 | `u8` | `partCount` | Number of LOD part records. |
+| 2 | 1 | `u8` | `flags` | Value 1 makes the LOD billboard about Y toward the camera; used by 27 LODs in 22 tree and palm models. |
+| 3 | `partCount` | variable record | `parts` | Part records defined below. |
+| 4 | 1 | `f32` | `distance` | LOD switch distance. |
+
+Each LOD part begins with this header, followed by `materialCount` material records:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 1 | `u8` | `materialCount` | Number of material records. |
+| `0x01` | 1 | `u8` | `partIndex` | Part-matrix index. |
+| `0x02` | 1 | `u8` | `depth` | Hierarchy depth. |
+
+| Order | Count | Type | Field | Description |
+|---:|---:|---|---|---|
+| 1 | 1 | `u32` | `state` | Material/render state. |
+| 2 | 1 | `u16` | `vertexCount` | Material vertex count. |
+| 3 | 1 | `u16` | `triangleCount` | Material triangle count. |
+| 4 | 1 | packed command stream | `geometry` | Packed list described above. |
 
 - **Hierarchy (verified: asm 0x8022CC28 and render).** For each part the draw pushes the part matrix, draws the part's materials, then pops `depth[j] − depth[j+1] + 1` matrices (and `depth[last] + 1` at the end). The parent is therefore the previous part one level up. Examples: the Ferris wheel's cars ring the hub; the windmill rotor sits on its tower.
 - **LOD (verified: asm 0x8022C674/0x8022C7B8).**
@@ -456,22 +529,65 @@ nTri6 × {u16, u16, u16}   vertex-index triples used by volumes (*Collision*)
 #### Geometry and textures: Terrain: UVTR grids of UVCT cells
 
 **UVTR record** (one COMM chunk per terrain id):
-```
-f32 minX, minY, minZ, maxX, maxY, maxZ; u8 cols; u8 rows; f32 cellW, cellH, f32 approxRadius
-cols × rows × { u8 present; if present: f32[16] Mtx (identity + translation = cell centre); u8 0; u16 uvct }
-```
+| Offset/order | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 24 | `f32[6]` | `bounds` | Minimum and maximum X, Y, and Z. |
+| after bounds | 1 | `u8` | `cols` | Grid columns. |
+| next | 1 | `u8` | `rows` | Grid rows. |
+| next | 4 | `f32` | `cellW` | Cell width. |
+| next | 4 | `f32` | `cellH` | Cell height. |
+| next | 4 | `f32` | `approxRadius` | Approximate radius. |
+| per cell | 1 | `u8` | `present` | Zero omits the rest of the cell record. |
+| if present | 64 | `f32[16]` | `matrix` | Identity plus translation to the cell center. |
+| if present | 1 | `u8` | `zero` | Zero. |
+| if present | 2 | `u16` | `uvct` | UVCT identifier. |
 Cell centre = `(minX + (col + ½)·cellW, minY + (row + ½)·cellH, 0)`; row 0 is the south edge.
 
 **UVCT cell:**
-```
-u16 nverts; u16 nTris; u16 nObjects; u16 nBatches
-Vtx[nverts]                                  x, y relative to the cell centre; z = height
-nTris × { u16 a, b, c; u16 mask }            collision triangles
-nObjects × { u8 n; n × Mtx (16.16 fixed: 16 s16 integer parts, then 16 u16 fractions, row-major)
-             u16 model (UVMD); f32 x, y, z; u16 mask; u16 0xFFFF }
-nBatches × { u32 state; u16 nv; u16 nt; packed list; u16 firstTri; u16 triCount; u16 mask; u16 0xFFFF; f32 x, y, z, r }
-f32 × 5                                      bounding sphere + 1.0
-```
+
+Header (`0x08` bytes):
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 2 | `u16` | `vertexCount` | Number of vertices. |
+| `0x02` | 2 | `u16` | `triangleCount` | Number of collision triangles. |
+| `0x04` | 2 | `u16` | `objectCount` | Number of static objects. |
+| `0x06` | 2 | `u16` | `batchCount` | Number of render batches. |
+
+The remaining cell data is serialized in this order:
+
+| Order | Count | Type | Field | Description |
+|---:|---:|---|---|---|
+| 1 | `vertexCount` | `Vtx` | `vertices` | X and Y are relative to the cell center; Z is height. |
+| 2 | `triangleCount` | 8-byte record | `triangles` | Three `u16` vertex indices followed by a `u16 mask`. |
+| 3 | `objectCount` | variable record | `objects` | Static-object records defined below. |
+| 4 | `batchCount` | variable record | `batches` | Render-batch records defined below. |
+| 5 | 5 | `f32` | `bounds` | Bounding sphere followed by constant 1.0. |
+
+Static-object record:
+
+| Order | Count | Type | Field | Description |
+|---:|---:|---|---|---|
+| 1 | 1 | `u8` | `matrixCount` | Number of following matrices. |
+| 2 | `matrixCount` | 64-byte fixed matrix | `matrices` | Row-major 16.16 fixed-point matrices: 16 `s16` integer parts followed by 16 `u16` fractional parts. |
+| 3 | 1 | `u16` | `modelId` | UVMD model identifier. |
+| 4 | 3 | `f32` | `position` | X, Y, and Z. |
+| 5 | 1 | `u16` | `mask` | Spatial mask. |
+| 6 | 1 | `u16` | `terminator` | Always `0xFFFF`. |
+
+Render-batch record:
+
+| Order | Count | Type | Field | Description |
+|---:|---:|---|---|---|
+| 1 | 1 | `u32` | `state` | Material/render state. |
+| 2 | 1 | `u16` | `vertexCount` | Batch vertex count. |
+| 3 | 1 | `u16` | `triangleCount` | Batch triangle count. |
+| 4 | 1 | packed command stream | `geometry` | Packed list described above. |
+| 5 | 1 | `u16` | `firstTriangle` | First collision-triangle index. |
+| 6 | 1 | `u16` | `collisionTriangleCount` | Number of collision triangles. |
+| 7 | 1 | `u16` | `mask` | Spatial mask. |
+| 8 | 1 | `u16` | `terminator` | Always `0xFFFF`. |
+| 9 | 4 | `f32` | `bounds` | Bounding-sphere X, Y, Z, and radius. |
 
 - **Static objects.**
   - An object's first matrix is its world placement relative to the cell, with scale `1/scaleDiv` (1364 of 1364). The remaining matrices repeat the model's part matrices.
@@ -587,20 +703,34 @@ All four types are **packed big-endian byte streams read field by field**, not a
 
 #### Geometry and textures: UVTX textures
 
-```
-u16 dataSize        texel bytes (> 4096 clamped to 4096 with a warning)
-u16 dlCount
-f32 su0, sv0        scroll speed of tile 1 (if either is non-zero)
-f32 su1, sv1        scroll speed of tile 0 (second image)
-u8  texels[dataSize]           an RDP texture-memory image: level 0 and its mip levels
-u32 dl[dlCount][2]             a Fast3D texture list
-u16 width, height   (trailer +10/+12) level-0 size
-u8  bpp             (+14)      4 / 8 / 16
-u8  b15, b16        (+15/+16)  0..2, unknown
-u16 flags18         (+18)      low 12 bits = own texture id (= file index); 0x8000 → translucent in render modes 6/7
-u16 secondId        (+20)      0x0FFF none; else the texture whose texels the second SETTIMG uses
-u16 surfaceClass (+32), u8 b34 (+34; 1 → translucent in mode 7), u8 b35..b38 (RGB-like; average colour [hypothesis]), f32 (+40)
-```
+Stream prefix and variable payloads:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 2 | `u16` | `dataSize` | Texel-byte count; values above 4096 are clamped to 4096 with a warning. |
+| `0x02` | 2 | `u16` | `displayListCount` | Number of following 8-byte Fast3D commands after the texels. |
+| `0x04` | 4 | `f32` | `scrollU0` | Tile-1 U scroll speed. |
+| `0x08` | 4 | `f32` | `scrollV0` | Tile-1 V scroll speed. |
+| `0x0C` | 4 | `f32` | `scrollU1` | Tile-0/second-image U scroll speed. |
+| `0x10` | 4 | `f32` | `scrollV1` | Tile-0/second-image V scroll speed. |
+| `0x14` | `dataSize` | bytes | `texels` | RDP texture-memory image containing level 0 and its mip levels. |
+| after texels | `8 × displayListCount` | `u32[2][]` | `displayList` | Fast3D texture list. |
+
+Known fields in the trailer following the display list:
+
+| Trailer offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x10` | 2 | `u16` | `width` | Level-0 width. |
+| `0x12` | 2 | `u16` | `height` | Level-0 height. |
+| `0x14` | 1 | `u8` | `bitsPerPixel` | 4, 8, or 16. |
+| `0x15` | 1 | `u8` | `unknown15` | Unknown; observed range 0–2. |
+| `0x16` | 1 | `u8` | `unknown16` | Unknown; observed range 0–2. |
+| `0x18` | 2 | `u16` | `flags18` | Low 12 bits are this texture's file index; `0x8000` makes render modes 6 and 7 translucent. |
+| `0x20` | 2 | `u16` | `secondId` | `0x0FFF` means none; otherwise selects the texels used by the second `G_SETTIMG`. |
+| `0x32` | 2 | `u16` | `surfaceClass` | Surface classification used by collision. |
+| `0x34` | 1 | `u8` | `translucent34` | Value 1 makes render mode 7 translucent. |
+| `0x35` | 4 | `u8[4]` | `color35` | RGB-like values; average color is a hypothesis. |
+| `0x40` | 4 | `f32` | `unknown40` | Unknown. |
 
 - **Parsing.** The parser relocates the list: each `FD` (G_SETTIMG) word 1 gets the image address. The first `FD` points to this file's texels; later ones point to texture `secondId`'s texels.
 - **The texture list:**
@@ -618,7 +748,14 @@ u16 surfaceClass (+32), u8 b34 (+34; 1 → translucent in mode 7), u8 b35..b38 (
   - tile 0 gets the size of `secondId`.
 - **Two-image textures (32).** The combiner mixes TEXEL0 and TEXEL1. The prototype draws TEXEL0 only (`Batch.texture1` could carry the second).
 - **Animated texture (UVSQ[0]).** 16 textures (69-84), one frame each at 20 fps, repeating. It is listed as sequence 0 by Crescent, Little States and Ever-Frost [evidence: ROM bytes]; its identification as water is [hypothesis].
-- **Night/snow palettes (UVTP).** Texture id substitutions `{u16 n; {u16 from, u16 to} × n}`, applied as textures load (*Concepts*).
+- **Night/snow palettes (UVTP).** Texture ID substitutions are:
+
+  | Order | Count | Type | Field | Description |
+  |---:|---:|---|---|---|
+  | 1 | 1 | `u16` | `count` | Number of substitutions. |
+  | 2 | `count` | `u16[2]` | `substitutions` | Each entry stores the source texture ID followed by the replacement ID. |
+
+  They are applied as textures load (*Concepts*).
 
 #### Geometry and textures: Render state: one 32-bit word per material
 
@@ -677,12 +814,17 @@ The UVTX trailer class, selected by the batch's low-12-bit texture id, is the on
 
 Two hundred thirty-four models contain 830 36-byte volumes:
 
-```
-u8 part, u8 skipCount, u8 hollow, pad
-f32 minX,minY,minZ,maxX,maxY,maxZ
-u16 cumulativeTriangleEnd @ 0x1c
-u32 runtimePointer @ 0x20
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 1 | `u8` | `part` | Part-matrix index. |
+| `0x01` | 1 | `u8` | `skipCount` | Number of following boxes skipped after a miss. |
+| `0x02` | 1 | `u8` | `hollow` | Hollow-volume flag. |
+| `0x03` | 1 | — | `padding03` | Alignment. |
+| `0x04` | 12 | `f32[3]` | `minimum` | Minimum X, Y, and Z in the part frame. |
+| `0x10` | 12 | `f32[3]` | `maximum` | Maximum X, Y, and Z in the part frame. |
+| `0x1C` | 2 | `u16` | `cumulativeTriangleEnd` | Exclusive cumulative end index in the volume-triangle array. |
+| `0x1E` | 2 | — | `padding1E` | Pointer alignment. |
+| `0x20` | 4 | `u32` | `runtimePointer` | Runtime pointer field. |
 
 Bounds are world units in the part frame. A missed parent skips the following `skipCount` boxes. Of the 830 boxes,
 293 leaf boxes own triangle-index triples into the model's Vtx array; a leaf without triangles collides as the box.
@@ -709,15 +851,33 @@ Source: `obj/notes/environment.md`, `fs/notes/small_us.txt`, and the task/enviro
 
 Each of the 24 COMM records in the single UVEN file is packed as follows; all records decode to their exact length.
 
-```
-u8 count
-count × { u16 model; u8 flags }
-u8 raw[0x3c] = {
-  RGBA8 clear, RGBA8 fog, RGBA8 auxiliary, pad[8],
-  f32 fogMin, f32 fogMax, u8 fogEnabled, pad[17],
-  u8 clearEnabled @ 0x2e, runtime pointer/count fields
-}
-```
+| Order | Count | Type | Field | Description |
+|---:|---:|---|---|---|
+| 1 | 1 | `u8` | `modelCount` | Number of environment-model entries. |
+| 2 | `modelCount` | 3-byte record | `models` | Environment-model records defined below. |
+| 3 | 1 | 0x3C-byte record | `parameters` | Environment parameters defined below. |
+
+Environment-model record (`0x03` bytes):
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 2 | `u16` | `modelId` | UVMD model identifier. |
+| `0x02` | 1 | `u8` | `flags` | Environment-model flags. |
+
+Environment-parameter record (`0x3C` bytes):
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 4 | `u8[4]` | `clearColor` | RGBA8 clear color. |
+| `0x04` | 4 | `u8[4]` | `fogColor` | RGBA8 fog color. |
+| `0x08` | 4 | `u8[4]` | `auxColor` | Auxiliary RGBA8 color. |
+| `0x0C` | 8 | — | `padding0C` | Unknown/padding. |
+| `0x14` | 4 | `f32` | `fogMin` | Fog-range minimum. |
+| `0x18` | 4 | `f32` | `fogMax` | Fog-range maximum. |
+| `0x1C` | 1 | `u8` | `fogEnabled` | Enables fog. |
+| `0x1D` | 17 | — | `padding1D` | Unknown/padding. |
+| `0x2E` | 1 | `u8` | `clearEnabled` | Enables color-buffer clearing. |
+| `0x2F` | 13 | — | `runtimeFields` | Runtime pointer/count fields whose individual meanings are not established. |
 
 | ids | models | clear/fog state | use |
 |---|---|---|---|
@@ -828,7 +988,14 @@ Source: `obj/notes/objects.md`; complete generated censuses are `obj/notes/tasks
 
 #### SPTH, 3VUE and demonstrations
 
-Each SPTH axis is `u32 count; count × {f32 time, f32 value}`. Across all 48 axes the first time is zero and keys
+Each SPTH axis is:
+
+| Order | Count | Type | Field | Description |
+|---:|---:|---|---|---|
+| 1 | 1 | `u32` | `count` | Number of following keys. |
+| 2 | `count` | `f32[2]` | `keys` | Each key stores time followed by value. |
+
+Across all 48 axes the first time is zero and keys
 increase to 100, resolving the earlier value/time ambiguity. SCPX/Y/Z are position and SCPH/P/R are angles in degrees;
 SCP# selects a mode. Cubic Hermite interpolation comes from the decomp. User 0x04 drives the ski lift, 0x43–0x47 the
 title flyover and 0x6D/0x6E the Little States planes.

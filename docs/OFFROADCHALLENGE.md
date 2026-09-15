@@ -87,14 +87,12 @@ The main/file boundary is verified by both direct mapping and table continuity. 
 
 Startup passes RAM `0x8006D710` (US ROM `0x6E310`) and count 41 to the table setter at `0x8004DFD0`. Records are big-endian: [evidence: ROM bytes, disassembly]
 
-```c
-struct AssetFile {
-    uint32_t romStart;
-    uint32_t romEnd;       // exclusive
-    uint32_t defaultDest;  // KSEG0
-    uint32_t flags;
-};
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 4 | `u32` | `romStart` | Inclusive ROM start. |
+| `0x04` | 4 | `u32` | `romEnd` | Exclusive ROM end. |
+| `0x08` | 4 | `u32` | `defaultDest` | Default KSEG0 destination. |
+| `0x0C` | 4 | `u32` | `flags` | All retail records are zero. |
 
 All 41 flags are zero. Sorted by `romStart`, their ranges partition `0x88BC0–0xC75030` exactly, without overlaps or gaps. Table order is logical ID order rather than physical order; alternatives reuse common destination arenas. The authoritative inventory is `fs/file_table.tsv`. [evidence: ROM bytes, deterministic decoding]
 
@@ -165,33 +163,41 @@ Track files do not contain ready-made RSP display lists. They contain absolute R
 
 The per-track root has these established fields: [evidence: ROM bytes, disassembly, deterministic decoding]
 
-| offset | meaning |
-|---:|---|
-| `+0x04` | resource bundle |
-| `+0x08` | palette-selector lookup |
-| `+0x0C` | sector table |
-| `+0x10` | track-resident auxiliary-object list |
-| `+0x14` | terminated type/callback map |
-| `+0x18` | sector count |
-| `+0x2C` | start-sector index |
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x04 | 4 | u32 | bundle | Absolute RAM pointer to the resource bundle. |
+| 0x08 | 4 | u32 | paletteLookup | Absolute RAM pointer to palette-selector lookup. |
+| 0x0C | 4 | u32 | sectors | Absolute RAM pointer to the sector table. |
+| 0x10 | 4 | u32 | auxObjects | Absolute RAM pointer to track-resident auxiliary objects. |
+| 0x14 | 4 | u32 | callbacks | Absolute RAM pointer to terminated type/callback map. |
+| 0x18 | 4 | u32 | sectorCount | Sector count. |
+| 0x2C | 4 | u32 | startSector | Starting sector index. |
 
 Root `+0x1C`, `+0x20`, `+0x28`, `+0x30…+0x44` and the sector-sized lookup beginning at `+0x48` are accessed by the course loader but are not yet semantically named. `+0x20` is halved and stored in positive/negative form, suggesting a course extent or wrap value. [evidence: disassembly, open question]
 
 A sector is 16 bytes:
 
-```c
-struct Sector {
-    uint32_t flags;
-    uint32_t ordinal;
-    uint16_t field08;
-    uint16_t field0A;
-    uint32_t payloadPtr;
-};
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 4 | `u32` | `flags` | Sector flags. |
+| `0x04` | 4 | `u32` | `ordinal` | Equals the array index. |
+| `0x08` | 2 | `u16` | `field08` | Unknown. |
+| `0x0A` | 2 | `u16` | `field0A` | Unknown. |
+| `0x0C` | 4 | `u32` | `payloadPtr` | Sector payload pointer. |
 
 The ordinal equals the array index. Flags `1`, `8` and `0x80000000` each occur once per course; flags `2` and, on Vegas, `6` occur in a few sectors and are read by driving/physics code. Their names remain open. [evidence: ROM bytes, disassembly, open question]
 
-Each sector payload begins with a `0x44`-byte header. Five `u32` counts at `+0x28…+0x38` partition the placement array; `+0x3C` is skipped/reserved, `+0x40` is total count, and `+0x44` begins `count` records of `0x24` bytes. Repeated payload boundaries equal `0x44 + count*0x24`, and collision routines select category slices by summing the five counts. [evidence: ROM bytes, disassembly, deterministic decoding]
+Each sector payload begins with a 0x44-byte header. [evidence: ROM bytes, disassembly, deterministic decoding]
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 0x28 | u8[] | unknown00 | Fields not described here. |
+| 0x28 | 20 | u32[5] | categoryCounts | Partition the placement array. |
+| 0x3C | 4 | u32 | reserved3C | Skipped/reserved. |
+| 0x40 | 4 | u32 | count | Total placement count. |
+| 0x44 | 0x24 × count | placement[] | placements | Placement records. |
+
+Repeated payload boundaries equal 0x44 + count × 0x24. Collision routines select category slices by summing the five counts.
 
 #### Whole-ROM structural counts
 
@@ -211,9 +217,36 @@ The prototype `levels/analyze_orc.py` validates pointer bounds, vertices and fac
 
 #### SSEQ format
 
-The SSEQ header declares version 2, 165 uncompressed sequences and a `0xA50`-byte table. Each 16-byte record is `{u16 trackCount,u16 compression,u32 payloadSize,u32 payloadRelativeOffset,u32 loadedPointer}`; payload offsets are relative to `0xC84DB0`, and on-ROM loaded pointers are zero. [evidence: ROM bytes, deterministic decoding]
+The SSEQ header declares version 2, 165 uncompressed sequences and a `0xA50`-byte table. Its 16-byte records are:
 
-Each payload contains one or more track headers, label offsets and event bytes. A 20-byte track header is `{u8 soundClass,u8 reverb,u16 initialPatch,s16 initialPitch,u8 volume,u8 pan,u8 substack,u8 muteBits,u16 PPQ,u16 QPM,u16 labelCount,u32 eventBytes}`. Events use a big-endian VLQ delta, one-byte opcode and fixed parameters; WESS multi-byte command parameters are little-endian. The music uses `PatchChg`, `NoteOn`, `NoteOff`, `NullEvent`, `TrkJump` and `TrkEnd`; the complete 36-opcode length table is required for safe validation and later SFX support. **[ROM bytes/deterministic decoding/source archive]**
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 2 | `u16` | `trackCount` | Track count. |
+| `0x02` | 2 | `u16` | `compression` | Compression selector. |
+| `0x04` | 4 | `u32` | `payloadSize` | Payload byte count. |
+| `0x08` | 4 | `u32` | `payloadOffset` | Relative to `0xC84DB0`. |
+| `0x0C` | 4 | `u32` | `loadedPointer` | Zero on ROM. |
+
+[evidence: ROM bytes, deterministic decoding]
+
+Each payload contains one or more track headers, label offsets and event bytes. Track headers are 20 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 1 | `u8` | `soundClass` | — |
+| `0x01` | 1 | `u8` | `reverb` | — |
+| `0x02` | 2 | `u16` | `initialPatch` | — |
+| `0x04` | 2 | `s16` | `initialPitch` | — |
+| `0x06` | 1 | `u8` | `volume` | — |
+| `0x07` | 1 | `u8` | `pan` | — |
+| `0x08` | 1 | `u8` | `substack` | — |
+| `0x09` | 1 | `u8` | `muteBits` | — |
+| `0x0A` | 2 | `u16` | `PPQ` | — |
+| `0x0C` | 2 | `u16` | `QPM` | — |
+| `0x0E` | 2 | `u16` | `labelCount` | — |
+| `0x10` | 4 | `u32` | `eventBytes` | — |
+
+Events use a big-endian VLQ delta, one-byte opcode and fixed parameters; WESS multi-byte command parameters are little-endian. The music uses `PatchChg`, `NoteOn`, `NoteOff`, `NullEvent`, `TrkJump` and `TrkEnd`; the complete 36-opcode length table is required for safe validation and later SFX support. **[ROM bytes/deterministic decoding/source archive]**
 
 Sequences 0–11 are sound class 1 music; 12–164 are class 0 SFX. Thus the archive contains 12 music sequences and 153 SFX sequences. [evidence: ROM bytes, deterministic decoding]
 
@@ -248,24 +281,27 @@ No tenth track name, tenth track-table slot, extra top-level course file or obvi
 
 A model record exposes: [evidence: ROM bytes, disassembly]
 
-| offset | meaning |
-|---:|---|
-| `+0x00` | `f32` radius |
-| `+0x04…+0x18` | six `f32` AABB bounds |
-| `+0x1C` | inclusive maximum vertex index |
-| `+0x20` | pointer to `f32 x,y,z` vertices (12 bytes each) |
-| `+0x24` | unresolved |
-| `+0x28` | inclusive maximum polygon index |
-| `+0x2C` | pointer to 24-byte polygons |
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | f32 | radius | Bounding radius. |
+| 0x04 | 24 | f32[6] | bounds | AABB values; component order not established here. |
+| 0x1C | 4 | u32 | maxVertex | Inclusive maximum vertex index. |
+| 0x20 | 4 | u32 | vertices | Absolute RAM pointer to twelve-byte XYZ f32 vectors. |
+| 0x24 | 4 | u32 | unknown_24 | Unresolved. |
+| 0x28 | 4 | u32 | maxPolygon | Inclusive maximum polygon index. |
+| 0x2C | 4 | u32 | polygons | Absolute RAM pointer to 24-byte polygons. |
 
-Polygon fields currently established: [evidence: ROM bytes, disassembly]
+Polygon records are 24 bytes. Known fields: [evidence: ROM bytes, disassembly]
 
-- `+0x00` packed flags; bit `0x100` selects the textured path;
-- `+0x01` palette-selector index;
-- bytes `+0x04…+0x0B` supply four S/T pairs, in logical-reference order `(5,4),(7,6),(9,8),(11,10)`, and are multiplied by 32;
-- `+0x0E` selects a texture-atlas row;
-- `+0x10/+0x12/+0x14/+0x16` are `u16` float-word offsets; divide by three for vertex indices;
-- equal second/third indices encode a triangle; otherwise the face is a quad.
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | u16 | flags | Bit 0x100 selects the textured path. |
+| 0x01 | 1 | u8 | paletteIndex | Overlaps the low byte of flags. |
+| 0x04 | 8 | u8[4][2] | texcoords | Four T,S pairs; logical S,T order is (5,4),(7,6),(9,8),(11,10). Multiply bytes by 32. |
+| 0x0E | 2 | u16 | atlasRow | Starting texture-atlas row. |
+| 0x10 | 8 | u16[4] | vertexOffsets | Offsets in float words; divide by three for vertex indices. |
+
+Equal second/third vertex references encode a triangle; otherwise the face is a quad.
 
 The runtime transforms float vertices to temporary N64 vertices and emits `gSPVertex` plus `BF`/`B1` triangle commands. The corrected sentinel, UV order and triangle winding follow the register/data flow in `0x80013E7C`: the comparison uses the low half of polygon `+0x10` (reference 1 at `+0x12`) and the high half of `+0x14` (reference 2 at `+0x14`); a triangle uses logical references `(1,0,3)`, while a quad uses `(1,0,3)` and `(1,3,2)`. [evidence: disassembly, deterministic decoding]
 
@@ -275,12 +311,12 @@ The runtime transforms float vertices to temporary N64 vertices and emits `gSPVe
 
 For all nine tracks, root `+0x04` resolves a sole resource descriptor: [evidence: ROM bytes, disassembly, deterministic decoding]
 
-```text
-+00 u32 palette-bank/config count
-+04 u32 RGBA16 palette-data base
-+08 u32 0x80000000 | atlasHeight
-+0C u32 packed-CI4 atlas base
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 4 | `u32` | `paletteConfigCount` | Palette-bank/configuration count. |
+| `0x04` | 4 | `u32` | `paletteData` | RGBA16 palette-data base. |
+| `0x08` | 4 | `u32` | `atlasFlagsHeight` | `0x80000000 \| atlasHeight`. |
+| `0x0C` | 4 | `u32` | `atlasData` | Packed-CI4 atlas base. |
 
 The terrain builder describes the source as a 128-wide CI8 image for loading bytes into TMEM, but describes the render tile as CI4. Each 128-byte source row therefore contains 256 logical texels, with the high nibble first. Polygon `+0x0E * 128` selects the starting row; the per-face UV extrema determine the loaded rectangle. `G_SETTILE` uses wrap on both axes with mask and shift zero. Root `+0x08` is a `u32` lookup indexed by polygon byte `+0x01`; doubling the selected value produces the offset of a 16-entry RGBA16 TLUT window. Several tracks reference through exactly `atlasHeight-1`, independently validating the low 31 bits of descriptor `+0x08` as height. The normal reset render mode `0x0F0A7008` is the game's anti-aliased, Z-buffered textured-edge mode, so textured faces use one-bit alpha cutout; this restores the transparent surroundings of tree, cliff and other billboard art. The earlier research prototype's CI8 decode caused rainbow-smearing and transparent holes; packed-CI4 decoding and the cutout state were confirmed by coherent offline and browser renders. Remaining packed polygon/material bits are open. [evidence: ROM bytes, disassembly, deterministic decoding]
 
@@ -334,19 +370,33 @@ Gameplay frames show a perspective third-person chase camera above and behind th
 
 The shared 36-byte placement schema is: [evidence: ROM bytes, disassembly]
 
-```text
-+00 u32 flags
-+04 u32 modelPtr
-+08 u32 field08
-+0C u32 field0C
-+10 u32 packed IDs/material/type
-+14 f32 x
-+18 f32 y
-+1C f32 z
-+20 u32 angle
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 4 | `u32` | `flags` | Placement flags. |
+| `0x04` | 4 | `u32` | `modelPtr` | Model pointer. |
+| `0x08` | 4 | `u32` | `field08` | Unknown. |
+| `0x0C` | 4 | `u32` | `field0C` | Unknown. |
+| `0x10` | 4 | `u32` | `packedIdsMaterialType` | Packed identifiers, material, and type. |
+| `0x14` | 4 | `f32` | `x` | World X. |
+| `0x18` | 4 | `f32` | `y` | World Y. |
+| `0x1C` | 4 | `f32` | `z` | World Z. |
+| `0x20` | 4 | `u32` | `angle` | Unsigned binary-angle turn. |
 
-Root `+0x10` holds a count followed by `{u32 templatePtr, u32 instanceId}` pairs; each template uses the same placement schema. These are track-resident auxiliary objects. Common vehicle/race files 14, 15 and 36 are not loaded by the track loader and should be omitted from the initial static scene; they can become an optional vehicle layer later. [evidence: ROM bytes, disassembly, viewer design]
+Root +0x10 references a counted auxiliary-object list:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | count | Auxiliary-object count. |
+| 0x04 | 8 × count | auxiliary[] | objects | Eight-byte records below. |
+
+Auxiliary-object record:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | templatePtr | Pointer to the same placement schema. |
+| 0x04 | 4 | u32 | instanceId | Instance identifier. |
+
+These are track-resident auxiliary objects. Common vehicle/race files 14, 15 and 36 are not loaded by the track loader and should be omitted from the initial static scene; they can become an optional vehicle layer later. [evidence: ROM bytes, disassembly, viewer design]
 
 The angle feeds a sin/cos transform. Routine `0x8004239C` consumes the full unsigned 32-bit word as one binary-angle turn: the high bits select a sine-table entry and the low 17 bits interpolate it. Y is vertical; physics uses X/Z for planar distance and the middle component for height. The source world must be reflected on X to enter the viewer's right-handed frame, including both placement translation and rotation. This was independently checked against the sidedness and location of signs, grandstands, tents and terrain in reports 0012–0019. Preserve the native float coordinates—often hundreds of thousands of units—and fit the viewer camera to their bounds rather than applying an unverified scale. The packed `+0x08/+0x0C/+0x10` names remain unresolved. [evidence: disassembly, deterministic decoding]
 
@@ -382,16 +432,37 @@ Runtime `0x80050038–0x80050044` explicitly stores `0xC871C0` in `WessConfig` a
 
 The 32-byte module header says version 2 and `data_size=0xF2D8`. Its 24-byte patch-group header at `0xC75050` has load flags `0x1F`, 196 patches (4 bytes), 196 patch maps (20 bytes), 196 wave records (24 bytes), no drum maps and `extra_size=0xCE18`. [evidence: ROM bytes, deterministic decoding]
 
-| offset | records |
-|---|---|
-| `0xC75068` | 196× `{u8 mapCount,u8 pad,u16 firstMap}` |
+| ROM start | Records |
+|---:|---|
+| `0xC75068` | 196 four-byte patch records (below) |
 | `0xC75378` | 196×20-byte patch maps |
 | `0xC762C8` | 196×24-byte wave records |
 | `0xC77528` | loop-info header: 196 waves, zero raw loops, 21 ADPCM loops |
 | `0xC77530` | 21×48-byte `ALADPCMloop2` records |
 | `0xC77920` | 196×264-byte predictor books |
 
-A patch map holds priority, volume, pan, reverb, root/fine tuning, note and pitch-step ranges, wave ID and attack/decay/release envelope fields. A wave record is `{u32 relativeBase,u32 byteLength,u8 codec,u8 flags,u16 pad,s32 pitchCents,s32 loopIndex,u32 zero}` before WESS fixes it up in memory. All 196 waves use 4-bit N64 VADPCM. Ninety-one declared byte lengths include a one-byte remainder; decode only complete 9-byte/16-sample frames. [evidence: ROM bytes, disassembly, deterministic decoding]
+Patch record, four bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | mapCount | Patch-map count. |
+| 0x01 | 1 | u8 | padding | Padding. |
+| 0x02 | 2 | u16 | firstMap | First patch-map index. |
+
+A patch map holds priority, volume, pan, reverb, root/fine tuning, note and pitch-step ranges, wave ID and attack/decay/release envelope fields. Wave records are:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 4 | `u32` | `relativeBase` | — |
+| `0x04` | 4 | `u32` | `byteLength` | — |
+| `0x08` | 1 | `u8` | `codec` | — |
+| `0x09` | 1 | `u8` | `flags` | — |
+| `0x0A` | 2 | `u16` | `padding` | — |
+| `0x0C` | 4 | `s32` | `pitchCents` | — |
+| `0x10` | 4 | `s32` | `loopIndex` | — |
+| `0x14` | 4 | `u32` | `zero` | — |
+
+WESS fixes these up in memory. All 196 waves use 4-bit N64 VADPCM. Ninety-one declared byte lengths include a one-byte remainder; decode only complete 9-byte/16-sample frames. [evidence: ROM bytes, disassembly, deterministic decoding]
 
 Pitch ratio is `2^((wavePitch + pitchControl + (key-rootKey)*100 - fineAdj)/1200)`. A diagnostic extraction of patch 31 decodes 103,648 PCM frames at effective 11,025 Hz, lasting 9.401 s against sequence 0's 9.404-s NoteOff. This verifies the WDD base, predictor-book index, frame format, tuning and event timing, but it is not a mixed-song/audio-capture comparison. [evidence: deterministic decoding]
 

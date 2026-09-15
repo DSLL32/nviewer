@@ -198,6 +198,74 @@ for (const file of files) {
   for (const sentence of boilerplate) {
     if (text.includes(sentence)) problems.push(`generic navigation prose: ${sentence}`);
   }
+  for (const match of text.matchAll(/```([^\n]*)\n([\s\S]*?)```/g)) {
+    const language = match[1].trim().toLowerCase();
+    const body = match[2];
+    const offsetFields = body.match(/(?:^|\n)\s*(?:\+?0x[0-9a-f]+|\+[0-9a-f]{1,3})\s+(?:(?:u|s)(?:8|16|32|64)|f32|f64|ptr|char\[|vec)/gi)?.length ?? 0;
+    const declarations = body.match(/\b(?:(?:u|s)(?:8|16|32|64)|f32|f64|ptr)\s+[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?/g)?.length ?? 0;
+    const structureSyntax = /\bstruct\s+[A-Za-z_][A-Za-z0-9_]*\s*\{|(?:^|\n)\s*(?:file|chunk|header|entry|record)\s*:=/i.test(body);
+    const formatContext = /\b(?:header|record|entry|layout|offset|pointer|payload|field|bytes?)\b/i.test(body);
+    if (offsetFields > 0 || structureSyntax || (declarations >= 2 && formatContext)) {
+      problems.push(`binary layout in fenced ${language || 'plain-text'} block; use a field table`);
+    }
+  }
+  let inFence = false;
+  for (const [index, line] of text.split('\n').entries()) {
+    if (/^\s*```/.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence || /^\s*<(?:table|thead|tbody|tr|th|td)\b/i.test(line)) {
+      continue;
+    }
+    if (/^\s*\|\s*(?:Offset|Off|Block offset)\s*\|/i.test(line)
+      && !/^\s*\|\s*Offset\s*\|\s*Size\s*\|\s*Type\s*\|\s*Field\s*\|\s*Description\s*\|\s*$/i.test(line)
+      && !/^\s*\|\s*Offset\s*\|\s*Bits\s*\|\s*Field\s*\|\s*Meaning\s*\|\s*$/i.test(line)) {
+      problems.push(`line ${index + 1}: nonstandard offset-layout columns; use Offset/Size/Type/Field/Description`);
+      continue;
+    }
+    if (/^\s*\|\s*Order\s*\|/i.test(line)
+      && !/^\s*\|\s*Order\s*\|\s*(?:Count|Size)\s*\|\s*Type\s*\|\s*Field\s*\|\s*Description\s*\|\s*$/i.test(line)) {
+      problems.push(`line ${index + 1}: nonstandard sequential-layout columns; use Order/Count/Type/Field/Description`);
+      continue;
+    }
+    if (/^\s*\|\s*[—-]\s*\|\s*[—-]\s*\|\s*[—-]\s*\|\s*[—-]\s*\|/.test(line)) {
+      problems.push(`line ${index + 1}: placeholder-only format row; put fields in table columns`);
+      continue;
+    }
+    if (/^\s*\|\s*[—-]\s*\|\s*[—-]\s*\|[^|]+\|\s*[—-]\s*\|/.test(line)) {
+      problems.push(`line ${index + 1}: unnamed format field; use a sequential-layout table when offsets vary`);
+      continue;
+    }
+    if (/^\s*\|[^|]+\|\s*[—-]\s*\|\s*[—-]\s*\|\s*[—-]\s*\|/.test(line)) {
+      problems.push(`line ${index + 1}: prose-only format row; use table columns`);
+      continue;
+    }
+    if (/^\s*\|[^|]+\|\s*[—-]\s*\|\s*`(?:(?:u|s)(?:8|16|32|64)|f32|f64|ptr)(?:\[[^`]*\])?`\s*\|/.test(line)) {
+      problems.push(`line ${index + 1}: fixed-width field has no size`);
+      continue;
+    }
+    if (/^\s*\|/.test(line)) {
+      const typeTokens = line.match(/\b(?:(?:u|s)(?:8|16|32|64)|f32|f64|ptr)\b/g)?.length ?? 0;
+      const explicitOffsets = line.match(/\+\s*0x?[0-9a-f]+/gi)?.length ?? 0;
+      const semicolons = line.match(/;/g)?.length ?? 0;
+      if (typeTokens >= 3 && (/[{}]/.test(line) || semicolons >= 2 || explicitOffsets >= 2)) {
+        problems.push(`line ${index + 1}: whole structure compressed into one table cell; use one row per field`);
+      }
+      continue;
+    }
+    const offsetFields = line.match(/(?:\+?0x[0-9a-f]+|\+[0-9a-f]{1,3})\s+(?:(?:u|s)(?:8|16|32|64)|f32|f64|ptr|char\[|vec)/gi)?.length ?? 0;
+    const declarations = line.match(/\b(?:(?:u|s)(?:8|16|32|64)|f32|f64|ptr)\s+[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?/g)?.length ?? 0;
+    const formatContext = /\b(?:header|record|entry|struct|layout|offset|field|consists?|contains?)\b|\{/i.test(line);
+    const bulletField = /^\s*[-*]\s+`?\+0x[0-9a-f]+`?\s+(?:(?:u|s|i)(?:8|16|32|64)|f32|f64|ptr)\b/i.test(line);
+    const atOffsetField = /\b(?:at|from)\s+(?:file\s+)?offset\s+`?(?:\+?0x[0-9a-f]+|0)`?[^|]{0,60}\b(?:(?:u|s|i)(?:8|16|32|64)|f32|f64|ptr)\b/i.test(line)
+      || /\bat\s+`?\+(?:0x)?[0-9a-f]+`?[^|]{0,60}\b(?:(?:u|s|i)(?:8|16|32|64)|f32|f64|ptr)\b/i.test(line);
+    const packedFieldList = formatContext
+      && /\b(?:(?:u|s|i)(?:8|16|32|64)|f32|f64|ptr)\s+[A-Za-z_][A-Za-z0-9_]*(?:\s*,\s*[A-Za-z_][A-Za-z0-9_]*){2,}/i.test(line);
+    if (offsetFields >= 2 || (declarations >= 3 && formatContext) || bulletField || atOffsetField || packedFieldList) {
+      problems.push(`line ${index + 1}: prose binary layout; use a field table`);
+    }
+  }
   if (problems.length) {
     failures++;
     console.error(`${file}:`);

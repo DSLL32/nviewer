@@ -10,10 +10,10 @@ interpretations are labelled hypotheses.
 
 | Property | Value |
 |---|---|
-| Asset organization | DMA table of 64 entries `{vromStart, romStart, romEnd, compressed}` at ROM 0xDE480 (V1.1) / 0xD9A90 (V1.0), found by pattern; 51 files MIO0, 13 raw |
+| Asset organization | DMA table of 64 sixteen-byte entries at ROM 0xDE480 (V1.1) / 0xD9A90 (V1.0), found by pattern; 51 files MIO0, 13 raw |
 | Compression | MIO0 (header, control bits, back-reference and literal streams); trivial, and the viewer needs a new ~40-line decoder |
 | Graphics microcode | F3DEX 1.x. |
-| Geometry | 0x14-byte placement records `{f32 z, s16 z2, x, y, rx, ry, rz, id}`; 400-entry object-info table (ids 0-399; id → display list / draw recipe); 108-entry event-actor model table; 0x44-byte environment record (fog, light, ambient, BGM); F3DEX 1.x display lists with **no render state** (the game prepends one of 88 presets); camera-attached ground planes; procedural Titania terrain; skeleton models |
+| Geometry | 0x14-byte placement records; 400-entry object-info table (ids 0-399; id → display list / draw recipe); 108-entry event-actor model table; 0x44-byte environment record (fog, light, ambient, BGM); F3DEX 1.x display lists with **no render state** (the game prepends one of 88 presets); camera-attached ground planes; procedural Titania terrain; skeleton models |
 | Textures | RGBA16, CI4/CI8 with RGBA16 TLUTs, IA8/IA16, and I textures. |
 | Collision | Object hitboxes and level-specific collision routines; no single general-purpose level collision mesh. |
 | Music driver | Nintendo EAD sequence engine; three-level bytecode, 44 music sequences, 32 kHz output, and 180 updates per second. |
@@ -173,12 +173,12 @@ The names in the second column come from the decomp's `src/dmatable.c`. The name
 #### DMA file table
 
 The table is 0x5A0 bytes: 90 slots of 16 bytes, of which 64 are used and the rest are zero. All values are big-endian.
-```
-+0x00 u32 vromStart   address of the file in the uncompressed linked image; the game's file id
-+0x04 u32 romStart    ROM offset of the stored bytes
-+0x08 u32 romEnd      end of the stored bytes (0 terminates the table)
-+0x0C u32 compressed  1 = MIO0 stream, 0 = raw
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `+0x00` | 4 | `u32` | `vromStart` | address of the file in the uncompressed linked image; the game's file id |
+| `+0x04` | 4 | `u32` | `romStart` | ROM offset of the stored bytes |
+| `+0x08` | 4 | `u32` | `romEnd` | end of the stored bytes (0 terminates the table) |
+| `+0x0C` | 4 | `u32` | `compressed` | 1 = MIO0 stream, 0 = raw |
 - **Location:** ROM 0xD9A90 (V1.0) or 0xDE480 (V1.1). The table is itself DMA file 2.
 - **Pattern search (verified unique in both ROMs):** entry 0 = {0, 0, 0x1050, 0}, entry 1 = {0x1050, 0x1050, T, 0}, and entry 2's vromStart = T, where T is the table's own ROM offset. Scan 4-byte-aligned offsets from 0x1000 to 0x200000.
 - **Reading:** read entries until romEnd == 0. The decompressed size is the next entry's vromStart minus this one's. For the last entry, use the MIO0 header size.
@@ -193,13 +193,13 @@ The table is 0x5A0 bytes: 90 slots of 16 bytes, of which 64 are used and the res
 #### MIO0
 
 **Verified** against the game routine `Mio0_Decompress` (0x8001EE70) and all 102 compressed files of both ROMs. The leak's `slidec/slid12.o` `slidstart` is byte-identical to the ROM routine.
-```
-+0x00 "MIO0"
-+0x04 u32 decompressedSize
-+0x08 u32 backrefOffset   (from header start)
-+0x0C u32 literalOffset   (from header start)
-+0x10 control stream: u32 BE words, bits consumed MSB first
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u8[4] | magic | MIO0. |
+| `+0x04` | 4 | `u32` | `decompressedSize` | — |
+| `+0x08` | 4 | `u32` | `backrefOffset` | (from header start) |
+| `+0x0C` | 4 | `u32` | `literalOffset` | (from header start) |
+| 0x10 | Variable | u32[] | control | Control words, bits consumed MSB first. |
 Decoding loop, until `decompressedSize` bytes have been written:
 - **control bit 1:** copy one byte from the literal stream.
 - **control bit 0:** read `u16 v` (BE) from the back-reference stream. Copy `(v >> 12) + 3` bytes (3..18), one at a time, from `out[pos - ((v & 0xFFF) + 1)]` (distance 1..4096). Overlapping copies act as runs.
@@ -448,13 +448,25 @@ Title, map and ending scenes are driven by overlay code, not by placement lists.
 Game code outside main lives in 9 overlays: `ovl_i1`..`ovl_i6` (level code), `ovl_menu` (title, option, map, game over), `ovl_ending` and `ovl_unused`. Each overlay is linked at the load base. At most one overlay is in RAM at a time.
 
 What is loaded is described by **Scene** structs in main. Each is 0x98 bytes:
-```
-+0x00 u32 ovl.rom.start, ovl.rom.end     vrom range of the overlay file (0 = none)
-+0x08 u32 ovl.bss.start, ovl.bss.end     RAM
-+0x10 u32 ovl.text.start, ovl.text.end
-+0x18 u32 ovl.data.start, ovl.rodata.end
-+0x20 15 x { u32 vromStart, u32 vromEnd } asset slot i = RSP segment i+1 (0 = empty)
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | overlayVromStart | Overlay-file VROM start; zero means none. |
+| 0x04 | 4 | u32 | overlayVromEnd | Exclusive VROM end. |
+| 0x08 | 4 | u32 | bssStart | RAM BSS start. |
+| 0x0C | 4 | u32 | bssEnd | RAM BSS end. |
+| 0x10 | 4 | u32 | textStart | RAM text start. |
+| 0x14 | 4 | u32 | textEnd | RAM text end. |
+| 0x18 | 4 | u32 | dataStart | RAM data start. |
+| 0x1C | 4 | u32 | rodataEnd | RAM read-only data end. |
+| 0x20 | 0x78 | assetSlot[15] | assets | Slot i binds RSP segment i+1; zero is empty. |
+
+Asset slot, eight bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | vromStart | Inclusive virtual-ROM start. |
+| 0x04 | 4 | u32 | vromEnd | Exclusive virtual-ROM end. |
+
 **Verified:** all 44 structs decode in both versions (`fs/scenes.py`, `lv/proto/dump.txt`).
 
 Tables of Scene structs start at V1.0 0x800C59C4 and V1.1 0x800CA3B4 (`sNoOvl_Logo`). Table order is: logo, ending (6 setups), title, option, map, game over, then the level scenes.
@@ -710,10 +722,24 @@ These complement *Terrain and ground planes*. **Verified** in the emulator for C
 A loader can find the tables by structure: the sample-bank table header has n = 4 and contiguous entries, and the sequence and font tables follow it. That works for both versions (`mus/proto/sf64audio.ts findTables`).
 
 **AudioTable** (sequences, fonts, sample banks). **Verified**; the lead re-checked the sequence table: 66 entries, 20 aliases, extents tile audio_seq exactly.
-```
-+0x00 s16 numEntries; s16 unk; u32 romAddr (0; add the file's ROM start); 8 pad
-+0x10 numEntries x { u32 offset; u32 size; s8 medium (2 = cart); s8 cachePolicy; s16 shortData1..3 }
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | s16 | numEntries | Entry count. |
+| 0x02 | 2 | s16 | unknown02 | Unknown. |
+| 0x04 | 4 | u32 | romAddr | Zero; add the file's ROM start. |
+| 0x08 | 8 | u8[8] | padding | Padding. |
+| 0x10 | 16 × numEntries | AudioTableEntry[] | entries | Entry records below. |
+
+AudioTableEntry, 16 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | offset | Offset or alias sequence id. |
+| 0x04 | 4 | u32 | size | Byte count; zero marks an alias. |
+| 0x08 | 1 | s8 | medium | 2 is cartridge. |
+| 0x09 | 1 | s8 | cachePolicy | Cache policy. |
+| 0x0A | 6 | s16[3] | shortData | Type-specific metadata. |
+
 - **Sequences:** 66 entries. `size == 0` marks an alias: `offset` is then another sequence id.
 
   | alias ids | target |
@@ -740,7 +766,20 @@ A loader can find the tables by structure: the sample-bank table header has n = 
   | 2 | voice | 0x1E1800 | 0x497480 |
   | 3 | music instruments | 0x678C80 | 0x0C3900 |
 
-**Sequence → font map.** `u16 offset[66]`, then at each offset `u8 count, u8 fontId[count]`. Every music sequence has exactly one font. The player's default font is the last one listed.
+**Sequence → font map.** Offsets are relative to the table start.
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 132 | u16[66] | offsets | One list offset per sequence. |
+
+Each referenced list is:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | count | font count. |
+| 0x01 | count | u8[] | fontIds | font identifiers. |
+
+ Every music sequence has exactly one font. The player's default font is the last one listed.
 
 | font | sequences |
 |---|---|
@@ -760,32 +799,99 @@ A loader can find the tables by structure: the sample-bank table header has n = 
 Aliases inherit their target's font.
 
 **Soundfont** (offsets relative to the font start in audio_bank). **Verified**: 33 fonts, 941 instruments, 479 drums and 1732 sample references all land in bounds, and font and bank extents tile their files.
-```
-Font:        u32 drumListOffset (0 = none); u32 instrumentOffset[numInstruments] (0 = empty)
-Drum list:   u32 drumOffset[numDrums]
-Instrument (0x20): u8 isRelocated; u8 normalRangeLo; u8 normalRangeHi; u8 releaseRate(adsrDecayIndex);
-                   u32 envelopeOffset; {u32 sampleOffset; f32 tuning} x 3 (low, normal, high)
-                   notes < lo use low (if lo != 0); notes > hi use high (if hi != 127)
-Drum (0x10):       u8 releaseRate; u8 pan; u8 isRelocated; pad; u32 sampleOffset; f32 tuning; u32 envelopeOffset
-Sample (0x10):     u32 bits: codec 31..28 (0 = VADPCM), medium 27..26 (0: font's sampleBank1), bit 25, reloc 24, size 23..0
-                   u32 offset in sample bank; u32 loopOffset; u32 bookOffset
-AdpcmLoop:         u32 start, end, count (0 = none, else forever), pad; if count != 0: s16 predictorState[16]
-AdpcmBook:         s32 order (2); s32 numPredictors (2 or 4); s16 book[8·order·numPredictors]
-Envelope:          s16 pairs {delay, arg}: delay > 0 ramp to arg (0..32767); 0 end; -1 hang; -2 goto arg; -3 restart
-```
+Font, four-byte header and instrument offsets:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | drumListOffset | Drum-list offset, zero if absent. |
+| 0x04 | 4 × numInstruments | u32[] | instrumentOffset | Instrument offsets; zero means empty. |
+
+Drum list:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 × numDrums | u32[] | drumOffset | Drum offsets. |
+
+Tuned sample, eight bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | sampleOffset | Sample offset. |
+| 0x04 | 4 | f32 | tuning | Pitch multiplier. |
+
+Instrument, 0x20 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | isRelocated | Relocation flag. |
+| 0x01 | 1 | u8 | normalRangeLo | Low bound of normal range. |
+| 0x02 | 1 | u8 | normalRangeHi | High bound of normal range. |
+| 0x03 | 1 | u8 | releaseRate | Release rate. |
+| 0x04 | 4 | u32 | envelopeOffset | Envelope offset. |
+| 0x08 | 8 | TunedSample | low | Low-range sample, when present. |
+| 0x10 | 8 | TunedSample | normal | Normal-range sample. |
+| 0x18 | 8 | TunedSample | high | High-range sample, when present. |
+
+Drum, 0x10 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | releaseRate | Release rate. |
+| 0x01 | 1 | u8 | pan | Pan. |
+| 0x02 | 1 | u8 | isRelocated | Relocation flag. |
+| 0x03 | 1 | u8 | padding | Padding. |
+| 0x04 | 8 | TunedSample | sample | Drum sample and tuning. |
+| 0x0C | 4 | u32 | envelopeOffset | Envelope offset. |
+
+Sample, 0x10 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | flagsAndSize | Codec bits 31–28, medium 27–26, relocation 24, size 23–0. |
+| 0x04 | 4 | u32 | sampleOffset | Sample-data offset. |
+| 0x08 | 4 | u32 | loopOffset | Loop offset. |
+| 0x0C | 4 | u32 | bookOffset | Predictor-book offset. |
+
+AdpcmLoop, 0x10 bytes without history or 0x30 with history:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | start | Loop start. |
+| 0x04 | 4 | u32 | end | Exclusive loop end. |
+| 0x08 | 4 | u32 | count | Loop count. |
+| 0x0C | 4 | u32 | padding | Padding. |
+| 0x10 | 0x20 if count ≠ 0 | s16[16] | predictorState | Conditional decoder history. |
+
+AdpcmBook:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | s32 | order | 2. |
+| 0x04 | 4 | s32 | numPredictors | 2 or 4. |
+| 0x08 | 16 × order × numPredictors | s16[] | book | Predictor coefficients. |
+
+Envelope point, four bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | s16 | delay | Positive ramps; 0 ends; −1 hangs; −2 jumps; −3 restarts. |
+| 0x02 | 2 | s16 | arg | Target or branch argument. |
+
 - **Pitch:** `freq = gPitchFrequencies[note] · tuning`. gPitchFrequencies[39] = 1.0 = C4, i.e. 2^((n−39)/12).
 - **VADPCM:** 9-byte frames make 16 samples, decoded exactly as the RSP does (the viewer's `decodeVadpcm`).
 - **Loops:** play [0, end), then jump to start with the decoder history loaded from `predictorState`. predictorState equals the decoded samples of the frame containing `loop.start` (**verified** 56/56 looped samples, both versions). That is the convention libultra.ts `prepareWave` already implements.
 - **Code tables** in note_data, used by the renderer (offsets from the note_data base):
 
-  | offset | table |
-  |---|---|
-  | 0x000 | wave pointers (vibrato uses the sine) |
-  | 0x020 | bendOctave f32[256] |
-  | 0x420 | bend ±2 semitones |
-  | 0x820 | gPitchFrequencies f32[128] |
-  | 0xA40 | default envelope {(4,32000), (1000,32000), (−1,0)} |
-  | 0xB70 / 0xD70 / 0xF70 | pan volume tables (default: cos-like, [0] = 1.0, [64] = 0.70272, [127] = 0) |
+  | Offset | Size | Type | Field | Description |
+  |---:|---:|---|---|---|
+  | 0x000 | 0x20 | u32[8] | wavePointers | RAM wave pointers; vibrato uses sine. |
+  | 0x020 | 0x400 | f32[256] | bendOctave | Octave pitch-bend factors. |
+  | 0x420 | 0x400 | f32[256] | bendTwoSemitones | ±2-semitone pitch-bend factors. |
+  | 0x820 | 0x200 | f32[128] | pitchFrequencies | Pitch frequencies. |
+  | 0xA40 | 12 | EnvelopePoint[3] | defaultEnvelope | Points (4,32000), (1000,32000), (−1,0); four-byte record defined above. |
+  | 0xB70 | 0x200 | f32[128] | panDefault | Cosine-like; entries 0=1, 64=0.70272, 127=0. |
+  | 0xD70 | 0x200 | f32[128] | panTable1 | Additional pan curve. |
+  | 0xF70 | 0x200 | f32[128] | panTable2 | Additional pan curve. |
 
 ### 3.3 Geometry
 
@@ -845,7 +951,15 @@ PipeSync; clear all geometry modes; gSPTexture(on/off); SetCombine; SetGeometryM
 #### Display lists, vertices, textures
 
 - **Microcode:** F3DEX 1.x, "F3DEX.NoN 1.22". **Verified**: the ID string is in main; opcodes decode consistently (G_VTX 0x04, G_TRI1 0xBF, G_TRI2 0xB1, G_ENDDL 0xB8). The leak's spec links `gspF3DEX.NoN.fifo.o`.
-- **Vertices:** standard 16-byte `Vtx {s16 x,y,z; u16 flag; s16 s,t; u8 r,g,b|nx,ny,nz; u8 a}`.
+- **Vertices:** standard 16-byte `Vtx` records:
+
+  | Offset | Size | Type | Field | Description |
+  |---:|---:|---|---|---|
+  | `0x00` | 6 | `s16[3]` | `position` | X, Y, Z. |
+  | `0x06` | 2 | `u16` | `flag` | Vertex flag. |
+  | `0x08` | 4 | `s16[2]` | `texcoord` | S, T. |
+  | `0x0C` | 3 | `u8[3]` | `colorOrNormal` | RGB or signed normal XYZ. |
+  | `0x0F` | 1 | `u8` | `alpha` | Alpha. |
 - **What object lists contain.** Opcode histogram over all placed scenery lists of 13 levels (`lv/proto/dlscan.ts`, **verified**): `04 B1 BF B8 BA E6 E7 E8 F0 F2 F3 F5 FD` only.
   - Present: geometry, `gDPLoadTextureBlock`-style uploads (SETTIMG/SETTILE/LOADBLOCK/SETTILESIZE), `G_LOADTLUT` and TLUT-mode changes.
   - Absent: G_DL calls, matrices, geometry-mode, combiner or render-mode commands, BRANCH_Z.
@@ -922,17 +1036,18 @@ There is no Sector Z shot; the candidate frames are in `rt/cand/`. Prototype ren
 #### Fog, lights, clear colour, camera
 
 **Environment record**, 0x44 bytes, usually immediately before the level's main placement list (not on Macbeth or Titania); locate it through the pointer table below. The leak calls it `Stage_Data`. **Verified** by decode for all levels (`lv/proto/dump.txt`):
-```
-+0x00 s32 type        0 planet, 1 space
-+0x04 s32 groundType
-+0x08 u16 bgColor     (encoding: see below)
-+0x0A u16 seqId       BGM
-+0x0C s32 fogR, fogG, fogB
-+0x18 s32 fogNear, fogFar    gSPFogPosition values (e.g. 996, 1000)
-+0x20 f32 lightRot x, y, z   degrees
-+0x2C s32 lightR, lightG, lightB
-+0x38 s32 ambR, ambG, ambB
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `+0x00` | 4 | `s32` | `type` | 0 planet, 1 space |
+| `+0x04` | 4 | `s32` | `groundType` | — |
+| `+0x08` | 2 | `u16` | `bgColor` | (encoding: see below) |
+| `+0x0A` | 2 | `u16` | `seqId` | BGM |
+| `+0x0C` | 12 | `s32[3]` | `fogR, fogG, fogB` | — |
+| 0x18 | 4 | s32 | fogNear | gSPFogPosition near value, e.g. 996. |
+| 0x1C | 4 | s32 | fogFar | gSPFogPosition far value, e.g. 1000. |
+| `+0x20` | 12 | `f32[3]` | `lightRot x, y, z   degrees` | — |
+| `+0x2C` | 12 | `s32[3]` | `lightR, lightG, lightB` | — |
+| `+0x38` | 12 | `s32[3]` | `ambR, ambG, ambB` | — |
 Example, Corneria: type 0, fog (25,35,56) 996-1000, lightRot (−80,60,0), light (160,150,150), ambient (15,20,20).
 
 Extra records: Aquas has a second one at +0x44 (ast_aquas+0x2E584: light 255,255,255, ambient 20,20,20), used on the first start of the level (intro), with +0x2E540 on restarts (decomp `Play_InitEnvironment`); Versus has three.
@@ -1077,14 +1192,14 @@ It works from the main menu or inside a level (`rt/goto.sh`). Frame display list
 #### Object placement
 
 **ObjectInit record**, 0x14 bytes. **Verified**: all 37 lists parsed; live RAM objects match field for field. The leak names it `enemy_set_data`.
-```
-+0x00 f32 zPos1   on-rails: path distance (>= 0, list sorted ascending); all-range: z
-+0x04 s16 zPos2   on-rails extra z offset
-+0x06 s16 xPos    world x
-+0x08 s16 yPos    world y
-+0x0A s16 rot.x, rot.y, rot.z   degrees
-+0x10 s16 id      ObjectId; <= -1 ends the list; >= 1000 = event actor, script index id - 1000
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `+0x00` | 4 | `f32` | `zPos1` | on-rails: path distance (>= 0, list sorted ascending); all-range: z |
+| `+0x04` | 2 | `s16` | `zPos2` | on-rails extra z offset |
+| `+0x06` | 2 | `s16` | `xPos` | world x |
+| `+0x08` | 2 | `s16` | `yPos` | world y |
+| `+0x0A` | 6 | `s16[3]` | `rot.x, rot.y, rot.z   degrees` | — |
+| `+0x10` | 2 | `s16` | `id` | ObjectId; <= -1 ends the list; >= 1000 = event actor, script index id - 1000 |
 **World position.**
 - On-rails: `(xPos, yPos, −zPos1 − 3000 + zPos2)`.
   - **Verified**: all 15 live scenery objects in a Corneria RAM dump match exactly, e.g. id 55 at (−1046, 0, −40707.1) from zPos1 31707.1, zPos2 −6000.
@@ -1123,12 +1238,18 @@ It works from the main menu or inside a level (`rt/goto.sh`). Frame display list
 Level geometry is scenery, sprites, static actors and static event actors (*Event actors (ids ≥ 1000)*).
 
 **Object info table** `gObjectInfo[400]` (ids 0-399; `OBJ_ID_MAX` is 406 but ids 400-405 have no entry; the table is followed by the `$Id: fox_edisplay.c` string), 0x24 each, at V1.1 0x800CC124. **Verified** layout by decode:
-```
-+0x00 u32 dList (drawType 0) or draw function (drawType 1/2)
-+0x04 u8  drawType   0: plain segmented list; 1: C function; 2: function building its own matrices (skeletons)
-+0x08 fn  action; +0x0C f32* hitbox; +0x10 f32 cullDistance; +0x14 s16, s16; +0x18 u8 damage, u8;
-+0x1C f32 targetOffset; +0x20 u8 bonus
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `+0x00` | 4 | `u32` | `dList (drawType 0) or draw function (drawType 1/2)` | — |
+| `+0x04` | 1 | `u8` | `drawType` | 0: plain segmented list; 1: C function; 2: function building its own matrices (skeletons) |
+| 0x08 | 4 | u32 | action | Function pointer. |
+| 0x0C | 4 | u32 | hitbox | Float-array pointer. |
+| `+0x10` | 4 | `f32` | `cullDistance;` | — |
+| 0x14 | 4 | s16[2] | unknown14 | Unknown halfwords. |
+| 0x18 | 1 | u8 | damage | Damage amount. |
+| 0x19 | 1 | u8 | unknown_19 | Unknown byte. |
+| `+0x1C` | 4 | `f32` | `targetOffset;` | — |
+| `+0x20` | 1 | `u8` | `bonus` | — |
 
 **Instance matrix** (decomp `Object_SetMatrix`, `Scenery_Draw`, `Sprite_Draw`; positions and angles **verified** in RAM, composition order per decomp and consistent with renders):
 - On-rails scenery, sprites and actors: `T(pos)·RY(rot.y)·RX(rot.x)·RZ(rot.z)`.
@@ -1230,7 +1351,16 @@ Almost everything visible in Meteo, Sector X, Area 6, Sector Y and the warp zone
   - `aiIndex` counts u16 words, so command k is at byte 4k;
   - levels without their own table fall back to the Corneria table;
   - eventType ≥ 200 (EVENT_HANDLER, ME_MORA) has no model.
-- **Model.** `sEventActorInfo[eventType]` (108 entries of 0x20 at V1.1 0x800D003C, V1.0 0x800CB64C): `{Gfx* dList; f32* hitbox; f32 scale; f32 cull; ...}`.
+EventActorInfo has 108 entries of 0x20 bytes at V1.1 0x800D003C or V1.0 0x800CB64C. Index by eventType. Known fields:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | displayList | Gfx pointer. |
+| 0x04 | 4 | u32 | hitbox | Float-array pointer. |
+| 0x08 | 4 | f32 | scale | Model scale. |
+| 0x0C | 4 | f32 | cull | Culling distance. |
+
+- **Model lookup:**
   - To find a static model, walk the script from command 0, following LOOP and script changes, to the first INIT_ACTOR. If there is none, follow trigger branches breadth-first.
   - Unresolved (trigger-only handlers): Corneria 12 scripts, Area 6 11 scripts.
   - Per-type draw extras for the main types:
@@ -1266,10 +1396,37 @@ Almost everything visible in Meteo, Sector X, Area 6, Sector Y and the warp zone
 
 **Verified** by decoding aCoDoorsSkel, aVe2BaseSkel and aMaTrainStopBlockSkel; semantics per decomp `fox_std_lib.c`.
 
-- **Limb** (0x20): `+0 Gfx* dList (may be NULL); +4 f32 trans x,y,z; +0x10 s16 rot x,y,z (unused); +0x18 Limb* sibling; +0x1C Limb* child`.
+- **Limb** (0x20):
+
+  | Offset | Size | Type | Field | Description |
+  |---:|---:|---|---|---|
+  | `0x00` | 4 | `Gfx*` | `displayList` | May be NULL. |
+  | `0x04` | 12 | `f32[3]` | `translation` | X, Y, Z. |
+  | `0x10` | 6 | `s16[3]` | `rotation` | Stored but unused. |
+  | `0x18` | 4 | `Limb*` | `sibling` | Sibling limb. |
+  | `0x1C` | 4 | `Limb*` | `child` | Child limb. |
 - **Skeleton:** a NULL-terminated array of Limb*. Element 0 is the root; a limb's index is its array position + 1.
-- **Animation** (0x0C): `s16 frameCount; s16 limbCount; u16* frameData; JointKey* jointKey`.
-- **JointKey** (0x0C): `u16 xLen, x, yLen, y, zLen, z`. Channel value for frame f is `frameData[idx + (f < len ? f : 0)]`.
+Animation header, 0x0C bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | s16 | frameCount | Frame count. |
+| 0x02 | 2 | s16 | limbCount | Limb count. |
+| 0x04 | 4 | u32 | frameData | Pointer to u16 frame values. |
+| 0x08 | 4 | u32 | jointKey | Pointer to JointKey records. |
+
+JointKey, 0x0C bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | u16 | xLen | X channel length. |
+| 0x02 | 2 | u16 | x | X channel data index. |
+| 0x04 | 2 | u16 | yLen | Y channel length. |
+| 0x06 | 2 | u16 | y | Y channel data index. |
+| 0x08 | 2 | u16 | zLen | Z channel length. |
+| 0x0A | 2 | u16 | z | Z channel data index. |
+
+Channel value for frame f is frameData[idx + (f < len ? f : 0)].
   - Key 0: root translation (s16).
   - Keys 1..limbCount: that limb's rotation, `value·360/65536` degrees.
 - **Drawing:**
@@ -1686,7 +1843,13 @@ Other asset leftovers:
 #### Unused text
 
 **Radio messages** (`un/radio.py`, `un/radio.txt`):
-- **Table.** gMsgLookup is at ast_radio+0xCCAC (V1.1 RAM 0x80185CBC, V1.0 0x8017BB2C). It has 779 `{s32 id; u16* text}` entries.
+gMsgLookup is at ast_radio+0xCCAC (V1.1 RAM 0x80185CBC, V1.0 0x8017BB2C), with 779 eight-byte entries:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | s32 | id | Message identifier. |
+| 0x04 | 4 | u32 | text | Pointer to u16 text codes. |
+
 - **What counts as used:**
   - its text pointer is built by code or stored in main/overlay data: 492 entries;
   - or its id appears as arg2 of an EVOP_PLAY_MSG (opcode 120) command in any asset file: 324 entries. This scan is conservative, over every even offset.
@@ -1775,7 +1938,7 @@ Other text:
 
 | item | location | evidence | label | conf. |
 |---|---|---|---|---|
-| Developer $Id strings | main (both versions) | `$Id: fox_edisplay.c,v 1.196 1997/05/08 08:31:50 morita Exp $`, `$Id: sprintf.c,v 1.5 1997/03/19 02:28:53 hayakawa Exp $` | VERIFIED (string scan) | high |
+| Developer $Id strings | main (both versions) | `$Id: fox_edisplay.c,v 1.196 1997/05/08 08:31:50 morita Exp , `$Id: sprintf.c,v 1.5 1997/03/19 02:28:53 hayakawa Exp  | VERIFIED (string scan) | high |
 | `"play_time = %d\n"` | V1.1 main+0xD7EA0 | fox_play.c:6992 PRINTF, a no-op in retail | VERIFIED | high |
 | Audio debug strings | main | `CAUTION:WAVE CACHE FULL %d`, `Alloc Error:Dim voice-Alloc %d`, `Err :Sub %x ,address %x:Undefined SubTrack Function %x`, `WARNING: Before Area Overlaid After.`; DMA mode names SUPERDMA/FastCopy/SLOWCOPY/BGCOPY | VERIFIED | high |
 | V1.1 remote debugger | V1.1 main 0x80029BA0-0x8002E3E0 (rmon, kdebugserver, osReadHost, osInitRdb); ramromMain thread 0x8002296C | A debug libultra build. kdebugserver is called from `__osException` and ramromMain is started by osCreatePiManager; rmonMain and osInitRdb are unreferenced. The strings `Set temp BP at %08x` and ` and %08x` exist only in V1.1 | VERIFIED | high |

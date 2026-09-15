@@ -93,14 +93,23 @@ libultra and I/O functions:
 ##### Tables
 | RAM (ROM) | Layout | Used by |
 |---|---|---|
-| 0x80125A68 + 16*id (internal id, 4.2.1) | Level record: +0 A_start, +4 A_end, +8 B_start, +0xC B_end (cart addresses; ends exact, not aligned) | Filled at runtime by 0x800865E0; read by the level loader 0x80088CF0 (A) and 0x800DDA08 (B) |
+| 0x80125A68 + 16*id (internal id, 4.2.1) | Sixteen-byte level record (fields below); cartridge addresses, exact unaligned ends | Filled at runtime by 0x800865E0; read by the level loader 0x80088CF0 (A) and 0x800DDA08 (B) |
 | 0x801354EC (0xC54EC) | 28 pointers to level display names, in **menu-index order**. Map to internal ids through the u8 permutation 0x801352B0 (4.2.1). | 0x800D9F30 |
-| 0x801416F8[id], then 0x80141768 + 16*k | img16 image record {u32 start, u32 end, u32 w, u32 h}; k = -1 means none | 0x800F5960 |
-| 0x80141560[id], then 0x80141308 + 40*k | img40 image record {start, end, 4 x i32, 2 x f32, 8 x u8}; k = 0 means none | 0x800F5960 |
+| 0x801416F8[id], then 0x80141768 + 16*k | img16 image record (field layout below); k = -1 means none | 0x800F5960 |
+| 0x80141560[id], then 0x80141308 + 40*k | img40 image record (field layout below); k = 0 means none | 0x800F5960 |
 | 0x801259DC + 3*id (internal id) | 3 bytes (RGB) per level. The Arena entry, 0x909CA4, equals its in-game fog colour (section 5). | passed to 0x8007D430 |
 | 0x80125714 | 20 pointers: song i is the byte range [t[i], t[i+1]). 19 Standard MIDI files. | 0x80079C28 |
 | 0x80134058, 0x80134B88 | 20 pointers into the 10 LZARI image banks 0x2E2CD0-0x308290 | 0x800C80E8, 0x800CA8C0 |
 | Jump table 0x800749B0 | World/scenario file by index `*(u32*)0x80137904` (0..11); level id per index at 0x8013790C | 0x800EC418 |
+
+Level record, 0x10 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | aStart | Part A cartridge start address. |
+| 0x04 | 4 | u32 | aEnd | Part A exclusive cartridge end address. |
+| 0x08 | 4 | u32 | bStart | Part B cartridge start address. |
+| 0x0C | 4 | u32 | bEnd | Part B exclusive cartridge end address. |
 
 Audio bank addresses (set up by 0x8007A004):
 
@@ -152,11 +161,10 @@ Verified by static references, plus a dynamic check: 2500 `romread` calls logged
 | 0x7EA060-0x800000 | 0xFF fill | | |
 
 ##### Stored-data conventions
-- **Level A** (decoded) starts with 9 u32 **file-relative** section offsets `h[0..8] = [0x24, s1, s2, s3, s4, s5, s6, end, end]`. The loader adds the load address to each.
-  - Section k spans `[h[k], h[k+1])`; section 0 is the part after the 0x24-byte header.
+- **Level A** uses the file-relative section directory defined under *BTX1 level files*. The loader relocates its offsets.
   - This reading gives whole record counts in every file checked: internal id 0 (Cinematic) has s5 = 0x410/4 and s6 = 0x44E0/16; id 9 (Chicago - Bonus) has s5 = 0x314/4 and s6 = 0x2320/16; id 17 (San Francisco - Bonus) has s5 = 0x3FC/4 and s6 = 0x3FB0/16.
-  - Section 6, the pool index, has 16-byte entries: +0 u32 offset into the texture pool 0x5A1110, +4 u16 flags, +6 u16 size, +8 u32 offset into the geometry pool 0x3EA970, +0xC u32 size. Section 5 has 4-byte entries: {u8 count, u8 ?, u16 first section-6 index}. See section 5 for the rest.
-- **Level B:** the u32 fields at +4, +0xC, +0x10, +0x14, +0x18 and +0x1C are file-relative and get relocated at load.
+  - Section 6 is the pool index; section 5 indexes its entries. Both layouts are tabulated under *BTX1 level files*.
+- **Level B:** the known file-relative pointers are listed under *File B* and relocated at load.
 - **Pool chunks** use **chunk-relative** addresses. At load, 0x80085290 adds the chunk's load base to every G_VTX operand and 0x800852E0 to every G_SETTIMG operand.
 - Chunks are deduplicated by offset into two lists: ctx+0x936C holds up to 256 texture chunks (read at 0x8008AA38) and ctx+0xA374 holds up to 1800 geometry chunks (read at 0x8008AB4C).
 - Stored data contains no segmented or absolute RAM pointers.
@@ -212,7 +220,14 @@ Scripts and logs:
 BTX1 numbers its levels in two ways, and they are easy to confuse. (fs1's `levels.csv` names are wrong for this reason: it took names from the menu-order table.)
 
 **Internal level id (0..27).** Every per-level table is indexed by this id:
-- the level record `0x80125A68 + 16*id` {A_start, A_end, B_start, B_end}, filled at runtime by 0x800865E0 (zero in ROM);
+- the 16-byte level record at `0x80125A68 + 16*id`, filled at runtime by 0x800865E0 (zero in ROM):
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | aStart | Level A ROM start |
+| 0x04 | 4 | u32 | aEnd | Level A ROM end |
+| 0x08 | 4 | u32 | bStart | Level B ROM start |
+| 0x0C | 4 | u32 | bEnd | Level B ROM end |
 - the RGB table `0x801259DC + 3*id`;
 - the f32 table at 0x8012596C: the vertex-colour scale, 1.92 for every id. At load, 0x80086DC0 multiplies the r, g, b bytes of every G_VTX vertex by it and clamps to 255;
 - the i16 far-plane table 0x80125A30;
@@ -388,46 +403,109 @@ Both games are right-handed with Y up, use 1 vertex unit = 1 world unit, and hav
 - **Loaders:** 0x80088CF0(internal id, world buffer, ...) decodes file A with LZARI (caller 0x800820CC, into 0x803DA800), fixes up its header and reads the pool chunks. File B is loaded by 0x800DDA08.
 - **Coverage:** all 22 ids with data (0-17, 24-27) load through the prototype `lvl1/loader.ts`, in 0.3-0.6 s each.
 
-**Header:** 9 x u32 file-relative offsets h[0..8]. Section k = [h[k], h[k+1]). h[7] = h[8] = file size, so section 7 is empty.
+**Header (0x24 bytes).** Section k spans `[h[k], h[k+1])`.
 
-| Section | Record | Layout |
-|---|---|---|
-| hdr0 | one 0x2E0-byte block at 0x24 | level header (below) |
-| hdr1 | 20 B | object group: u16 count, u16 first hdr2 index, f32 x0, z0, x1, z1 |
-| hdr2 | 28 B | object (below) |
-| hdr3 | 12 B | model: u8 lodType, u8 0, u16 first hdr5 index, i16 xmin, zmin, xmax, zmax (footprint) |
-| hdr4 | 4 B | model range: u8 count, u8 0, u16 first hdr3 model (used by kinds 5 (5 models), 6 (3), 8 (2)) |
-| hdr5 | 4 B | LOD piece list: u8 count, u8 0, u16 first hdr6 index |
-| hdr6 | 16 B | piece: u32 texture-pool offset (from ROM 0x5A1110), u16 anim, u16 texture-chunk size, u32 geometry-pool offset (from ROM 0x3EA970), u32 geometry-chunk size |
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 0x24 | u32[9] | h | File-relative section offsets; h[0] = 0x24, h[7] = h[8] = file size. Section 7 is empty. |
 
-**hdr0:**
+| Section | Record size | Contents |
+|---|---:|---|
+| hdr0 | 0x2E0 | Level header at 0x24. |
+| hdr1 | 20 | Object groups. |
+| hdr2 | 28 | Objects, defined below. |
+| hdr3 | 12 | Models. |
+| hdr4 | 4 | Model ranges. |
+| hdr5 | 4 | LOD piece lists. |
+| hdr6 | 16 | Pieces. |
 
-| Offset | Content |
-|---|---|
-| +0x00 | f32 xmin, zmin, xmax, zmax |
-| +0x10 | f32 x4 outer bounds (negated, passed to the grid init 0x80106B60) |
-| +0x20 | u32 flags |
-| +0x24, +0x60, +0xD8, +0x18C | 5 / 10 / 15 / 20 x {f32 x, f32 z, f32 heading} spawn tables. These are prefixes of each other: four groups of 5 near the four base objects (kinds 11-14). Spawn yaw = heading x 0x2000. Verified: in the Arena dump the player tank sits at entry 15, (2588, 67, heading -2.0), drawn with yaw 0xC000. |
-| +0x27C | u32 group count |
-| +0x280 | i32 group start (-1: groups start at record 0) |
-| +0x284.. | mission parameters |
-| +0x2DC | u32 |
+Object group:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | u16 | count | Object count. |
+| 0x02 | 2 | u16 | firstObject | First hdr2 index. |
+| 0x04 | 16 | f32[4] | bounds | X0,Z0,X1,Z1. |
+
+Model:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | lodType | LOD type. |
+| 0x01 | 1 | u8 | zero01 | Zero. |
+| 0x02 | 2 | u16 | firstLod | First hdr5 index. |
+| 0x04 | 8 | s16[4] | footprint | Minimum X,Z; maximum X,Z. |
+
+Model range:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | count | Model count; kinds 5/6/8 use 5/3/2 models. |
+| 0x01 | 1 | u8 | zero01 | Zero. |
+| 0x02 | 2 | u16 | firstModel | First hdr3 model index. |
+
+LOD piece list:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | count | Piece count. |
+| 0x01 | 1 | u8 | zero01 | Zero. |
+| 0x02 | 2 | u16 | firstPiece | First hdr6 index. |
+
+Piece:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | textureOffset | Offset from ROM 0x5A1110. |
+| 0x04 | 2 | u16 | animation | Animation selector. |
+| 0x06 | 2 | u16 | textureSize | Texture-chunk length. |
+| 0x08 | 4 | u32 | geometryOffset | Offset from ROM 0x3EA970. |
+| 0x0C | 4 | u32 | geometrySize | Geometry-chunk length. |
+
+**hdr0**, known fields (offsets are hexadecimal):
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | f32 | xmin | Minimum world X. |
+| 0x04 | 4 | f32 | zmin | Minimum world Z. |
+| 0x08 | 4 | f32 | xmax | Maximum world X. |
+| 0x0C | 4 | f32 | zmax | Maximum world Z. |
+| 0x10 | 16 | f32[4] | outerBounds | Negated and passed to grid initializer 0x80106B60; component meanings not established. |
+| 0x20 | 4 | u32 | flags | Header flags. |
+| 0x24 | 0x3C | Spawn[5] | spawns1 | Five spawn records. |
+| 0x60 | 0x78 | Spawn[10] | spawns2 | Ten spawn records. |
+| 0xD8 | 0xB4 | Spawn[15] | spawns3 | Fifteen spawn records. |
+| 0x18C | 0xF0 | Spawn[20] | spawns4 | Twenty spawn records. |
+| 0x27C | 4 | u32 | groupCount | Group count. |
+| 0x280 | 4 | s32 | groupStart | −1 means groups start at record zero. |
+| 0x284 | 0x58 | u8[0x58] | missionParameters | Mission parameters; detailed layout not established. |
+| 0x2DC | 4 | u32 | unknown_2DC | Unknown. |
+
+The four spawn arrays are prefixes of one another: groups of five near each of the four base objects (kinds 11–14). Spawn yaw = heading × 0x2000. Verified against the Arena RAM dump: entry 15 is the player tank at (2588, 67), heading −2.0, drawn with yaw 0xC000.
+
+Spawn record, 12 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | f32 | x | Spawn X. |
+| 0x04 | 4 | f32 | z | Spawn Z. |
+| 0x08 | 4 | f32 | heading | Yaw = heading × 0x2000. |
 
 **hdr2 object:**
 
-| Offset | Field |
-|---|---|
-| +0 | u8 flags: 0x01 private geometry copy (0x80088360); 0x02 player-count gate (bits 2-3 index 0x801260A4); **0x10 only when `0x8007C6D8()` is true; 0x40 only when it is false** |
-| +1 | u8: high nibble = viewport visibility bits (0 = never drawn); low nibble = texture animation mode |
-| +2 | u8 param |
-| +3 | u8 layer |
-| +4 | u16 param4 |
-| +8 | u32 kind |
-| +12 | f32 x |
-| +16 | f32 z |
-| +20 | u16 yaw (65536 = 360°) |
-| +22 | i16 hdr4 index |
-| +24 | i16 hdr3 model |
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | flags | 0x01 private geometry copy (0x80088360); 0x02 player-count gate (bits 2–3 index 0x801260A4); 0x10 requires 0x8007C6D8() true; 0x40 requires false. |
+| 0x01 | 1 | u8 | visibilityAnimation | High nibble: viewport visibility (zero means never drawn); low nibble: texture-animation mode. |
+| 0x02 | 1 | u8 | param | Parameter. |
+| 0x03 | 1 | u8 | layer | Layer. |
+| 0x04 | 2 | u16 | param4 | Parameter. |
+| 0x08 | 4 | u32 | kind | Object kind. |
+| 0x0C | 4 | f32 | x | World X. |
+| 0x10 | 4 | f32 | z | World Z. |
+| 0x14 | 2 | u16 | yaw | 65536 units per turn. |
+| 0x16 | 2 | s16 | hdr4Index | Index into hdr4. |
+| 0x18 | 2 | s16 | model | hdr3 model index. |
 
 - **Modes.** The setup-struct mode `*(u32*)*0x801B4ABC` is 5 in Campaign, 0 in Battlelord, 7 for the code-loaded bonus stage, and 8 in the attract demo (runtime values from dumps). `0x8007C6D8()` is true for modes 3..6.
   - The spawn code at 0x80088748..0x80088784 skips flag-0x10 objects unless it is true, and skips flag-0x40 objects when it is true.
@@ -448,7 +526,14 @@ Both games are right-handed with Y up, use 1 vertex unit = 1 world unit, and hav
 - **Geometry chunks (4756):**
   - They contain only G_VTX, G_TRI1 and G_ENDDL, with at most 32 vertices.
   - G_VTX w1 is chunk-relative; 0x80085290 adds the load base.
-  - Vertex (16 B): s16 x, y, z, u16 0, s16 s, t, u8 r, g, b, a.
+  - Vertex (0x10 bytes):
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 6 | s16[3] | position | Local x, y, z |
+| 0x06 | 2 | u16 | flag | Zero |
+| 0x08 | 4 | s16[2] | st | Texture coordinates |
+| 0x0C | 4 | u8[4] | rgba | Vertex colour and opacity |
   - **At load, vertex r, g, b are multiplied by f32 0x8012596C[id] (1.92 for every id), truncated and clamped to 255** (0x80086DC0).
 - **Texture chunks (561).**
   - **Layout:** a render-state DL, then G_SETTIMG (chunk-relative; 0x800852E0 adds the base), SETTILE, LOADTLUT / LOADBLOCK and SETTILESIZE (tile 0 corner always (0,0)), then G_ENDDL. The texels follow the ENDDL.
@@ -485,11 +570,32 @@ Both games are right-handed with Y up, use 1 vertex unit = 1 world unit, and hav
 - **Flush order:** 0x800803B8 calls 0x80080EEC (passes 0, 6, 5, 1, 2, 3), then 0x80081934, then 0x80081788 (pass 4 last).
 - **Frame setup:** 0x8007DE80..0x8007E0C0 (5.0).
 
-**Images.**
-- **img16** (records 0x80141768 + 16·k {start, end, w, h}; index 0x801416F8[id]): **level title images.** 256-entry RGBA16 palette (512 B), then CI8 w x h, padded to 16 bytes. Record 0 decodes to "GROUND ZERO" (`lvl1/img/img16_rec*.png`).
-- **img40** (records 0x80141308 + 40·k: +0 start, +4 end, +8 w, +12 h, +16 cx, +20 cy, +24/+28 f32, +32 u8 x 8; index 0x80141560[id]): **radar maps.** 16-entry RGBA16 palette (32 B), then CI4 w x h, padded to 16 bytes. All 14 record sizes fit, and the aspect ratios match the level shapes (`lvl1/img/img40_*.png`).
+**Images.** `img16` records at `0x80141768 + 16*k` describe level-title images, selected by `0x801416F8[id]`. Record 0 decodes to "GROUND ZERO" (`lvl1/img/img16_rec*.png`). `img40` records at `0x80141308 + 40*k` describe radar maps, selected by `0x80141560[id]`. All 14 radar-image sizes and aspect ratios match the level shapes (`lvl1/img/img40_*.png`).
 
-**File B:** relocated fields at +4, +0xC..+0x1C; pointer global 0x80135834. Its meaning is a hypothesis (9.2).
+| Record | Offset | Size | Type | Field | Description |
+|---|---:|---:|---|---|---|
+| Both | 0x00 | 4 | u32 | start | Image ROM start |
+| Both | 0x04 | 4 | u32 | end | Image ROM end |
+| Both | 0x08 | 4 | u32 | width | Image width |
+| Both | 0x0C | 4 | u32 | height | Image height |
+| img40 | 0x10 | 4 | Unknown | centerX | Horizontal centre |
+| img40 | 0x14 | 4 | Unknown | centerY | Vertical centre |
+| img40 | 0x18 | 8 | f32[2] | unknown_18 | Semantics unknown |
+| img40 | 0x20 | 8 | u8[8] | unknown_20 | Semantics unknown |
+
+| Image | Offset | Size | Type | Field | Description |
+|---|---:|---:|---|---|---|
+| img16 | 0x00 | 0x200 | RGBA16[256] | palette | Title palette |
+| img16 | 0x200 | width × height | CI8[] | pixels | Padded to 16-byte alignment |
+| img40 | 0x00 | 0x20 | RGBA16[16] | palette | Radar palette |
+| img40 | 0x20 | ceil(width × height / 2) | CI4[] | pixels | Padded to 16-byte alignment |
+
+**File B.** The pointer global is 0x80135834; section meanings remain unknown.
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x04 | 4 | u32 | unknown_04 | File-relative pointer, relocated at load |
+| 0x0C | 20 | u32[5] | unknown_0C | File-relative pointers at 0x0C, 0x10, 0x14, 0x18 and 0x1C; relocated at load |
 
 **Scene split by kind** (viewer layers in `src/rom/battletanx.ts`). The file has no other grouping to split along (hdr1 groups only cull), so drawn objects are grouped by kind, following the draw pass and the collision class (5.1.3). Content was identified from renders of each kind alone (Queens, Golden Gate Bridge); it is an observation, not a game-defined name.
 
@@ -524,7 +630,15 @@ Both games are right-handed with Y up, use 1 vertex unit = 1 world unit, and hav
 BTX1 stores **no collision mesh, heightfield or collision section**. At load, the object handlers insert one **2D oriented rectangle** per collidable object into a spatial grid, and all tank and shell collision queries that grid. The ground (kind 0) never collides, and the world has no heights: ground vertices lie at y 0..49 in levels 1, 2, 4, 14 and 24, bridges and the tunnel included, and the tank's modelview translation has y = 0.
 
 **Shape of an entry** (from level file A):
-- Local box: the hdr3 footprint of the object's model (i16 xmin +4, zmin +6, xmax +8, zmax +10), grown by a margin m on every side. m = 1 (f32 1.0 at 0x80071894) for kinds 1, 8, 19 and 27, otherwise 0.
+- Local box: the hdr3 footprint fields below, grown by a margin m on every side. m = 1 (f32 1.0 at 0x80071894) for kinds 1, 8, 19 and 27, otherwise 0.
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x04 | 2 | s16 | xmin | Model-local footprint bound. |
+| 0x06 | 2 | s16 | zmin | Model-local footprint bound. |
+| 0x08 | 2 | s16 | xmax | Model-local footprint bound. |
+| 0x0A | 2 | s16 | zmax | Model-local footprint bound. |
+
 - Position: the hdr2 x and z, **truncated to integers**; yaw from hdr2 +20.
 - World corners (0x80108E74, the same rotation as the draw matrix): with c = cos(yaw·2π/65536) and s = sin(...), `X = x + c·lx + s·lz`, `Z = z − s·lx + c·lz`. The footprints are therefore oriented rectangles, not axis-aligned boxes.
 - The loader's mode filter applies first (0x80089A7C: flag 0x10 campaign only, 0x40 non-campaign only).
@@ -551,7 +665,18 @@ BTX1 stores **no collision mesh, heightfield or collision section**. At load, th
 
 **Runtime grid:**
 - Entry pool: 1300 × 40 B at 0x803B8248. Cell heads: 4 layers × 20×20 u16 at 0x803B75B0; cell = (coord + origin + {0 or 1024}) >> 11 (2048-unit cells). List heads: oversize 0x803B8230, free 0x803B8234, used 0x803B8240.
-- Entry: +0 u16 grid flags, +2/+4 next/prev, +8 owner, +14/+16 s16 x, z, +18/+20/+22/+24 s16 xmin, xmax, zmin, zmax (margin included), +26 bounding radius, +28 u16 yaw, +30..+37 per-layer links.
+- Entry (0x28 bytes; unlisted bytes unresolved):
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | u16 | flags | Grid flags |
+| 0x02 | 4 | u16[2] | nextPrev | List links |
+| 0x08 | 4 | u32 | owner | Owner pointer or static class |
+| 0x0E | 4 | s16[2] | position | x, z |
+| 0x12 | 8 | s16[4] | bounds | xmin, xmax, zmin, zmax; includes margin |
+| 0x1A | 2 | Unknown | radius | Bounding radius |
+| 0x1C | 2 | u16 | yaw | Binary angle |
+| 0x1E | 8 | u16[4] | layerLinks | Per-layer links |
 - Grid init 0x80106B60 takes the hdr0 +0x10 outer rectangle (the +0x00 inner rectangle grown by 100) negated; origin = −outer min + 500 (globals 0x803B8238 / 0x803B823C). Insert rejects positions beyond ±origin.
 - Other functions: remove 0x80107170, move 0x801074AC, set / clear flag bits 0x80106C9C / 0x80106CCC.
 - **Queries.** Tank movement 0x80108B68(box, self, mask, velocity) sweeps the mover in each candidate's local frame (pair test 0x8010B9C8, then 0x8010B740 / 0x8010AC90), i.e. an oriented-box test. Tanks use mask 0x10 (tank byte +0x40A, set at 0x800979CC). The segment query 0x8010874C(start, end, mask, ...) is used by shells with mask 0x04 (0x8008D030).
@@ -854,15 +979,74 @@ Everything here is stock libultra 2.0 behaviour. Section 6.0 describes VADPCM.
 
 **ALBankFile** (stock libultra). All pointers in the .ctl are offsets from the .ctl start, relocated by `alBnkfNew`; a wave `base` is an offset into the .tbl.
 
-| Record | Layout |
-|---|---|
-| ALBankFile | +0 s16 revision 0x4231 ("B1"), +2 s16 bankCount, +4 u32 bankArray[] |
-| ALBank | +0 s16 instCount, +2 u8 flags, +4 s32 sampleRate, +8 u32 percussion, +0xC u32 instArray[] |
-| ALInstrument | +0 u8 volume, +1 u8 pan, +2 u8 priority, +3 u8 flags, +4..+7 tremolo type/rate/depth/delay, +8..+0xB vibrato type/rate/depth/delay, +0xC s16 bendRange (cents), +0xE s16 soundCount, +0x10 u32 soundArray[] |
-| ALSound | +0 u32 envelope, +4 u32 keyMap, +8 u32 wavetable, +0xC u8 samplePan, +0xD u8 sampleVolume, +0xE u8 flags |
-| ALEnvelope | +0 s32 attackTime, +4 s32 decayTime, +8 s32 releaseTime (µs), +0xC u8 attackVolume, +0xD u8 decayVolume |
-| ALKeyMap | +0 u8 velocityMin, +1 velocityMax, +2 keyMin, +3 keyMax, +4 keyBase, +5 s8 detune (cents) |
-| ALWaveTable / loop / book | as in 6.0 |
+ALBankFile, four-byte header and counted offsets:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | s16 | revision | 0x4231 (B1). |
+| 0x02 | 2 | s16 | bankCount | Bank count. |
+| 0x04 | 4 × bankCount | s32[] | bankOffset | Bank offsets. |
+
+ALBank, 0x0C-byte header and counted offsets:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | s16 | instCount | Instrument count. |
+| 0x02 | 1 | u8 | flags | Relocation flags. |
+| 0x03 | 1 | u8 | padding | Padding. |
+| 0x04 | 4 | s32 | sampleRate | 22050 Hz in the music bank; 44100 in the SFX bank. |
+| 0x08 | 4 | s32 | percussion | Instrument offset or zero. |
+| 0x0C | 4 × instCount | s32[] | instOffset | Instrument offsets. |
+
+ALInstrument, 0x10-byte header and counted offsets:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | volume | Volume. |
+| 0x01 | 1 | u8 | pan | Pan. |
+| 0x02 | 1 | u8 | priority | Priority. |
+| 0x03 | 1 | u8 | flags | Flags. |
+| 0x04 | 4 | u8[4] | tremolo | Type, rate, depth, delay. |
+| 0x08 | 4 | u8[4] | vibrato | Type, rate, depth, delay. |
+| 0x0C | 2 | s16 | bendRange | Pitch-bend range. |
+| 0x0E | 2 | s16 | soundCount | Sound count. |
+| 0x10 | 4 × soundCount | s32[] | soundOffset | Sound offsets. |
+
+ALSound, 0x10 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | s32 | envelope | Envelope offset. |
+| 0x04 | 4 | s32 | keyMap | Key-map offset. |
+| 0x08 | 4 | s32 | wavetable | Wave-table offset. |
+| 0x0C | 1 | u8 | samplePan | Pan. |
+| 0x0D | 1 | u8 | sampleVolume | Volume. |
+| 0x0E | 1 | u8 | flags | Flags. |
+| 0x0F | 1 | u8 | padding | Padding. |
+
+ALEnvelope, 0x10 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | s32 | attackTime | Microseconds. |
+| 0x04 | 4 | s32 | decayTime | Microseconds. |
+| 0x08 | 4 | s32 | releaseTime | Microseconds. |
+| 0x0C | 1 | u8 | attackVolume | Attack target. |
+| 0x0D | 1 | u8 | decayVolume | Decay target. |
+| 0x0E | 2 | u8[2] | padding | Alignment padding. |
+
+ALKeyMap, six bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | velocityMin | Minimum velocity. |
+| 0x01 | 1 | u8 | velocityMax | Maximum velocity. |
+| 0x02 | 1 | u8 | keyMin | Minimum key. |
+| 0x03 | 1 | u8 | keyMax | Maximum key. |
+| 0x04 | 1 | u8 | keyBase | Base key. |
+| 0x05 | 1 | s8 | detune | Cents. |
+
+ALWaveTable, loop, and book field tables are given in the shared sample-format section.
 
 **Music bank contents:**
 - **Instruments:** soundCount per instrument is 7, 2, 2, 2, 2, 2, 2, 3, 1, 4, 2. Instrument 0 has volume 100 and the rest 127. All have pan 64, priority 5, bendRange 200 cents, and no tremolo or vibrato.
@@ -993,12 +1177,42 @@ There are **no in-game song names**: no jukebox, and "Music Volume" is the only 
 
 Both games play N64 VADPCM samples through libultra's synth and the RSP "audio" microcode. In GA every sample is VADPCM (6.1). BTX1 uses libultra ALBank files (6.2), whose waves are VADPCM or RAW16.
 
-**Wave and codebook structures**
-- `ALWaveTable` (20 bytes): +0 u32 base (offset into the sample file), +4 s32 len (bytes), +8 u8 type (0 = ADPCM, 1 = RAW16), +9 u8 flags, +0xC u32 loop offset (0 = none), +0x10 u32 book offset (ADPCM only).
-- `ALADPCMBook`: s32 order, s32 npredictors, then s16 book[order * npredictors * 8]. GA's banks all use order 2 with 4 predictors.
-- `ALADPCMloop`: u32 start, u32 end, u32 count (0 = no loop; 0xFFFFFFFF = infinite), s16 state[16].
+**ALWaveTable (0x14 bytes).** Pointers are control-bank-relative before relocation.
 
-**Frames.** Each frame is 9 bytes and produces 16 samples. The header byte gives `scale = hi nibble` and `pred = lo nibble`; 16 signed 4-bit residual nibbles follow, high nibble first.
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | base | Sample-file-relative byte offset |
+| 0x04 | 4 | s32 | length | Stored sample bytes |
+| 0x08 | 1 | u8 | type | 0 = VADPCM; 1 = RAW16 |
+| 0x09 | 1 | u8 | flags | Relocation flags |
+| 0x0A | 2 | u8[2] | padding | Alignment |
+| 0x0C | 4 | u32 | loopOffset | Loop record offset; 0 = no loop |
+| 0x10 | 4 | u32 | bookOffset | VADPCM predictor-book offset |
+
+**ALADPCMBook (variable size).** GA uses order 2 and four predictors in every bank.
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | s32 | order | Predictor order |
+| 0x04 | 4 | s32 | predictorCount | Number of predictors |
+| 0x08 | 16 × order × predictorCount | s16[] | coefficients | Eight coefficients per predictor order |
+
+**ALADPCMloop (0x2C bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | start | First loop sample |
+| 0x04 | 4 | u32 | end | Exclusive loop end |
+| 0x08 | 4 | u32 | count | 0 = no loop; 0xFFFFFFFF = infinite |
+| 0x0C | 32 | s16[16] | state | Predictor history at loop start |
+
+**VADPCM frame (9 bytes; 16 decoded samples).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | header | High nibble = scale; low nibble = predictor index |
+| 0x01 | 8 | packed s4[16] | residuals | Signed residuals, high nibble first |
+
 - Residual: `r[i] = signExtend4(nibble) << scale`, which equals `((nibble << 12) as s16) >> (12 - scale)`.
 - Coefficients (order 2): `b1 = book[pred*16 .. +8]`, `b2 = book[pred*16+8 .. +16]`.
 - Each 8-sample half is predicted from the two previous output samples `(l1, l2)` and from that half's own residuals:

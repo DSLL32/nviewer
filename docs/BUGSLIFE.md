@@ -71,12 +71,12 @@ Linked RSP identifiers include F3DEX 1.23 at ROM `0x86970` and F3DLX 1.23 at
 [evidence: ROM bytes, deterministic decoding] The US manifest occupies `0xA89A0..0xABEC0`. Its 488
 variable-size records are:
 
-```text
-char path[]       NUL-terminated ASCII Windows path
-padding           through the next four-byte boundary
-u32 storedSize
-u32 auxiliary     always zero in all five builds
-```
+| Order | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 1 | variable | NUL-terminated ASCII | `path` | Windows path. |
+| 2 | 0–3 | — | `padding` | Advances through the next four-byte boundary. |
+| 3 | 4 | `u32` | `storedSize` | Stored payload size. |
+| 4 | 4 | `u32` | `auxiliary` | Always zero in all five builds. |
 
 If `string_end` points at the NUL, the size fields start at
 `(string_end + 4) & ~3`. A four-byte empty-name record terminates the table.
@@ -202,8 +202,21 @@ These are presentation packages, not hidden 3-D stages.
 
 #### `level.dat` envelope and placements
 
-[evidence: disassembly, deterministic decoding] The file begins with an `s32 initialTableCount`, then
-variable tables. Each table begins `s16 n, s16 type`; its byte length is:
+[evidence: disassembly, deterministic decoding] The initial-table region is:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | s32 | initialTableCount | Number of initial tables. |
+| 0x04 | Variable | table[] | initialTables | Sequential variable-size tables. |
+
+Each initial table starts with this four-byte header:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | s16 | n | Element count. |
+| 0x02 | 2 | s16 | type | Selects the table length formula. |
+
+Its byte length is:
 
 ```text
 type < 0   : ((3*n + 1) // 2) * 4 + 16
@@ -211,29 +224,39 @@ type == 63 : n * 16 + 4
 otherwise  : n * 12 + 4
 ```
 
-After these comes a relative `u32` optional pointer, then 20-byte placements
-terminated by a record whose signed halfword at `+0x0E` is negative:
+The remaining envelope is sequential. Pointers are relative to the file;
+variable regions have no fixed offset.
 
-```text
-+00 s32 x
-+04 s32 y
-+08 s32 z
-+0C s16 field0 / flags
-+0E s16 field1 / terminator test
-+10 u32 relativeModel
-```
+| Order | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 1 | 4 | u32 | optionalPointer | Optional relative pointer after the initial tables. |
+| 2 | Variable | placement[] | firstPlacements | 20-byte records including the terminator. |
+| 3 | 4 | s32 | pointerCount | −1 means no pointers; otherwise count plus one. |
+| 4 | 4 × (pointerCount + 1), or 0 | u32[] | pointers | Relative pointers; absent when count is −1. |
+| 5 | Variable | placement[] | secondPlacements | Stops at its terminator or the first model payload. |
 
-The terminator is followed by a signed pointer-table count. A nonnegative
-value means `count + 1` relative `u32` pointers follow; `-1` means none. A
-second 20-byte placement list follows and likewise runs to its terminator or
-the first model payload.
+Both placement lists use this 20-byte record; a negative signed halfword at
+`+0x0E` terminates the list:
 
-The loader relocates the normal variant's model pointer at runtime `+0x14`
-and builds its fixed-point 3x3 transform at `+0x18`. When placement flag bit
-`0x8` is set those locations become `+0x1C` and `+0x20`. The model header's
-three signed words at `+0x00/+0x04/+0x08` are the runtime translation; the
-placement XYZ is its culling centre. Model halfwords `+0x0C/+0x0E/+0x10` are
-the three source angles.
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `+00` | 4 | `s32` | `x` | — |
+| `+04` | 4 | `s32` | `y` | — |
+| `+08` | 4 | `s32` | `z` | — |
+| `+0C` | 2 | `s16` | `field0 / flags` | — |
+| `+0E` | 2 | `s16` | `field1 / terminator test` | — |
+| `+10` | 4 | `u32` | `relativeModel` | — |
+
+The model header has these known fields. The loader relocates its model
+pointer and builds the runtime fixed-point 3×3 transform. Translation belongs
+to the model; placement XYZ is the culling centre.
+
+| Normal offset | Flag 0x8 offset | Size | Type | Field |
+|---:|---:|---:|---|---|
+| 0x00 | 0x00 | 12 | s32[3] | Translation X, Y, Z. |
+| 0x0C | 0x0C | 6 | s16[3] | Source angles. |
+| 0x14 | 0x1C | 4 | u32 | Model pointer, relocated at load. |
+| 0x18 | 0x20 | Unknown | fixed-point matrix | Runtime 3×3 transform; component storage width not established here. |
 
 #### Coordinates and transforms
 
@@ -274,18 +297,39 @@ setup variants, so do not create artificial duplicates in the level selector.
 [evidence: disassembly, deterministic decoding] The visible payload is not stored GBI. Renderer
 `0x8003C858` converts this stream to F3D-family commands:
 
-1. Signed `u32 vertexCount`.
-2. For the common positive form, `vertexCount` eight-byte vertices:
-   `s16 x,y,z; u16 packedColor`. The last word carries 5-bit RGB channels.
-3. Face groups `u16 control; s16 count`, ending when the next control is
-   signed `-1`.
-4. `kind = control & 0x1F`; `texture = (control >> 8) & 0x1F`; render-mode
-   bits are `control & 0x60`.
-5. Kinds 0/2/4/6/8/10/12/14 have 16-byte quad records. Kinds 1/3/9/11 have
-   12-byte triangle records. Kinds 5/7/13 use the renderer default branch.
-6. Quad/triangle vertex references are BE `u16`, masked with `0x0FFF`.
-   Remaining bytes are per-corner U/V values, shifted left four by the game.
-7. For a quad, the generated `G_TRI2` nominally names cache slots
+The common positive-count stream is:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | s32 | vertexCount | Positive in the common form. |
+| 0x04 | 8 × vertexCount | vertex[] | vertices | Eight-byte records below. |
+| 0x04 + 8 × vertexCount | Variable | faceGroup[] | groups | Ends with the two-byte signed control value −1. |
+
+Vertex record, eight bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 6 | s16[3] | position | X, Y, Z. |
+| 0x06 | 2 | u16 | packedColor | Packed RGB color. |
+
+Face-group header, four bytes (the terminator contains only the first halfword):
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | u16 | control | Kind: bits 0–4; render mode: bits 5–6; texture: bits 8–12. |
+| 0x02 | 2 | s16 | count | Number of following face records. |
+
+Face records contain three or four corners and are respectively 12 or 16 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 × corners | u16[] | references | Vertex index in low 12 bits. |
+| 2 × corners | 2 × corners | u8[][2] | uv | Per-corner U, V bytes; shifted left four by the game. |
+
+Kinds 0/2/4/6/8/10/12/14 use quads; kinds 1/3/9/11 use triangles.
+Kinds 5/7/13 use the renderer default branch.
+
+For a quad, the generated `G_TRI2` nominally names cache slots
    `(2,1,0),(3,1,2)`, but the runtime loads slots 0..3 from source references
    3,2,0,1. The source-record split is therefore `(2,1,0),(3,2,0)`, using
    diagonal 0--2.
@@ -313,9 +357,14 @@ valid engine variants, not corrupt data.
 
 #### `.tpg` pages
 
-[evidence: ROM bytes, disassembly, deterministic decoding] All 124 pages share this envelope. Sixteen BE `u32`
-slot descriptors occupy `+0x00..+0x40`. A shared color/palette region follows;
-ordinary image payload starts at `+0x240`. `FFFFFFFF` means an unused slot.
+[evidence: ROM bytes, disassembly, deterministic decoding] All 124 pages share
+this envelope. The page length depends on the active slots.
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 0x40 | u32[16] | descriptors | 0xFFFFFFFF marks an unused slot. |
+| 0x40 | 0x200 | u8[] | paletteData | Shared color/palette region. |
+| 0x240 | Variable | u8[] | imageData | Ordinary image payload. |
 
 For live descriptor `d`, the loader computes:
 
@@ -359,19 +408,26 @@ the game's exact screen-space strip and fill-band compositor.
 #### `.all` container
 
 [evidence: ROM bytes, disassembly, deterministic decoding] `.all` is a generic group container used for terrain,
-characters, plants, and props. At `+0`, a `u32` gives the metadata offset in
-halfwords: `metadataByteOffset = readU32BE(file, 0) * 2`. Group bytes occupy
-`[4, metadataByteOffset)`. Metadata begins
-with `u32 groupCount`, followed by `groupCount` records of `0x4C` bytes:
+characters, plants, and props. Its top-level layout is:
 
-```text
-+00 u32 data size in halfwords
-+04 s32 x
-+08 s32 y
-+0C s32 z
-+10 u32 group ID
-...  record size 0x4C
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 4 | `u32` | `metadataOffsetHalfwords` | Multiply by two to obtain `metadataByteOffset`. |
+| `0x04` | `metadataByteOffset - 4` | byte array | `groupData` | Concatenated group payloads. |
+| `metadataByteOffset` | 4 | `u32` | `groupCount` | Number of following metadata records. |
+| `metadataByteOffset + 4` | `0x4C * groupCount` | metadata record array | `groups` | Records defined below. |
+
+Thus `metadataByteOffset = readU32BE(file, 0) * 2`. Group bytes occupy
+`[4, metadataByteOffset)` and each metadata record is `0x4C` bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `+00` | 4 | `u32` | `data size in halfwords` | — |
+| `+04` | 4 | `s32` | `x` | — |
+| `+08` | 4 | `s32` | `y` | — |
+| `+0C` | 4 | `s32` | `z` | — |
+| `+10` | 4 | `u32` | `group ID` | — |
+| `+14` | `0x38` | unknown | `unknown14` | Remaining fields; the complete record stride is `0x4C`. |
 
 Runtime routines `0x80030A70`/`0x80030FE8` advance data by `size * 2` and
 metadata by `0x4C`. A zero-size record reuses the preceding data pointer at a
@@ -386,19 +442,27 @@ new position.
 - ID `0x0101`: infinite-wall collision;
 - ID `0x0104`: one footer/end record.
 
-A finite group's batches are:
+A finite group's batches begin with this header:
 
-```text
-s16 enabled          must be 1 for another batch
-u16 triangleCount
-u16 unknown[4]
-CollisionTri tris[triangleCount]   // 32 bytes each
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 2 | `s16` | `enabled` | Must equal 1 for another batch; any other value terminates the group. |
+| `0x02` | 2 | `u16` | `triangleCount` | Number of following collision triangles. |
+| `0x04` | 8 | `u16[4]` | `unknown04` | Unknown header fields. |
+| `0x0C` | `32 × triangleCount` | `CollisionTri[]` | `triangles` | Collision-triangle records. |
 
-A negative/non-1 first halfword terminates the group. In each 32-byte
-triangle, halfwords 3–5 are a local origin, 6–8 the delta to vertex 2, and
-9–11 the delta to vertex 3. Add the metadata X/Y/Z to all three vertices. The
-other fields are collision attributes.
+A negative/non-1 first halfword terminates the group. Each 32-byte collision
+triangle has this partially understood layout:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 6 | `u16[3]` | `attributes00` | Collision attributes; semantics remain unknown. |
+| `0x06` | 6 | `s16[3]` | `origin` | Local origin for vertex 1. |
+| `0x0C` | 6 | `s16[3]` | `vertex2Delta` | Add to `origin` to obtain vertex 2. |
+| `0x12` | 6 | `s16[3]` | `vertex3Delta` | Add to `origin` to obtain vertex 3. |
+| `0x18` | 8 | `u16[4]` | `attributes18` | Collision attributes; semantics remain unknown. |
+
+Add the metadata X/Y/Z to all three vertices.
 
 [evidence: deterministic decoding] All 17 files land exactly on their metadata offsets. All 3,297
 finite group instances terminate on `FFFF`; expanding reused group data at

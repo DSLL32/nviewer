@@ -81,7 +81,15 @@ position-dependent.
 |---|---|---|
 | BM64 asset / overlay | `u32 BE decompressedSize` + LZSS stream | always LZSS, except 7 raw assets: 32 (music "S2" blob), 33 (SFX "T2" blob), 71, 72, 220, 221, 267 |
 | SA resource | `u32 BE decompressedSize` + payload | if the u32 at +4 is `Yay0` (0x59617930): Yay0 image starting at +4; else LZSS stream from +4 |
-| SA exec | `u32 codeSize; u32 bssSize;` LZSS stream | LZSS |
+| SA exec | Eight-byte exec header below, followed by LZSS data | LZSS |
+
+SA exec header, eight bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | codeSize | Decoded executable byte count. |
+| 0x04 | 4 | u32 | bssSize | BSS byte count. |
+| 0x08 | Variable | u8[] | stream | LZSS executable payload. |
 
 SA exceptions: resources 0 (music blob, "S2") and 1 (SFX blob, "T3") are raw and used by ROM address;
 resource 2 is 64 KB of zeros; 46 resources (2527–2540, 2562–2573, 2595–2605, 2621–2629) are
@@ -307,10 +315,30 @@ Source: `notes/bm64_model.md`; decoder `bm64_model/decode.ts` + `displaylist_bm6
   RDRAM is identical to its extracted file, and the frame lists set segment 2 to its address.
 - **Maps** use only segment 2 (textures inside the file).
 - **Characters and props** take textures from a separate **texture-bank container** (image + palette records)
-  bound to **segments 3..14** (code `0x80228CE8`). `obj + 76 → { s32 n; ptr refs; ptr anim }`; for `i < n`,
-  segment `3 + i` = `refs[i].container + record[refs[i].record].offset` (refs are `{container ptr, record index}`).
-  If `anim` is set, each segment steps through frames `{record index, duration}`: this is texture animation by
-  segment swapping. Example: Bomberman = container 73 with bank 74 (player 1), 75–77 (players 2–4).
+  bound to **segments 3..14** (code `0x80228CE8`). The record at `obj + 76` is:
+
+  | Offset | Size | Type | Field | Description |
+  |---:|---:|---|---|---|
+  | 0x00 | 4 | s32 | count | — |
+  | 0x04 | 4 | u32 | references | — |
+  | 0x08 | 4 | u32 | animation | — |
+
+  For `i < count`,
+  segment 3 + i = refs[i].container + record[refs[i].record].offset. The reference fields are sequential; the record-index width was not established here:
+
+| Order | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 1 | 4 | u32 | container | Container pointer. |
+| 2 | Unknown | Unknown | record | Record index. |
+
+If animation is present, each segment steps through frame records. Their field widths remain unspecified:
+
+| Order | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 1 | Unknown | Unknown | record | Record index. |
+| 2 | Unknown | Unknown | duration | Frame duration. |
+
+This animates textures by segment swapping. Example: Bomberman = container 73 with bank 74 (player 1), 75–77 (players 2–4).
 - Per object the frame contains: `G_CLEARGEOMETRYMODE(G_FOG)`, alpha compare none, modelview load + push (object
   matrix), `G_MOVEWORD seg 2`, bank segments, the container's record or node tree, `G_POPMTX`.
 
@@ -378,8 +406,19 @@ No BRANCH_Z LODs. `texture.ts` decodes everything correctly unchanged.
 - **Animation:**
   - Type-6 "scroll" globals 0x802A2D50/54 are constant 0x80 and never written, so type-6 records are static.
   - The real texture scroll is a **vertex UV scroll** (verified from code):
-    - Table at 0x800A8C68: 6 × 24-byte entries `{u32 object, u32 vertexPtr, u32 count, s16 dS, s16 dT, s16 limitS,
-      s16 limitT, s16 accS, s16 accT}`.
+    - Table at 0x800A8C68: six 24-byte entries:
+
+      | Offset | Size | Type | Field | Description |
+      |---:|---:|---|---|---|
+      | `0x00` | 4 | `u32` | `object` | — |
+      | `0x04` | 4 | `u32` | `vertexPtr` | — |
+      | `0x08` | 4 | `u32` | `count` | — |
+      | `0x0C` | 2 | `s16` | `dS` | — |
+      | `0x0E` | 2 | `s16` | `dT` | — |
+      | `0x10` | 2 | `s16` | `limitS` | — |
+      | `0x12` | 2 | `s16` | `limitT` | — |
+      | `0x14` | 2 | `s16` | `accS` | — |
+      | `0x16` | 2 | `s16` | `accT` | — |
     - Updated once per game frame by 0x8022997C. It adds dS/dT to every vertex s/t (vertex +8/+10) of the loaded
       container in RAM while `acc + d` stays within the limit; otherwise it subtracts `acc` and resets it.
       1024 units = one repeat of a 32-texel texture.
@@ -433,7 +472,14 @@ Source: `notes/bm64_stage.md`.
 - **Map loading** (verified, disassembly):
   - `loadMap(asset)` = ZeroJump 0x0C00 = 0x80243BA8.
   - `loadMapPart(asset, f32 x, y, z, flags, s16)` = 0x0C01 = 0x80243A50. It keeps a part table at 0x800AED78
-    (`{object*, data*, assetIdx}`) and creates a draw object with the position at object +0x10/+0x14/+0x18.
+    and creates a draw object whose position field is documented in the drawable-object record below. The part-table record has these sequential fields (asset-index width unresolved):
+
+| Order | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 1 | 4 | u32 | object | Object pointer. |
+| 2 | 4 | u32 | data | Data pointer. |
+| 3 | Unknown | Unknown | assetIdx | Asset index. |
+
   - `loadAttributes(asset)` = 0x0D00 = 0x8026FF64 (parser 0x8026FC08).
   - In RAM, map 578 is byte-identical to its file and drawn with position 0, rotation 0 and scale 1, so **map
     vertex coordinates are world coordinates**.
@@ -441,20 +487,19 @@ Source: `notes/bm64_stage.md`.
   origin and at x = 7600 (0x6A, 0x6C); Trap Tower instances part 199 at y = 0 and y = 12000.
 - **Drawable object pool** (verified from RAM, `bm64_stage/scripts/objpool.py`): 0x50-byte records from 0x800A0DF0.
 
-  ```
-  +0x00 id
-  +0x04 link id
-  +0x08 flags (0x40 prop, 0x50 map, 0x60 special)
-  +0x0C kind
-  +0x10 position (x, y, z)
-  +0x1C rotation (degrees)
-  +0x28 scale
-  +0x3C data pointer
-  ```
+  | Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | Unknown | id | Identifier. |
+| 0x04 | 4 | Unknown | linkId | Link identifier. |
+| 0x08 | 4 | Unknown | flags | 0x40 prop, 0x50 map, 0x60 special. |
+| 0x0C | 4 | Unknown | kind | Object kind. |
+| 0x10 | 12 | f32[3] | position | X,Y,Z. |
+| 0x1C | 12 | f32[3] | rotation | Degrees. |
+| 0x28 | 12 | f32[3] | scale | Scale. |
+| 0x3C | 4 | u32 | data | Data pointer. |
 
   The asset index comes from the getAsset cache 0x800A7F30. Props are placed by overlay code, from float records in
-  overlay data, e.g. overlay 0x28 at 0x8004A520: `{u32 asset 685, f32 4450, 700, 50, …, f32 scale 1,1,1}` equals
-  the instance in RAM. There is no single placement format: a viewer needs per-overlay extraction or the RAM
+  overlay data. For example, overlay 0x28 at 0x8004A520 places asset 685 at (4450, 700, 50), scale (1,1,1), matching the RAM instance. There is no single placement format: a viewer needs per-overlay extraction or the RAM
   positions. Green Garden 1 prop positions from RAM are in `bm64_stage.md` *Bomberman Hero* (e.g. six pots, asset 147, at
   (900|1100|1300, 200, 1300|1800)).
 - **Attribute file:** the 3-D collision and object grid, section 5.4.7.
@@ -478,12 +523,30 @@ The attribute file is Bomberman 64's **only map collision**: ground height (`gro
 overlay call sites) and wall blocking (0x80290498 inside 0x802909FC) read the grid, never the map containers. Moving
 platforms are objects (0x8026E8E0 walks the object list 0x802A55F4).
 
-```
-u8 layerCount; u8 originX; u8 originLayer; u8 originZ          (origins 0 in all 67 files)
-u8 floorByte      bit 7 = bottomless; low 7 bits b: fall-out height floorY = −100·b (stored at 0x802AFC5C)
-layerCount × { u8 blocksX (6); u8 blocksZ (4); u8 unit      layer height in hundreds; 0xFF on the top layer
-               blocksX·blocksZ × { u16 blockId = col << 8 | row; u16 cell[64] (8 × 8, row-major) } }
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | layerCount | Layer count. |
+| 0x01 | 1 | u8 | originX | Zero in all 67 files. |
+| 0x02 | 1 | u8 | originLayer | Zero in all 67 files. |
+| 0x03 | 1 | u8 | originZ | Zero in all 67 files. |
+| 0x04 | 1 | u8 | floorByte | Bit 7: bottomless; low 7 bits b: fall-out height = −100 × b. |
+| 0x05 | Variable | layer[] | layers | Counted layer records. |
+
+Layer record, three-byte header followed by blocks:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | blocksX | 6. |
+| 0x01 | 1 | u8 | blocksZ | 4. |
+| 0x02 | 1 | u8 | unit | Layer height in hundreds; 0xFF on the top layer. |
+| 0x03 | 130 × blocksX × blocksZ | block[] | blocks | Block records. |
+
+Block record, 130 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | u16 | blockId | Column in high byte, row in low byte. |
+| 0x02 | 128 | u16[64] | cells | 8×8 cells, row-major. |
 
 - **Loading:** ZeroJump table 0x0D at 0x802A1450: 0x0D00 `loadAttributes` 0x8026FF64, 0x0D0C parser 0x8026FC08 (fills
   each layer with 0x2010, then `setCell(col·8 + originX + i % 8, layer + originLayer, row·8 + originZ + i / 8)`),
@@ -579,16 +642,30 @@ and no MusyX. Music data is **uncompressed** and read in place from ROM.
 
 #### S2 song table (verified)
 
-```
-+0          u16 'S2' (0x5332)           libultra ALSeqFile uses 'S1'; the loader accepts both
-+2          u16 count
-+4          count × { u32 seqOffset; u32 seqLength }      seqOffset 0xFFFFFFFF = empty entry
-+4+8·count  count × 16-byte song record:
-              u8  bank        index into the .ctl's bank array
-              u8  volume      per-song master volume (0..127)
-              u16 0xFFFF
-              u32 ctlOffset   u32 ctlSize   u32 tblOffset
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | u16 | magic | S2 (0x5332); loader also accepts S1. |
+| 0x02 | 2 | u16 | count | Song count. |
+| 0x04 | 8 × count | sequenceEntry[] | sequences | Sequence offset/length table. |
+| 0x04 + 8 × count | 16 × count | song[] | songs | One song record per sequence. |
+
+Sequence entry, eight bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | seqOffset | 0xFFFFFFFF marks an empty entry. |
+| 0x04 | 4 | u32 | seqLength | Sequence length. |
+
+Song record, 16 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | bank | Bank-array index. |
+| 0x01 | 1 | u8 | volume | Master volume, 0–127. |
+| 0x02 | 2 | u16 | unknown02 | 0xFFFF. |
+| 0x04 | 4 | u32 | ctlOffset | Control-bank offset. |
+| 0x08 | 4 | u32 | ctlSize | Control-bank length. |
+| 0x0C | 4 | u32 | tblOffset | Wave-bank offset. |
 
 SA's loader (0x800249A8–0x80024BB4) reads `bank`, `ctlOffset`, `ctlSize`, `tblOffset` from the record at
 `table + song·16` and binds `ctl->bankArray[bank]` to the sequence player. Song → bank:
@@ -600,23 +677,32 @@ SA's loader (0x800249A8–0x80024BB4) reads `bank`, `ctlOffset`, `ctlSize`, `tbl
 
 #### Sequence format: libultra compressed MIDI (verified: all 155 songs parse to the end)
 
-```
-header: s32 trackOffset[16] (from sequence start; 0 = unused), s32 division (480 in every song)
-track:  { varlen delta; event }*
-byte fetch (applies to every byte read, including deltas):
-  FE FE          -> literal 0xFE
-  FE hi lo len   -> back-reference: read `len` bytes starting at (position of this FE) - (hi << 8 | lo),
-                    then continue after the 4-byte escape
-events:
-  FF 51 t1 t2 t3            tempo, microseconds per quarter note
-  FF 2F                     end of track
-  FF 2E nn FF               loop start marker (2 payload bytes ignored)
-  FF 2D cnt cur o1 o2 o3 o4 loop end: if cur == 0 { cur = cnt; fall through } else { if cur != 0xFF: cur--;
-                            jump to (address after these 6 payload bytes) - (o1..o4 as u32) }
-                            cnt = cur = 0xFF loops forever
-  8n..En                    MIDI channel messages with running status (reset after meta events)
-  9n key vel {varlen dur}   NOTE-ON CARRIES ITS DURATION in ticks; there are no note-off events
-```
+Sequence header, 0x44 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 0x40 | s32[16] | trackOffsets | Relative to sequence start; zero marks unused tracks. |
+| 0x40 | 4 | s32 | division | 480 ticks per quarter note. |
+
+Track unit (variable length), repeated until end of track:
+
+| Order | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 1 | Variable | VLQ | delta | Delta time. |
+| 2 | Variable | event | event | Event encoding below. |
+
+| Component | Encoding | Meaning |
+|---|---|---|
+| Header | 0x44-byte header below | Track offsets are relative to the sequence start; zero means unused. Division is 480 in every song. |
+| Track | Repeated delta/event units below | Time-ordered event stream. |
+| Escape | `FE FE` | Literal byte `0xFE`. |
+| Back-reference | `FE hi lo len` | Read `len` bytes from `escapeOffset - ((hi << 8) \| lo)`, then resume after the four-byte escape. |
+| Tempo | `FF 51 t1 t2 t3` | Microseconds per quarter note. |
+| End | `FF 2F` | End of track. |
+| Loop start | `FF 2E nn FF` | Start marker; the two payload bytes are ignored. |
+| Loop end | `FF 2D cnt cur o1 o2 o3 o4` | Initialize/decrement `cur` and jump backward by the big-endian `u32` offset; `cnt = cur = 0xFF` loops forever. |
+| MIDI | `8n..En` | Channel messages with running status; meta events reset running status. |
+| Note | `9n key vel {varlen dur}` | Note-on with an inline duration; no note-off event is stored. |
 
 Only controllers 7 (volume), 10 (pan) and 91 (effects/reverb send) occur, plus program change and
 pitch bend. BM64 has some finite loops (`cnt = 3`); Hero and SA loop forever.
@@ -700,22 +786,101 @@ VADPCM decoder, sequence parser including back-references and loops, simple samp
 Standard libultra ALBankFile, big-endian, offsets relative to the .ctl start (relocated by adding the
 base, as `alBnkfNew` does):
 
-```
-ALBankFile   { s16 revision = 0x4231 'B1'; s16 bankCount; s32 bankOffset[bankCount]; }
-ALBank       { s16 instCount; u8 flags; u8 pad; s32 sampleRate (32000); s32 percussion (offset or 0);
-               s32 instOffset[instCount]; }
-ALInstrument { u8 volume; u8 pan; u8 priority; u8 flags;
-               u8 tremType, tremRate, tremDepth, tremDelay; u8 vibType, vibRate, vibDepth, vibDelay;
-               s16 bendRange (cents); s16 soundCount; s32 soundOffset[soundCount]; }
-ALSound      { s32 envelope; s32 keyMap; s32 wavetable; u8 samplePan; u8 sampleVolume; u8 flags; u8 pad; }
-ALEnvelope   { s32 attackTime; s32 decayTime; s32 releaseTime;   (microseconds)
-               u8 attackVolume; u8 decayVolume; }
-ALKeyMap     { u8 velocityMin, velocityMax, keyMin, keyMax, keyBase; s8 detune (cents); }
-ALWaveTable  { s32 base (offset into .tbl); s32 len; u8 type (0 ADPCM, 1 RAW16); u8 flags; u16 pad;
-               s32 loop (offset or 0); s32 book (offset); }
-ALADPCMloop  { u32 start; u32 end; s32 count (-1 = forever); s16 state[16]; }
-ALADPCMBook  { s32 order (2); s32 npredictors (4); s16 book[order · npredictors · 8]; }
-```
+ALBankFile, four-byte header and counted offsets:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | s16 | revision | 0x4231 (B1). |
+| 0x02 | 2 | s16 | bankCount | Bank count. |
+| 0x04 | 4 × bankCount | s32[] | bankOffset | Bank offsets. |
+
+ALBank, 0x0C-byte header and counted offsets:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | s16 | instCount | Instrument count. |
+| 0x02 | 1 | u8 | flags | Relocation flags. |
+| 0x03 | 1 | u8 | padding | Padding. |
+| 0x04 | 4 | s32 | sampleRate | 32000 Hz. |
+| 0x08 | 4 | s32 | percussion | Instrument offset or zero. |
+| 0x0C | 4 × instCount | s32[] | instOffset | Instrument offsets. |
+
+ALInstrument, 0x10-byte header and counted offsets:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | volume | Volume. |
+| 0x01 | 1 | u8 | pan | Pan. |
+| 0x02 | 1 | u8 | priority | Priority. |
+| 0x03 | 1 | u8 | flags | Flags. |
+| 0x04 | 4 | u8[4] | tremolo | Type, rate, depth, delay. |
+| 0x08 | 4 | u8[4] | vibrato | Type, rate, depth, delay. |
+| 0x0C | 2 | s16 | bendRange | Pitch-bend range. |
+| 0x0E | 2 | s16 | soundCount | Sound count. |
+| 0x10 | 4 × soundCount | s32[] | soundOffset | Sound offsets. |
+
+ALSound, 0x10 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | s32 | envelope | Envelope offset. |
+| 0x04 | 4 | s32 | keyMap | Key-map offset. |
+| 0x08 | 4 | s32 | wavetable | Wave-table offset. |
+| 0x0C | 1 | u8 | samplePan | Pan. |
+| 0x0D | 1 | u8 | sampleVolume | Volume. |
+| 0x0E | 1 | u8 | flags | Flags. |
+| 0x0F | 1 | u8 | padding | Padding. |
+
+ALEnvelope, 0x10 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | s32 | attackTime | Microseconds. |
+| 0x04 | 4 | s32 | decayTime | Microseconds. |
+| 0x08 | 4 | s32 | releaseTime | Microseconds. |
+| 0x0C | 1 | u8 | attackVolume | Attack target. |
+| 0x0D | 1 | u8 | decayVolume | Decay target. |
+| 0x0E | 2 | u8[2] | padding | Alignment padding. |
+
+ALKeyMap, six bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | velocityMin | Minimum velocity. |
+| 0x01 | 1 | u8 | velocityMax | Maximum velocity. |
+| 0x02 | 1 | u8 | keyMin | Minimum key. |
+| 0x03 | 1 | u8 | keyMax | Maximum key. |
+| 0x04 | 1 | u8 | keyBase | Base key. |
+| 0x05 | 1 | s8 | detune | Cents. |
+
+ALWaveTable, 0x14 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | s32 | base | Offset into .tbl. |
+| 0x04 | 4 | s32 | len | Encoded byte count. |
+| 0x08 | 1 | u8 | type | 0 VADPCM; 1 RAW16. |
+| 0x09 | 1 | u8 | flags | Flags. |
+| 0x0A | 2 | u16 | padding | Padding. |
+| 0x0C | 4 | s32 | loop | Loop offset. |
+| 0x10 | 4 | s32 | book | Predictor-book offset. |
+
+ALADPCMloop, 0x2C bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | start | Loop start sample. |
+| 0x04 | 4 | u32 | end | Exclusive loop end. |
+| 0x08 | 4 | s32 | count | −1 repeats forever. |
+| 0x0C | 0x20 | s16[16] | state | Decoder history. |
+
+ALADPCMBook, eight-byte header and coefficients:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | s32 | order | Observed: 2. |
+| 0x04 | 4 | s32 | npredictors | Observed: 4. |
+| 0x08 | 16 × order × npredictors | s16[] | book | Predictor coefficients. |
 
 All wave tables in all three games are type 0 (VADPCM), order 2, 4 predictors.
 

@@ -59,7 +59,7 @@ position-dependent.
 | 0x1000–0x4DFF0 | 0x80000400–0x8004D3F0 | seg1 (IPL3 copy): core, loaders, decompressor, libultra; BSS 0x8004D3F0–0x8005BAD0 |
 | 0x4DFF0–0x126CB0 | 0x8005BAD0–0x80134790 | seg2 (game code and data tables), copied by `0x80000BE8 romRead(0x4DFF0, 0x8005BAD0, 0xD8CC0)` |
 | 0x126CB0–0x128D20 | slots | two raw data files (see 3.5) |
-| 0x128D20–0x147BB0 | 0x80280000 | 7 per-planet code overlays, uncompressed; table of {start, end} at 0x8010CC68 (ROM 0xFF188), indexed by the planet byte at 0x8016523E (`0x800883A8`) |
+| 0x128D20–0x147BB0 | 0x80280000 | 7 per-planet code overlays, uncompressed; ROM-range table (field layout below) at 0x8010CC68 (ROM 0xFF188), indexed by the planet byte at 0x8016523E (`0x800883A8`) |
 | 0x147BB0–0x20F5B0 | 0x8032E000–0x8033FFFF | 67 uncompressed scene overlays (common part 0x147BB0–0x14C540 at 0x80320000 plus per-scene parts), loaded by `0x80000C2C`–`0x80001A44` |
 | 0x20F5B0–0x2193A0 | 0x8033A000 | pointer-linked data blob (stage index ≥ 128 and intro), paged in 0x4000 bytes at a time by `0x80000F8C` |
 | 0x2193A0–0x229650 | 0x80300000 (linked), read to 0x8016E450 | per-stage 0x800-byte data pages, `0x80000FF4(stage)` |
@@ -90,7 +90,13 @@ hard-coded in loader calls or stored in data tables. The viewer should key Hero 
 
 **Loaders** (verified: disassembly, traces, RDRAM):
 - Heap cursor u32 at 0x801776D4, aligned to 16 before each load; slot table at 0x8016CAA0
-  (700 × {u32 ptr, u32}), cleared per scene by 0x800819E0.
+  (700 eight-byte entries), cleared per scene by 0x800819E0:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | pointer | Loaded resource pointer |
+| 0x04 | 4 | u32 | unknown_04 | Unresolved |
+
 - `0x8001E98C loadRaw(slot, start, end)`, `0x8001EA68 loadLzss(slot, start, end)`,
   `0x8001EB68(slot, start, end)` = loadLzss plus bookkeeping. Loaded data is not modified in place.
 
@@ -98,12 +104,53 @@ hard-coded in loader calls or stored in data tables. The viewer should key Hero 
 
 | Table (VRAM) | Record | Use |
 |---|---|---|
-| 0x80108238 | 192 pointers → 0x24-byte records `{u32 desc, A start, A end, B start, B end, s32 × 4}` | main-game stages: A = blob loaded at 0x802D0000 (slot 0x1C), B = stage map container (slot 0x1B); index in s32 at 0x8016E428 |
-| 0x8010CC68 | 7 × {start, end} | planet code overlays |
-| 0x80122B08 | 16-byte `{u32 desc, start, end, 0}` (~550) | object models, loaded on demand by 0x80065CA4 |
-| 0x80320534 (common overlay) | 20-byte `{slot, start, end, flags, desc}` | 2D pictures/sprites |
-| 0x80100720 / 0x80101A14 / 0x80101F18 | 0x58-byte map records `{A start, end; B start, end; ...}` | alternate modes; 0x80101F18 = the 23 attract-demo maps |
-| 0x80104C20, 0x801051E0 | {start, end} lists | menu/story pictures |
+| 0x80108238 | 192 pointers to 0x24-byte stage records below | main-game stages: A = blob loaded at 0x802D0000 (slot 0x1C), B = stage map container (slot 0x1B); index in s32 at 0x8016E428 |
+| 0x8010CC68 | Seven ROM-range records below | planet code overlays |
+| 0x80122B08 | About 550 sixteen-byte model records below | object models, loaded on demand by 0x80065CA4 |
+| 0x80320534 (common overlay) | Twenty-byte picture records below | 2D pictures/sprites |
+| 0x80100720 / 0x80101A14 / 0x80101F18 | 0x58-byte alternate-map records; known fields below | alternate modes; 0x80101F18 = the 23 attract-demo maps |
+| 0x80104C20, 0x801051E0 | ROM-range record lists below | menu/story pictures |
+
+ROM-range record, eight bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | start | Inclusive ROM start. |
+| 0x04 | 4 | u32 | end | Exclusive ROM end. |
+
+Stage record, 0x24 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | descriptor | Descriptor value/pointer. |
+| 0x04 | 8 | RomRange | fileA | Stage-blob extent. |
+| 0x0C | 8 | RomRange | fileB | Map-container extent. |
+| 0x14 | 16 | s32[4] | unknown14 | Unknown signed words. |
+
+Model record, 16 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | descriptor | Descriptor value/pointer. |
+| 0x04 | 8 | RomRange | file | Model extent. |
+| 0x0C | 4 | u32 | zero0C | Zero. |
+
+Picture record, 20 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | slot | Load slot. |
+| 0x04 | 8 | RomRange | file | Picture extent. |
+| 0x0C | 4 | u32 | flags | Load flags. |
+| 0x10 | 4 | u32 | descriptor | Descriptor. |
+
+Alternate-map record, 0x58 bytes, known fields:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 8 | RomRange | fileA | First extent. |
+| 0x08 | 8 | RomRange | fileB | Second extent. |
+| 0x10 | 0x48 | u8[] | unknown10 | Remaining fields not decoded here. |
 
 ### 2.3 ROM map and asset organization
 
@@ -115,7 +162,15 @@ hard-coded in loader calls or stored in data tables. The viewer should key Hero 
 |---|---|---|
 | BM64 asset / overlay | `u32 BE decompressedSize` + LZSS stream | always LZSS, except 7 raw assets: 32 (music "S2" blob), 33 (SFX "T2" blob), 71, 72, 220, 221, 267 |
 | SA resource | `u32 BE decompressedSize` + payload | if the u32 at +4 is `Yay0` (0x59617930): Yay0 image starting at +4; else LZSS stream from +4 |
-| SA exec | `u32 codeSize; u32 bssSize;` LZSS stream | LZSS |
+| SA exec | Eight-byte exec header below, followed by LZSS data | LZSS |
+
+SA exec header, eight bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | codeSize | Decoded executable byte count. |
+| 0x04 | 4 | u32 | bssSize | BSS byte count. |
+| 0x08 | Variable | u8[] | stream | LZSS executable payload. |
 
 SA exceptions: resources 0 (music blob, "S2") and 1 (SFX blob, "T3") are raw and used by ROM address;
 resource 2 is 64 KB of zeros; 46 resources (2527–2540, 2562–2573, 2595–2605, 2621–2629) are
@@ -243,12 +298,20 @@ Planet 1 Area 1 also matches the stage-select screenshot.
 
 ##### "64" container
 
-```
-+0x00 u32 0x36340038 ("64\0" 0x38)
-+0x04 u32 nSections
-+0x08 u32 0x02020202
-+0x0C nSections × { u32 type; u32 param; u32 offset }   offset from the container start
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `+0x00` | 4 | `u32` | `0x36340038 ("64\0" 0x38)` | — |
+| `+0x04` | 4 | `u32` | `nSections` | — |
+| `+0x08` | 4 | `u32` | `0x02020202` | — |
+| 0x0C | 12 × nSections | section[] | sections | Section records below. |
+
+Section record, 12 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | type | Record type. |
+| 0x04 | 4 | u32 | param | Type-specific parameter. |
+| 0x08 | 4 | u32 | offset | Offset from container start. |
 
 Vertex, texel, palette and display-list data sit before the record table; records are in ascending
 offset order. The layout is confirmed from BM64 game code (record parser `0x8022D58C` reads
@@ -273,16 +336,16 @@ image records: their textures are only reachable through the display lists.
 
 **Node (48 bytes)**, walked by BM64 `0x8022D414`:
 
-```
-+0x00 s32 drawRecord        record index to draw (−1 = none)
-+0x04 f32 tx, ty, tz        emitted as a matrix only if non-zero
-+0x10 f32 rx, ry, rz        degrees; only if non-zero
-+0x1C f32 sx, sy, sz        unused by the static draw path (always 1.0)
-+0x28 s32 nextSibling       relative node index (0 = none)
-+0x2C s32 firstChild        relative node index (0 = none)
-walk(i): if T or R non-zero: G_MTX push·mul; draw drawRecord; if firstChild: walk(i + firstChild); pop;
-         if nextSibling: walk(i + nextSibling)
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `+0x00` | 4 | `s32` | `drawRecord` | record index to draw (−1 = none) |
+| `+0x04` | 12 | `f32[3]` | `tx, ty, tz        emitted as a matrix only if non-zero` | — |
+| `+0x10` | 12 | `f32[3]` | `rx, ry, rz        degrees; only if non-zero` | — |
+| `+0x1C` | 12 | `f32[3]` | `sx, sy, sz        unused by the static draw path (always 1.0)` | — |
+| `+0x28` | 4 | `s32` | `nextSibling` | relative node index (0 = none) |
+| `+0x2C` | 4 | `s32` | `firstChild` | relative node index (0 = none) |
+
+Traversal: for node i, push/multiply G_MTX if its translation or rotation is nonzero, draw its drawRecord, recurse to i + firstChild if present, then pop. Recurse to i + nextSibling if present.
 
 In all 3,442 BM64 nodes R = 0 and S = 1, so the static pose is translations only. The list begins with a
 root node (draw −1, child 1). Maps have identity nodes.
@@ -299,25 +362,41 @@ concluded that Hero has no SETTIMG. The type-5 CI files are 2D pictures (menus, 
 ##### Stage records
 
 For stage index `i`:
-- **Info record**, 0x38 bytes, `*(0x8010B3FC + 4i)` (ROM 0xFD91C):
-  - +0/+1/+2 planet, area, map
-  - +6 kind (0 normal, 1 boss with "Vs. Nitros", 2 boss with "Vs. The Big Four/Bagular", 3 special, 4 event, 5 index 110)
-  - +7 song
-  - +0xC 6 × s16 object activation box
-  - +0x18/+0x1C squared activation distances
-  - +0x2C f32 **far plane** (20000, 8200, 6300, 5400, 4400, 2400, 2000)
-  - the other fields are hypotheses (`hero_level.md` *Bomberman 64 (verified: disassembly + RDRAM dump compare)*)
+**Info record (0x38 bytes)** at `*(0x8010B3FC + 4*i)` (ROM 0xFD91C). Unlisted fields are unresolved or hypothetical (`hero_level.md`).
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 3 | u8[3] | location | Planet, area, map |
+| 0x06 | 1 | u8 | kind | 0 normal; 1 Vs. Nitros; 2 Vs. The Big Four/Bagular; 3 special; 4 event; 5 index 110 |
+| 0x07 | 1 | u8 | song | Song ID |
+| 0x0C | 12 | s16[6] | activationBox | Object activation bounds |
+| 0x18 | 8 | Unknown[2] | activationDistanceSquared | Two squared activation distances; scalar type unresolved |
+| 0x2C | 4 | f32 | farPlane | 20000, 8200, 6300, 5400, 4400, 2400 or 2000 |
+
 - **File record**, 0x24 bytes, `*(0x80108238 + 4i)`:
-  `{u32 desc, u32 A start, A end, u32 B start, B end, s32 sub[4]}`.
+
+  | Offset | Size | Type | Field | Description |
+  |---:|---:|---|---|---|
+  | `0x00` | 4 | `u32` | `descriptor` | — |
+  | `0x04` | 8 | `u32[2]` | `rangeA` | — |
+  | `0x0C` | 8 | `u32[2]` | `rangeB` | — |
+  | `0x14` | 16 | `s32[4]` | `sub` | — |
+
   - B = **map container** (slot 0x1B).
   - A = **stage blob**, linked and loaded at 0x802D0000 (slot 0x1C). u32 at +0 points to a header at the
     end of the blob. Header fields a viewer needs (verified from code 0x80066AE8–0x80066E60, 0x8001C7DC,
     0x8006E088, and against stage 1-1 runtime values):
-    - +0x2B u8 **fog mode**: 0 none, 2 fog (mode 1 exists in code but no stage uses it)
-    - +0x2C u8 **backdrop picture**: 0 none, n ≥ 1 = entry n − 1 of the 30-entry picture table 0x801051E0
-    - +0x31/+0x32/+0x33 u8 **fog colour** R, G, B
-    - +0x34/+0x36 s16 **fog min / max** (gSPFogPosition arguments)
-    - +0x00..+0x1C bounds and the collision grid, +0x3C the collision cells (5.2.7)
+
+**Stage-blob header environment fields.** Bounds and collision-grid fields are tabulated under collision.
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x2B | 1 | u8 | fogMode | 0 = none; 2 = fog; mode 1 exists only in code |
+| 0x2C | 1 | u8 | backdrop | 0 = none; otherwise picture-table index + 1 (table 0x801051E0) |
+| 0x31 | 3 | u8[3] | fogRGB | Fog colour |
+| 0x34 | 2 | s16 | fogMin | gSPFogPosition minimum |
+| 0x36 | 2 | s16 | fogMax | gSPFogPosition maximum |
+
   - `sub[]` = offsets (−1 = none) of nested sub-containers inside B, drawn at identity in stage 1-1 (hypothesis:
     doors/platforms driven by stage code).
 
@@ -329,22 +408,45 @@ For stage index `i`:
 Placement blob ROM 0x2193A0–0x229650, linked at 0x80300000; pointer table 0x8010BC30 (192 entries, same index).
 Block for stage `i` = `ROM 0x2193A0 + (*(0x8010BC30 + 4i) − 0x80300000)`. Records, 16 bytes big-endian:
 
-```
-u16 type      index into the 652-entry object class table (0x60-byte records; name at ROM 0x1172F8 + type·0x60, e.g. NAME_SOFTBLK1)
-s16 x, y, z   world units
-s16 yaw       degrees
-s16 p1, p2, p3  per-class parameters (item id, crate contents, ...)
-first record: type 0x2D at (30000, 30000, 30000) (sentinel); list ends at type 0xFFFF
-```
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | u16 | type | Index into 652-entry object class table; 0xFFFF ends list |
+| 0x02 | 6 | s16[3] | position | World x, y, z |
+| 0x08 | 2 | s16 | yaw | Degrees |
+| 0x0A | 6 | s16[3] | parameters | Class-specific item/content parameters |
+
+The first record is a sentinel: type 0x2D at (30000,30000,30000). Names are at ROM `0x1172F8 + type*0x60`, e.g. NAME_SOFTBLK1.
 
 - Drawn x, z and yaw equal the record exactly.
 - **Object class descriptor** (0x60 bytes; record start = ROM 0x1172F8 + type·0x60 − 0x48, name at +0x48).
   Verified on 10 classes against the stage 1-1 load trace:
-  - +0x14/+0x18/+0x1C behaviour functions
-  - +0x24 → resource record `{u16 slot, u16 flag, u32 romStart, u32 romEnd}` = the model file (LZSS chain file)
-  - +0x28 → shape struct
-  - +0x34 u32 activation distance² (1920²)
-  - +0x38 → `{u16 0, u16 type, u16 slot, u16 flags}`
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x14 | 12 | u32[3] | behaviorFunctions | Linked function pointers at 0x14, 0x18 and 0x1C |
+| 0x24 | 4 | u32 | modelResource | Model-file resource-record pointer; LZSS-chain layout below. |
+| 0x28 | 4 | u32 | shape | Shape-structure pointer. |
+| 0x34 | 4 | u32 | activationDistanceSquared | Usually 1920². |
+| 0x38 | 4 | u32 | typeRecord | Pointer to the eight-byte type record below. |
+| 0x48 | Unknown | u8[] | name | Class name; maximum occupied length not established here. |
+
+  Model-file resource record, 12 bytes:
+
+    | Offset | Size | Type | Field | Description |
+    |---:|---:|---|---|---|
+    | `0x00` | 2 | `u16` | `slot` | — |
+    | `0x02` | 2 | `u16` | `flag` | — |
+    | `0x04` | 4 | `u32` | `romStart` | — |
+    | `0x08` | 4 | `u32` | `romEnd` | — |
+  Type record, eight bytes:
+
+    | Offset | Size | Type | Field | Description |
+    |---:|---:|---|---|---|
+    | 0x00 | 2 | u16 | zero | — |
+    | 0x02 | 2 | u16 | type | — |
+    | 0x04 | 2 | u16 | slot | — |
+    | 0x06 | 2 | u16 | flags | — |
 
   So a loader goes type → descriptor → model file directly; no per-stage table is needed.
 - **Y offset = shape struct s16[1]** (gates 360, door 120, crates 60, switch 35, plate 60; classes with shape 0
@@ -422,23 +524,48 @@ Hero's static collision is a grid of **planes** in the stage blob; the map conta
 at exactly 0x802D0000 and is linked there (absolute pointers, no relocation: stage 1-1 RAM from 0x802D0000 equals the
 decompressed file, 0x48D0 bytes). The header (u32 at blob +0, the last 0x54 bytes) begins:
 
-```
-+0x00 s16 xmin, ymin, zmin, xmax, ymax, zmax    the query rejects x <= xmin, z <= zmin, x >= xmax, z >= zmax
-+0x0C s16 × 6                                    a second box (copied to 0x801778F0; not used by collision)
-+0x18 s16 nx, ny, nz                            cells of 960 units from (xmin, zmin); x/z spans = nx·960, nz·960 in all 102 blobs
-+0x1E s16 × 3 = 16                               tiles per cell (the query hardcodes 16 tiles of 60 units)
-+0x38 ptr  nx·ny·nz 16-byte records             not read by the collision code (hypothesis: draw lists)
-+0x3C ptr  u32[nx·nz] cell blocks, index iz·nx + ix, 0 = no collision in the cell
-+0x40 ptr  push table for attribute 252 (2 blobs); +0x44 always 0
-cell block (3 pointers stored after the cell's data):
-  +0 tiles   256 × { u8 diagonal; u8 list0; u8 list1 }   index tz·16 + tx, tile = 60 × 60 units
-  +4 planes  28-byte records, up to `lists`
-  +8 lists   u8 plane indices, each list ended by 0xFF; tile.listH = offset of the list for half H
-plane (28 bytes): s32 a, b, c, d     a·x + b·y + c·z = d, i.e. y = (d − a·x − c·z) / b (0x80015D2C); b is never 0
-                  s32 b (again)      its sign is the facing: b > 0 top, b < 0 underside (3,085 of 13,033 planes)
-                  s32 attr           200..255 (255 = plain)
-                  s32 param          0xFFFF when unused
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | s16 | xmin | Collision-grid bound; X/Z tests reject points on or outside the corresponding boundary. |
+| 0x02 | 2 | s16 | ymin | Collision-grid bound; X/Z tests reject points on or outside the corresponding boundary. |
+| 0x04 | 2 | s16 | zmin | Collision-grid bound; X/Z tests reject points on or outside the corresponding boundary. |
+| 0x06 | 2 | s16 | xmax | Collision-grid bound; X/Z tests reject points on or outside the corresponding boundary. |
+| 0x08 | 2 | s16 | ymax | Collision-grid bound; X/Z tests reject points on or outside the corresponding boundary. |
+| 0x0A | 2 | s16 | zmax | Collision-grid bound; X/Z tests reject points on or outside the corresponding boundary. |
+| 0x0C | 12 | s16[6] | secondaryBounds | Copied to 0x801778F0; not used by collision. |
+| `+0x18` | 6 | `s16[3]` | `nx, ny, nz                            cells of 960 units from (xmin, zmin); x/z spans = nx·960, nz·960 in all 102 blobs` | — |
+| 0x1E | 6 | s16[3] | tileCounts | Each is 16; query hardcodes 16 tiles of 60 units. |
+| `+0x38` | 4 | `ptr` | `nx·ny·nz 16-byte records             not read by the collision code (hypothesis: draw lists)` | — |
+| `+0x3C` | 4 | `ptr` | `u32[nx·nz] cell blocks, index iz·nx + ix, 0 = no collision in the cell` | — |
+| `+0x40` | 4 | `ptr` | `push table for attribute 252 (2 blobs); +0x44 always 0` | — |
+
+Cell block, 12 bytes. These three pointers are stored after the cell's data:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | tiles | Pointer to 256 three-byte tiles, index tz × 16 + tx. |
+| 0x04 | 4 | u32 | planes | Pointer to 28-byte planes; array ends at lists. |
+| 0x08 | 4 | u32 | lists | Pointer to byte-sized plane-index lists, each ending in 0xFF. |
+
+Tile record, three bytes; tile size is 60×60 units:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | diagonal | Selects the two triangle halves. |
+| 0x01 | 1 | u8 | list0 | List offset for half 0. |
+| 0x02 | 1 | u8 | list1 | List offset for half 1. |
+
+Plane record, 28 bytes. The equation is a·x + b·y + c·z = d; b is never zero (routine 0x80015D2C).
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | s32 | a | X coefficient. |
+| 0x04 | 4 | s32 | b | Y coefficient. |
+| 0x08 | 4 | s32 | c | Z coefficient. |
+| 0x0C | 4 | s32 | d | Plane distance. |
+| 0x10 | 4 | s32 | facing | Repeated b: positive top, negative underside (3,085 of 13,033 planes). |
+| 0x14 | 4 | s32 | attr | 200–255; 255 is plain. |
+| 0x18 | 4 | s32 | param | 0xFFFF when unused. |
 
 - **Tile halves:** diagonal 0 → half 0 is `lx + lz < 60`; diagonal 1 → half 0 is `lz < lx` (lx, lz local to the tile).
   A plane's surface is the union of the tile halves whose list names it; there are no vertices.
@@ -531,16 +658,30 @@ and no MusyX. Music data is **uncompressed** and read in place from ROM.
 
 #### S2 song table (verified)
 
-```
-+0          u16 'S2' (0x5332)           libultra ALSeqFile uses 'S1'; the loader accepts both
-+2          u16 count
-+4          count × { u32 seqOffset; u32 seqLength }      seqOffset 0xFFFFFFFF = empty entry
-+4+8·count  count × 16-byte song record:
-              u8  bank        index into the .ctl's bank array
-              u8  volume      per-song master volume (0..127)
-              u16 0xFFFF
-              u32 ctlOffset   u32 ctlSize   u32 tblOffset
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | u16 | magic | S2 (0x5332); loader also accepts S1. |
+| 0x02 | 2 | u16 | count | Song count. |
+| 0x04 | 8 × count | sequenceEntry[] | sequences | Sequence offset/length table. |
+| 0x04 + 8 × count | 16 × count | song[] | songs | One song record per sequence. |
+
+Sequence entry, eight bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | seqOffset | 0xFFFFFFFF marks an empty entry. |
+| 0x04 | 4 | u32 | seqLength | Sequence length. |
+
+Song record, 16 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | bank | Bank-array index. |
+| 0x01 | 1 | u8 | volume | Master volume, 0–127. |
+| 0x02 | 2 | u16 | unknown02 | 0xFFFF. |
+| 0x04 | 4 | u32 | ctlOffset | Control-bank offset. |
+| 0x08 | 4 | u32 | ctlSize | Control-bank length. |
+| 0x0C | 4 | u32 | tblOffset | Wave-bank offset. |
 
 SA's loader (0x800249A8–0x80024BB4) reads `bank`, `ctlOffset`, `ctlSize`, `tblOffset` from the record at
 `table + song·16` and binds `ctl->bankArray[bank]` to the sequence player. Song → bank:
@@ -552,23 +693,32 @@ SA's loader (0x800249A8–0x80024BB4) reads `bank`, `ctlOffset`, `ctlSize`, `tbl
 
 #### Sequence format: libultra compressed MIDI (verified: all 155 songs parse to the end)
 
-```
-header: s32 trackOffset[16] (from sequence start; 0 = unused), s32 division (480 in every song)
-track:  { varlen delta; event }*
-byte fetch (applies to every byte read, including deltas):
-  FE FE          -> literal 0xFE
-  FE hi lo len   -> back-reference: read `len` bytes starting at (position of this FE) - (hi << 8 | lo),
-                    then continue after the 4-byte escape
-events:
-  FF 51 t1 t2 t3            tempo, microseconds per quarter note
-  FF 2F                     end of track
-  FF 2E nn FF               loop start marker (2 payload bytes ignored)
-  FF 2D cnt cur o1 o2 o3 o4 loop end: if cur == 0 { cur = cnt; fall through } else { if cur != 0xFF: cur--;
-                            jump to (address after these 6 payload bytes) - (o1..o4 as u32) }
-                            cnt = cur = 0xFF loops forever
-  8n..En                    MIDI channel messages with running status (reset after meta events)
-  9n key vel {varlen dur}   NOTE-ON CARRIES ITS DURATION in ticks; there are no note-off events
-```
+Sequence header, 0x44 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 0x40 | s32[16] | trackOffsets | Relative to sequence start; zero marks unused tracks. |
+| 0x40 | 4 | s32 | division | 480 ticks per quarter note. |
+
+Track unit (variable length), repeated until end of track:
+
+| Order | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 1 | Variable | VLQ | delta | Delta time. |
+| 2 | Variable | event | event | Event encoding below. |
+
+| Component | Encoding | Meaning |
+|---|---|---|
+| Header | 0x44-byte header below | Track offsets are relative to the sequence start; zero means unused. Division is 480 in every song. |
+| Track | Repeated delta/event units below | Time-ordered event stream. |
+| Escape | `FE FE` | Literal byte `0xFE`. |
+| Back-reference | `FE hi lo len` | Read `len` bytes from `escapeOffset - ((hi << 8) \| lo)`, then resume after the four-byte escape. |
+| Tempo | `FF 51 t1 t2 t3` | Microseconds per quarter note. |
+| End | `FF 2F` | End of track. |
+| Loop start | `FF 2E nn FF` | Start marker; the two payload bytes are ignored. |
+| Loop end | `FF 2D cnt cur o1 o2 o3 o4` | Initialize/decrement `cur` and jump backward by the big-endian `u32` offset; `cnt = cur = 0xFF` loops forever. |
+| MIDI | `8n..En` | Channel messages with running status; meta events reset running status. |
+| Note | `9n key vel {varlen dur}` | Note-on with an inline duration; no note-off event is stored. |
 
 Only controllers 7 (volume), 10 (pan) and 91 (effects/reverb send) occur, plus program change and
 pitch bend. BM64 has some finite loops (`cnt = 3`); Hero and SA loop forever.
@@ -652,22 +802,101 @@ VADPCM decoder, sequence parser including back-references and loops, simple samp
 Standard libultra ALBankFile, big-endian, offsets relative to the .ctl start (relocated by adding the
 base, as `alBnkfNew` does):
 
-```
-ALBankFile   { s16 revision = 0x4231 'B1'; s16 bankCount; s32 bankOffset[bankCount]; }
-ALBank       { s16 instCount; u8 flags; u8 pad; s32 sampleRate (32000); s32 percussion (offset or 0);
-               s32 instOffset[instCount]; }
-ALInstrument { u8 volume; u8 pan; u8 priority; u8 flags;
-               u8 tremType, tremRate, tremDepth, tremDelay; u8 vibType, vibRate, vibDepth, vibDelay;
-               s16 bendRange (cents); s16 soundCount; s32 soundOffset[soundCount]; }
-ALSound      { s32 envelope; s32 keyMap; s32 wavetable; u8 samplePan; u8 sampleVolume; u8 flags; u8 pad; }
-ALEnvelope   { s32 attackTime; s32 decayTime; s32 releaseTime;   (microseconds)
-               u8 attackVolume; u8 decayVolume; }
-ALKeyMap     { u8 velocityMin, velocityMax, keyMin, keyMax, keyBase; s8 detune (cents); }
-ALWaveTable  { s32 base (offset into .tbl); s32 len; u8 type (0 ADPCM, 1 RAW16); u8 flags; u16 pad;
-               s32 loop (offset or 0); s32 book (offset); }
-ALADPCMloop  { u32 start; u32 end; s32 count (-1 = forever); s16 state[16]; }
-ALADPCMBook  { s32 order (2); s32 npredictors (4); s16 book[order · npredictors · 8]; }
-```
+ALBankFile, four-byte header and counted offsets:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | s16 | revision | 0x4231 (B1). |
+| 0x02 | 2 | s16 | bankCount | Bank count. |
+| 0x04 | 4 × bankCount | s32[] | bankOffset | Bank offsets. |
+
+ALBank, 0x0C-byte header and counted offsets:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | s16 | instCount | Instrument count. |
+| 0x02 | 1 | u8 | flags | Relocation flags. |
+| 0x03 | 1 | u8 | padding | Padding. |
+| 0x04 | 4 | s32 | sampleRate | 32000 Hz. |
+| 0x08 | 4 | s32 | percussion | Instrument offset or zero. |
+| 0x0C | 4 × instCount | s32[] | instOffset | Instrument offsets. |
+
+ALInstrument, 0x10-byte header and counted offsets:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | volume | Volume. |
+| 0x01 | 1 | u8 | pan | Pan. |
+| 0x02 | 1 | u8 | priority | Priority. |
+| 0x03 | 1 | u8 | flags | Flags. |
+| 0x04 | 4 | u8[4] | tremolo | Type, rate, depth, delay. |
+| 0x08 | 4 | u8[4] | vibrato | Type, rate, depth, delay. |
+| 0x0C | 2 | s16 | bendRange | Pitch-bend range. |
+| 0x0E | 2 | s16 | soundCount | Sound count. |
+| 0x10 | 4 × soundCount | s32[] | soundOffset | Sound offsets. |
+
+ALSound, 0x10 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | s32 | envelope | Envelope offset. |
+| 0x04 | 4 | s32 | keyMap | Key-map offset. |
+| 0x08 | 4 | s32 | wavetable | Wave-table offset. |
+| 0x0C | 1 | u8 | samplePan | Pan. |
+| 0x0D | 1 | u8 | sampleVolume | Volume. |
+| 0x0E | 1 | u8 | flags | Flags. |
+| 0x0F | 1 | u8 | padding | Padding. |
+
+ALEnvelope, 0x10 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | s32 | attackTime | Microseconds. |
+| 0x04 | 4 | s32 | decayTime | Microseconds. |
+| 0x08 | 4 | s32 | releaseTime | Microseconds. |
+| 0x0C | 1 | u8 | attackVolume | Attack target. |
+| 0x0D | 1 | u8 | decayVolume | Decay target. |
+| 0x0E | 2 | u8[2] | padding | Alignment padding. |
+
+ALKeyMap, six bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | velocityMin | Minimum velocity. |
+| 0x01 | 1 | u8 | velocityMax | Maximum velocity. |
+| 0x02 | 1 | u8 | keyMin | Minimum key. |
+| 0x03 | 1 | u8 | keyMax | Maximum key. |
+| 0x04 | 1 | u8 | keyBase | Base key. |
+| 0x05 | 1 | s8 | detune | Cents. |
+
+ALWaveTable, 0x14 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | s32 | base | Offset into .tbl. |
+| 0x04 | 4 | s32 | len | Encoded byte count. |
+| 0x08 | 1 | u8 | type | 0 VADPCM; 1 RAW16. |
+| 0x09 | 1 | u8 | flags | Flags. |
+| 0x0A | 2 | u16 | padding | Padding. |
+| 0x0C | 4 | s32 | loop | Loop offset. |
+| 0x10 | 4 | s32 | book | Predictor-book offset. |
+
+ALADPCMloop, 0x2C bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | start | Loop start sample. |
+| 0x04 | 4 | u32 | end | Exclusive loop end. |
+| 0x08 | 4 | s32 | count | −1 repeats forever. |
+| 0x0C | 0x20 | s16[16] | state | Decoder history. |
+
+ALADPCMBook, eight-byte header and coefficients:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | s32 | order | Observed: 2. |
+| 0x04 | 4 | s32 | npredictors | Observed: 4. |
+| 0x08 | 16 × order × npredictors | s16[] | book | Predictor coefficients. |
 
 All wave tables in all three games are type 0 (VADPCM), order 2, 4 predictors.
 

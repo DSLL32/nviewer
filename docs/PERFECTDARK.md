@@ -93,7 +93,7 @@ segmented, VROM, and file-relative addresses are named at each use.
 | 0x1D5CA00–0x1D6573D | file name table |
 | 0x1D6573D–0x1D65F40 | zeros |
 | 0x1D65F40–0x1FF7C95 | global textures, 3,503 entries (*Level geometry*) |
-| 0x1FF7CA0–0x1FFEA20 | global texture table: 8-byte entries `{u8 flags, u24 offset; u32 0}` |
+| 0x1FF7CA0–0x1FFEA20 | global texture table; field layout is documented under *Global textures* |
 | 0x1FFEA20–0x1FFFE00 | two rarezip boot screens, 507×48 RGBA5551: "Copyright Rare Ltd. 2000" and "Accessing Controller Pak" (lib 0x7000D740) |
 | 0x1FFFE00–0x2000000 | 0xFF fill (0x1FFFF00 is the developer boot-argument area, *Debug features left in the retail code*) |
 
@@ -101,12 +101,12 @@ segmented, VROM, and file-relative addresses are named at each use.
 
 #### Compression: rarezip "1173" (verified bit-exact against the game)
 
-```
-u8  0x11
-u8  0x73
-u24 size        big-endian decompressed size (exact)
-... raw RFC 1951 DEFLATE (no zlib/gzip header, no checksum), then 0..15 padding bytes in file-table entries
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 1 | `u8` | `magic0` | `0x11`. |
+| `0x01` | 1 | `u8` | `magic1` | `0x73`. |
+| `0x02` | 3 | `u24` | `decodedSize` | Exact big-endian decompressed size. |
+| `0x05` | variable | raw DEFLATE | `payload` | RFC 1951 stream without a zlib/gzip wrapper or checksum. File-table entries may add zero to 15 padding bytes after the stream. |
 - **Other magics:** `rarezipInflate` also accepts `11 72` (GoldenEye's format: magic only, no size, DEFLATE after 2
   bytes), but PD doesn't use it anywhere. Any other magic fails with `RareZipAsmDecompress: input not in any known
   rare zip format`.
@@ -124,12 +124,10 @@ u24 size        big-endian decompressed size (exact)
 
 #### File table (verified: ROM, RAM, loader disassembly, load trace)
 
-```
-data + 0x28080 = vaddr 0x80082060: u32 romOffset[2015]    absolute ROM offsets
-    entry 0 = 0; entries 1..2013 are files; entry 2014 = 0x1D5CA00 (end)
-    file k = ROM [romOffset[k], romOffset[k+1])
-ROM 0x1D5CA00: u32 nameOffset[2014], relative to 0x1D5CA00; NUL-terminated names
-```
+| Location | Count | Type | Field | Description |
+|---|---:|---|---|---|
+| `data + 0x28080` / `0x80082060` | 2015 | `u32` | `romOffset` | Absolute ROM offsets. Entry 0 is zero; entries 1–2013 are files; entry 2014 is the terminal offset `0x1D5CA00`. File `k` occupies `[romOffset[k], romOffset[k+1])`. |
+| ROM `0x1D5CA00` | 2014 | `u32` | `nameOffset` | Offsets relative to `0x1D5CA00`, each naming a NUL-terminated string. |
 The game loads files by numeric id and never reads the name table. The ids are compiled-in constants and stage-table
 fields. A viewer can rely on the names for lookup, because they are stable within this revision.
 
@@ -190,29 +188,58 @@ The file layer never relocates; format code converts pointers afterwards (*Addre
 | Table | vaddr (data offset) | Layout | Users |
 |---|---|---|---|
 | stage table | 0x8007FCC0 (+0x25CE0) | 61 × 0x38 bytes, then a zero record | `stageGetIndex(id)` 0x7F15B00C (loops 61 times); the index is kept at 0x8007FC00 |
-| solo mission list | 0x80071E6C (+0x17E8C) | 21 × 12 bytes `{u32 stage; u8 k; u8 0; u16 nameId; u16 subtitleId; u16 shortNameId}` | 0x7F105438 |
-| mission groups | 0x80071F68 (+0x17F88) | 10 × `{u32 firstSoloIndex; u16 textId; u16 0}` ("Mission 1" … "Mission 9", "Special Assignments") | 0x7F10475C |
-| Combat Simulator arenas | 0x80084B98 (+0x2ABB8) | 17 × `{u16 stage; u8 unlock; u8 0; u16 nameId}` | 0x7F178ED4… |
-| arena groups | 0x80084C00 (+0x2AC20) | 3 × `{u32 firstIndex; u16 textId; u16 0}` ("Dark", "Classic", "Random") | 0x7F178F8C |
+| solo mission list | 0x80071E6C (+0x17E8C) | 21 × `SoloMissionRecord` (`0x0C`; below) | 0x7F105438 |
+| mission groups | 0x80071F68 (+0x17F88) | 10 × `MissionGroupRecord` (`0x08`; below) | 0x7F10475C |
+| Combat Simulator arenas | 0x80084B98 (+0x2ABB8) | 17 × `ArenaRecord` (`0x06`; below) | 0x7F178ED4… |
+| arena groups | 0x80084C00 (+0x2AC20) | 3 × `ArenaGroupRecord` (`0x08`; below) | 0x7F178F8C |
 | text bank → file | 0x80084124 (+0x2A144) | u16 fileId[69] | `langGetFileNum` 0x7F16E4B4 |
 | stage → text bank | code | `switch` in 0x7F16DFA0 (jump table 0x7F1B77C0, stage ids 9..0x50) | setup and briefing loaders |
-| per-stage memory arguments | 0x8005D9D8 (8 MiB), 0x8005DBD0 (4 MiB) | `{u32 stage; char* args}`, e.g. `-ml0 -me0 -mgfx120 -mvtx100 -ma500` | lib 0x7000DE28 |
+| per-stage memory arguments | 0x8005D9D8 (8 MiB), 0x8005DBD0 (4 MiB) | `StageMemoryArgs` (`0x08`; below) | lib 0x7000DE28 |
 
-**Stage record** (0x38 bytes):
+| Structure | Offset | Size | Type | Field | Meaning |
+|---|---:|---:|---|---|---|
+| `SoloMissionRecord` | `0x00` | 4 | `u32` | `stage` | Stage ID. |
+| `SoloMissionRecord` | `0x04` | 1 | `u8` | `unknown04` | Unknown selector `k`. |
+| `SoloMissionRecord` | `0x05` | 1 | `u8` | `zero05` | Always zero. |
+| `SoloMissionRecord` | `0x06` | 2 | `u16` | `nameId` | Mission-name text ID. |
+| `SoloMissionRecord` | `0x08` | 2 | `u16` | `subtitleId` | Subtitle text ID. |
+| `SoloMissionRecord` | `0x0A` | 2 | `u16` | `shortNameId` | Short-name text ID. |
+| `MissionGroupRecord` | `0x00` | 4 | `u32` | `firstSoloIndex` | First mission index in the group. |
+| `MissionGroupRecord` | `0x04` | 2 | `u16` | `textId` | Group label (`Mission 1` through `Mission 9`, then `Special Assignments`). |
+| `MissionGroupRecord` | `0x06` | 2 | `u16` | `zero06` | Always zero. |
+| `ArenaRecord` | `0x00` | 2 | `u16` | `stage` | Arena stage ID. |
+| `ArenaRecord` | `0x02` | 1 | `u8` | `unlock` | Unlock requirement. |
+| `ArenaRecord` | `0x03` | 1 | `u8` | `zero03` | Always zero. |
+| `ArenaRecord` | `0x04` | 2 | `u16` | `nameId` | Arena-name text ID. |
+| `ArenaGroupRecord` | `0x00` | 4 | `u32` | `firstIndex` | First arena index in the group. |
+| `ArenaGroupRecord` | `0x04` | 2 | `u16` | `textId` | Group label (`Dark`, `Classic`, or `Random`). |
+| `ArenaGroupRecord` | `0x06` | 2 | `u16` | `zero06` | Always zero. |
+| `StageMemoryArgs` | `0x00` | 4 | `u32` | `stage` | Stage ID. |
+| `StageMemoryArgs` | `0x04` | 4 | `char*` | `args` | Argument string, such as `-ml0 -me0 -mgfx120 -mvtx100 -ma500`. |
 
-| Offset | Type | Meaning |
-|---|---|---|
-| +0x00 | s16 | stage id (**verified**) |
-| +0x02..+0x05 | u8 × 4 | 2, 0xFF, 100, 100 in every stage except Deep Sea (8, 0x60, 0x50, 0xC8) (hypothesis: fog or light type; see *Level geometry*) |
-| +0x08 | u16 | **BG file id** `bgdata/bg_*.seg` (**verified**: loader and emulator) |
-| +0x0A | u16 | **tiles (collision) file id** (**verified**) |
-| +0x0C | u16 | **pads file id** (**verified**) |
-| +0x0E | u16 | **solo setup file id** `Usetup*Z` (**verified**) |
-| +0x10 | u16 | **multiplayer setup file id** `Ump_setup*Z`, used when `[0x8009A2D8] != 0` (**verified**: Skedar loads `Ump_setupoatZ`) |
-| +0x14 | f32 | 1.0 (0.1004 for 0x36 `len`) (hypothesis: world scale) |
-| +0x18 | f32 | 1.0; 0.5 for 0x1C, 0x27, 0x2C, 0x4C (copied to a per-player field) |
-| +0x1C | f32 | 100.0 (6.684 for 0x36); 0x7F15C664 returns +0x1C / +0x14 |
-| +0x20..+0x34 | | u32, u32, f32 0.15, u16/u16 (e.g. 0x2BC/0x190), u32, f32 1.0 (hypothesis: sky and fog parameters; see *Level geometry*) |
+**Stage record** (`0x38` bytes):
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 2 | `s16` | `stageId` | Verified stage ID. |
+| `0x02` | 4 | `u8[4]` | `environment02` | Usually `02 FF 64 64`; Deep Sea uses `08 60 50 C8`. Fog/light semantics are a hypothesis. |
+| `0x06` | 2 | `u16` | `unknown06` | Not yet interpreted. |
+| `0x08` | 2 | `u16` | `bgFileId` | Verified `bgdata/bg_*.seg` file ID. |
+| `0x0A` | 2 | `u16` | `tilesFileId` | Verified collision-tile file ID. |
+| `0x0C` | 2 | `u16` | `padsFileId` | Verified pads file ID. |
+| `0x0E` | 2 | `u16` | `soloSetupFileId` | Verified `Usetup*Z` file ID. |
+| `0x10` | 2 | `u16` | `multiplayerSetupFileId` | Verified `Ump_setup*Z` file ID, used when `[0x8009A2D8] != 0`. |
+| `0x12` | 2 | `u16` | `unknown12` | Not yet interpreted. |
+| `0x14` | 4 | `f32` | `scale14` | Usually 1.0; 0.1004 for stage `0x36` (`len`). World-scale semantics are a hypothesis. |
+| `0x18` | 4 | `f32` | `scale18` | Usually 1.0; 0.5 for stages `0x1C`, `0x27`, `0x2C`, and `0x4C`; copied to a per-player field. |
+| `0x1C` | 4 | `f32` | `scale1C` | Usually 100.0; 6.684 for stage `0x36`; `0x7F15C664` returns `scale1C / scale14`. |
+| `0x20` | 4 | `u32` | `unknown20` | Hypothesized sky/fog parameter. |
+| `0x24` | 4 | `u32` | `unknown24` | Hypothesized sky/fog parameter. |
+| `0x28` | 4 | `f32` | `unknown28` | Usually 0.15; hypothesized sky/fog parameter. |
+| `0x2C` | 2 | `u16` | `unknown2C` | Example value: `0x02BC`. |
+| `0x2E` | 2 | `u16` | `unknown2E` | Example value: `0x0190`. |
+| `0x30` | 4 | `u32` | `unknown30` | Hypothesized sky/fog parameter. |
+| `0x34` | 4 | `f32` | `unknown34` | Usually 1.0; hypothesized sky/fog parameter. |
 
 **Global variables** (verified by RAM reads in Defection and Skedar):
 
@@ -333,22 +360,54 @@ These appear in the unused-content catalogue in *Unused and hidden content*.
 
 #### Room gfx data (one stream per room; pointers relative to the room pointer)
 
-Header (0x18; verified in RDRAM: Defection room 2 loaded at 0x80161470 with `base + (ptr − roomPtr)`):
-`ptr vertices; ptr colours; ptr opaqueBlocks; ptr xluBlocks (0 = none); s16 lightsIndex; s16 numLights; s16 numVtx
-(set at load); s16 numColours (set at load)`, then the 0x14-byte block records.
+Header (`0x18` bytes; verified in RDRAM with Defection room 2 at `0x80161470`, relocated as
+`base + (pointer − roomPointer)`):
 
-| Block offset | Leaf (type 0) | Parent (type 1) |
-|---|---|---|
-| +0x00 | u8 0, pad | u8 1, pad |
-| +0x04 | ptr next sibling | ptr next sibling |
-| +0x08 | ptr display list | ptr first child |
-| +0x0C | ptr vertex array (bound to RSP segment 14 when drawn) | ptr `{coord pos; coord normal}` split plane (hypothesis: child draw order) |
-| +0x10 | ptr colour array (segment 13) | – |
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 4 | `ptr` | `vertices` | Vertex array. |
+| `0x04` | 4 | `ptr` | `colors` | RGBA color array. |
+| `0x08` | 4 | `ptr` | `opaqueBlocks` | Opaque block tree. |
+| `0x0C` | 4 | `ptr` | `translucentBlocks` | Translucent block tree, or zero. |
+| `0x10` | 2 | `s16` | `lightsIndex` | First room-light index. |
+| `0x12` | 2 | `s16` | `lightCount` | Room-light count. |
+| `0x14` | 2 | `s16` | `vertexCount` | Set at load. |
+| `0x16` | 2 | `s16` | `colorCount` | Set at load. |
+
+The header is followed by `0x14`-byte block records. Leaf records use:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 1 | `u8` | `type` | Zero for a leaf. |
+| `0x01` | 3 | byte array | `padding01` | Alignment padding. |
+| `0x04` | 4 | `ptr` | `nextSibling` | Next block at the same tree depth. |
+| `0x08` | 4 | `ptr` | `displayList` | Display-list pointer. |
+| `0x0C` | 4 | `ptr` | `vertices` | Vertex array bound to RSP segment 14. |
+| `0x10` | 4 | `ptr` | `colors` | Color array bound to RSP segment 13. |
+
+Parent records use:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 1 | `u8` | `type` | One for a parent. |
+| `0x01` | 3 | byte array | `padding01` | Alignment padding. |
+| `0x04` | 4 | `ptr` | `nextSibling` | Next block at the same tree depth. |
+| `0x08` | 4 | `ptr` | `firstChild` | First child block. |
+| `0x0C` | 4 | `ptr` | `splitPlane` | Position and normal coordinates; camera-dependent child ordering is a hypothesis. |
+| `0x10` | 4 | `u32` | `zero10` | Unused in parent records. |
 
 - Stream order: header, blocks, vertices, colours, display lists. 4,367 leaves, 542 parents in all BGs.
-- **Vertex** (12 bytes): `s16 x, y, z; u8 flags; u8 colourOffset; s16 s, t`. The colour is `u32 RGBA` at
-  `colourArray[G_COL offset + colourOffset]` (a byte offset, multiple of 4). **verified** (all offsets in range in
-  every BG; RDRAM vertex bytes identical; renders).
+Vertex record (`0x0C` bytes; verified):
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 6 | `s16[3]` | `position` | X, Y, and Z. |
+| `0x06` | 1 | `u8` | `flags` | Vertex flags. |
+| `0x07` | 1 | `u8` | `colorOffset` | Byte offset, always a multiple of four, added to the current `G_COL` offset. |
+| `0x08` | 4 | `s16[2]` | `texcoord` | S and T texture coordinates. |
+
+The color is the `u32 RGBA` value at `colorArray[G_COL offset + colorOffset]`. All offsets are in range in every BG;
+RDRAM vertex bytes and renders verify the layout.
 - **Colours:** u32 RGBA baked vertex colours. **verified** (RAM colour buffer = file for Defection room 2).
 
 #### Level assembly (`loadLevel`)
@@ -386,16 +445,31 @@ hypothesis.
 
 #### BG file container (verified: all 31 non-stub BGs parse exactly to the file end; disassembly of `bgReset` 0x7F15B304..0x7F15B6C4)
 
-| Offset | Type | Field |
-|---|---|---|
-| +0x00 | u32 | inflated size P of the primary data |
-| +0x04 | u32 | S1 = bytes from +0x0C to the section 2 header |
-| +0x08 | u32 | length of the (padded) primary stream |
-| +0x0C | 1173 stream | primary data |
-| +0x0C + [8] | 1173 streams | room 1, 2, … : room r at `0x0C + [8] + (roomPtr[r] − 0x0F000000 − P)`; its length = next room pointer − this pointer |
-| +0x0C + S1 | u16, u16 | section 2 header: `0x8000 \| inflatedSize`, stream length |
-| +0x10 + S1 | 1173 stream | section 2: u16 texture numbers used by the stage (the game preloads them) |
-| next | u16, u16 + stream | section 3: for rooms 1..N−1: `s16 min xyz, max xyz` (room-relative bbox) ×N−1, then `u16 gfxLen/16` ×N−1 (allocation `align16(v·16 + 0x100)`), then `u8 numLights` ×N−1 |
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 4 | `u32` | `primaryInflatedSize` | Inflated primary-data size `P`. |
+| `0x04` | 4 | `u32` | `section2OffsetDelta` | Bytes `S1` from `0x0C` to the section-2 header. |
+| `0x08` | 4 | `u32` | `primaryStoredSize` | Padded primary-stream length. |
+| `0x0C` | `primaryStoredSize` | rarezip stream | `primaryData` | Primary data. |
+| `0x0C + primaryStoredSize` | variable | rarezip stream array | `rooms` | Room `r` begins at `0x0C + primaryStoredSize + (roomPtr[r] - 0x0F000000 - P)` and ends at the next room pointer. |
+| `0x0C + S1` | 4 | stream header | `section2Header` | Header defined below. |
+| `0x10 + S1` | variable | rarezip stream | `textureNumbers` | Section 2; decoded as the stage's `u16` texture numbers. |
+| after section 2 | variable | stream header and rarezip stream | `roomMetadata` | Section 3; header and decoded layout are defined below. |
+
+Sections 2 and 3 use this stream header:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 2 | `u16` | `inflatedSizeFlags` | `0x8000 \| inflatedSize`. |
+| `0x02` | 2 | `u16` | `streamLength` | Stored stream length. |
+
+Decoded section 3, where `N` is the BG room-table count:
+
+| Order | Count | Type | Field | Description |
+|---:|---:|---|---|---|
+| 1 | `N − 1` | `s16[6]` | `roomBounds` | Room-relative minimum XYZ followed by maximum XYZ. |
+| 2 | `N − 1` | `u16` | `gfxLengthUnits` | Graphics allocation length in 16-byte units; allocation is `align16(value × 16 + 0x100)`. |
+| 3 | `N − 1` | `u8` | `lightCount` | Per-room light count. |
 
 The game reads the file in parts (`fileLoadPart`): the 0x40-byte header, the primary stream, section 2 and 3, then
 room streams on demand as rooms become visible (*How a stage loads (verified: disassembly; order confirmed with file-load breakpoints for stages 0x30 and 0x32)*). **Stubs:** 0x200-byte files (one trivial room);
@@ -405,29 +479,71 @@ room streams on demand as rooms become visible (*How a stage loads (verified: di
 
 Header (verified: the loader adds `base − 0x0F000000` to words 1..5):
 
-| Offset | Field |
-|---|---|
-| +0x00 | u32 0 |
-| +0x04 | ptr rooms (0x14 bytes each) |
-| +0x08 | ptr portals (8 bytes each) |
-| +0x0C | ptr BG commands (8 bytes each; visibility script) |
-| +0x10 | ptr lights (0x22 bytes each; 0 if none) |
-| +0x14 | ptr 0 (unused in retail) |
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 4 | `u32` | `zero00` | Always zero. |
+| `0x04` | 4 | `ptr` | `rooms` | Array of `0x14`-byte room records. |
+| `0x08` | 4 | `ptr` | `portals` | Array of eight-byte portal records. |
+| `0x0C` | 4 | `ptr` | `commands` | Array of eight-byte BG visibility commands. |
+| `0x10` | 4 | `ptr` | `lights` | Array of `0x22`-byte lights, or zero. |
+| `0x14` | 4 | `ptr` | `unused14` | Zero in retail. |
 
-- **Room** (0x14): `ptr gfxData` (link address; also locates the room stream; entry 0 is zero, and the entry after
-  the last room holds only a pointer = end marker); `f32 x, y, z` room origin; `u8 brightnessMin, brightnessMax`
-  (names hypothesis); `u16 0`. Room count: entries with a non-zero pointer from entry 1, minus the end marker.
-  **verified**.
-- **Portal** (8): `u16 verticesRef` (1-based vertex-list index in file order; 0 ends; rewritten to an offset at load),
-  `s16 roomA, roomB`, `u8 flags`, pad; after the terminator the vertex lists `u8 count; 3 pad; count × f32 xyz`
-  (absolute world coordinates). **verified** (data and RAM).
-- **BG commands** (8): `u8 type; u8 len; u16 0; s32 param`, a small stack language for visibility special cases
-  (most BGs have only END; eld has 709 commands). Counts verified, semantics hypothesis. **A viewer ignores portals and
-  commands and draws all rooms.**
-- **Light** (0x22, grouped by room): `u16 room; u16 colour; u8 brightness; u8 flags; u8 multiplier; s8 dir xyz;
-  4 × s16 xyz fixture quad`. Record size, count and per-room grouping **verified**; field meanings hypothesis. 15 BGs
-  have lights (all solo stages, MP Ruins). They describe light fixtures used for dynamic effects (shooting lights
-  out); the baked look doesn't need them.
+Room record (`0x14` bytes; verified):
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 4 | `ptr` | `gfxData` | Link address that also locates the room stream. Entry 0 is zero; the entry after the final room contains only the end pointer. |
+| `0x04` | 12 | `f32[3]` | `origin` | Room X, Y, and Z origin. |
+| `0x10` | 1 | `u8` | `brightnessMin` | Hypothesized minimum brightness. |
+| `0x11` | 1 | `u8` | `brightnessMax` | Hypothesized maximum brightness. |
+| `0x12` | 2 | `u16` | `zero12` | Always zero. |
+
+The room count is the number of nonzero entries from entry 1, excluding the final end-marker entry.
+
+Portal record (`0x08` bytes; verified from data and RAM):
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 2 | `u16` | `verticesRef` | One-based vertex-list index in file order; zero terminates the portal array. Rewritten to an offset at load. |
+| `0x02` | 2 | `s16` | `roomA` | First connected room. |
+| `0x04` | 2 | `s16` | `roomB` | Second connected room. |
+| `0x06` | 1 | `u8` | `flags` | Portal flags; semantics remain unknown. |
+| `0x07` | 1 | — | `padding07` | Padding. |
+
+Portal vertex lists follow the terminating portal:
+
+| Order | Count | Type | Field | Description |
+|---:|---:|---|---|---|
+| 1 | 1 | `u8` | `count` | Number of points. |
+| 2 | 3 | — | `padding` | Float alignment. |
+| 3 | `count` | `f32[3]` | `points` | Absolute world-space XYZ coordinates. |
+
+BG visibility command (`0x08` bytes):
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 1 | `u8` | `type` | Visibility-language opcode. |
+| `0x01` | 1 | `u8` | `length` | Command length. |
+| `0x02` | 2 | `u16` | `zero02` | Always zero. |
+| `0x04` | 4 | `s32` | `parameter` | Opcode parameter. |
+
+The command count is verified, but the small stack language's semantics are a hypothesis. Most BGs contain only END;
+`eld` contains 709 commands. A viewer ignores portals and commands and draws all rooms.
+
+Light record (`0x22` bytes, grouped by room):
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 2 | `u16` | `room` | BG room number. |
+| `0x02` | 2 | `u16` | `color` | Packed color; interpretation is a hypothesis. |
+| `0x04` | 1 | `u8` | `brightness` | Hypothesized brightness. |
+| `0x05` | 1 | `u8` | `flags` | Hypothesized flags. |
+| `0x06` | 1 | `u8` | `multiplier` | Hypothesized multiplier. |
+| `0x07` | 3 | `s8[3]` | `direction` | Hypothesized direction vector. |
+| `0x0A` | 24 | `s16[4][3]` | `fixtureQuad` | Four XYZ fixture points. |
+
+Record size, count, and grouping are verified. Fifteen BGs have lights (all solo stages and MP Ruins). They describe
+fixtures used for dynamic effects such as shooting lights out; baked lighting does not require them.
 
 #### Coordinates, units, culling (verified)
 
@@ -465,12 +581,30 @@ Header (verified: the loader adds `base − 0x0F000000` to words 1..5):
 No `G_DL`, `G_MTX`, `G_MOVEWORD`, lights or fog commands occur in BG lists.
 
 **`C0` texture macro** (field layout from the lead, consistent with the expanded list in the frame):
-```
-w0: C0 | smode:2 (bits 22-23) | tmode:2 (20-21) | offset:2 (18-19) | shiftS:4 (14-17) | shiftT:4 (10-13) | flag (9) | subcmd:3 (0-2)
-w1: min:8 (24-31) | texture2:12 (12-23) | texture:12 (0-11)
-smode/tmode: 0 wrap, 1 clamp, 2 mirror;  subcmd 2 = texture with LOD tiles (~21,100), 4 = single tile (906),
-0/1 = with a detail tile (186/89; texture2 is the detail texture for 1)
-```
+
+| Word | Bits | Field | Meaning |
+|---|---:|---|---|
+| `w0` | 31–24 | `opcode` | `0xC0`. |
+| `w0` | 23–22 | `sMode` | S wrap mode. |
+| `w0` | 21–20 | `tMode` | T wrap mode. |
+| `w0` | 19–18 | `offsetMode` | Value 2 applies a half-texel offset. |
+| `w0` | 17–14 | `shiftS` | S coordinate shift. |
+| `w0` | 13–10 | `shiftT` | T coordinate shift. |
+| `w0` | 9 | `flag` | Unknown flag. |
+| `w0` | 2–0 | `subcommand` | Texture-load form. |
+| `w1` | 31–24 | `minimum` | Minimum/LOD parameter. |
+| `w1` | 23–12 | `texture2` | Secondary or detail texture number. |
+| `w1` | 11–0 | `texture` | Primary texture number. |
+
+| Field | Value | Meaning |
+|---|---:|---|
+| `sMode`, `tMode` | 0 | Wrap. |
+| `sMode`, `tMode` | 1 | Clamp. |
+| `sMode`, `tMode` | 2 | Mirror. |
+| `subcommand` | 0 | Detail-tile form; 186 uses. |
+| `subcommand` | 1 | Detail-tile form using `texture2`; 89 uses. |
+| `subcommand` | 2 | Texture with LOD tiles; approximately 21,100 uses. |
+| `subcommand` | 4 | Single tile; 906 uses. |
 Verified in the Defection frame: the expansion loads the texture's pool data with `SETTIMG`/`LOADBLOCK`/`LOADTLUT`,
 emits one `SETTILE`/`SETTILESIZE` pair per LOD, patches `BB002801` to `BB002001`, and `offset == 2` sets
 `SETTILESIZE` uls/ult = 2 (half-texel offset, `F2002002 0007E07E` for 32×32). UV: `u = (s·scale/32 − uls/4)/width`.
@@ -504,20 +638,76 @@ approach for the combiner fold).
 
 #### Global textures (verified: disassembly, all 3,502 non-empty textures decode, texels identical to RDRAM)
 
-- **List:** ROM 0x1FF7CA0, 3,504 × `{u32 w0; u32 w1}`: w0 bits 0–23 = data offset (unaligned), bits 24–27 surface
-  type, 28–31 sound type (names hypothesis); w1 = detail-tile nibbles (hypothesis). Data `ROM 0x1D65F40 + offset[n] ..
-  offset[n+1]`; numbers ≥ 3503 rejected. Referenced by number from BG `C0` macros and from model files
-  (`FD…… ABCDnnnn`, *Objects and props*).
-- **Header byte:** `hasLodData:1 zlib:1 numLods:6` (numLods clamped to 5).
-- **zlib (paletted) textures** (2,886): MSB-first bit reader: `u8 format` (9 CI8/RGBA16, 10 CI4/RGBA16, 11 CI8/IA16,
-  12 CI4/IA16), `u8 numColours − 1`, `u16 palette[n]`; per stored image `u8 width, u8 height` + a 1173 stream of indices
-  (CI8: 1 byte per texel, CI4: 1 byte per 2 texels). Without stored LODs the game generates smaller levels
-  (2×2 average + nearest palette colour) while the total stays ≤ 0x800 bytes.
-- **Bitstream textures** (616): per image `format:4 width:8 height:8 method:4`; formats 0 RGBA32, 1 RGBA16, 2 RGB24,
-  3 RGB15, 4 IA16, 5 IA8, 6 IA4, 7 I8, 8 I4; methods 0/1 uncompressed, 2 Huffman (shared table), 3 Huffman per channel,
-  4 RLE, 5 lookup (palette of up to 2047 colours + packed indices), 6 Huffman lookup, 7 RLE lookup, 8 Huffman + blur
-  (predictor 0..6, modular differences), 9 RLE + blur. Exact bit layouts: `bg/lib/pdtex.ts` (a port that reproduces
-  the game's pool bytes, including three game bugs).
+- **List:** ROM 0x1FF7CA0 contains 3,504 eight-byte entries:
+
+  | Offset | Bits | Field | Meaning |
+  |---:|---:|---|---|
+  | `0x00` | 23–0 | `dataOffset` | Unaligned offset relative to ROM `0x1D65F40`. Texture `n` occupies `[offset[n], offset[n+1])`. |
+  | `0x00` | 27–24 | `surfaceType` | Surface classification; name is a hypothesis. |
+  | `0x00` | 31–28 | `soundType` | Sound classification; name is a hypothesis. |
+  | `0x04` | 31–0 | `detailTiles` | Detail-tile nibbles; interpretation is a hypothesis. |
+
+  Texture numbers at or above 3503 are rejected. BG `C0` macros and model-file commands (`FD…… ABCDnnnn`) refer
+  to these entries by number.
+- **Header byte:**
+
+  | Bits | Field | Meaning |
+  |---:|---|---|
+  | 7 | `hasLodData` | Stored LOD data follows. |
+  | 6 | `zlib` | Selects the paletted zlib representation. |
+  | 5–0 | `numLods` | LOD count, clamped to 5. |
+- **zlib (paletted) textures** (2,886) use an MSB-first bit reader:
+
+  | Order | Size | Type | Field | Description |
+  |---:|---:|---|---|---|
+  | 1 | 1 | `u8` | `format` | 9 = CI8/RGBA16, 10 = CI4/RGBA16, 11 = CI8/IA16, 12 = CI4/IA16. |
+  | 2 | 1 | `u8` | `colorCountMinus1` | Stored palette size minus one. |
+  | 3 | `2 × colorCount` | `u16[]` | `palette` | RGBA16 or IA16 palette selected by `format`. |
+  | 4 | per stored image | image record | `images` | Image record defined below. |
+
+  | Order | Size | Type | Field | Description |
+  |---:|---:|---|---|---|
+  | 1 | 1 | `u8` | `width` | Stored-image width. |
+  | 2 | 1 | `u8` | `height` | Stored-image height. |
+  | 3 | variable | rarezip 1173 | `indices` | CI8 uses one byte per texel; CI4 uses one byte per two texels. |
+
+  Without stored LODs, the game generates smaller levels by 2×2 averaging and choosing the nearest palette color;
+  total texture-memory use remains at most `0x800` bytes.
+- **Bitstream textures** (616) begin each image with this 24-bit header:
+
+  | Bits | Field | Meaning |
+  |---:|---|---|
+  | 23–20 | `format` | Pixel format listed below. |
+  | 19–12 | `width` | Image width. |
+  | 11–4 | `height` | Image height. |
+  | 3–0 | `method` | Compression method listed below. |
+
+  | Format | Pixel representation |
+  |---:|---|
+  | 0 | RGBA32 |
+  | 1 | RGBA16 |
+  | 2 | RGB24 |
+  | 3 | RGB15 |
+  | 4 | IA16 |
+  | 5 | IA8 |
+  | 6 | IA4 |
+  | 7 | I8 |
+  | 8 | I4 |
+
+  | Method | Encoding |
+  |---:|---|
+  | 0, 1 | Uncompressed. |
+  | 2 | Huffman with a shared table. |
+  | 3 | Huffman per channel. |
+  | 4 | RLE. |
+  | 5 | Lookup palette of at most 2,047 colors plus packed indices. |
+  | 6 | Huffman lookup. |
+  | 7 | RLE lookup. |
+  | 8 | Huffman plus blur predictor 0–6 with modular differences. |
+  | 9 | RLE plus blur. |
+
+  Exact bit layouts are implemented by `bg/lib/pdtex.ts`, a port that reproduces the game's pool bytes including
+  three game bugs.
 - **Pool layout:** rows padded to 4 texels/8 bytes, odd rows "swizzled" (halves of each 64-bit word swapped, 16-byte
   halves for 32-bit texels) — the same rule as the viewer's `texture.ts`.
 - **RAM check** (Defection, `bg/scripts/texram.ts`): of the stage's 118 textures, 116 found in the pool; LOD 0 +
@@ -567,12 +757,32 @@ approach for the combiner fold).
 
 #### Tiles (collision) and pads (verified: all 60 tiles files parse exactly)
 
-- **Tiles** (`bg_{code}_tilesZ`, 1173-compressed): `u32 roomCount` (BG rooms + 1), `u32 offset[roomCount + 1]`
-  (file-relative; room r's records span `offset[r]..offset[r+1]`), then per room records `{u8 type; u8 numVertices;
-  u16 flags}`:
-  - type 0: `u16 floorType; u8 xmin, ymin, zmin, xmax, ymax, zmax; u16 floorColour; numVertices × s16 x, y, z` (14 + 6n
-    bytes, absolute world units). Types 1 (f32 vertices, +16), 2 (block) and 3 (cylinder) exist in the loader (lead)
-    but never in retail.
+- **Tiles** (`bg_{code}_tilesZ`, 1173-compressed) begin with:
+
+  | Offset | Size | Type | Field | Description |
+  |---:|---:|---|---|---|
+  | `0x00` | 4 | `u32` | `roomCount` | BG room count plus one. |
+  | `0x04` | `4 × (roomCount + 1)` | `u32[]` | `roomOffset` | File-relative offsets; room `r` spans `[roomOffset[r], roomOffset[r+1])`. |
+
+  Every room contains variable-length collision records beginning with this common header:
+
+  | Offset | Size | Type | Field | Description |
+  |---:|---:|---|---|---|
+  | `0x00` | 1 | `u8` | `type` | Shape type. |
+  | `0x01` | 1 | `u8` | `vertexCount` | Vertex count. |
+  | `0x02` | 2 | `u16` | `flags` | Surface and collision flags. |
+
+  Retail files contain only type 0 records (`14 + 6 × vertexCount` bytes):
+
+  | Offset | Size | Type | Field | Description |
+  |---:|---:|---|---|---|
+  | `0x04` | 2 | `u16` | `floorType` | Surface-material selector. |
+  | `0x06` | 6 | `u8[6]` | `extremaIndices` | Vertex indices for minimum and maximum X, Y, and Z. |
+  | `0x0C` | 2 | `u16` | `floorColor` | 12-bit `0x0RGB` baked-floor color. |
+  | `0x0E` | `6 × vertexCount` | `s16[][3]` | `vertices` | Absolute world-space XYZ coordinates. |
+
+  Loader support also exists for type 1 (floating-point vertices, with 16 extra bytes), type 2 (block), and type 3
+  (cylinder), but none occurs in retail.
   - **Survey of the 50 distinct non-empty files** (verified, `../impl/pd_col/explore.ts`):
     - 119,842 tiles, all type 0: 77,104 quads, 42,267 triangles, a few 5–12-gons (convex polygons).
     - The six index bytes name the vertex with the minimum / maximum x, y, z: true for every tile.
@@ -657,15 +867,70 @@ everything (BG, props, characters, held weapons) uniformly: a viewer draws BG an
 the **no-fog table** (0x800813CC, 0x38-byte records, s32 id, first record id −1 = default). Both fill the live struct
 0x80081058 and call `0x7000BE84(near, far)`.
 
-```
-fog record (0x2C):   +0 s16 id  +2 s16 near  +4 s16 far  +6/+8/+A s16 vec  +C s16 fogMin  +E s16 fogMax  +10 u8 sky r,g,b
-                     +13 u8 numSuns  +14 ptr suns  +18 u8 cloudsOn  +1A s16 cloudsScale  +1C u8 cloudsType  +1D u8 cloud r,g,b
-                     +20 u8 waterOn  +22 s16 waterScale  +24 u8 waterType  +25 u8 water r,g,b  +28 u8 waterOffset
-no-fog record (0x38): +0 s32 id  +4 s16 near  +6 s16 far  +8/+A/+C s16 vec  +E u8 sky r,g,b  +11 u8 numSuns  +14 ptr suns
-                     +18 u8 cloudsOn  +19 u8 cloud r,g,b  +1C f32 cloudsScale  +20 s16 cloudsType  +22 u8 waterOn
-                     +23 u8 water r,g,b  +28 f32 waterScale  +2C s16 waterType  +30 f32 waterOffset  +34 s32 flag
-sun (0x14):          u8 lensflare; u8 r,g,b; f32 x,y,z (direction, ~1e6); u16; u16
-```
+Fog record (`0x2C` bytes):
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 2 | `s16` | `id` | Stage or override identifier. |
+| `0x02` | 2 | `s16` | `near` | Near plane. |
+| `0x04` | 2 | `s16` | `far` | Far plane. |
+| `0x06` | 2 | `s16` | `unknown06` | Unknown. |
+| `0x08` | 2 | `s16` | `unknown08` | Unknown. |
+| `0x0A` | 2 | `s16` | `vec` | Environment vector parameter. |
+| `0x0C` | 2 | `s16` | `fogMin` | Fog-range minimum. |
+| `0x0E` | 2 | `s16` | `fogMax` | Fog-range maximum. |
+| `0x10` | 3 | `u8[3]` | `skyColor` | Sky RGB. |
+| `0x13` | 1 | `u8` | `numSuns` | Sun count. |
+| `0x14` | 4 | `ptr` | `suns` | Pointer to sun records. |
+| `0x18` | 1 | `u8` | `cloudsOn` | Enables clouds. |
+| `0x19` | 1 | — | `padding19` | Alignment. |
+| `0x1A` | 2 | `s16` | `cloudsScale` | Cloud scale. |
+| `0x1C` | 1 | `u8` | `cloudsType` | Cloud texture/type selector. |
+| `0x1D` | 3 | `u8[3]` | `cloudColor` | Cloud RGB. |
+| `0x20` | 1 | `u8` | `waterOn` | Enables water. |
+| `0x21` | 1 | — | `padding21` | Alignment. |
+| `0x22` | 2 | `s16` | `waterScale` | Water scale. |
+| `0x24` | 1 | `u8` | `waterType` | Water texture/type selector. |
+| `0x25` | 3 | `u8[3]` | `waterColor` | Water RGB. |
+| `0x28` | 1 | `u8` | `waterOffset` | Water offset. |
+| `0x29` | 3 | — | `padding29` | Tail padding. |
+
+No-fog record (`0x38` bytes):
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 4 | `s32` | `id` | Stage identifier; -1 is the default record. |
+| `0x04` | 2 | `s16` | `near` | Near plane. |
+| `0x06` | 2 | `s16` | `far` | Far plane. |
+| `0x08` | 2 | `s16` | `unknown08` | Unknown. |
+| `0x0A` | 2 | `s16` | `unknown0A` | Unknown. |
+| `0x0C` | 2 | `s16` | `vec` | Environment vector parameter. |
+| `0x0E` | 3 | `u8[3]` | `skyColor` | Sky RGB. |
+| `0x11` | 1 | `u8` | `numSuns` | Sun count. |
+| `0x12` | 2 | — | `padding12` | Pointer alignment. |
+| `0x14` | 4 | `ptr` | `suns` | Pointer to sun records. |
+| `0x18` | 1 | `u8` | `cloudsOn` | Enables clouds. |
+| `0x19` | 3 | `u8[3]` | `cloudColor` | Cloud RGB. |
+| `0x1C` | 4 | `f32` | `cloudsScale` | Cloud scale. |
+| `0x20` | 2 | `s16` | `cloudsType` | Cloud texture/type selector. |
+| `0x22` | 1 | `u8` | `waterOn` | Enables water. |
+| `0x23` | 3 | `u8[3]` | `waterColor` | Water RGB. |
+| `0x26` | 2 | — | `padding26` | Float alignment. |
+| `0x28` | 4 | `f32` | `waterScale` | Water scale. |
+| `0x2C` | 2 | `s16` | `waterType` | Water texture/type selector. |
+| `0x2E` | 2 | — | `padding2E` | Float alignment. |
+| `0x30` | 4 | `f32` | `waterOffset` | Water offset. |
+| `0x34` | 4 | `s32` | `flag` | Environment flag. |
+
+Sun record (`0x14` bytes):
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 1 | `u8` | `lensflare` | Lens-flare selector or enable flag. |
+| `0x01` | 3 | `u8[3]` | `color` | Sun RGB. |
+| `0x04` | 12 | `f32[3]` | `direction` | Direction vector, with components on the order of one million. |
+| `0x10` | 2 | `u16` | `unknown10` | Unknown. |
+| `0x12` | 2 | `u16` | `unknown12` | Unknown. |
 All records are decoded in `runtime/envtable.json` (`runtime/tools/envtable.py`). Menu stages:
 
 | Stage | Near/far | Sky/clear colour | Fog min..max | Suns | Clouds (rgb, scale) | Water |
@@ -823,46 +1088,114 @@ Defection RDRAM capture (`obj/scripts/compare_ram.ts`).
 
 | Thing | Address / file |
 |---|---|
-| stage setup globals `g_StageSetup` | 0x8009D030: waypoints, waygroups, covers, +0x0C intro, +0x10 props, paths, AI lists, +0x1C pads file |
+| stage setup globals `g_StageSetup` | 0x8009D030; fields listed below |
 | setup command lengths | `setupGetCmdLength` 0x7F091E10 (types 1..0x3B) |
 | setup loop (creates props) | 0x7F00F5C0..0x7F0102B8 (jump table 0x7F1A7E28) |
 | generic object placement | 0x7F00CEE4 → `objInit` 0x7F06A730 |
 | door setup | 0x7F00E368 |
 | chr spawn | 0x7F02D4FC → body/head model 0x7F02CE8C |
 | intro command parser | 0x7F0118F4 |
-| model table `g_ModelStates` | data 0x8007B06C: 441 × `{ptr modeldef (0 in ROM); u16 fileId; u16 scale × 4096}` |
-| bodies/heads `g_HeadsAndBodies` | data 0x8007CF04: 151 × 20 bytes `{u16 flags; u16 fileId; f32 scale; f32 animScale; ptr modeldef; u16 handFileId; u16}` |
-| skeletons | data 0x80089990 (NULL-terminated pointers to `{s16 id, …}`) |
+| model table `g_ModelStates` | data 0x8007B06C: 441 × `ModelState` (`0x08`; below) |
+| bodies/heads `g_HeadsAndBodies` | data 0x8007CF04: 151 × `HeadBodyRecord` (`0x14`; below) |
+| skeletons | data 0x80089990 (NULL-terminated pointers to records beginning with an `s16` ID) |
 | model loader | 0x7F1A7604(fileId) → 0x7F1A7554: load, skeleton fix-up, relocate from 0x05000000 (0x70022A24), texture rewrite (0x7F175480) |
 | animations | ROM 0x1A15C0..0x7CD1A0 + table 0x7CD1A0..0x7D0A40 (*Animations and standing characters (verified: lib `anim.c` disassembly, all 1,207 table records, joint matrices vs RAM)*) |
 
+`g_StageSetup` fields:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 4 | `ptr` | `waypoints` | Waypoint table. |
+| `0x04` | 4 | `ptr` | `waygroups` | Waypoint-group table. |
+| `0x08` | 4 | `ptr` | `covers` | Cover table. |
+| `0x0C` | 4 | `ptr` | `intro` | Intro-command list. |
+| `0x10` | 4 | `ptr` | `props` | Prop-command list. |
+| `0x14` | 4 | `ptr` | `paths` | Path table. |
+| `0x18` | 4 | `ptr` | `aiLists` | AI-list table. |
+| `0x1C` | 4 | `ptr` | `padsFile` | Loaded pads file. |
+
+| Structure | Offset | Size | Type | Field | Description |
+|---|---:|---:|---|---|---|
+| `ModelState` | `0x00` | 4 | `ptr` | `modelDef` | Zero in ROM; populated at runtime. |
+| `ModelState` | `0x04` | 2 | `u16` | `fileId` | Model file ID. |
+| `ModelState` | `0x06` | 2 | `u16` | `scale4096` | Scale multiplied by 4096. |
+| `HeadBodyRecord` | `0x00` | 2 | `u16` | `flags` | Head/body flags. |
+| `HeadBodyRecord` | `0x02` | 2 | `u16` | `fileId` | Model file ID. |
+| `HeadBodyRecord` | `0x04` | 4 | `f32` | `scale` | Model scale. |
+| `HeadBodyRecord` | `0x08` | 4 | `f32` | `animationScale` | Animation scale. |
+| `HeadBodyRecord` | `0x0C` | 4 | `ptr` | `modelDef` | Runtime model-definition pointer. |
+| `HeadBodyRecord` | `0x10` | 2 | `u16` | `handFileId` | Hand model file ID. |
+| `HeadBodyRecord` | `0x12` | 2 | `u16` | `unknown12` | Unknown. |
+
 #### Pads file `bgdata/bg_<code>_padsZ` (verified: `padUnpack` 0x7F115A30 disassembly field by field; all 37 populated pads files parse)
 
-```
-+0x00 s32 numPads   +0x04 s32 numCovers   +0x08 s32 waypointsOffset   +0x0C s32 waygroupsOffset   +0x10 s32 coversOffset
-+0x14 u16 padOffset[numPads]                                   (file offsets)
-pad: u32 header: flags = header >> 14; room = sign-extended bits 13..4 (always -1 in ROM); lift = header & 0xF
-     pos : flag 0x1 INTPOS -> 3 x s16 + 2 pad bytes, else 3 x f32
-     up  : flags 0x2/0x4/0x8 = +X/+Y/+Z (0x10 = negative), else 3 x f32
-     look: flags 0x20/0x40/0x80 = +X/+Y/+Z (0x100 = negative), else 3 x f32
-     bbox: flag 0x200 -> 6 x f32 xmin,xmax,ymin,ymax,zmin,zmax, else -100..100
-     normal = up x look.  Pad-local axes: bbox x along normal, y along up, z along look.
-     centre = pos + 0.5·((xmin+xmax)·normal + (ymin+ymax)·up + (zmin+zmax)·look)
-cover: 0x1C bytes {f32 pos[3]; f32 look[3]; u16 flags; u16}
-waypoint (hypothesis layout): {s32 padnum; s32 neighboursOffset; s32 groupnum; s32 step} until padnum < 0
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `+0x00` | 4 | `s32` | `numPads` | — |
+| `+0x04` | 4 | `s32` | `numCovers` | — |
+| `+0x08` | 4 | `s32` | `waypointsOffset` | — |
+| `+0x0C` | 4 | `s32` | `waygroupsOffset` | — |
+| `+0x10` | 4 | `s32` | `coversOffset` | — |
+| `+0x14` | `2 × numPads` | `u16[]` | `padOffset` | File offsets of pad records. |
+
+Each `padOffset` selects a variable-length pad record:
+
+| Order | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 1 | 4 | packed `u32` | `header` | `flags = header >> 14`; `room` is signed bits 13–4 and is always -1 in ROM; `lift = header & 0xF`. |
+| 2 | 8 or 12 | vector | `position` | With `INTPOS` flag `0x1`, three `s16` coordinates plus two padding bytes; otherwise three `f32` coordinates. |
+| 3 | 0 or 12 | vector | `up` | Flags `0x2`, `0x4`, or `0x8` select +X, +Y, or +Z, with `0x10` negating it; otherwise stored as three `f32` values. |
+| 4 | 0 or 12 | vector | `look` | Flags `0x20`, `0x40`, or `0x80` select +X, +Y, or +Z, with `0x100` negating it; otherwise stored as three `f32` values. |
+| 5 | 0 or 24 | bounds | `bbox` | Flag `0x200` stores six `f32` values in `xmin, xmax, ymin, ymax, zmin, zmax` order; otherwise all limits default to -100 and 100. |
+
+The local normal is `up × look`. Bounding-box X follows the normal, Y follows `up`, and Z follows `look`; the center
+is `position + 0.5 × ((xmin+xmax) × normal + (ymin+ymax) × up + (zmin+zmax) × look)`.
+
+Cover record (`0x1C` bytes):
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 12 | `f32[3]` | `position` | World position. |
+| `0x0C` | 12 | `f32[3]` | `look` | Facing vector. |
+| `0x18` | 2 | `u16` | `flags` | Cover flags. |
+| `0x1A` | 2 | `u16` | `unknown1A` | Unknown. |
+
+Waypoint record (hypothesis; repeated until `padnum < 0`):
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 4 | `s32` | `padnum` | Pad number; a negative value terminates the array. |
+| `0x04` | 4 | `s32` | `neighboursOffset` | Offset of the neighbor list. |
+| `0x08` | 4 | `s32` | `groupnum` | Waypoint-group number. |
+| `0x0C` | 4 | `s32` | `step` | Step value. |
 Pad positions are world coordinates (verified by RAM object positions).
 
 #### Setup files `Usetup<code>Z`, `Ump_setup<code>Z` (verified)
 
-```
-+0x00..+0x08  0 (waypoints/waygroups/covers, filled from the pads file)
-+0x0C u32 intro offset   +0x10 u32 props offset (0x20)   +0x14 u32 paths offset   +0x18 u32 AI lists offset   +0x1C 0
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 4 | `u32` | `waypoints` | Zero in the file; populated from the pads file at runtime. |
+| `0x04` | 4 | `u32` | `waygroups` | Zero in the file; populated from the pads file at runtime. |
+| `0x08` | 4 | `u32` | `covers` | Zero in the file; populated from the pads file at runtime. |
+| `+0x0C` | 4 | `u32` | `intro offset` | — |
+| `+0x10` | 4 | `u32` | `props offset (0x20)` | — |
+| `+0x14` | 4 | `u32` | `paths offset` | — |
+| `+0x18` | 4 | `u32` | `aiListsOffset` | AI-list offset. |
+| `+0x1C` | 4 | `u32` | `zero1C` | Always zero. |
 - **Props list** (from +0x10): commands until type 0x34 END; the **low byte of the first word is the type**; length in
   32-bit words per type from `setupGetCmdLength` (every populated setup's list ends exactly at its intro offset).
 - **Links** between commands are relative command indices (`target = index + value`).
-- Stub setups are 0x40 bytes. Paths `{u32 padsOffset; u8 id; u8 flags; u16 len}` and AI lists `{u32 offset; s32 id}`
+- Stub setups are 0x40 bytes. Path and AI-list entries are:
+
+  | Structure | Offset | Size | Type | Field | Description |
+  |---|---:|---:|---|---|---|
+  | Path | `0x00` | 4 | `u32` | `padsOffset` | Offset of the path's pad list. |
+  | Path | `0x04` | 1 | `u8` | `id` | Path identifier. |
+  | Path | `0x05` | 1 | `u8` | `flags` | Path flags. |
+  | Path | `0x06` | 2 | `u16` | `length` | Pad-list length. |
+  | AI list | `0x00` | 4 | `u32` | `offset` | AI bytecode offset. |
+  | AI list | `0x04` | 4 | `s32` | `id` | AI-list identifier. |
+
   (layout hypothesis; the AI bytecode was only decoded far enough for the music commands, *Unused and hidden content*).
 
 | Type | Name | Words | Count in all setups | Viewer |
@@ -884,7 +1217,7 @@ Pad positions are world coordinates (verified by RAM object positions).
 | 0x11 | HAT | 23 | 0 | – |
 | 0x12 | GRENADEPROB | 2 | 0 | – |
 | 0x13 | LINKLIFTDOOR | 5 | 96 | link |
-| 0x14 | MULTIAMMOCRATE | 42 | 364 | mesh (+ 19 `{u16 model; u16 quantity}` contents) |
+| 0x14 | MULTIAMMOCRATE | 42 | 364 | mesh plus 19 `AmmoCrateContent` records (below) |
 | 0x15 | SHIELD | 26 | 35 | mesh |
 | 0x16 | TAG | 4 | 1,607 | info |
 | 0x17 / 0x18 | BEGIN/ENDOBJECTIVE | 4 / 1 | 102 / 102 | info (text id, difficulty bits) |
@@ -899,7 +1232,7 @@ Pad positions are world coordinates (verified by RAM object positions).
 | 0x2A | GLASS | 24 | 441 | blended mesh |
 | 0x2B / 0x2C | SAFE / SAFEITEM | 23 / 5 | 0 | – |
 | 0x2D | TANK | 32 | 0 | – |
-| 0x2E | CAMERAPOS | 7 | 10 | camera view: `{s32 x, y, z (/100); s32 theta, verta (/65536); s32 pad}` |
+| 0x2E | CAMERAPOS | 7 | 10 | `CameraPosRecord` view (below) |
 | 0x2F | TINTEDGLASS | 26 | 293 | blended mesh |
 | 0x30 | LIFT | 37 | 84 | mesh at its start stop |
 | 0x31 | CONDITIONALSCENERY | 5 | 40 | link |
@@ -913,24 +1246,77 @@ Pad positions are world coordinates (verified by RAM object positions).
 | 0x3A | MINE | 26 | 9 | mesh (placed like a weapon) |
 | 0x3B | ESCASTEP | 27 | 40 | mesh |
 
+| Structure | Offset | Size | Type | Field | Description |
+|---|---:|---:|---|---|---|
+| `AmmoCrateContent` | `0x00` | 2 | `u16` | `model` | Ammunition model ID. |
+| `AmmoCrateContent` | `0x02` | 2 | `u16` | `quantity` | Ammunition quantity. |
+| `CameraPosRecord` | `0x00` | 4 | `s32` | `x100` | X position multiplied by 100. |
+| `CameraPosRecord` | `0x04` | 4 | `s32` | `y100` | Y position multiplied by 100. |
+| `CameraPosRecord` | `0x08` | 4 | `s32` | `z100` | Z position multiplied by 100. |
+| `CameraPosRecord` | `0x0C` | 4 | `s32` | `theta65536` | Horizontal angle multiplied by 65536. |
+| `CameraPosRecord` | `0x10` | 4 | `s32` | `vertical65536` | Vertical angle multiplied by 65536. |
+| `CameraPosRecord` | `0x14` | 4 | `s32` | `padding` | Padding/unknown. |
+
 (Types 0x10, 0x1F, 0x22 and 0x29 are 1-word unnamed commands, never used.)
 
-**Object header** (first 0x5C bytes of every object record; verified): `+0x00 u16 extraScale (/256)`, `+0x03 u8 type`,
-`+0x04 s16 modelNum` (`g_ModelStates` index), `+0x06 s16 pad` (chr number when flags 0x4000; < 0 = not placed),
-`+0x08 u32 flags` (0x2/0x4/0x8 alignment variants, 0x20/0x40/0x80 fit to pad box, 0x4000 held by chr),
-`+0x0C u32 flags2` (**difficulty exclusion**: 0x10 Agent, 0x20 Special Agent, 0x40 Perfect Agent, 0x80 Perfect Dark;
-0x400000/0x800000/0x1000000 for 2/3/4 players; the setup loop skips an object when `flags2 & (1 << (difficulty + 4))`),
-`+0x14..` runtime fields.
+**Object header** (first 0x5C bytes of every object record; verified):
 
-**Type-specific fields** (verified where the handlers read them): DOOR `+0x5C` maxfrac, `+0x60` perimfrac, `+0x64`
-accel, `+0x68` decel, `+0x6C` maxspeed, `+0x70` doorflags, `+0x72` doortype (4/8 = opens along look, else along up),
-`+0xBC` sibling door (relative). CHR (0x2C bytes): `+0x0A u16 pad`, `+0x0C u8 body` (255 random), `+0x0D s8 head`
-(< 0 random), `+0x0E u16 AI list id`, `+0x04 spawnflags` (difficulty mapping hypothesis). LIFT `+0x5C` stop pads
-(hypothesis), door links. TINTEDGLASS `+0x5C/+0x5E` fade distances (hypothesis). MINE is rewritten to WEAPON.
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 2 | `u16` | `extraScale` | Divide by 256. |
+| `0x03` | 1 | `u8` | `type` | Object type. |
+| `0x04` | 2 | `s16` | `modelNum` | `g_ModelStates` index. |
+| `0x06` | 2 | `s16` | `pad` | Character number when flags include `0x4000`; negative means unplaced. |
+| `0x08` | 4 | `u32` | `flags` | `0x2/0x4/0x8` alignment; `0x20/0x40/0x80` fit to pad box; `0x4000` held by character. |
+| `0x0C` | 4 | `u32` | `flags2` | Difficulty and player-count exclusions. |
+| `0x14` | variable | runtime | `runtime` | Runtime fields through the end of the 0x5C-byte common header. |
 
-**Intro commands** (after the props list): `0 SPAWN {pad, flag}` (player start pads; MP setups have 12–21),
-`1 WEAPON`, `2 AMMO`, `5 OUTFIT`, `7 watch time`, `8 credits data`, `9/10/11` MP case/respawn/hill pads, `12 END`
-(lengths verified; names of 1, 2, 5, 9–11 hypothesis).
+Difficulty bits are `0x10` Agent, `0x20` Special Agent, `0x40` Perfect Agent, and `0x80` Perfect Dark;
+`0x400000/0x800000/0x1000000` exclude 2/3/4-player modes. The setup loop skips an object when
+`flags2 & (1 << (difficulty + 4))`.
+
+**Type-specific fields** are verified where their handlers read them.
+
+| Object type | Offset | Size | Type | Field | Description |
+|---|---:|---:|---|---|---|
+| DOOR | `0x5C` | 4 | word | `maxFraction` | Maximum opening fraction. |
+| DOOR | `0x60` | 4 | word | `perimeterFraction` | Perimeter fraction. |
+| DOOR | `0x64` | 4 | word | `acceleration` | Opening acceleration. |
+| DOOR | `0x68` | 4 | word | `deceleration` | Opening deceleration. |
+| DOOR | `0x6C` | 4 | word | `maxSpeed` | Maximum opening speed. |
+| DOOR | `0x70` | 2 | `u16` | `doorFlags` | Door flags. |
+| DOOR | `0x72` | 2 | `u16` | `doorType` | Values 4 and 8 open along the look axis; other values open along the up axis. |
+| DOOR | `0xBC` | 4 | relative reference | `siblingDoor` | Relative reference to a sibling door. |
+| LIFT | `0x5C` | unknown | pad references | `stopPads` | Lift stops; layout remains a hypothesis. |
+| TINTEDGLASS | `0x5C` | 2 | unknown | `fadeNear` | Near fade distance; semantics are a hypothesis. |
+| TINTEDGLASS | `0x5E` | 2 | unknown | `fadeFar` | Far fade distance; semantics are a hypothesis. |
+
+Door-link structures remain unresolved. MINE records are rewritten to WEAPON. CHR records are `0x2C` bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x04` | 4 | flags | `spawnFlags` | Difficulty mapping is a hypothesis. |
+| `0x0A` | 2 | `u16` | `pad` | Spawn pad. |
+| `0x0C` | 1 | `u8` | `body` | 255 selects randomly. |
+| `0x0D` | 1 | `s8` | `head` | Negative selects randomly. |
+| `0x0E` | 2 | `u16` | `aiListId` | AI-list identifier. |
+
+**Intro commands** follow the props list:
+
+| Opcode | Name | Operands / meaning |
+|---:|---|---|
+| 0 | SPAWN | Pad and flag; player start pads. Multiplayer setups contain 12–21. |
+| 1 | WEAPON | Starting weapon; name is a hypothesis. |
+| 2 | AMMO | Starting ammunition; name is a hypothesis. |
+| 5 | OUTFIT | Starting outfit; name is a hypothesis. |
+| 7 | WATCHTIME | Watch time. |
+| 8 | CREDITS | Credits data. |
+| 9 | MPCASEPAD | Multiplayer case pad; name is a hypothesis. |
+| 10 | MPRESPAWNPAD | Multiplayer respawn pad; name is a hypothesis. |
+| 11 | MPHILLPAD | Multiplayer hill pad; name is a hypothesis. |
+| 12 | END | Terminates the intro-command list. |
+
+Command lengths are verified.
 
 #### Detection and game object
 
@@ -978,11 +1364,21 @@ them by code references, checked in the ROM through slot cross-references and da
 #### Animations and standing characters (verified: lib `anim.c` disassembly, all 1,207 table records, joint matrices vs RAM)
 
 **Table** (ROM 0x7CD1A0, read whole by `animsInit` 0x700233C0): `u32 count = 1207`, then 12-byte records:
-```
-+0x00 u16 numFrames (0 = empty; 262 empty)   +0x02 u16 bytesPerFrame   +0x04 u32 dataOffset (from ROM 0x1A15C0)
-+0x08 u16 headerLength   +0x0A u8 angleBits (12 in all)   +0x0B u8 flags: 0x01 loop, 0x02 absolute root (cutscene),
-                                                                          0x04 frame remap table, 0x08 unknown (29)
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `+0x00` | 2 | `u16` | `numFrames (0 = empty; 262 empty)` | — |
+| `+0x02` | 2 | `u16` | `bytesPerFrame` | — |
+| `+0x04` | 4 | `u32` | `dataOffset (from ROM 0x1A15C0)` | — |
+| `+0x08` | 2 | `u16` | `headerLength` | — |
+| `+0x0A` | 1 | `u8` | `angleBits (12 in all)` | — |
+| `+0x0B` | 1 | `u8` | `flags` | Animation flags defined below. |
+
+| Mask | Meaning |
+|---:|---|
+| `0x01` | Loop. |
+| `0x02` | Absolute root motion for cutscenes. |
+| `0x04` | Frame-remap table is present. |
+| `0x08` | Unknown; set on 29 animations. |
 - Records chain through the data region exactly, with at most 16 padding bytes. 945 non-empty animations total 6.47 MB.
 - Playback speed is passed by the caller, not stored: 0.25 for human stands, 0.5 for other races.
 
@@ -1063,10 +1459,19 @@ Renders: `anim/renders/chars_standing.png` (the ten characters of `obj/renders/c
 | output rate | **22018 Hz** (AI dacrate 2210; `N_ALSynth.outputRate` = 0x5602 at 0x800918C0) |
 | synth frame | 184 samples per update |
 | voices | 44 virtual, 30 physical; 2 custom FX (reverb) busses; 16 MIDI channels |
-| players | 3 sequence players (`seqinstance[3]` at 0x80094ED8, 0x108 bytes each: +0xF8 player, +0xFC sequence buffer, +0x100 volume, +0x104 sequence number) |
+| players | 3 sequence players (`seqinstance[3]` at 0x80094ED8, `0x108` bytes each; known tail fields below) |
 | player volume | `musicVolume (default and maximum 0x5000) × seqVolTable[seq] >> 15`; `seqVolTable` = s16[119] at 0x8005ECF8 (data segment offset 0x4D18) |
 | **voice volume** | **linear**: the envelope mixer volume is the sequence player's voice volume itself, **not squared** as in libultra ABI1 and the viewer's `libultra.ts`. Verified: in RAM, a menu voice's computed volume 16744 equals `em_volume` 16744 (squared would be 8555). Squared renders are 4–16 dB too quiet against captures |
 | reverb | per-voice dry/wet sends from the channel FX mix; the FX parameters are not decoded, and reverb is not rendered |
+
+Known `seqinstance` tail fields:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0xF8` | 4 | `ptr` | `player` | Compressed-sequence player. |
+| `0xFC` | 4 | `ptr` | `sequenceBuffer` | Inflated sequence buffer. |
+| `0x100` | 4 | `u32` | `volume` | Sequence-player volume. |
+| `0x104` | 4 | `u32` | `sequenceNumber` | Current sequence number. |
 
 #### Data (ROM, outside the file table; referenced only from lib code)
 
@@ -1076,13 +1481,33 @@ Renders: `anim/renders/chars_standing.png` (the ten characters of `obj/renders/c
 | 0x839DC0–0xCFBF30 | sound-effect samples `.tbl` (VADPCM) |
 | 0xCFBF30–0xD05F90 | **music bank** `.ctl`: ALBankFile `B1`, 1 bank, 126 instruments (no percussion), 258 sounds, 188 VADPCM waves, sampleRate 22050 |
 | 0xD05F90–0xE82000 | music samples `.tbl` |
-| 0xE82000–0xED83A0 | **sequence table**: `u16 count (119); u16 pad`, then `count × {u32 offset from 0xE82000; u16 uncompressedLen; u16 compressedLen}`. Each entry is a rarezip 1173 stream |
+| 0xE82000–0xED83A0 | **sequence table** and 119 rarezip-1173 sequence streams; format below |
+
+Sequence-table header and entries:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 2 | `u16` | `count` | Always 119. |
+| `0x02` | 2 | `u16` | `padding` | Padding. |
+| `0x04` | `8 × count` | entry array | `entries` | Eight-byte records defined below. |
+
+| Entry offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 4 | `u32` | `offset` | Offset relative to ROM `0xE82000`. |
+| `0x04` | 2 | `u16` | `uncompressedLength` | Exact inflated length. |
+| `0x06` | 2 | `u16` | `compressedLength` | Stored rarezip-1173 byte count. |
 
 - **Bank:** standard libultra `.ctl` (ALBank, ALInstrument, ALSound, ALEnvelope, ALKeyMap, ALWaveTable,
   ALADPCMloop, ALADPCMBook) with offsets relative to the ctl start. The viewer's
   `parseBank(rom, 0xCFBF30, 0xD05F90, 0, null)` parses all 126 instruments unchanged (verified).
 - **Sequences:** libultra compressed MIDI (ALCSeq), the same format as the Bomberman games.
-  - Header: `u32 trackOffset[16]`, `u32 division` (384 in all 119).
+  - Header:
+
+    | Offset | Size | Type | Field | Description |
+    |---:|---:|---|---|---|
+    | `0x00` | 64 | `u32[16]` | `trackOffset` | Sequence-relative track offsets; zero denotes an unused track. |
+    | `0x40` | 4 | `u32` | `division` | Ticks per quarter note; 384 in all 119 sequences. |
+
   - Meta events: `FF 51` tempo, `FF 2E` loop start and `FF 2D count cur back` loop end, where count 0xFF means
     forever.
   - Verified: all 119 inflate to exactly `uncompressedLen` and parse with the viewer's `parseCompressedMidi`
@@ -1092,7 +1517,16 @@ Renders: `anim/renders/chars_standing.png` (the ten characters of `obj/renders/c
 
 #### Where music plays (verified: data tables and disassembly; RAM where marked)
 
-- **Stage music table** at 0x80084500: 24 × `{s16 stage, s16 primary, s16 ambient, s16 xTrack}`, terminated by stage
+- **Stage music table** at 0x80084500 contains 24 records:
+
+  | Offset | Size | Type | Field | Description |
+  |---:|---:|---|---|---|
+  | `0x00` | 2 | `s16` | `stage` | Stage ID; zero terminates the table. |
+  | `0x02` | 2 | `s16` | `primary` | Primary sequence ID, or −1. |
+  | `0x04` | 2 | `s16` | `ambient` | Ambient sequence ID, or −1. |
+  | `0x06` | 2 | `s16` | `xTrack` | Alternate/danger sequence ID, or −1. |
+
+  It is terminated by stage
   0; −1 = none.
   - Multiplayer stages and stages missing from the table use the Combat Simulator picker.
   - RAM: in Defection the players hold seq 9 (primary) and seq 8 (ambient).
@@ -1110,7 +1544,13 @@ Renders: `anim/renders/chars_standing.png` (the ten characters of `obj/renders/c
   - **X music** (0x7F16D7EC) stops types 2–4, fades the primary out over 0.5 s and starts the X track. When it ends
     (0x7F16D864), X fades out over 1 s and the primary fades back in over 0.5 s.
   - Triggers: combat state (0x7F16D480, hypothesis) and AI script commands.
-- **Combat Simulator "Soundtrack"** at 0x80087A70: 42 × `{u16 track << 9 | defaultSeconds; u16 textId; s16 unlock}`.
+- **Combat Simulator "Soundtrack"** at 0x80087A70 has 42 records:
+
+  | Offset | Size | Type | Field | Description |
+  |---:|---:|---|---|---|
+  | `0x00` | 2 | `u16` | `trackAndSeconds` | Track in the high seven bits; default seconds in the low nine. |
+  | `0x02` | 2 | `u16` | `textId` | Text identifier. |
+  | `0x04` | 2 | `s16` | `unlock` | Unlock condition. |
   - Names come from `LmiscE` strings 124–165.
   - Each match picks a random enabled entry and switches after `defaultSeconds`. RAM, in a Skedar Quick Start match:
     entry 3 "dataDyne Action" = seq 62, timer 10800 frames = 180 s.
@@ -1376,14 +1816,31 @@ these files are byte-identical in U, E and J):
 | **Crash screen "Another Perfect Crash (tm)"**: FPU and CPU registers, TID/EPC/cause, the IRIX host command `dshex -a …`, a stack trace | printer 0x7000C548; text grid 71 × 30 at `[0x8005D994]`; renderer 0x7000CF54 | the printer has no caller, the fault thread only records the thread, the grid is never allocated and the glyph bitmaps are gone. **Emulator:** after patching the fault thread to call the printer and forcing a TLB fault in Defection, the complete report was written to the grid (`unused/shots/crash_screen_textgrid.txt`; offline render with a PD font: `unused/shots/crash_screen_textgrid_offline_render.png`). The framebuffer shows only the blank text box, confirming the missing font | high | no |
 | **Developer boot arguments**: `-level_NN`, `-hard N`, `-play N`, `-coop`, `-anti`, `-mpbots`, `-nomp3`, `-d`, `-s`, `-j` (Japanese text slot), `-nochr/-noprop/-noobj`, `-mpwpnset`, `-forceversion`, `-scrub`, memory args | read from ROM 0x1FFFF00 only if stub 0x7002FA08 returns 0; it always returns 1 | disassembly. **Emulator:** injecting `-level_48` boots straight into the Defection intro, skipping title and menus (`unused/shots/level_arg_48_boot_direct_defection_intro.png`) | high | no |
 | 124 named debug variables (`debugdoors`, `wallhit`, radar/HUD, rain/snow, PD-controller gains, menu colours…) | registered through the empty stub 0x7000DB30; list `unused/debugvars.tsv` | disassembly; no editor exists. The Controller Pak actions `pakdump`, `wipeeeprom`, `corruptme`, `dumpeeprom` are still polled (effects from function names, not tested) | high | debugger only |
-| ROM "RAM patch" table: 8 × `{dest, len}` records with blobs, copied into RAM | ROM 0x1D65740, loader 0x7F082D74 | the code runs; the table is zero in all four revisions | high (purpose low) | runs, loads nothing |
+| ROM "RAM patch" table: eight `RamPatchRecord` entries with blobs copied into RAM | ROM 0x1D65740, loader 0x7F082D74 | the code runs; the table is zero in all four revisions | high (purpose low) | runs, loads nothing |
 | about 600 compiled-out debug printf strings (`AISOUND: …`, `BriGun: …`, `vtxstore: GROSS! CorspeCount > MAX_CORPSES`, `MUSIC(Play) : SERIOUS -> Out of MIDI channels`) | lib/game rodata | string scan with code/data cross-references | high | no |
 | anti-tamper checksum in the cheat-menu handler (corrupts boot code if modified) | 0x7F107970 | disassembly (not tested) | medium-high | yes, silently |
 | searched for and **not** found: a GoldenEye-style debug menu, level select, free camera, collision/portal overlay, profiler | full string dump and joypad-mask scan | – | high (strings), medium (computed button masks) | – |
 
+`RamPatchRecord` (`0x08` bytes):
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 4 | `u32` | `destination` | RAM destination address. |
+| `0x04` | 4 | `u32` | `length` | Blob length in bytes. |
+
 #### Cheats
 
-- **Cheat table:** 0x80073A90, 42 × `{u16 nameText; u16 time; u8 soloIndex; u8 difficulty; u8 flags}`. All 42
+- **Cheat table:** 0x80073A90, 42 records:
+
+  | Offset | Size | Type | Field | Description |
+  |---:|---:|---|---|---|
+  | `0x00` | 2 | `u16` | `nameText` | Cheat-name text ID. |
+  | `0x02` | 2 | `u16` | `time` | Unlock time. |
+  | `0x04` | 1 | `u8` | `soloIndex` | Solo-mission index. |
+  | `0x05` | 1 | `u8` | `difficulty` | Required difficulty. |
+  | `0x06` | 1 | `u8` | `flags` | Cheat flags. |
+
+  All 42
   entries are named and unlockable. Unlock conditions for each are in `unused/cheats_table.md`: target times,
   mission completion, firing-range golds for the classic guns, or Game Boy Perfect Dark in a Transfer Pak (Hurricane
   Fists, Cloaking Device, All Guns in Solo, R-Tracker). Verified, high.
@@ -1697,28 +2154,93 @@ Found while implementing objects and characters (checked against the research RA
 
 #### Model files `P*Z`, `C*Z`, `G*Z` (verified: loader and relocation disassembly; all 686 models parse with 0 unknown opcodes and 0 missing textures)
 
-```
-pointers = 0x05000000 + file offset (the display lists also use segment 5 = file start)
-+0x00 ptr rootNode   +0x04 u32 skeleton id   +0x08 ptr parts (node ptrs, then s16 part numbers)
-+0x0C s16 numParts   +0x0E s16 numMatrices   +0x10 f32 radius-like size   +0x14 s16 rwDataLen (set at load)
-+0x16 s16 numTexConfigs   +0x18 ptr texConfigs (12 bytes: u32 global texture number or 0x05xxxxxx embedded texels; u8 w, h; 6 bytes)
-node (0x18): u16 type (low byte); u16; ptr rodata; ptr parent; ptr next; ptr prev; ptr child
-```
+Pointers use `0x05000000 + fileOffset`; display lists likewise use segment 5 as the file base.
 
-| Node | Name | Rodata (verified layout) |
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `+0x00` | 4 | `ptr` | `rootNode` | — |
+| `+0x04` | 4 | `u32` | `skeleton id` | — |
+| `+0x08` | 4 | `ptr` | `parts` | Node pointers followed by `s16` part numbers. |
+| `+0x0C` | 2 | `s16` | `numParts` | — |
+| `+0x0E` | 2 | `s16` | `numMatrices` | — |
+| `+0x10` | 4 | `f32` | `radius-like size` | — |
+| `+0x14` | 2 | `s16` | `rwDataLen (set at load)` | — |
+| `+0x16` | 2 | `s16` | `numTexConfigs` | — |
+| `+0x18` | 4 | `ptr` | `texConfigs` | Array of 12-byte texture configurations defined below. |
+
+Texture configuration (`0x0C` bytes):
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 4 | `u32` | `texture` | Global texture number or `0x05xxxxxx` embedded-texel pointer. |
+| `0x04` | 1 | `u8` | `width` | Texture width. |
+| `0x05` | 1 | `u8` | `height` | Texture height. |
+| `0x06` | 6 | unknown | `unknown06` | Remaining configuration bytes. |
+
+Model node (`0x18` bytes):
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 2 | `u16` | `type` | Node type is the low byte. |
+| `0x02` | 2 | `u16` | `unknown02` | Unknown. |
+| `0x04` | 4 | `ptr` | `rodata` | Type-specific read-only data. |
+| `0x08` | 4 | `ptr` | `parent` | Parent node. |
+| `0x0C` | 4 | `ptr` | `next` | Next sibling. |
+| `0x10` | 4 | `ptr` | `prev` | Previous sibling. |
+| `0x14` | 4 | `ptr` | `child` | First child. |
+
+| Node | Name | Function |
 |---|---|---|
-| 0x01 | CHRINFO | u16 animPart; s16 mtxIndex (root slot); f32; u16 rwDataIndex |
-| 0x02 | POSITION | f32 pos[3] (relative to parent joint); u16 part; s16 mtxIndex[3]; f32 drawDist (hypothesis) |
-| 0x04 | GUNDL | ptr opaDl; ptr xluDl; base; ptr vertices; s16 numVertices |
-| 0x08 | DISTANCE | f32 near, far; ptr target (LOD: children drawn when near ≤ d < far) |
-| 0x09 | REORDER | two subtrees drawn in camera-dependent order |
-| 0x0A | BBOX | s32 hitPart; f32 xmin, xmax, ymin, ymax, zmin, zmax (**the first BBOX is the model bbox used by placement**) |
-| 0x0C / 0x16 | CHRGUNFIRE / STARGUNFIRE | muzzle flash |
-| 0x12 | TOGGLE | ptr target; u16 rwDataIndex (visibility set by code) |
-| 0x15 | POSITIONHELD | f32 pos[3]; u16 part; s16 mtxIndex |
-| 0x17 | HEADSPOT | where the separate head model attaches |
-| 0x18 | DL | ptr opaDl; ptr xluDl; base; ptr vertices; s16 numVertices; s16; u16 rwDataIndex; u16 numColours; **the colour table follows the vertices** |
-| 0x19 | (unnamed) | s32 n + 12 × f32: 4–6 points (probably collision; lifts, desks) |
+| 0x01 | CHRINFO | Character root and matrix slot. |
+| 0x02 | POSITION | Joint-relative position and matrix slots. |
+| 0x04 | GUNDL | Opaque/translucent gun display lists. |
+| 0x08 | DISTANCE | Distance LOD; draws `target` when `near ≤ distance < far`. |
+| 0x09 | REORDER | Draws two subtrees in camera-dependent order. |
+| 0x0A | BBOX | Hit-part bounds; the first BBOX supplies the placement bounds. |
+| 0x0C / 0x16 | CHRGUNFIRE / STARGUNFIRE | Muzzle flash. |
+| 0x12 | TOGGLE | Code-controlled subtree visibility. |
+| 0x15 | POSITIONHELD | Position node used by held objects. |
+| 0x17 | HEADSPOT | Separate head-model attachment. |
+| 0x18 | DL | General opaque/translucent display-list node. |
+| 0x19 | unnamed | Four to six points, probably collision for lifts and desks. |
+
+Known rodata fields:
+
+| Node | Offset | Size | Type | Field | Description |
+|---|---:|---:|---|---|---|
+| CHRINFO | `0x00` | 2 | `u16` | `animationPart` | Animation-part index. |
+| CHRINFO | `0x02` | 2 | `s16` | `matrixIndex` | Root matrix slot. |
+| CHRINFO | `0x04` | 4 | `f32` | `unknown04` | Unknown. |
+| CHRINFO | `0x08` | 2 | `u16` | `rwDataIndex` | Runtime-data index. |
+| POSITION | `0x00` | 12 | `f32[3]` | `position` | Position relative to the parent joint. |
+| POSITION | `0x0C` | 2 | `u16` | `part` | Skeleton part. |
+| POSITION | `0x0E` | 6 | `s16[3]` | `matrixIndex` | Matrix-slot indices. |
+| POSITION | `0x14` | 4 | `f32` | `drawDistance` | Hypothesized draw distance. |
+| GUNDL | `0x00` | 4 | `ptr` | `opaqueDl` | Opaque display list. |
+| GUNDL | `0x04` | 4 | `ptr` | `translucentDl` | Translucent display list. |
+| GUNDL | `0x08` | 4 | `ptr` | `base` | Segment-5 base. |
+| GUNDL | `0x0C` | 4 | `ptr` | `vertices` | Vertex array. |
+| GUNDL | `0x10` | 2 | `s16` | `vertexCount` | Vertex count. |
+| DISTANCE | `0x00` | 4 | `f32` | `near` | Near LOD distance. |
+| DISTANCE | `0x04` | 4 | `f32` | `far` | Far LOD distance. |
+| DISTANCE | `0x08` | 4 | `ptr` | `target` | Target subtree. |
+| BBOX | `0x00` | 4 | `s32` | `hitPart` | Hit-part index. |
+| BBOX | `0x04` | 24 | `f32[6]` | `bounds` | Minimum and maximum X, Y, and Z. |
+| TOGGLE | `0x00` | 4 | `ptr` | `target` | Target subtree. |
+| TOGGLE | `0x04` | 2 | `u16` | `rwDataIndex` | Runtime visibility-data index. |
+| POSITIONHELD | `0x00` | 12 | `f32[3]` | `position` | Position relative to the parent. |
+| POSITIONHELD | `0x0C` | 2 | `u16` | `part` | Skeleton part. |
+| POSITIONHELD | `0x0E` | 2 | `s16` | `matrixIndex` | Matrix-slot index. |
+| DL | `0x00` | 4 | `ptr` | `opaqueDl` | Opaque display list. |
+| DL | `0x04` | 4 | `ptr` | `translucentDl` | Translucent display list. |
+| DL | `0x08` | 4 | `ptr` | `base` | Segment base. |
+| DL | `0x0C` | 4 | `ptr` | `vertices` | Vertex array. |
+| DL | `0x10` | 2 | `s16` | `vertexCount` | Vertex count. |
+| DL | `0x12` | 2 | `s16` | `unknown12` | Unknown. |
+| DL | `0x14` | 2 | `u16` | `rwDataIndex` | Runtime-data index. |
+| DL | `0x16` | 2 | `u16` | `colorCount` | Color count; the color table follows the vertices. |
+| unnamed 0x19 | `0x00` | 4 | `s32` | `pointCount` | Four to six. |
+| unnamed 0x19 | `0x04` | 48 | `f32[12]` | `points` | Point data. |
 
 **Display lists** use the same Rare microcode as BG lists (*Display lists (verified: opcode histogram of all 4,367 leaf lists; decoded identically by the frame-DL walker; renders)*) plus: `01020040 03xxxxxx` G_MTX = load modelview
 matrix slot `(w1 & 0xFFFFFF) / 0x40` (segment 3 = the model's matrix array; the following vertices are relative to

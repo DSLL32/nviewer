@@ -10,7 +10,7 @@ interpretations are labelled hypotheses.
 
 | Property | Value |
 |---|---|
-| Asset organization | 76 J / 77 P records `{storedSize, relativeOffset}`; P inserts one localized file at ID 3 |
+| Asset organization | 76 J / 77 P eight-byte file records; P inserts one localized file at ID 3 |
 | Compression | big-endian decoded size followed by headerless LH5-family data: 8 KiB dictionary, block/static Huffman, 509 character/length symbols |
 | Graphics microcode | F3DLX.NoN 1.21. |
 | Geometry | grid-binned old F3DLX 1.21 display lists, standard 16-byte vertices, Y-up identity scale; near/detail table plus optional far-LOD replacement table |
@@ -104,10 +104,10 @@ The archive is not the whole post-code ROM. Songs begin at J `0xA4750`, followed
 
 Compressed files are:
 
-```text
-u32 decodedSize
-LH5-family bitstream, MSB-first
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 4 | `u32` | `decodedSize` | Number of output bytes. |
+| `0x04` | variable | bitstream | `payload` | MSB-first LH5-family stream. |
 
 There is no magic. Decoder `0x80026A80` reads the size and fills an 8 KiB circular dictionary with spaces (`0x20`); `0x80026B74` decodes blocks:
 
@@ -129,7 +129,14 @@ There is no magic. Decoder `0x80026A80` reads the size and fills an 8 KiB circul
 
 #### Complete courses and setup list
 
-State base is J `0x8004FE88`; course is signed halfword `+0x20C` (`0x80050094`), setup/level `+0x218`, and mode `+0x21A`. **[disassembly/RAM: session2]**
+State base is J `0x8004FE88`. Known fields: **[disassembly/RAM: session2]**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x20C | 2 | s16 | course | Course ID; J RAM 0x80050094 |
+| 0x218 | 2 | Unknown signedness | setup | Setup/level index |
+| 0x21A | 2 | Unknown signedness | mode | Mode selector |
+
 
 | ID | Course | J overlay VROM | J archive/header | Grid/context |
 |---:|---|---:|---:|---|
@@ -156,7 +163,14 @@ Every normal course has three static setup slots for each applicable family. Run
 | 2P | 0 | A `0x30 + setup*8` | aliases 1P Time Attack family |
 | 2P | 1 | B `0x18 + setup*8` | aliases 1P Coin family |
 
-Lecture/course 0 has its own path. Free Run selects no A/B course placement set in this dispatch. Descriptor `{s16 count; pad; u32 records}` arrays are linked stage-overlay data, so all sets are decoded without RAM extraction.
+Lecture/course 0 has its own path. Free Run selects no A/B course placement set in this dispatch. Descriptor arrays are linked stage-overlay data, so all sets are decoded without RAM extraction. Each descriptor is eight bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | s16 | count | Placement count |
+| 0x02 | 2 | u8[2] | padding | Alignment |
+| 0x04 | 4 | u32 | records | Linked placement-array pointer |
+
 
 | Course | Street Work S0/S1/S2 | Time Attack S0/S1/S2 | Coin S0/S1/S2 |
 |---|---:|---:|---:|
@@ -181,10 +195,10 @@ For nviewer, list six base courses and expose mode/setup as selectors or optiona
 
 Each eight-byte record is:
 
-```text
-u32 storedSize
-u32 payloadRelativeOffset
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | storedSize | Stored byte count. |
+| 0x04 | 4 | u32 | payloadRelativeOffset | Relative to the payload base. |
 
 Records tile the payload with two-byte alignment:
 
@@ -199,14 +213,16 @@ J `0x80027BD8` reads `table + id*8`; raw accessor `0x80027CA8` returns/copies th
 
 Descriptor points to 24-byte records:
 
-```text
-+00 u32 runtime state/visibility (cleared at initialization)
-+04 s16 x; +06 s16 y; +08 s16 z
-+0A s16 uniform scale numerator, divided by 5.0
-+0C 4 bytes not consumed by initializer
-+10 f32 orientation parameter A
-+14 f32 orientation parameter B
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `+00` | 4 | `u32` | `runtime state/visibility (cleared at initialization)` | — |
+| `+04` | 2 | `s16` | `x;` | — |
+| `+06` | 2 | `s16` | `y;` | — |
+| `+08` | 2 | `s16` | `z` | — |
+| `+0A` | 2 | `s16` | `uniform scale numerator, divided by 5.0` | — |
+| 0x0C | 4 | u8[4] | unknown0C | Not consumed by initializer. |
+| `+10` | 4 | `f32` | `orientation parameter A` | — |
+| `+14` | 4 | `f32` | `orientation parameter B` | — |
 
 `0x800DF650` builds a 64-byte matrix per record; `0x800DF7D0` draws it. Bits `0x100/0x200` distinguish player views. Street Work and Time Attack select these records. The fixed overlay-3 asset is an untextured 18-triangle disk: vertices at J RAM `0x800E9EA0`, setup DL at `0x800E9FD0`, and draw DL at `0x800EA020` (J VROM `0x89710`, `0x89840`, `0x89890` respectively). Put the exact positions, orientations and disk meshes in a `markers` layer; only the retail gameplay label/role remains open.
 
@@ -214,11 +230,13 @@ Descriptor points to 24-byte records:
 
 The ten-byte record is:
 
-```text
-+00 s16 runtime visibility/state (cleared)
-+02 s16 frame/variant index
-+04 s16 x; +06 s16 y; +08 s16 z
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `+00` | 2 | `s16` | `runtime visibility/state (cleared)` | — |
+| `+02` | 2 | `s16` | `frame/variant index` | — |
+| `+04` | 2 | `s16` | `x;` | — |
+| `+06` | 2 | `s16` | `y;` | — |
+| `+08` | 2 | `s16` | `z` | — |
 
 `0x800DFA10` initializes them; `0x800DFA48` view-transforms/culls at most 40 in 1P or 80 otherwise; `0x800DFF6C` constructs view-facing textured quads. Family B's use only by Coin mode and exact retail counts proves the semantic label. Fixed Gfx at J RAM `0x800EA080` and `0x800EA100` supplies two tint variants; archive 68 is referenced through runtime pointer `0x800EBF98` and contains the RGBA5551 TLUT at `+0x7630` plus nine 24x24 CI8 animation frames at `+0x7830 + n*0x240`. Put them in an `objects` or `coins` layer, separately toggleable from `main`. [evidence: disassembly, ROM bytes]
 
@@ -234,9 +252,12 @@ Gameplay selects board `n` from archive `38+n` and paired resource `50+n`; paral
 
 Vertices use the standard 16-byte form:
 
-```text
-s16 x,y,z; u16 flag; s16 s,t; u8 r,g,b,a
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 6 | `s16[3]` | `position` | X, Y, and Z. |
+| `0x06` | 2 | `u16` | `flag` | Vertex flag. |
+| `0x08` | 4 | `s16[2]` | `texcoord` | S and T. |
+| `0x0C` | 4 | `u8[4]` | `color` | R, G, B, and A. |
 
 Old F3DLX commands used include `04` VTX, `B1` TRI2, `BF` TRI1, `06` DL and `B8` END, plus standard RDP material/texture state. Coordinates are signed world units, Y up, identity scale. Every decoded list terminates in bounds and every triangle references a loaded slot. [evidence: ROM bytes, deterministic decoding]
 
@@ -259,16 +280,14 @@ Old F3DLX commands used include `04` VTX, `B1` TRI2, `BF` TRI1, `06` DL and `B8`
 
 The source header begins with a `0x2C` environment prefix (*Environment, sky and camera*), followed by:
 
-```text
-gridX*gridZ u32 header-relative display-list offsets, pass 0
-gridX*gridZ u32 header-relative display-list offsets, pass 1
-gridX*gridZ records {s16 minX,minY,minZ,maxX,maxY,maxZ}
-u32 header-relative collision vertex-bank offset
-gridX*gridZ u32 header-relative collision-cell offsets
-4 * 4 u32 header-relative auxiliary/group pointers
-gridX*gridZ u32 auxiliary-cell offsets
-two final header-relative targets
-```
+| Order | Count | Type | Field | Description |
+|---:|---:|---|---|---|
+| 1 | gridX × gridZ | u32 | pass0 | Header-relative display-list offsets for pass 0. |
+| 2 | gridX × gridZ | u32 | pass1 | Header-relative display-list offsets for pass 1. |
+| 3 | gridX × gridZ | s16[6] | cellBounds | Minimum and maximum X, Y, Z. |
+| 4 | 1 | u32 | collisionVertices | Header-relative vertex-bank offset. |
+| 5 | gridX × gridZ | u32 | collisionCells | Header-relative collision-cell offsets. |
+| 6 | 16 | u32 | auxiliary | Header-relative auxiliary/group pointers. |
 
 Parser `0x800CECC0` copies scalars, rebases pointers and initializes the grid; traversal/rendering is in `0x800CDDB4` and `0x800D2980`. Table 0 binds header pointer `+0x24` as F3DLX segment 2; table 1 binds `+0x28`; both bind texture/palette pointer `+0x20` as segment 3. Grid entries themselves are CPU/header-relative display-list pointers. [evidence: disassembly]
 
@@ -282,17 +301,28 @@ Both distance tables carry display-list material state. A production parser must
 
 ### 3.6 Collision
 
-Collision uses packed `s16 x,y,z` vertices (stride 6) and per-grid-cell lists:
+Collision uses a six-byte vertex record:
 
-```text
-u32 faceCount
-face[faceCount] {                 // 20 bytes
-  u16 vertexIndex[4]
-  s8 normalX, normalY, normalZ; u8 pad
-  s32 plane
-  u32 flagsOrMaterial
-}
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 6 | s16[3] | position | X, Y, Z. |
+
+Each grid cell contains a counted face list:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | faceCount | Number of faces. |
+| 0x04 | 20 × faceCount | face[] | faces | Twenty-byte records. |
+
+Face record:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 8 | u16[4] | vertexIndices | Four vertex indices. |
+| 0x08 | 3 | s8[3] | normal | X, Y, Z. |
+| 0x0B | 1 | u8 | pad0B | Padding. |
+| 0x0C | 4 | s32 | plane | Plane value. |
+| 0x10 | 4 | u32 | flagsOrMaterial | Meaning unresolved. |
 
 The same source face can occur in multiple cells; deduplicate the exact 20-byte record before emitting viewer geometry. Runtime routine `0x800C7864` consumes it. [evidence: disassembly, deterministic decoding]
 
@@ -313,18 +343,24 @@ High-Y faces near 10,000 in Green/Snow are valid indexed faces, not parser overr
 
 #### Environment prefix
 
-| Source | Type | Runtime | Meaning |
-|---:|---|---:|---|
-| `+00,+02` | u16,u16 | `+04,+06` | grid X/Z dimensions |
-| `+04` | RGB8 | `+08` | ambient light |
-| `+07` | RGB8 | `+0C` | directional light color |
-| `+0A` | s8x3 | `+10` | directional-light vector |
-| `+0D` | RGB8 | `+14` | fog and viewport clear color |
-| `+10,+12` | u16,u16 | `+18,+1A` | 1P far clip / distance split |
-| `+14,+16` | u16,u16 | `+1C,+1E` | 2P far clip / distance split |
-| `+18,+1A` | u16,u16 | skipped | stale fog-start-like fields (*Empty placeholders and stale fog fields*) |
-| `+1C` | u32 | skipped | zero/reserved |
-| `+20,+24,+28` | u32 | rebased | texture/vertex/data banks |
+| Source offset | Size | Type | Field | Runtime offset | Meaning |
+|---:|---:|---|---|---:|---|
+| 0x00 | 2 | u16 | gridX | 0x04 | Grid X dimension. |
+| 0x02 | 2 | u16 | gridZ | 0x06 | Grid Z dimension. |
+| 0x04 | 3 | u8[3] | ambient | 0x08 | Ambient RGB. |
+| 0x07 | 3 | u8[3] | directional | 0x0C | Directional-light RGB. |
+| 0x0A | 3 | s8[3] | lightDirection | 0x10 | Directional-light vector. |
+| 0x0D | 3 | u8[3] | fogColor | 0x14 | Fog and viewport-clear RGB. |
+| 0x10 | 2 | u16 | farClip1P | 0x18 | Single-player far clip. |
+| 0x12 | 2 | u16 | distanceSplit1P | 0x1A | Single-player distance split. |
+| 0x14 | 2 | u16 | farClip2P | 0x1C | Two-player far clip. |
+| 0x16 | 2 | u16 | distanceSplit2P | 0x1E | Two-player distance split. |
+| 0x18 | 2 | u16 | staleFog1P | — | Stale fog-start-like field; not copied. |
+| 0x1A | 2 | u16 | staleFog2P | — | Stale fog-start-like field; not copied. |
+| 0x1C | 4 | u32 | reserved | — | Zero; not copied. |
+| 0x20 | 4 | u32 | textureBank | Rebased | Texture-bank offset. |
+| 0x24 | 4 | u32 | vertexBank | Rebased | Vertex-bank offset. |
+| 0x28 | 4 | u32 | dataBank | Rebased | Data-bank offset. |
 
 | Course | Ambient | Directional | direction | fog/clear | 1P clip/split | 2P clip/split |
 |---|---|---|---|---|---:|---:|
@@ -355,7 +391,16 @@ Every course header carries uncopied u16s at `+0x18/+0x1A`: Tutorial 996/996, Gr
 
 Normal gameplay FOV is 65°. A mode selected by state `+0x202 == 1` uses 45°. Projection is 4:3, near 10, scale 1, and uses the course's 1P/2P far clip. FOV lives at J `0x8004C830`; projection setup starts `0x800B4324`. [evidence: disassembly]
 
-The view path uses a `guLookAtF` equivalent. In the ordinary state, camera base J `0x80113470` contains eye at `+0x24`, target `+0x34`, up `+0x44`; a player-follow branch instead takes eye at `+0x39C`, target from active entity `+0x440`, and up `(0,1,0)`. A Z-axis yaw from camera `+0xBC` is combined with look-at. Session2 RAM confirms the ordinary triplet layout and `(0,1,0)` up. [evidence: disassembly, RAM]
+The view path uses a `guLookAtF` equivalent. Camera base is J `0x80113470`; offsets below are camera-relative except the entity target. Session2 confirms the ordinary triplet layout and up vector `(0,1,0)`. [evidence: disassembly, RAM]
+
+| Base | Offset | Size | Type | Field | Description |
+|---|---:|---:|---|---|---|
+| Camera | 0x24 | 12 | f32[3] | eye | Ordinary eye position |
+| Camera | 0x34 | 12 | f32[3] | target | Ordinary look-at target |
+| Camera | 0x44 | 12 | f32[3] | up | Ordinary up vector |
+| Camera | 0xBC | Unknown | Unknown | yaw | Z-axis yaw combined with look-at |
+| Camera | 0x39C | 12 | f32[3] | followEye | Player-follow eye |
+| Active entity | 0x440 | 12 | f32[3] | followTarget | Player-follow target; up is fixed (0,1,0) |
 
 Session2 measured the following stable initial 1P cameras; each uses up `(0,1,0)` and 65° FOV: [evidence: RAM, captured frames]
 
@@ -399,14 +444,14 @@ The pointer bank identifies `N64 PtrTablesV2` / `KO_MD00.WBK`; the wave bank ide
 
 Songs are raw/uncompressed. Header:
 
-```text
-+00 u32 channel slots (16)
-+04 u32 channel-stream offset-list (0x18)
-+08 u32 volume-stream offset-list (0x58)
-+0C u32 pitch-bend offset-list (0x98)
-+10 u32 envelope-table offset (0xD8)
-+14 u32 drum-list offset (0xD8)
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `+00` | 4 | `u32` | `channel slots (16)` | — |
+| `+04` | 4 | `u32` | `channel-stream offset-list (0x18)` | — |
+| `+08` | 4 | `u32` | `volume-stream offset-list (0x58)` | — |
+| `+0C` | 4 | `u32` | `pitch-bend offset-list (0x98)` | — |
+| `+10` | 4 | `u32` | `envelope-table offset (0xD8)` | — |
+| `+14` | 4 | `u32` | `drum-list offset (0xD8)` | — |
 
 Offsets are song-relative; wave numbers directly index the common bank. All used commands are implemented by `libmus64.ts`. The musical timebase is 48 PPQ. Tempo opcode `85` uses `trunc(trunc(BPM*24576/120)/VSYNCS)` before channel scale. [evidence: disassembly, deterministic decoding]
 

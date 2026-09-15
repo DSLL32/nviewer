@@ -68,12 +68,20 @@ segmented, VROM, and file-relative addresses are named at each use.
 Everything outside main is loaded from fixed ROM ranges. There is **no file table and no filesystem**: the ranges are hard-coded as `Overlay` structs or as constants in loader code.
 
 **Overlay struct** (0x24 bytes, big-endian; **verified**, 31 of 31 structs in all dumps):
-```
-+0x00 u32 romStart     +0x04 u32 romEnd      +0x08 u32 vram
-+0x0C u32 textStart    +0x10 u32 textEnd     +0x14 u32 dataStart
-+0x18 u32 dataEnd      +0x1C u32 bssStart    +0x20 u32 bssEnd
-invariants: textStart == vram; textEnd == dataStart; dataEnd == bssStart; dataEnd − vram == romEnd − romStart
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `+0x00` | 4 | `u32` | `romStart` | — |
+| `+0x04` | 4 | `u32` | `romEnd` | — |
+| `+0x08` | 4 | `u32` | `vram` | — |
+| `+0x0C` | 4 | `u32` | `textStart` | — |
+| `+0x10` | 4 | `u32` | `textEnd` | — |
+| `+0x14` | 4 | `u32` | `dataStart` | — |
+| `+0x18` | 4 | `u32` | `dataEnd` | — |
+| `+0x1C` | 4 | `u32` | `bssStart` | — |
+| `+0x20` | 4 | `u32` | `bssEnd` | — |
+
+Invariants: `textStart == vram`, `textEnd == dataStart`, `dataEnd == bssStart`, and `dataEnd − vram == romEnd − romStart`.
+
 - **app_render** (persistent): its struct is in main .data at ROM 0x418C0. It is loaded before the scene manager: rom 0x46270-0x5BF20 → vram 0x8009A8C0, bss to 0x800BF060.
 - **The other 30 structs** form a table in app_render .data at **ROM 0x57580** (vram 0x800ABBD0), in a fixed order: unk_segment_AA18E0, window, camera_check, oaks_lab, pokemon_album, pokemon_report, photo_check, gallery, unk_end_level_8, more_funcs, main_menu, menu_new_game, credits, intro_code, app_level, world, then `{level}_assets`, `{level}_code` for beach, tunnel, cave, river, volcano, valley and rainbow.
 - Level asset segments are also described as overlays, with a 0x10-byte text and 0x20-byte bss.
@@ -155,24 +163,29 @@ Different scenes reuse the same vram (splat `exclusive_ram_id`): 0x800F5D90 is m
 | unk_segment_AA18E0_vpk0 | AAA610-AAA65B | 1 | 0x50 | 0x80200000 | dead anti-piracy RSP-memory check; its loader has no caller (*Unused and hidden content*) |
 
 **Format** (**verified**: `fs/proto/vpk0.ts` output is byte-identical to the decomp's Python codec on all three streams, and the consumed lengths end exactly at the next segment's padding):
-```
-+0 "vpk0"   +4 u32 BE decompressed size
-+8 bitstream, MSB first:
-   u8 method: 0 = one-sample offsets, 1 = two-sample offsets
-   offsets tree, lengths tree
-   tokens until size bytes are written
-tree  = post-order stack code:
-        bit 0 -> leaf; next 8 bits = bit width
-        bit 1 -> if the stack has >= 2 entries: node(left = 2nd from top, right = top), push
-                 else: end of tree (root = last node created)
-tv(T) = walk from the root (0 = left, 1 = right) to a leaf, then read leaf.width bits
-token bit 0: literal (8 bits)
-token bit 1: back-reference
-   method 1: v = tv(off); if v <= 2 { adj = v + 1; v = tv(off) } else adj = 0
-             src = pos - 4*v - adj + 8
-   method 0: src = pos - tv(off)
-   len = tv(len); copy byte by byte (overlap allowed)
-```
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | char[4] | magic | vpk0 |
+| 0x04 | 4 | u32 | decodedSize | Output byte count |
+| 0x08 | 1 | u8 | method | 0 = one-sample offsets; 1 = two-sample offsets |
+| 0x09 | Variable | bitstream | treesAndTokens | MSB first; offsets tree, lengths tree, then tokens until decodedSize bytes have been written |
+
+| Tree code | Payload | Effect |
+|---|---|---|
+| 0 | 8-bit width | Push a leaf with this bit width |
+| 1, at least two stack entries | None | Pop right then left; push their parent |
+| 1, fewer than two stack entries | None | End tree; root is last node created |
+
+`tv(T)` walks the tree with 0 = left and 1 = right, then reads the leaf's bit width.
+
+| Token bit | Payload | Effect |
+|---|---|---|
+| 0 | 8-bit value | Emit literal |
+| 1 | Encoded offset and length | Copy back-reference byte by byte; overlap allowed |
+
+For method 0, source = pos − tv(offsetTree). For method 1, read v = tv(offsetTree); if v ≤ 2, set adj = v + 1 and read v again, otherwise adj = 0. Source = pos − 4 × v − adj + 8. Length = tv(lengthTree).
+
 The viewer does not need VPK0 for levels. It needs it only for menu or title images.
 
 #### ROM, code, overlays, codec
@@ -289,17 +302,22 @@ Each course's code or asset segment holds one WorldSetup; the level entry passes
 | rainbow | 0x800F5DA0 (0x4A8170) | none | – |
 
 Layout (**verified** by decoding all seven; lead re-checked the ROM bytes):
-```c
-struct WorldSetup {
-  /*00*/ WorldBlockSetup* blocksSetup;
-  /*04*/ StaticModelEntry* staticModelTable; // id -> attach handler + payload (*Static models*); NULL in 5 courses
-  /*08*/ s32 unk_08;                         // 0 everywhere
-  /*0C*/ CollisionModel* collisionModels;    // id -1 ends (*Object hitboxes*)
-  /*10*/ f32 animSpeed;                      // added to GlobalTimer each game update (sky rotation, material animation)
-  /*14*/ u16 fogMin, fogMax;                 // gSPFogPosition
-  /*18*/ u8 fogR, fogG, fogB, bgR, bgG, bgB; // fog colour, clear colour
-};
-```
+
+**WorldSetup (0x20 bytes; pointers use linked RAM addresses).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | blocksSetup | WorldBlockSetup pointer |
+| 0x04 | 4 | u32 | staticModelTable | StaticModelEntry pointer; null in five courses |
+| 0x08 | 4 | s32 | unknown_08 | Zero in every course |
+| 0x0C | 4 | u32 | collisionModels | CollisionModel array; id −1 terminates |
+| 0x10 | 4 | f32 | animSpeed | Added to GlobalTimer each game update; sky/material animation |
+| 0x14 | 2 | u16 | fogMin | gSPFogPosition minimum |
+| 0x16 | 2 | u16 | fogMax | gSPFogPosition maximum |
+| 0x18 | 3 | u8[3] | fogRGB | Fog colour |
+| 0x1B | 3 | u8[3] | backgroundRGB | Clear colour |
+| 0x1E | 2 | u8[2] | padding | Alignment |
+
 
 | course | animSpeed | fog min/max | fog RGB | clear RGB |
 |---|---|---|---|---|
@@ -314,31 +332,52 @@ struct WorldSetup {
 #### World blocks
 
 **Verified** layout by decoding every block of all seven courses; semantics **decomp**.
-```c
-struct WorldBlockSetup { WorldBlockDescriptor** modelBlocks; WorldBlockDescriptor** sceneryBlocks; SkyBox* skybox; };
-                                        // both lists NULL-terminated
-struct WorldBlockDescriptor {           // 0x24
-  /*00*/ WorldBlockGFX* gfx;
-  /*04*/ Vec3f worldPos;                // block units; 1 block unit = 100 game units
-  /*10*/ f32 yaw;                       // applies to the rail path only; 0 in every course
-  /*14*/ s32 reversed;                  // rail played backwards; 0 in every course
-  /*18*/ StaticObject* staticModels;    // props attached by id through WorldSetup.staticModelTable (*Static models*)
-  /*1C*/ ObjectSpawn* spawn;            // Pokémon and effect spawns (*Objects*)
-  /*20*/ StaticObject* staticObjects;   // collision-bearing objects (*Object hitboxes*)
-};
-struct WorldBlockGFX {
-  /*00*/ void* gfxData;                 // Gfx* (render type A/C, skies) or DObj tree (B/D)
-  /*04*/ Texture*** textures;           // per DObj: NULL-terminated Texture* list (materials)
-  /*08*/ AnimCmd*** materialAnim;       // per DObj, per material: texture animation script
-  /*0C*/ GObjFunc renderFunc;
-  /*10*/ DObjTreeNode* road;            // rail control points (*Rail path*)
-  /*14*/ s32 numControlLines;           // 2 or 3; 0 = no movement
-  /*18*/ AnimCmd** movementAnim;        // one script per road node
-  /*1C*/ s32 movementAnimDuration;      // 100 everywhere
-  /*20*/ f32 cpTimeStamps[numControlLines - 2];
-};
-struct SkyBox { Gfx* gfx; GObjFunc renderFunc; Texture*** textures; AnimCmd*** animation; f32 animationSpeed; };
-```
+
+**WorldBlockSetup (0x0C bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | modelBlocks | Pointer to null-terminated WorldBlockDescriptor pointer array |
+| 0x04 | 4 | u32 | sceneryBlocks | Pointer to null-terminated WorldBlockDescriptor pointer array |
+| 0x08 | 4 | u32 | skybox | SkyBox pointer |
+
+**WorldBlockDescriptor (0x24 bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | gfx | WorldBlockGFX pointer |
+| 0x04 | 12 | f32[3] | worldPos | Block units; one block unit = 100 game units |
+| 0x10 | 4 | f32 | yaw | Rail-only yaw; zero in every course |
+| 0x14 | 4 | s32 | reversed | Rail reversal; zero in every course |
+| 0x18 | 4 | u32 | staticModels | StaticObject array, resolved through WorldSetup.staticModelTable |
+| 0x1C | 4 | u32 | spawn | ObjectSpawn array; Pokémon and effects |
+| 0x20 | 4 | u32 | staticObjects | Collision-bearing StaticObject array |
+
+**WorldBlockGFX (0x20-byte prefix plus timestamps).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | gfxData | Gfx pointer for A/C and skies; DObj tree for B/D |
+| 0x04 | 4 | u32 | textures | Per-DObj null-terminated Texture pointer lists |
+| 0x08 | 4 | u32 | materialAnim | Per-DObj, per-material animation scripts |
+| 0x0C | 4 | u32 | renderFunc | Render-function pointer |
+| 0x10 | 4 | u32 | road | DObj tree of rail control points |
+| 0x14 | 4 | s32 | numControlLines | 2 or 3; zero = no movement |
+| 0x18 | 4 | u32 | movementAnim | One script pointer per road node |
+| 0x1C | 4 | s32 | movementAnimDuration | 100 in every course |
+| 0x20 | 4 × (numControlLines − 2), when ≥ 2 | f32[] | cpTimeStamps | Control-line timestamps |
+
+**SkyBox (0x14 bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | gfx | Display-list pointer |
+| 0x04 | 4 | u32 | renderFunc | Render-function pointer |
+| 0x08 | 4 | u32 | textures | Texture pointer lists |
+| 0x0C | 4 | u32 | animation | Material-animation pointer lists |
+| 0x10 | 4 | f32 | animationSpeed | Animation rate |
+
+All pointers in these records are linked RAM addresses, resolved through the containing overlay.
 - **Render functions** (**verified** by value): every non-Rainbow course block uses `renderModelTypeAFogged` (0x800A1530), a plain Gfx list. Rainbow Cloud's only block uses `drawSkyBox2Cycle` (0x800E1D80): no Z, no fog, rotating. Tree types B/D (0x800A15D8, 0x800A1608) are never used for blocks. **A course loader needs only the plain-list path.**
 - **Scenery blocks** (the decomp's "UV scroll" list) are ordinary pieces such as far terrain, sea and distant mountains. They have no road and are placed like model blocks (**verified** by renders).
 - **Placement.** Instance matrix = translate(worldPos × 100). There is no rotation: the block's DObj is MTX_TYPE_TRANSLATE, and yaw is ignored by it. Vertices are s16 game units local to the block, Y up, no mirroring.
@@ -357,7 +396,7 @@ struct SkyBox { Gfx* gfx; GObjFunc renderFunc; Texture*** textures; AnimCmd*** a
 
 Per-block addresses (descriptor, gfx, gfxData, textures, animations, road) are in `lv/dumps/{course}.json`.
 
-**DObj trees** (`UnkEC64Arg3`, 0x2C: `{s32 id; Gfx* dl; Vec3f pos, rot, scale}`, terminated by id 18; **decomp**, used by roads, props and Pokémon, *Model format*):
+**DObj trees** use the `UnkEC64Arg3` record tabulated under *Model format*. They terminate at id 18 and are used by roads, props and Pokémon (**decomp**):
 - `id & 0xFFF` is the depth: a node at depth d is a child of the latest node at depth d − 1, and depth 0 is a root sibling.
 - `id & 0xF000` adds extra matrix kinds.
 - Materials attach to nodes in array order.
@@ -371,7 +410,16 @@ Per-block addresses (descriptor, gfx, gfxData, textures, animations, road) are i
 
 #### Model format
 
-**DObj tree** (`UnkEC64Arg3`, 0x2C: `{s32 id; void* payload; Vec3f pos, rot, scale}`, terminated by id 18; **decomp**, **verified**: all 238 models decode):
+**DObj tree** (`UnkEC64Arg3`, 0x2C bytes; id 18 terminates; **decomp**, **verified**: all 238 models decode):
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | s32 | id | Low 12 bits = hierarchy depth; high nibble = matrix kinds |
+| 0x04 | 4 | u32 | payload | Linked pointer; layout selected by render type below |
+| 0x08 | 12 | f32[3] | position | Local translation |
+| 0x14 | 12 | f32[3] | rotation | RPY angles |
+| 0x20 | 12 | f32[3] | scale | Local scale |
+
 - **Hierarchy:** `id & 0xFFF` is the depth; a node at depth d > 0 is a child of the latest node at depth d − 1. Node 0 is an empty root.
 - **Billboards:** `id & 0xF000` selects camera-facing matrices (types 43-50: projection-only with node scale, optionally roll). They are used for flames, Snorlax's Zzz, the play Haunter sprite and smoke.
 - **Node matrix:** RPY-TS, `hal_rotate_rpy_translate_scale`, r = rot.x, p = rot.y, h = rot.z:
@@ -387,9 +435,31 @@ Per-block addresses (descriptor, gfx, gfxData, textures, animations, road) are i
 | type | payload | per node |
 |---|---|---|
 | B | `Gfx*` | node matrix, material lists, draw |
-| D | `{s32 dlistID; Gfx*}[]` until dlistID 4 | one list per RDP pass: 0 opaque, 1 translucent |
-| I | `{Gfx* pre; Gfx* draw}` | `pre` under the **parent's** matrix, then the node matrix, materials, `draw` |
-| J | `{s32 dlistID; Gfx* pre; Gfx* draw}[]` until 4 | as I, per pass |
+| D | Eight-byte D records below, until dlistID 4 | one list per RDP pass: 0 opaque, 1 translucent |
+| I | Eight-byte I record below | `pre` under the **parent's** matrix, then the node matrix, materials, `draw` |
+| J | Twelve-byte J records below, until dlistID 4 | as I, per pass |
+
+D draw-pass record, eight bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | s32 | dlistID | 0 opaque; 1 translucent; 4 terminates. |
+| 0x04 | 4 | u32 | draw | Display-list pointer. |
+
+I draw record, eight bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | pre | Display list under parent matrix. |
+| 0x04 | 4 | u32 | draw | Display list under node matrix. |
+
+J draw-pass record, 12 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | s32 | dlistID | Pass selector; 4 terminates. |
+| 0x04 | 4 | u32 | pre | Display list under parent matrix. |
+| 0x08 | 4 | u32 | draw | Display list under node matrix. |
 
 - **Skinning:** `pre` loads vertices under the parent matrix. `draw` loads more under the node matrix, patches cached vertices with **G_MODIFYVTX (0x02)** (texture coordinates at 0x14, colour at 0x10) and draws triangles across both ranges (**verified**, e.g. Growlithe: 85 × `0214xxxx`). The vertex cache must survive the matrix change.
 - **LOD:** every Pokémon list is `E1 near; 04 G_BRANCH_Z; far version`. The branch to the near version is taken when the list's bounding vertex is closer than its threshold (thresholds decode to 599-7936 units), and G_MODIFYVTX occurs only in near versions (**verified**, frame display lists). Use the near version.
@@ -403,7 +473,14 @@ Per-block addresses (descriptor, gfx, gfxData, textures, animations, road) are i
   ```
   E7 | D9FFFFFF 00020000 set G_LIGHTING | DB020000 00000018 one light | DC08060A 800AEBD8 light 1 | DC08090A 800AEBD0 ambient | E3… | DF
   ```
-- `Lights1` at ROM 0x5A580 (vram 0x800AEBD0): ambient 64 64 64 (100) at +0, light colour B4 B4 B4 (180) at +8, direction 1E 1E 1E at +0x10.
+Lights1 at ROM 0x5A580 (VRAM 0x800AEBD0), known fields:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 3 | u8[3] | ambient | RGB 0x64, 0x64, 0x64 (100). |
+| 0x08 | 3 | u8[3] | color | Light RGB 0xB4, 0xB4, 0xB4 (180). |
+| 0x10 | 3 | s8[3] | direction | X,Y,Z = 0x1E, 0x1E, 0x1E. |
+
 - Lists override the light colours with `G_MOVEWORD DB0A0000` / `DB0A0018` (e.g. Pikachu FFFFFF / 323232).
 - **F3DEX2 lights are 0x18 bytes apart;** `displaylist.ts`'s MOVEWORD handler assumes 0x20.
 - At run time the light direction follows the camera: the horizontal unit vector from the look-at point to the eye, with y = 1, normalised (**decomp**; **verified** in RAM: direction (0, 89, −89) at yaw 0, (−89, 89, 6) at yaw 1.64).
@@ -414,8 +491,42 @@ Per-block addresses (descriptor, gfx, gfxData, textures, animations, road) are i
 
 **Verified**: ROM bytes, and every table parses with the repo's unchanged modules.
 
-- **Sequence file** (ROM 0xAEFC10): ALSeqFile `u16 revision 0x5331 ('S1'), u16 count = 37`, then 37 × `{u32 offset from the file start, u32 length}`. The 37 sequences are contiguous and 4-byte aligned from 0xAEFD3C to 0xAFEED6, followed by 2 bytes of padding (lead re-checked).
-- **Sequences.** libultra compressed MIDI (ALCSeq), stored uncompressed: `u32 trackOffset[16]`, `u32 division` = **480 in all 37**. The body uses `FE` back-references, note-ons with varlen durations, `FF 51` tempo, `FF 2F` end, `FF 2E` loop start and `FF 2D count cur u32` loop end (count 0xFF = forever), as in GoldenEye and Perfect Dark.
+**Sequence file** (ROM 0xAEFC10). Its 37 sequences are contiguous and 4-byte aligned from 0xAEFD3C to 0xAFEED6, followed by two padding bytes (lead re-checked).
+
+**ALSeqFile header (4 bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | u16 | revision | 0x5331 (S1) |
+| 0x02 | 2 | u16 | count | 37 |
+
+**Sequence entry (8 bytes; count entries follow header).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | offset | ALSeqFile-relative sequence start |
+| 0x04 | 4 | u32 | length | Sequence bytes |
+
+**Sequences.** libultra compressed MIDI (ALCSeq), stored without outer compression.
+
+**ALCSeq header (0x44 bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 0x40 | u32[16] | trackOffset | Sequence-relative track starts; zero = unused |
+| 0x40 | 4 | u32 | division | 480 ticks per quarter note in all 37 sequences |
+
+| Encoding | Payload | Meaning |
+|---|---|---|
+| Track item | Variable-length delta, event | Delay then MIDI event |
+| FE FE | None | Literal FE byte |
+| FE hi lo len | Three bytes | Back-reference; distance = (hi << 8) \| lo, length = len |
+| 9n | key, velocity, varlen duration | Note-on with duration |
+| FF 51 | Three-byte tempo | Microseconds per quarter note |
+| FF 2F | None | End track |
+| FF 2E | Two marker bytes | Loop start |
+| FF 2D | u8 count, u8 current, u32 offset | Loop end; count 0xFF = forever |
+
   - Events used: note-on, CC 7, 10, 21, 64 (always 0), 91, program change, pitch bend.
   - Loops are **per track**: 26 songs have forever loops on every musical track, 9 have no loop markers, and songs 11 and 36 have only finite loops and play once.
 - **Music bank** (ctl 0xAFEEE0, tbl 0xB04430): ALBankFile `B1`, one bank.
@@ -577,27 +688,42 @@ For gap 4: either a `Batch.fog?: boolean` field (contract change by the main ses
 #### Materials and the segment 0x0E lists
 
 Materials are 0x78-byte `Texture` records (copied into MObjs). **Verified** layout: Volcano block 0 material 0 decodes field for field like decomp `volcano/world/block0.c`.
-```c
-struct Texture {            // 0x78
- /*00*/ u16 pad; u8 fmt; u8 siz;               // SETTIMG format of images[imageIndex]
- /*04*/ u8** images;                           // animation frames
- /*08*/ u16 scale;                             // gSPTexture scale = 2^21 / scale / scaleS
- /*0A*/ u16 texelOffset;                       // added to the tile origin
- /*0C*/ u16 widthMain, heightMain;             // tile 0 window (texels)
- /*10*/ s32 halfS;                             // != 0: scaleS halved (mirrored S)
- /*14*/ f32 offS, offT;                        // UV scroll (animation params 14, 15)
- /*1C*/ f32 scaleS, scaleT;                    // (16, 17)
- /*24*/ f32 unk24, unk28;
- /*2C*/ u8** palettes;
- /*30*/ u16 flags; u8 blockFmt; u8 blockSiz;   // LOADBLOCK format
- /*34*/ u16 blockWidth, blockHeight;           // image size
- /*38*/ u16 widthAux, heightAux;               // tile 1 window
- /*3C*/ f32 auxOffS, auxOffT, unk44;
- /*48*/ u32 pad; u32 unk4C;
- /*50*/ u32 primRGBA; u8 lod255; u8 minLod; u8 pad2[2];
- /*58*/ u32 envRGBA, blendRGBA, light1, light2;
-};
-```
+
+**Texture (0x78 bytes; linked RAM pointers).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | u16 | padding_00 | Reserved |
+| 0x02 | 1 | u8 | fmt | SETTIMG image format |
+| 0x03 | 1 | u8 | siz | SETTIMG image size |
+| 0x04 | 4 | u32 | images | Pointer to animation-frame pointers |
+| 0x08 | 2 | u16 | scale | gSPTexture scale = 2^21 / scale / scaleS |
+| 0x0A | 2 | u16 | texelOffset | Added to tile origin |
+| 0x0C | 4 | u16[2] | widthMainHeightMain | Tile-0 window in texels |
+| 0x10 | 4 | s32 | halfS | Nonzero halves scaleS for mirroring |
+| 0x14 | 8 | f32[2] | offSOffT | UV scroll; animation parameters 14/15 |
+| 0x1C | 8 | f32[2] | scaleSScaleT | Animation parameters 16/17 |
+| 0x24 | 8 | f32[2] | unknown_24 | Mirroring-related parameters |
+| 0x2C | 4 | u32 | palettes | Palette pointer array |
+| 0x30 | 2 | u16 | flags | Material flags below |
+| 0x32 | 1 | u8 | blockFmt | LOADBLOCK format |
+| 0x33 | 1 | u8 | blockSiz | LOADBLOCK texel size |
+| 0x34 | 4 | u16[2] | blockWidthHeight | Image dimensions |
+| 0x38 | 4 | u16[2] | widthAuxHeightAux | Tile-1 window |
+| 0x3C | 8 | f32[2] | auxOffSOffT | Auxiliary scroll |
+| 0x44 | 4 | f32 | unknown_44 | Unresolved |
+| 0x48 | 4 | u32 | padding_48 | Reserved |
+| 0x4C | 4 | u32 | unknown_4C | Unresolved |
+| 0x50 | 4 | u32 | primRGBA | Primitive colour |
+| 0x54 | 1 | u8 | lod255 | LOD fraction |
+| 0x55 | 1 | u8 | minLod | Minimum LOD |
+| 0x56 | 2 | u8[2] | padding_56 | Reserved |
+| 0x58 | 4 | u32 | envRGBA | Environment colour |
+| 0x5C | 4 | u32 | blendRGBA | Blend colour |
+| 0x60 | 4 | u32 | light1 | Light colour 1 |
+| 0x64 | 4 | u32 | light2 | Light colour 2 |
+| 0x68 | 0x10 | u8[0x10] | unknown_68 | Not described in the recovered field list |
+
 Every frame, `renLoadTextures` (0x80013E2C) builds one Gfx sub-list per material on the frame heap and binds it with `gSPSegment(0x0E, …)`. The block lists call entry i as `gSPDisplayList(0x0E000000 + 8·i)`. The lists are **decomp**; the DE 0E0000xx calls are **verified** in ROM. **The sub-lists do not exist in ROM, so a loader must synthesise them:**
 
 | flags (0 = 0xA1) | emitted |
@@ -642,11 +768,31 @@ Collision serves Pokémon, items and the ground under spawns: the cart follows i
 #### Height map and ceiling map
 
 **Decomp** `world/ground_int.c`, `ground.c`; decode **verified** on all six courses. Rainbow Cloud has no height map (it never calls `setHeightMap`).
-```c
-struct HeightMap         { HeightMapPatch* patches; HeightMapTreeNode* tree; };
-struct HeightMapTreeNode { f32 A, B, C; s32 leftChild, rightChild, leftPatch, rightPatch; }; // 0x1C; array indices in ROM, -1 = none
-struct HeightMapPatch    { f32 a, b, c, d; u32 surface; };                                   // 0x14; surface = value >> 8 (24-bit RGB)
-```
+
+**HeightMap (8 bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | patches | Linked pointer to HeightMapPatch array |
+| 0x04 | 4 | u32 | tree | Linked pointer to HeightMapTreeNode array |
+
+**HeightMapTreeNode (0x1C bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 12 | f32[3] | ABC | Splitting-plane coefficients |
+| 0x0C | 4 | s32 | leftChild | Array index; −1 = none |
+| 0x10 | 4 | s32 | rightChild | Array index; −1 = none |
+| 0x14 | 4 | s32 | leftPatch | Patch index; −1 = none |
+| 0x18 | 4 | s32 | rightPatch | Patch index; −1 = none |
+
+**HeightMapPatch (0x14 bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 16 | f32[4] | abcd | Plane coefficients |
+| 0x10 | 4 | u32 | surface | Surface colour = value >> 8; RGB24 |
+
 - **Lookup** (`findHeightMapPatch`) in global block units (x, z) = local/100 + worldPos.xz. At a node, `A·x + B·z + C ≤ 0` takes the right side (rightPatch if set, else rightChild), otherwise the left side.
 - **Height** = −(a·x + b·z + d)/c in block units (0 if c = 0); × 100 is the absolute world Y. The normal is (a, c, b) normalised: the patch equation is Z-up.
 - **Tree shape** (**verified**): every tree is a full binary tree with N nodes and N + 1 leaves, each leaf a distinct patch. The indices are relocated to pointers at load (`createHeightMapTree`).
@@ -746,7 +892,20 @@ The fog lies close to the far plane and mainly hides pop-in near 25600 units. Th
   - `yawV = {−π, −π/2, 0, π/2, π}[index 2 at start] + viewYaw`; pitch limits −π/8..π/4;
   - fovy 55 during play (zoom narrows it).
 
-**AnimCmd** (HAL's animation script; **decomp** `sys/anim.c`, **verified** by decoding every course script). A command word is `cmd << 25 | mask << 15 | duration`, followed by one f32 per set mask bit (two for cmds 5/6, a pointer for 1/13/14):
+**AnimCmd** (HAL's animation script; **decomp** `sys/anim.c`, **verified** by decoding every course script). The 32-bit command word uses these fields:
+
+| Bits | Mask | Field | Meaning |
+|---|---|---|---|
+| 25–31 | 0xFE000000 | cmd | Command ID |
+| 15–24 | 0x01FF8000 | mask | Selected parameters |
+| 0–14 | 0x00007FFF | duration | Command duration |
+
+| Command | Following payload |
+|---|---|
+| 5 / 6 | Two f32 values per set mask bit |
+| 1 / 13 / 14 | Linked pointer |
+| Other value commands | One f32 per set mask bit |
+
 
 | cmd | name | effect per masked parameter |
 |---|---|---|
@@ -767,7 +926,19 @@ The fog lies close to the far plane and mainly hides pop-in near 25600 units. Th
 - Hermite, with k = 1/duration: `v = v0(2k³t³ − 3k²t² + 1) + v1(3k²t² − 2k³t³) + r0(k²t³ − 2kt² + t) + r1(k²t³ − kt²)`.
 - Model parameters: 1-3 rotation, 4 path parameter (0..1), 5-7 position, 8-10 scale.
 
-**InterpData** (0x18): `u8 type; s16 numPoints; f32 tension; Vec3f* points; f32 length; f32* knots; FittingParams* speed`.
+**InterpData** (0x18 bytes; linked RAM pointers):
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | type | Interpolation type below |
+| 0x01 | 1 | u8 | padding | Alignment |
+| 0x02 | 2 | s16 | numPoints | Point count |
+| 0x04 | 4 | f32 | tension | Cardinal-spline tension |
+| 0x08 | 4 | u32 | points | Pointer to f32[3] points |
+| 0x0C | 4 | f32 | length | Path length |
+| 0x10 | 4 | u32 | knots | Pointer to f32 knots |
+| 0x14 | 4 | u32 | speed | Pointer to FittingParams |
+
 - Types: 0 linear, 1 cubic Bézier, 2 uniform cubic B-spline over `points[s..s+3]`, 3 cardinal. **Course rails are type 2** (**verified**).
 - The parameter is arc-length uniform: find segment s with `knots[s+1] ≥ p`, then bisect u until ∫₀ᵘ √(quartic in the speed fit) (Simpson, 8 intervals) ≈ (p − knots[s])·length.
 
@@ -859,17 +1030,27 @@ Source notes: `notes/objects.md`. Prototype: `obj/proto/` (`npx tsx build_all.ts
 - **Static models** (palm, tunnel computers; *Static models*) and the collision-only static objects (*Object hitboxes*).
 - Items (apple, pester ball) and effect sprites have no records and are out of scope.
 
-```c
-struct ObjectSpawn {            // 0x30
- /*00*/ u32 id;                 // 1-151 National Dex number; 600-603 eggs/variants; 1001+ props and controllers
- /*04*/ s32 behavior;           // per-species variant 0..7
- /*08*/ Vec3f translation;      // block units, block-local
- /*14*/ Vec3f euler;            // radians; yaw only (166 records) or zero (65)
- /*20*/ Vec3f scale;            // not read by the spawn functions; (1,1,1) in 217 of 231
- /*2C*/ InterpData* path;       // or NULL
-};
-struct PokemonDef { u32 id; void* init; void* update; void* kill; };   // 0x10; all-zero record ends a table
-```
+
+**ObjectSpawn (0x30 bytes; id 0xFFFFFFFF terminates).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | id | 1–151 National Dex; 600–603 eggs/variants; 1001+ props/controllers |
+| 0x04 | 4 | s32 | behavior | Species variant 0–7 |
+| 0x08 | 12 | f32[3] | translation | Block-local block units |
+| 0x14 | 12 | f32[3] | euler | Radians; yaw only in 166 records, zero in 65 |
+| 0x20 | 12 | f32[3] | scale | Unused by spawn functions; (1,1,1) in 217 of 231 |
+| 0x2C | 4 | u32 | path | Linked InterpData pointer or null |
+
+**PokemonDef (0x10 bytes; all-zero record terminates).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | id | Spawn ID |
+| 0x04 | 4 | u32 | init | Function pointer |
+| 0x08 | 4 | u32 | update | Function pointer |
+| 0x0C | 4 | u32 | kill | Function pointer |
+
 
 **Placement rule** (`Pokemon_SpawnOnGround` 0x80362EE0 and `Pokemon_Spawn` 0x80362E5C, **decomp**). **Verified** by renders, which put every Pokémon on the terrain, and in RAM: at the Beach start, Doduo, Pikachu, three Pidgeys and Lapras stand at the decoded positions (one Pidgey within 3.3 units), with scales 0.2 and 0.3:
 - `x, z = (worldPos + translation)·100`;
@@ -898,17 +1079,32 @@ Lead re-checked the Beach table in ROM: 16 records (ids 12, 84, 133, 115, 143, 1
 #### Id → model
 
 Almost every `init` is a 12-instruction stub that passes a `PokemonInitData*` as stack argument 6 to a spawn function. All 159 def records resolve to one each by constant propagation (**verified**, `obj/proto/defs.ts` → `defs.json`; 124 unique rows in `id_models.tsv`).
-```c
-struct PokemonInitData {        // 0x34
- /*00*/ DObjTreeNode* tree;  /*04*/ Texture*** textures;   // one NULL-terminated material list per tree node
- /*08*/ GObjFunc fnRender;   /*0C*/ PokemonAnimationSetup* animSetup;   // animSetup->animations[0] plays at spawn
- /*10*/ Vec3f scale;         // model scale = 0.1 × scale
- /*1C*/ Vec3f collisionCenter; /*28*/ f32 radius;
- /*2C*/ u16 flags;           // 0x10: node matrices use matrix1..3 instead of RPY-TS (Snorlax: 54)
- /*2E*/ u8 matrix1, matrix2, matrix3;
-};
-struct AnimationHeader { f32 speed; f32 length; AnimCmd** modelAnims /* per node */; AnimCmd*** matAnims /* per node, per material */; s32* soundIds; };
-```
+
+**PokemonInitData (0x34 bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | tree | Linked DObj tree pointer |
+| 0x04 | 4 | u32 | textures | One null-terminated material list per node |
+| 0x08 | 4 | u32 | fnRender | Render-function pointer |
+| 0x0C | 4 | u32 | animSetup | PokemonAnimationSetup pointer; animations[0] plays at spawn |
+| 0x10 | 12 | f32[3] | scale | Model scale = 0.1 × scale |
+| 0x1C | 12 | f32[3] | collisionCenter | Collision centre |
+| 0x28 | 4 | f32 | radius | Collision radius |
+| 0x2C | 2 | u16 | flags | 0x10 selects matrix1–3 instead of RPY-TS; Snorlax = 54 |
+| 0x2E | 3 | u8[3] | matrixKinds | matrix1, matrix2, matrix3 |
+| 0x31 | 3 | u8[3] | padding | Alignment |
+
+**AnimationHeader (0x14 bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | f32 | speed | Animation speed |
+| 0x04 | 4 | f32 | length | Animation length |
+| 0x08 | 4 | u32 | modelAnims | Per-node AnimCmd pointer array |
+| 0x0C | 4 | u32 | matAnims | Per-node/per-material animation pointers |
+| 0x10 | 4 | u32 | soundIds | Pointer to s32 sound IDs |
+
 - **Where models live** (**verified** by resolving the tree pointers):
   - Course Pokémon trees and textures are in `{level}_code`, their animations in `{level}_assets`.
   - The shared Magikarp, Pikachu, Zubat and Bulbasaur trees are in the `*_model` segments, with textures and animations in `magikarp_textures`/`pikachu1`/`zubat1`/`bulbasaur1`.
@@ -918,14 +1114,31 @@ struct AnimationHeader { f32 speed; f32 length; AnimCmd** modelAnims /* per node
   - `renderModelTypeB/DFogged` for props;
   - two custom wrappers: Volcano `moltres_Render` (translucent) and `volcano_smoke_Render`.
 - **HD photo models** (**verified**, ROM tables, lead re-checked the first entries). The photo scenes look up each photographed id in:
-  - `D_800ADBEC` (ROM 0x5959C; 83 × `{u32 id; f32 scale; tree; textures; render}`);
+  - `D_800ADBEC` (ROM 0x5959C; 83 records of 0x14 bytes):
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | id | Photographed Pokémon ID |
+| 0x04 | 4 | f32 | scale | Model scale |
+| 0x08 | 4 | u32 | tree | Linked DObj tree pointer |
+| 0x0C | 4 | u32 | textures | Linked texture lists |
+| 0x10 | 4 | u32 | render | Render-function pointer |
+
   - `D_800ADA64` (ROM 0x59414; 13 × 0x1C, with animations).
 
   HD trees are in `{level}_extra` or `*_model_hd`, with about 1.5-2.5× the triangles (Pikachu 343 → 1422). Props reuse their play trees.
 
 #### Static models
 
-`descriptor.staticModels` entries are looked up by id in `WorldSetup.staticModelTable` (**verified**: 0xC-byte entries `{id, handler, payload}`, though the decomp says 0x28). The handler attaches the payload to the block (**decomp**):
+`descriptor.staticModels` entries are looked up by id in `WorldSetup.staticModelTable` (**verified**: 0x0C-byte entries, though the decomp says 0x28).
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | s32 | id | Static-model identifier |
+| 0x04 | 4 | u32 | handler | Linked attach-function pointer |
+| 0x08 | 4 | u32 | payload | Linked model pointer |
+
+The handler attaches the payload to the block (**decomp**):
 - `func_800E30B0` attaches a Gfx child with RPY-TS at pos × 100;
 - `func_800E3258` attaches a DObj tree.
 
@@ -945,12 +1158,46 @@ Tables exist only in Beach (1007 palm → Gfx 0x80138C80) and Tunnel (1015 compu
 #### Object hitboxes
 
 **Decomp** `world/collision.c`; decode **verified**.
-```c
-struct CollisionModel { s32 id; Collider* colliders; f32 scale; };   // 0xC; id -1 ends; scale > 0 overrides the object's scale
-struct Collider { s32 depth; HitBox* hitBox; Vec3f pos, rot, scale; }; // 0x2C; depth 18 ends
-struct HitBox { u8 type; Mtx4f localToGlobal, globalToLocal; f32 p84, p88, p8C; };
-struct StaticObject { s32 id; Vec3f pos, rot, scale; };              // 0x28; id -1 ends; block-local block units
-```
+
+**CollisionModel (0x0C bytes; id −1 terminates).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | s32 | id | Object ID |
+| 0x04 | 4 | u32 | colliders | Linked Collider array |
+| 0x08 | 4 | f32 | scale | Positive value overrides object scale |
+
+**Collider (0x2C bytes; depth 18 terminates).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | s32 | depth | Hierarchy depth |
+| 0x04 | 4 | u32 | hitBox | Linked HitBox pointer |
+| 0x08 | 12 | f32[3] | position | Local position |
+| 0x14 | 12 | f32[3] | rotation | Local rotation |
+| 0x20 | 12 | f32[3] | scale | Local scale |
+
+**HitBox (0x90 bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | type | Primitive type below |
+| 0x01 | 3 | u8[3] | padding | Matrix alignment |
+| 0x04 | 64 | f32[16] | localToGlobal | Transform |
+| 0x44 | 64 | f32[16] | globalToLocal | Inverse transform |
+| 0x84 | 4 | f32 | p84 | Radius or X half-extent |
+| 0x88 | 4 | f32 | p88 | Height or Y half-extent |
+| 0x8C | 4 | f32 | p8C | Z half-extent |
+
+**StaticObject (0x28 bytes; id −1 terminates).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | s32 | id | Object ID |
+| 0x04 | 12 | f32[3] | position | Block-local block units |
+| 0x10 | 12 | f32[3] | rotation | Local rotation |
+| 0x1C | 12 | f32[3] | scale | Local scale |
+
 - **Hitbox types:** 1 sphere (radius p84); 2 and 3 cylinders (radius p84, height p88); 4 box (half extents p84, p88, p8C).
 - **Matrices:** each collider's is `create_matrix(scale, rot, pos)` = S·Rx·Ry·Rz·T in row-vector form. The lowest-depth sphere is a broad-phase XZ circle.
 - **Testing:** the objects tested are the `staticObjects` of the previous, current and next blocks whose id has a collision model. Their world position is (worldPos + pos)·100.

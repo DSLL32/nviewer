@@ -58,12 +58,26 @@ position-dependent.
 | 0x98510–0x98640 | phys 0x1D0000, virtual 0x10000000 | ZeroJump stub |
 | 0xFF000 (0x1000) | 0x800EF250 | exec (overlay) id table, 2 bytes per id: block ROM = `hi << 17 \| lo << 11` |
 | 0x100000–0x270702 | TLB-mapped | 39 LZSS "exec" overlays linked at 0x40000000–0x45000000 or 0x60000000, backed by 8 KB pages from 0x80250000–0x802D0000 |
-| 0x280000–0x28F5A0 | (0x803E0000) | function-name table: header `u32 0x10000000, u32 0x803E52C0`, 2,645 `{u32 address, u32 namePtr}` pairs; `namePtr - 0x803E0000 + 0x280000` = ROM offset of the name |
+| 0x280000–0x28F5A0 | (0x803E0000) | Function-name table with 2,645 entries (header and record layouts below); `namePtr - 0x803E0000 + 0x280000` = ROM offset of the name |
 | 0x2A0000–0xFE2E32 | heap | resource block "block 21" (3,134 files) |
 
-- `0x80000698 dmaRead(vaddr, len, romOffset)` wraps osPiStartDma.
-- `0x800024C0 fexecLoadAddress(execId, vaddr)`: id → block → directory (file 0) → file = `u32 codeSize,
-  u32 bssSize, LZSS stream` decoded into `vaddr`, then called; each exec returns its function table.
+Function-name table header, eight bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | tag | 0x10000000. |
+| 0x04 | 4 | u32 | names | 0x803E52C0. |
+| 0x08 | 2645 × 8 | entry[] | entries | Function-name records. |
+
+Function-name record, eight bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | address | Function address. |
+| 0x04 | 4 | u32 | namePtr | Name pointer in the 0x803E0000 image. |
+
+- 0x80000698 dmaRead(vaddr, len, romOffset) wraps osPiStartDma.
+- `0x800024C0 fexecLoadAddress(execId, vaddr)`: id → block → directory (file 0) → file with the SA exec header defined under File payloads, decoded into `vaddr`, then called; each exec returns its function table.
   `moduleLoadRP 0x800516BC` maps slots 0–6 at `0x40000000 + (slot << 24)`; `moduleLoad 0x800517A4` uses
   0x60000000.
 - RSP microcode: "F3DEX.NoN fifo 2.08" (F3DEX2 family) and "S2DEX fifo 2.08"; audio: libultra aspMain (ABI1).
@@ -82,7 +96,15 @@ position-dependent.
 |---|---|---|
 | BM64 asset / overlay | `u32 BE decompressedSize` + LZSS stream | always LZSS, except 7 raw assets: 32 (music "S2" blob), 33 (SFX "T2" blob), 71, 72, 220, 221, 267 |
 | SA resource | `u32 BE decompressedSize` + payload | if the u32 at +4 is `Yay0` (0x59617930): Yay0 image starting at +4; else LZSS stream from +4 |
-| SA exec | `u32 codeSize; u32 bssSize;` LZSS stream | LZSS |
+| SA exec | Eight-byte exec header below, followed by LZSS data | LZSS |
+
+SA exec header, eight bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | codeSize | Decoded executable byte count. |
+| 0x04 | 4 | u32 | bssSize | BSS byte count. |
+| 0x08 | Variable | u8[] | stream | LZSS executable payload. |
 
 SA exceptions: resources 0 (music blob, "S2") and 1 (SFX blob, "T3") are raw and used by ROM address;
 resource 2 is 64 KB of zeros; 46 resources (2527–2540, 2562–2573, 2595–2605, 2621–2629) are
@@ -124,16 +146,24 @@ dumped from RDRAM at decoder exit, byte-identical.
 
 #### Yay0 (SA only)
 
-Standard Nintendo Yay0, decoder `slidstart 0x80073F10`:
+Standard Nintendo Yay0, decoder slidstart 0x80073F10:
 
-```
-+0x0 'Yay0'   +0x4 u32 decompressedSize   +0x8 u32 linkTableOffset   +0xC u32 chunkOffset
-+0x10 flag words (u32, most significant bit first)
-bit 1: copy one byte from the chunk stream
-bit 0: u16 L from the link table; n = L >> 12; dist = (L & 0xFFF) + 1
-       len = n == 0 ? nextChunkByte() + 18 : n + 2; copy len bytes from (out - dist)
-stop when decompressedSize bytes have been written
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u8[4] | magic | Yay0. |
+| 0x04 | 4 | u32 | decompressedSize | Output length. |
+| 0x08 | 4 | u32 | linkTableOffset | Offset of back-reference halfwords. |
+| 0x0C | 4 | u32 | chunkOffset | Offset of literal/extended-length bytes. |
+| 0x10 | Variable | u32[] | flags | Read most-significant bit first. |
+
+A set flag copies one chunk byte. A clear flag consumes this two-byte link:
+
+| Bits | Mask | Field | Meaning |
+|---:|---:|---|---|
+| 15–12 | 0xF000 | lengthCode | Nonzero: length = code + 2. Zero: consume a chunk byte and add 18. |
+| 11–0 | 0x0FFF | distanceMinus1 | Copy from output minus this value minus one. |
+
+Copy references one byte at a time to allow overlap. Stop after decompressedSize output bytes.
 
 Offsets are relative to the `Yay0` magic (i.e. SA file offset 4). Verified: resource 13 dumped from
 RDRAM, byte-identical.
@@ -238,18 +268,37 @@ listed in file order, which is not necessarily play order; areas are connected b
 
 An archive sits at a ROM offset on a 0x800 boundary:
 
-```
-+0x0000  u32 dataOffset      BM64: 0x2008   SA: 0x8008
-+0x0004  u32 capacity        BM64: 0x400    SA: 0x1000
-+0x0008  capacity × { u32 offset; u32 size }   offset relative to archive + dataOffset
-                                              unused slot: offset = size = 0xFFFFFFFF
-+dataOffset  file data, contiguous in index order
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | dataOffset | BM64 0x2008; SA 0x8008. |
+| 0x04 | 4 | u32 | capacity | BM64 0x400; SA 0x1000. |
+| 0x08 | 8 × capacity | entry[] | entries | Eight-byte directory entries below. |
+| dataOffset | Variable | u8[] | fileData | Files contiguous in index order. |
+
+Directory entry, eight bytes; both fields 0xFFFFFFFF mark an unused slot:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | offset | Relative to archive + dataOffset. |
+| 0x04 | 4 | u32 | size | Stored file size. |
 
 The games read the table in pages of 256 entries (0x800 bytes) and file data through a small cache
 (BM64 1 KB, SA 2 KB), which is why individual PI DMAs look like page reads.
 
-In overlay archives, file 0 is a directory, stored raw: `u8 n; n × { u16 overlayId (BE); u8 fileIndex }`.
+In overlay archives, file 0 is a raw directory:
+
+| Order | Count | Type | Field | Description |
+|---:|---:|---|---|---|
+| 1 | 1 | `u8` | `count` | Declared entry count. |
+| 2 | count | directoryEntry | entries | Three-byte records below. |
+
+Overlay-directory entry, three bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | u16 | overlayId | Overlay identifier. |
+| 0x02 | 1 | u8 | fileIndex | Archive file index. |
+
 Some directories declare more entries than they contain (BM64 0x160000: n = 9, 7 present; SA 0x240000:
 n = 3, 2 present); the loader stops at the first match, so a parser must bound the loop by file size.
 
@@ -283,19 +332,30 @@ Source: `notes/sa_niff.md`; annotated disassembly of the model library (0x8000C5
 
 ##### Header (version 0x05000100; also 0x04020100 with the same layout)
 
-| Off | Type | Meaning |
-|---|---|---|
-| 0x00 | char[4] | `niff` |
-| 0x04 | u32 | version |
-| 0x08 | u32 | 0x00020000 in the file; bit 31 is set after relocation |
-| 0x0C | u32 | file size |
-| 0x10 | ptr | scene record (always 0 in this game) |
-| 0x14 | f32 | 10.0 in models, 1.0 in texture sets (unknown) |
-| 0x18 | ptr[4] | default bases of segments 5..8 (texel areas) |
-| 0x28 | ptr[4] | default bases of segments 9..12 (palette areas) |
-| 0x38 / 0x3C / 0x40 / 0x44 / 0x48 | ptr | tables of record pointers: objects, shapes, texture records, animations, class 4 |
-| 0x54 | ptr | class 5 table |
-| 0x58.. | u16 × 7 | counts of the tables in the same order (0x58 objects, 0x5A shapes, 0x5C textures, 0x5E anims, 0x60 class 4, 0x62/0x64 always 0, 0x66 class 5) |
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u8[4] | magic | ASCII niff. |
+| 0x04 | 4 | u32 | version | version |
+| 0x08 | 4 | u32 | flags | 0x00020000 in the file; bit 31 is set after relocation |
+| 0x0C | 4 | u32 | fileSize | file size |
+| 0x10 | 4 | u32 | scene | scene record (always 0 in this game) |
+| 0x14 | 4 | f32 | unknown_14 | 10.0 in models, 1.0 in texture sets (unknown) |
+| 0x18 | 16 | u32[4] | texelSegments | default bases of segments 5..8 (texel areas) |
+| 0x28 | 16 | u32[4] | paletteSegments | default bases of segments 9..12 (palette areas) |
+| 0x38 | 4 | u32 | objects | File-relative pointer to the objects record-pointer table. |
+| 0x3C | 4 | u32 | shapes | File-relative pointer to the shapes record-pointer table. |
+| 0x40 | 4 | u32 | textures | File-relative pointer to the textures record-pointer table. |
+| 0x44 | 4 | u32 | animations | File-relative pointer to the animations record-pointer table. |
+| 0x48 | 4 | u32 | class4 | File-relative pointer to the class4 record-pointer table. |
+| 0x54 | 4 | u32 | class5Table | class 5 table |
+| 0x58 | 2 | u16 | objectCount | Corresponding record-table count. |
+| 0x5A | 2 | u16 | shapeCount | Corresponding record-table count. |
+| 0x5C | 2 | u16 | textureCount | Corresponding record-table count. |
+| 0x5E | 2 | u16 | animationCount | Corresponding record-table count. |
+| 0x60 | 2 | u16 | class4Count | Corresponding record-table count. |
+| 0x62 | 2 | u16 | reserved62 | Always zero. |
+| 0x64 | 2 | u16 | reserved64 | Always zero. |
+| 0x66 | 2 | u16 | class5Count | Corresponding record-table count. |
 
 All pointers are file offsets. `ndResLinkAbs` (0x800133BC) adds the load address to every pointer field.
 Texture-record image/palette offsets are relative to the header's segment bases, **not** to the file.
@@ -303,13 +363,19 @@ Texture-record image/palette offsets are relative to the header's segment bases,
 ##### Records
 
 **Object node** (72 bytes):
-- +0 u16 kind (1 group, 2 shape node, 3 billboard)
-- +4 u32 flags; `(flags >> 8) & 15` = draw layer (section 5.3.4)
-- +8 f32 × 3 translation, +20 f32 × 3 rotation (radians), +32 f32 × 3 scale
-- +44 s16 shape index (−1 none)
-- +52 s16 animation index
-- +56 u32 rotation order code (bytes low..high = axes, 1 = X, 2 = Y, 3 = Z; shape nodes use 0x020103)
-- +60 u16 child count, +64 ptr to s16 child offsets **relative to this object's index**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 2 | `u16` | `kind` | 1 group, 2 shape node, 3 billboard. |
+| `0x04` | 4 | `u32` | `flags` | `(flags >> 8) & 15` is the draw layer. |
+| `0x08` | 12 | `f32[3]` | `translation` | Translation. |
+| `0x14` | 12 | `f32[3]` | `rotation` | Radians. |
+| `0x20` | 12 | `f32[3]` | `scale` | Scale. |
+| `0x2C` | 2 | `s16` | `shapeIndex` | −1 means none. |
+| `0x34` | 2 | `s16` | `animationIndex` | Animation index. |
+| `0x38` | 4 | `u32` | `rotationOrder` | Axis codes from low to high byte; 1 X, 2 Y, 3 Z. Shape nodes use `0x020103`. |
+| `0x3C` | 2 | `u16` | `childCount` | Number of child offsets. |
+| `0x40` | 4 | `ptr` | `children` | `s16` child offsets relative to this object's index. |
 
 The game instantiates object 0 and all descendants. With row vectors,
 `World = S · R_hi · R_mid · R_lo · T · ParentWorld`. R_lo is the axis in the lowest byte of the order code, so
@@ -317,19 +383,45 @@ The game instantiates object 0 and all descendants. With row vectors,
 row-vector matrix equals the viewer's column-major `Instance.matrix`.
 
 **Shape** (80 bytes):
-- +0 ptr display list
-- +4 ptr vertices, +8 u16 count, +10 u16 vertex segment (always 4)
-- +12 ptr[4] image segment bases, +28 ptr[4] palette segment bases, +44 u16 image segment (5), +46 u16 palette segment (9)
-- +62 s16[6] bounding box (used for G_CULLDL)
 
-Vertices are 16 bytes: `s16 x, y, z; u16; s16 s, t; u8 r, g, b, a` (normal in r, g, b when lit).
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 4 | `ptr` | `displayList` | Display-list start. |
+| `0x04` | 4 | `ptr` | `vertices` | Vertex array. |
+| `0x08` | 2 | `u16` | `vertexCount` | Vertex count. |
+| `0x0A` | 2 | `u16` | `vertexSegment` | Always 4. |
+| `0x0C` | 16 | `ptr[4]` | `imageBases` | Segment 5–8 bases. |
+| `0x1C` | 16 | `ptr[4]` | `paletteBases` | Segment 9–12 bases. |
+| `0x2C` | 2 | `u16` | `imageSegment` | 5. |
+| `0x2E` | 2 | `u16` | `paletteSegment` | 9. |
+| 0x30 | 4 | u32 | vertexGroups | File-relative pointer to four-byte vertex-group records below. |
+| 0x38 | 4 | u32 | uvTracks | File-relative pointer to eight-byte UV-track records below. |
+| 0x3C | 2 | u16 | uvTrackCount | UV-track count. |
+| `0x3E` | 12 | `s16[6]` | `bounds` | Bounding box used by `G_CULLDL`. |
 
-**Texture record** (24 bytes):
-- +0 u16 type (2 = CI with RGBA16 TLUT, 0 = RGBA)
-- +2 u8 log size (0 = 4 bpp .. 3 = 32 bpp)
-- +4/+6 width/height
-- +10 palette count, +12 palette offset, +16 image offset
-- +22 image segment, +23 palette segment
+| Vertex offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 6 | `s16[3]` | `position` | X, Y, Z. |
+| `0x06` | 2 | `u16` | `flag` | Vertex flag. |
+| `0x08` | 4 | `s16[2]` | `texcoord` | S, T. |
+| `0x0C` | 4 | `u8[4]` | `colorOrNormal` | RGBA, or signed normal components in RGB when lit. |
+
+**Texture record (0x18 bytes).** Image/palette offsets are relative to their segment bases.
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | u16 | type | 2 = CI with RGBA16 TLUT; 0 = RGBA |
+| 0x02 | 1 | u8 | logSize | 0 = 4 bpp through 3 = 32 bpp |
+| 0x03 | 1 | u8 | unknown_03 | Unresolved |
+| 0x04 | 2 | u16 | width | Image width |
+| 0x06 | 2 | u16 | height | Image height |
+| 0x08 | 2 | u8[2] | unknown_08 | Unresolved |
+| 0x0A | 2 | u16 | paletteCount | Palette entries |
+| 0x0C | 4 | u32 | paletteOffset | Palette segment offset |
+| 0x10 | 4 | u32 | imageOffset | Image segment offset |
+| 0x14 | 2 | u8[2] | unknown_14 | Unresolved |
+| 0x16 | 1 | u8 | imageSegment | Image segment number |
+| 0x17 | 1 | u8 | paletteSegment | Palette segment number |
 
 Counts: CI4 3046, CI8 293, RGBA32 281, RGBA16 234.
 
@@ -381,14 +473,31 @@ overrides).
 - Wrap: all SETTILE cms/cmt = 0 (repeat). Environment mapping (G_TEXTURE_GEN) in 148 lists.
 - **Animated water = per-frame UV scroll of a vertex copy** (verified on Park: two RAM dumps 50 frames apart differ
   by +1000 in t on every vertex of the river shape; texels and palettes unchanged). Mechanism:
-  - Shapes with shape+48 ≠ 0 and a UV track (shape+60 count ≠ 0, records at shape+56) are cloned by
+  - Shapes with nonzero vertexGroups and uvTrackCount are cloned by
     `ndAttachAnimation` (0x80011C14).
   - Each frame the game copies the vertices into the gfx heap and adds per-group offsets. With T = frame count:
     - `ds = (sLin·T)·2 [+ sin((sFreq·T & 0x3FF)·2π/1023)·sAmp·8] & MASK[masks >> 4]`
     - `dt = (tLin·T)·2 [+ sin((tFreq·T & 0x3FF)·2π/1023 + PHASE[phaseIdx])·tAmp·8] & MASK[masks & 15]`
-  - Record: 8 bytes `{s8 sLin, s8 tLin, u8 sAmp, u8 tAmp, u8 sFreq, u8 tFreq, u8 phaseIdx, u8 masks}`.
+  - UV-track records are:
+
+    | Offset | Size | Type | Field | Description |
+    |---:|---:|---|---|---|
+    | 0x00 | 1 | s8 | sLin | — |
+    | 0x01 | 1 | s8 | tLin | — |
+    | 0x02 | 1 | u8 | sAmp | — |
+    | 0x03 | 1 | u8 | tAmp | — |
+    | 0x04 | 1 | u8 | sFreq | — |
+    | 0x05 | 1 | u8 | tFreq | — |
+    | 0x06 | 1 | u8 | phaseIdx | — |
+    | 0x07 | 1 | u8 | masks | — |
+
   - MASK (0x8008EC74) = {0, 0x7F, 0xFF, 0x1FF, 0x3FF, 0x7FF, 0xFFF, 0}; PHASE (0x8008EC84) = f32 {0, π/16, π/8, …}.
-  - The vertex group is an s16 per vertex from the shape+48 list `{s16 deformIdx, s16 group}`.
+  - The vertexGroups list uses four-byte records:
+
+    | Offset | Size | Type | Field | Description |
+    |---:|---:|---|---|---|
+    | 0x00 | 2 | s16 | deformIdx | — |
+    | 0x02 | 2 | s16 | group | — |
   - Battle maps with scrolling shapes (static data; only Park verified in the emulator), per frame in s/t units
     (64 = 1 texel at the usual 0.5 texture scale):
     - Park 19/shape 2 dt 20 (blend);
@@ -480,75 +589,145 @@ The Normal map spans x 0..1300, z 0..1100, floor y 0..100, and its descriptor's 
 **Scene descriptor** (resources 2056–2237 except the camera files 2054/2055). Loaded by `gamesceneSetupBattle`
 0x8002D5C4 / `gamesceneSetup` 0x8002E0C4. Size = 16 + 32·nKinds + 76·nObjects for all 182 files.
 
-```
-+0x00 u32 mapModelRes   map NIFF → obj2APIEntry(res, 29, 0): identity transform (verified in RAM)
-+0x04 u32 attrRes       collision/attribute file (−1 = none)
-+0x08 u32 nKinds        32-byte kind records at +0x10
-+0x0C u32 nObjects      76-byte placement records after the kinds
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `+0x00` | 4 | `u32` | `mapModelRes` | map NIFF → obj2APIEntry(res, 29, 0): identity transform (verified in RAM) |
+| `+0x04` | 4 | `u32` | `attrRes` | collision/attribute file (−1 = none) |
+| `+0x08` | 4 | `u32` | `nKinds` | 32-byte kind records at +0x10 |
+| `+0x0C` | 4 | `u32` | `nObjects` | 76-byte placement records after the kinds |
 
 Kind record (32 bytes):
 
-| Off | Type | Meaning |
-|---|---|---|
-| +0x00 | u32 | class: 0 event trigger, 1 map object (moving/animated, behaviour in "RP" overlays), 3 player start / exit, 4 destructible block or prop with a box |
-| +0x04 | u32 | flags; bit 0 on class 4 = member of the random soft-block pool |
-| +0x08 / +0x0C / +0x10 | f32 | box size X, Y, Z (object position = placement position + half size) |
-| +0x14 | u32 | class 0: event id (overlay `0x8008F5F0[id / 100]` = exec 0x22–0x2B, sub-event `id % 100`); class 3: player index (battle) or entrance id (story); class 1/4: object id |
-| +0x18 | u32 | class 3: entrance id in the destination area |
-| +0x1C | u32 | class 3: destination area descriptor (story) |
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | class | class: 0 event trigger, 1 map object (moving/animated, behaviour in "RP" overlays), 3 player start / exit, 4 destructible block or prop with a box |
+| 0x04 | 4 | u32 | flags | flags; bit 0 on class 4 = member of the random soft-block pool |
+| 0x08 | 12 | f32[3] | boxSize | Box size XYZ; object position = placement position + half size |
+| 0x14 | 4 | u32 | id | class 0: event id (overlay `0x8008F5F0[id / 100]` = exec 0x22–0x2B, sub-event `id % 100`); class 3: player index (battle) or entrance id (story); class 1/4: object id |
+| 0x18 | 4 | u32 | destinationEntrance | class 3: entrance id in the destination area |
+| 0x1C | 4 | u32 | destinationArea | class 3: destination area descriptor (story) |
 
 Placement record (76 bytes):
 
-| Off | Type | Meaning |
-|---|---|---|
-| +0x00 | u32 | kind index |
-| +0x04 / +0x08 / +0x0C | f32 | position X, Y, Z (world units) |
-| +0x10 | u32 | sub-type |
-| +0x18 | u32 | low 16 bits: spawn condition mode (1 = only for entrance +0x1C, 2 = game-flag test); bits 16–18: **Y rotation code** 0→0°, 1→90°, 2→180°, 3→225°, 4→270°, 5→315°, 6→135°, 7→45° |
-| +0x1C | u32 | condition value / flag number (bit 31 = negated) |
-| +0x20 | u32 | initial state (−1 none) |
-| +0x24 | u32 | flags |
-| +0x38..+0x48 | u32 × 5 | linked placement indices (−1 none) |
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | kind | kind index |
+| 0x04 | 12 | f32[3] | position | Position XYZ in world units |
+| 0x10 | 4 | u32 | subtype | sub-type |
+| 0x18 | 4 | u32 | spawnCondition | low 16 bits: spawn condition mode (1 = only for entrance +0x1C, 2 = game-flag test); bits 16–18: **Y rotation code** 0→0°, 1→90°, 2→180°, 3→225°, 4→270°, 5→315°, 6→135°, 7→45° |
+| 0x1C | 4 | u32 | conditionValue | condition value / flag number (bit 31 = negated) |
+| 0x20 | 4 | u32 | initialState | initial state (−1 none) |
+| 0x24 | 4 | u32 | flags | flags |
+| 0x38 | 20 | u32[5] | linkedPlacements | linked placement indices (−1 none) |
 
 Which NIFF each class 1/4 object id draws is decided by the resource-program overlays. Only a few ids are
 resolved; for example soft block id 25 → NIFF 586 (5.3.10). A viewer can show the map NIFF plus placement markers
 (or the known models). Soft blocks are chosen at random per round (area-info count), so the data holds every
 candidate position.
 
-**Area-info file** (res 2036 + world; 2045 in battle): records `{u32 areaRes, u32 envRes (−1 none), u32
-softBlockCount, u32 nSP, nSP × {u32, u32}, u32 nItemSets, nItemSets × {u32 a, b, c, u32 n, n × {u32 id, u32 weight}}}`,
-terminated by areaRes 0. The matching record's environment becomes the current scene. Then
+**Area-info file** (res 2036 + world; 2045 in battle) uses variable records:
+
+| Order | Count | Type | Field | Description |
+|---:|---:|---|---|---|
+| 1 | 1 | u32 | areaRes | Area resource. |
+| 2 | 1 | u32 | envRes | −1 means none. |
+| 3 | 1 | u32 | softBlockCount | Soft-block count. |
+| 4 | 1 | u32 | nSP | Number of following SP records. |
+| 5 | nSP | u32[2] | sp | SP records; individual word meanings unknown. |
+| 6 | 1 | u32 | nItemSets | Item-set count. |
+| 7 | nItemSets | ItemSet | itemSets | Variable-sized item-set records below. |
+
+Item-set record, 16-byte header plus counted items:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | a | Unknown. |
+| 0x04 | 4 | u32 | b | Unknown. |
+| 0x08 | 4 | u32 | c | Unknown. |
+| 0x0C | 4 | u32 | count | Item count. |
+| 0x10 | 8 × count | item[] | items | Item records. |
+
+Item record, eight bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | id | Item identifier. |
+| 0x04 | 4 | u32 | weight | Selection weight. |
+
+Records are terminated by areaRes 0. The matching record's environment becomes the current scene. Then
 `obj2SetFog(env+0x230 & 1, u16 env+0x60, 1000, u32 env+0x64)` and `rspSetClearColor(env[0x58..0x5A])` run.
 
 **Environment record** (res 2238–2298, 3120–3132, 0x234 bytes) = a raw copy of the renderer's scene buffer
 (verified: RAM equals the file except runtime light bytes). Defaults when absent: fovy 30, near 200, far 8000,
 ambient 127, light colour 255.
 
-| Off | Type | Meaning |
-|---|---|---|
-| +0x00..+0x06 | s16 × 4 | viewport y0, y1, x0, x1 |
-| +0x58 | u32 | clear colour RGBA |
-| +0x60 / +0x62 | u16 | fog values (the second is set to 1000 when fog is enabled) |
-| +0x64 | u32 | fog colour RGBA |
-| +0x6C / +0x70 | f32 | fovy / aspect (not used for the level projection) |
-| +0x7C / +0x7E | s16 | near / far field (the level projection uses far 8000, not this) |
-| +0x9C.. | 56-byte light slots | u16 flags (0x8000 directional, 0x8001 point), colour at +0x0C, vectors at +0x10/+0x1C |
-| +0x224 | u8 × 3 | ambient colour |
-| +0x22E | u16 | light count |
-| +0x230 | u32 | bit 0 = fog enable |
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | s16 | viewportY0 | viewport y0 |
+| 0x02 | 2 | s16 | viewportY1 | viewport y1 |
+| 0x04 | 2 | s16 | viewportX0 | viewport x0 |
+| 0x06 | 2 | s16 | viewportX1 | viewport x1 |
+| 0x58 | 4 | u32 | clearColor | clear colour RGBA |
+| 0x60 | 2 | u16 | fogMin | Fog minimum |
+| 0x62 | 2 | u16 | fogMax | Fog maximum; set to 1000 when fog is enabled |
+| 0x64 | 4 | u32 | fogColor | fog colour RGBA |
+| 0x6C | 4 | f32 | fovy | Vertical field of view; not used for the level projection |
+| 0x70 | 4 | f32 | aspect | Aspect ratio; not used for the level projection |
+| 0x7C | 2 | s16 | near | Near field |
+| 0x7E | 2 | s16 | far | Far field; the level projection uses 8000 instead |
+| 0x9C | 0x188 | Light[7] | lights | Seven 0x38-byte light slots; known fields below |
+| 0x224 | 3 | u8[3] | ambient | ambient colour |
+| 0x22E | 2 | u16 | lightCount | light count |
+| 0x230 | 4 | u32 | flags | bit 0 = fog enable |
 
-**Camera records** (res 2046–2053 story, 2055 battle): `u32 count; count × 52 bytes`. Each record is
-`{u32 area, s32 entrance (−1 any), f32 yaw°, f32 pitch°, f32 distance, f32 lookAt X/Y/Z, f32 second point X/Y/Z,
-f32 fovy°, u32 mode (2 fixed, 0 follow)}`. Verified: the Normal projection × view decomposes exactly to its
+Light slot, stride 0x38. The field types are corroborated by the implemented parser in src/rom/bomberman/niff.ts; enabled-light shading is verified against RAM and frames above.
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | u16 | flags | 0x8000 enabled; bit 0 point, bit 1 distance fade, bit 2 spot. |
+| 0x02 | 10 | u8[10] | unknown_02 | Not interpreted. |
+| 0x0C | 3 | u8[3] | color | RGB. |
+| 0x0F | 1 | u8 | unknown_0F | Not interpreted. |
+| 0x10 | 12 | f32[3] | direction | Directional or spotlight XYZ direction. |
+| 0x1C | 12 | f32[3] | position | Point-light XYZ position. |
+| 0x28 | 4 | f32 | near | Distance-fade near bound. |
+| 0x2C | 4 | f32 | far | Distance-fade far bound. |
+| 0x30 | 4 | f32 | cutoff | Spotlight cutoff. |
+| 0x34 | 4 | f32 | exponent | Spotlight exponent. |
+
+**Camera records** (res 2046–2053 story, 2055 battle) begin with `u32 count`, followed by 52-byte entries:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 4 | `u32` | `area` | Area identifier. |
+| `0x04` | 4 | `s32` | `entrance` | −1 matches any entrance. |
+| `0x08` | 4 | `f32` | `yaw` | Degrees. |
+| `0x0C` | 4 | `f32` | `pitch` | Degrees. |
+| `0x10` | 4 | `f32` | `distance` | Camera distance. |
+| `0x14` | 12 | `f32[3]` | `lookAt` | Look-at point. |
+| `0x20` | 12 | `f32[3]` | `secondPoint` | Second point. |
+| `0x2C` | 4 | `f32` | `fovY` | Degrees. |
+| `0x30` | 4 | `u32` | `mode` | 2 fixed, 0 follow. |
+
+Verified: the Normal projection × view decomposes exactly to its
 record (yaw 0, pitch 50°, distance 6500, look-at (650, 0, 500), eye (650, 4979, 4678), fovy 10). This is a
 ready-made initial viewer camera for battle stages.
 
 **Collision file** (descriptor +0x04): bounds plus a grid of 52-byte polygons; used for hit tests and to clamp
 the follow camera; not drawn by the game. Format in 5.3.11.
 
-**Bitmap resources** (380 files): `u32 total; u32 pixOff (0x20); u32 palOff; u32 bpp (4|8); u32 width; u32
-height; u32 nColors; u32 0`; pixels at pixOff, RGBA16 palette at palOff.
+Bitmap resources (380 files) have a 0x20-byte header. Pixels start at pixOff; the RGBA16 palette starts at palOff.
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | total | Total size. |
+| 0x04 | 4 | u32 | pixOff | Pixel offset, 0x20. |
+| 0x08 | 4 | u32 | palOff | Palette offset. |
+| 0x0C | 4 | u32 | bpp | Bits per pixel: 4 or 8. |
+| 0x10 | 4 | u32 | width | Width. |
+| 0x14 | 4 | u32 | height | Height. |
+| 0x18 | 4 | u32 | nColors | Palette color count. |
+| 0x1C | 4 | u32 | zero1C | Zero. |
 
 ##### Backdrop (drawn by game code)
 
@@ -630,23 +809,41 @@ camera-relative quad) textured with the bitmap and tinted by the mode colour.
 
 Scene descriptor +0x04 names the resource (−1 = none; 168 distinct files for the 182 descriptors). Big-endian:
 
-```
-+0x00  u32 nGrids                          1 in every file
-+0x04  f32 maxX, maxY, maxZ                camera clamp bounds (see below)
-+0x10  f32 minX, minY, minZ
-+0x1C  nGrids × 36-byte grid:
-         +0x00 u32 nx; +0x04 u32 ny (always 1); +0x08 u32 nz
-         +0x0C f32 originX, originY, originZ
-         +0x18 u32 cells        file offset of nx·nz × { u32 count; u32 list }   list = count × u32 polygon index
-         +0x1C u32 polyCount
-         +0x20 u32 polys        file offset of polyCount × 52-byte polygons
-polygon (52 bytes):
-  +0x00 f32 nx, ny, nz          unit normal
-  +0x0C f32 x, y, z             vertex 0      (world units, the map NIFF's space)
-  +0x18 f32 x, y, z             vertex 1
-  +0x24 f32 x, y, z             vertex 2
-  +0x30 u32 attr                attribute bits
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `+0x00` | 4 | `u32` | `nGrids` | 1 in every file |
+| `+0x04` | 12 | `f32[3]` | `maxX, maxY, maxZ                camera clamp bounds (see below)` | — |
+| `+0x10` | 12 | `f32[3]` | `minX, minY, minZ` | — |
+| 0x1C | 36 × nGrids | grid[] | grids | Grid records below. |
+
+Grid record, 36 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `+0x00` | 4 | `u32` | `nx;` | — |
+| `+0x04` | 4 | `u32` | `ny (always 1);` | — |
+| `+0x08` | 4 | `u32` | `nz` | — |
+| `+0x0C` | 12 | `f32[3]` | `originX, originY, originZ` | — |
+| `+0x18` | 4 | `u32` | `cells` | File offset of nx × nz eight-byte cells (layout below). |
+| `+0x1C` | 4 | `u32` | `polyCount` | — |
+| `+0x20` | 4 | `u32` | `polys` | file offset of polyCount × 52-byte polygons |
+
+Cell record, eight bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | count | Polygon-index count. |
+| 0x04 | 4 | u32 | list | File offset of count u32 polygon indices. |
+
+Polygon, 52 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `+0x00` | 12 | `f32[3]` | `nx, ny, nz          unit normal` | — |
+| `+0x0C` | 12 | `f32[3]` | `x, y, z             vertex 0      (world units, the map NIFF's space)` | — |
+| `+0x18` | 12 | `f32[3]` | `x, y, z             vertex 1` | — |
+| `+0x24` | 12 | `f32[3]` | `x, y, z             vertex 2` | — |
+| `+0x30` | 4 | `u32` | `attr` | attribute bits |
 
 - **Loader** `gamesceneSetupAttr` 0x8002D418: `gameresAlloc(res)` → 0x8008F4BC, first grid → 0x8008F4C0; bounds +0x04/+0x0C/+0x10/+0x18
   → 0x800ABD20/28/2C/34 (the Y fields are replaced by constants from 0x80095878/7C); relocates grid +0x18 and +0x20, every
@@ -726,16 +923,30 @@ and no MusyX. Music data is **uncompressed** and read in place from ROM.
 
 #### S2 song table (verified)
 
-```
-+0          u16 'S2' (0x5332)           libultra ALSeqFile uses 'S1'; the loader accepts both
-+2          u16 count
-+4          count × { u32 seqOffset; u32 seqLength }      seqOffset 0xFFFFFFFF = empty entry
-+4+8·count  count × 16-byte song record:
-              u8  bank        index into the .ctl's bank array
-              u8  volume      per-song master volume (0..127)
-              u16 0xFFFF
-              u32 ctlOffset   u32 ctlSize   u32 tblOffset
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | u16 | magic | S2 (0x5332); loader also accepts S1. |
+| 0x02 | 2 | u16 | count | Song count. |
+| 0x04 | 8 × count | sequenceEntry[] | sequences | Sequence offset/length table. |
+| 0x04 + 8 × count | 16 × count | song[] | songs | One song record per sequence. |
+
+Sequence entry, eight bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | seqOffset | 0xFFFFFFFF marks an empty entry. |
+| 0x04 | 4 | u32 | seqLength | Sequence length. |
+
+Song record, 16 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | bank | Bank-array index. |
+| 0x01 | 1 | u8 | volume | Master volume, 0–127. |
+| 0x02 | 2 | u16 | unknown02 | 0xFFFF. |
+| 0x04 | 4 | u32 | ctlOffset | Control-bank offset. |
+| 0x08 | 4 | u32 | ctlSize | Control-bank length. |
+| 0x0C | 4 | u32 | tblOffset | Wave-bank offset. |
 
 SA's loader (0x800249A8–0x80024BB4) reads `bank`, `ctlOffset`, `ctlSize`, `tblOffset` from the record at
 `table + song·16` and binds `ctl->bankArray[bank]` to the sequence player. Song → bank:
@@ -747,23 +958,32 @@ SA's loader (0x800249A8–0x80024BB4) reads `bank`, `ctlOffset`, `ctlSize`, `tbl
 
 #### Sequence format: libultra compressed MIDI (verified: all 155 songs parse to the end)
 
-```
-header: s32 trackOffset[16] (from sequence start; 0 = unused), s32 division (480 in every song)
-track:  { varlen delta; event }*
-byte fetch (applies to every byte read, including deltas):
-  FE FE          -> literal 0xFE
-  FE hi lo len   -> back-reference: read `len` bytes starting at (position of this FE) - (hi << 8 | lo),
-                    then continue after the 4-byte escape
-events:
-  FF 51 t1 t2 t3            tempo, microseconds per quarter note
-  FF 2F                     end of track
-  FF 2E nn FF               loop start marker (2 payload bytes ignored)
-  FF 2D cnt cur o1 o2 o3 o4 loop end: if cur == 0 { cur = cnt; fall through } else { if cur != 0xFF: cur--;
-                            jump to (address after these 6 payload bytes) - (o1..o4 as u32) }
-                            cnt = cur = 0xFF loops forever
-  8n..En                    MIDI channel messages with running status (reset after meta events)
-  9n key vel {varlen dur}   NOTE-ON CARRIES ITS DURATION in ticks; there are no note-off events
-```
+Sequence header, 0x44 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 0x40 | s32[16] | trackOffsets | Relative to sequence start; zero marks unused tracks. |
+| 0x40 | 4 | s32 | division | 480 ticks per quarter note. |
+
+Track unit (variable length), repeated until end of track:
+
+| Order | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 1 | Variable | VLQ | delta | Delta time. |
+| 2 | Variable | event | event | Event encoding below. |
+
+| Component | Encoding | Meaning |
+|---|---|---|
+| Header | 0x44-byte header below | Track offsets are relative to the sequence start; zero means unused. Division is 480 in every song. |
+| Track | Repeated delta/event units below | Time-ordered event stream. |
+| Escape | `FE FE` | Literal byte `0xFE`. |
+| Back-reference | `FE hi lo len` | Read `len` bytes from `escapeOffset - ((hi << 8) \| lo)`, then resume after the four-byte escape. |
+| Tempo | `FF 51 t1 t2 t3` | Microseconds per quarter note. |
+| End | `FF 2F` | End of track. |
+| Loop start | `FF 2E nn FF` | Start marker; the two payload bytes are ignored. |
+| Loop end | `FF 2D cnt cur o1 o2 o3 o4` | Initialize/decrement `cur` and jump backward by the big-endian `u32` offset; `cnt = cur = 0xFF` loops forever. |
+| MIDI | `8n..En` | Channel messages with running status; meta events reset running status. |
+| Note | `9n key vel {varlen dur}` | Note-on with an inline duration; no note-off event is stored. |
 
 Only controllers 7 (volume), 10 (pan) and 91 (effects/reverb send) occur, plus program change and
 pitch bend. BM64 has some finite loops (`cnt = 3`); Hero and SA loop forever.
@@ -847,22 +1067,101 @@ VADPCM decoder, sequence parser including back-references and loops, simple samp
 Standard libultra ALBankFile, big-endian, offsets relative to the .ctl start (relocated by adding the
 base, as `alBnkfNew` does):
 
-```
-ALBankFile   { s16 revision = 0x4231 'B1'; s16 bankCount; s32 bankOffset[bankCount]; }
-ALBank       { s16 instCount; u8 flags; u8 pad; s32 sampleRate (32000); s32 percussion (offset or 0);
-               s32 instOffset[instCount]; }
-ALInstrument { u8 volume; u8 pan; u8 priority; u8 flags;
-               u8 tremType, tremRate, tremDepth, tremDelay; u8 vibType, vibRate, vibDepth, vibDelay;
-               s16 bendRange (cents); s16 soundCount; s32 soundOffset[soundCount]; }
-ALSound      { s32 envelope; s32 keyMap; s32 wavetable; u8 samplePan; u8 sampleVolume; u8 flags; u8 pad; }
-ALEnvelope   { s32 attackTime; s32 decayTime; s32 releaseTime;   (microseconds)
-               u8 attackVolume; u8 decayVolume; }
-ALKeyMap     { u8 velocityMin, velocityMax, keyMin, keyMax, keyBase; s8 detune (cents); }
-ALWaveTable  { s32 base (offset into .tbl); s32 len; u8 type (0 ADPCM, 1 RAW16); u8 flags; u16 pad;
-               s32 loop (offset or 0); s32 book (offset); }
-ALADPCMloop  { u32 start; u32 end; s32 count (-1 = forever); s16 state[16]; }
-ALADPCMBook  { s32 order (2); s32 npredictors (4); s16 book[order · npredictors · 8]; }
-```
+ALBankFile, four-byte header and counted offsets:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | s16 | revision | 0x4231 (B1). |
+| 0x02 | 2 | s16 | bankCount | Bank count. |
+| 0x04 | 4 × bankCount | s32[] | bankOffset | Bank offsets. |
+
+ALBank, 0x0C-byte header and counted offsets:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | s16 | instCount | Instrument count. |
+| 0x02 | 1 | u8 | flags | Relocation flags. |
+| 0x03 | 1 | u8 | padding | Padding. |
+| 0x04 | 4 | s32 | sampleRate | 32000 Hz. |
+| 0x08 | 4 | s32 | percussion | Instrument offset or zero. |
+| 0x0C | 4 × instCount | s32[] | instOffset | Instrument offsets. |
+
+ALInstrument, 0x10-byte header and counted offsets:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | volume | Volume. |
+| 0x01 | 1 | u8 | pan | Pan. |
+| 0x02 | 1 | u8 | priority | Priority. |
+| 0x03 | 1 | u8 | flags | Flags. |
+| 0x04 | 4 | u8[4] | tremolo | Type, rate, depth, delay. |
+| 0x08 | 4 | u8[4] | vibrato | Type, rate, depth, delay. |
+| 0x0C | 2 | s16 | bendRange | Pitch-bend range. |
+| 0x0E | 2 | s16 | soundCount | Sound count. |
+| 0x10 | 4 × soundCount | s32[] | soundOffset | Sound offsets. |
+
+ALSound, 0x10 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | s32 | envelope | Envelope offset. |
+| 0x04 | 4 | s32 | keyMap | Key-map offset. |
+| 0x08 | 4 | s32 | wavetable | Wave-table offset. |
+| 0x0C | 1 | u8 | samplePan | Pan. |
+| 0x0D | 1 | u8 | sampleVolume | Volume. |
+| 0x0E | 1 | u8 | flags | Flags. |
+| 0x0F | 1 | u8 | padding | Padding. |
+
+ALEnvelope, 0x10 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | s32 | attackTime | Microseconds. |
+| 0x04 | 4 | s32 | decayTime | Microseconds. |
+| 0x08 | 4 | s32 | releaseTime | Microseconds. |
+| 0x0C | 1 | u8 | attackVolume | Attack target. |
+| 0x0D | 1 | u8 | decayVolume | Decay target. |
+| 0x0E | 2 | u8[2] | padding | Alignment padding. |
+
+ALKeyMap, six bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | velocityMin | Minimum velocity. |
+| 0x01 | 1 | u8 | velocityMax | Maximum velocity. |
+| 0x02 | 1 | u8 | keyMin | Minimum key. |
+| 0x03 | 1 | u8 | keyMax | Maximum key. |
+| 0x04 | 1 | u8 | keyBase | Base key. |
+| 0x05 | 1 | s8 | detune | Cents. |
+
+ALWaveTable, 0x14 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | s32 | base | Offset into .tbl. |
+| 0x04 | 4 | s32 | len | Encoded byte count. |
+| 0x08 | 1 | u8 | type | 0 VADPCM; 1 RAW16. |
+| 0x09 | 1 | u8 | flags | Flags. |
+| 0x0A | 2 | u16 | padding | Padding. |
+| 0x0C | 4 | s32 | loop | Loop offset. |
+| 0x10 | 4 | s32 | book | Predictor-book offset. |
+
+ALADPCMloop, 0x2C bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | start | Loop start sample. |
+| 0x04 | 4 | u32 | end | Exclusive loop end. |
+| 0x08 | 4 | s32 | count | −1 repeats forever. |
+| 0x0C | 0x20 | s16[16] | state | Decoder history. |
+
+ALADPCMBook, eight-byte header and coefficients:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | s32 | order | Observed: 2. |
+| 0x04 | 4 | s32 | npredictors | Observed: 4. |
+| 0x08 | 16 × order × npredictors | s16[] | book | Predictor coefficients. |
 
 All wave tables in all three games are type 0 (VADPCM), order 2, 4 predictors.
 

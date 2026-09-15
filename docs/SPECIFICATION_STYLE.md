@@ -172,6 +172,17 @@ revision-dependent, large, or awkwardly unaligned structures:
 | Offset | Size | Type | Field | Description |
 |---:|---:|---|---|---|
 
+Give each stored field its own row. Do not compress an entire multi-field
+structure into one `Layout` or `Contents` cell; if a summary table refers to a
+record, name it there and provide its field table immediately below or at a
+clear cross-reference.
+
+Do not present binary structures as fenced code, C declarations, offset lists,
+or prose-only field sequences. A grammar, formula, or source excerpt may remain
+in a code block only when it is not serving as the structure definition. The
+specification checker rejects fenced and inline prose layouts, unnamed fields,
+and placeholder-only rows masquerading as format tables.
+
 Other standard forms are:
 
 - bitfields: `Bits | Mask | Name | Meaning`;

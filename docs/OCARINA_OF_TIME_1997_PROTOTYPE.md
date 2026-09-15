@@ -177,7 +177,7 @@ Same command ids and 8-byte layout as retail (`include/scene.h`). Verified: ever
 | 00 player entries | 52/52 | 16-byte ActorEntry | same |
 | 01 actor list | 1 scene (0x17, 1 actor 0x0013) | same | retail uses 01 in scene headers only in alternate headers |
 | 03 collision | 52/52 | header 0x2C | same header; **waterbox differs** (below) |
-| 04 room list | 52/52 | 8-byte {romStart, romEnd} | same layout; the values are absolute ROM offsets |
+| 04 room list | 52/52 | Eight-byte ROM-range records below | same layout; the values are absolute ROM offsets |
 | 06 spawn list | 52/52 | 2-byte entries | same |
 | 07 special files | 38/52 | b1 = Navi message file (always 0), data = keep object (2 = field_keep, 3 = dangeon_keep) | retail 93/101 |
 | 0E transition actors | 9/52 | 16-byte | same layout |
@@ -187,6 +187,13 @@ Same command ids and 8-byte layout as retail (`include/scene.h`). Verified: ever
 | 15 sound settings | 34/52 | b1 specId, byte 6 nature ambience, byte 7 seq id | same layout; retail always present. Seq ids agree with retail names where checkable: 0x02 field (Hyrule Field), 0x1C inside Deku Tree (deku_tree), 0x1D market (pr_market_1), 0x1F Link's house (houses) (doc `include/tables/sequence_table.h`) |
 | 18 alternate headers | 1 (0x09) | seg-2 pointer list | same |
 | 0D paths, 17 cutscene, 19 misc | never | – | retail: 19 in all 101 scenes, 0D in 30, 17 in alt headers. A loader must not require 19. |
+
+Room-list record, eight bytes; addresses are absolute ROM offsets:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | romStart | Inclusive ROM start. |
+| 0x04 | 4 | u32 | romEnd | Exclusive ROM end. |
 
 #### Room header commands
 Same ids and layouts: 16 echo (byte 7), 08 behavior, 12 skybox disables (bytes 4-5), 0A mesh, 0B objects, 01 actors, 10 time (hour, minute, speed), 05 wind (x, y, z, strength). Verified (`census.txt`). Differences:
@@ -198,10 +205,61 @@ Same ids and layouts: 16 echo (byte 7), 08 behavior, 12 skybox disables (bytes 4
 #### Mesh (room shape) headers
 | type | alpha | retail | evidence |
 |---|---|---|---|
-| 0 | 74 rooms; {n, entries, entriesEnd}, 8-byte {opa, xlu} | same | verified |
-| 2 | 65 rooms; 16-byte {center, radius, opa, xlu} | same | verified |
+| 0 | 74 rooms; type-0 header and normal entries below | same | verified |
+| 2 | 65 rooms; type-2 header and cullable entries below | same | verified |
 | 1 single | 6 rooms (0x07, 0x08, 0x2A, 0x2B, 0x30, 0x33): header 0x20 with `width=0x140 height=0xF0 fmt=0 siz=2`. `source` points to a **raw RGBA16 320x240 image** (0x25800 bytes) filling the end of the room file. | retail: `source` is a JPEG (scene-oot census: all 35 prerender images are 320x240 JPEG) | verified: room sizes minus source offset = 0x25800 exactly; the decoded image is a coherent picture (`renders/a08_i_shop_bg0_room0.png`) |
 | 1 multi | never | 5 retail rooms | verified |
+
+Types 0 and 2 header, 0x0C bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | type | 0 normal; 2 cullable. |
+| 0x01 | 1 | u8 | count | Entry count; type 2 maximum 64. |
+| 0x02 | 2 | u8[2] | padding | Alignment. |
+| 0x04 | 4 | u32 | entries | Segmented entry pointer. |
+| 0x08 | 4 | u32 | entriesEnd | Segmented end pointer. |
+
+Normal entry, eight bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | opaque | Opaque display-list pointer or zero. |
+| 0x04 | 4 | u32 | translucent | Translucent display-list pointer or zero. |
+
+Cullable entry, 0x10 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 6 | s16[3] | center | Bounding-sphere X,Y,Z. |
+| 0x06 | 2 | s16 | radius | Bounding-sphere radius. |
+| 0x08 | 4 | u32 | opaque | Opaque display-list pointer. |
+| 0x0C | 4 | u32 | translucent | Translucent display-list pointer. |
+
+Image-header common prefix, eight bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | type | 1. |
+| 0x01 | 1 | u8 | amount | 1 single image; 2 multiple images. |
+| 0x02 | 2 | u8[2] | padding | Alignment. |
+| 0x04 | 4 | u32 | entry | Pointer to one normal entry. |
+
+Single-image header tail; complete header 0x20 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x08 | 4 | u32 | source | Image source pointer. |
+| 0x0C | 4 | u32 | unknown0C | Unknown. |
+| 0x10 | 4 | u32 | tlut | Palette pointer. |
+| 0x14 | 2 | u16 | width | Image width. |
+| 0x16 | 2 | u16 | height | Image height. |
+| 0x18 | 1 | u8 | format | Image format. |
+| 0x19 | 1 | u8 | size | Texel-size code. |
+| 0x1A | 2 | u16 | tlutMode | Palette mode. |
+| 0x1C | 2 | u16 | tlutCount | Palette count. |
+| 0x1E | 2 | u8[2] | padding | Alignment. |
+
 
 In 0x07 `old_depth_test` the header has `unk_0C = 0x03000030` and `tlutCount = 0x10`; the other five have 0 there.
 Scenes 0x18, 0x19, 0x1E and 0x23 (sw97 "pr_" names) have type-0 meshes with untextured, flat-coloured placeholder geometry; their background images are not in the ROM (doc: sw97 README says it recreated those prerenders).
@@ -221,7 +279,17 @@ Scenes 0x18, 0x19, 0x1E and 0x23 (sw97 "pr_" names) have type-0 meshes with unte
 
 #### Collision
 - Header (0x2C), 16-byte polygons (the vertex-index flag bits are used as in retail: flags 1/2/3 present), 8-byte surface types (values like `00200000 000007C0`, `40000001 000007C2`, same bit meanings plausible) and bgCam entries: same as retail. Verified: parse and bounds are consistent; the collision of five test maps is byte-identical in geometry to the debug ROM's (100% vertex and polygon match).
-- **WaterBox is 12 bytes in the alpha**, not 16: `s16 xMin, ySurface, zMin, xLength, zLength; u16 properties`. Verified: in 0x09 four boxes occupy exactly 48 bytes before the collision header; single boxes in 0x0D, 0x2F, 0x04 and 0x11 end 12 bytes before it.
+**WaterBox is 12 bytes in the alpha.** Verified: in 0x09 four boxes occupy exactly 48 bytes before the collision header; single boxes in 0x0D, 0x2F, 0x04 and 0x11 end 12 bytes before it.
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | s16 | xMin | Minimum x |
+| 0x02 | 2 | s16 | ySurface | Surface height |
+| 0x04 | 2 | s16 | zMin | Minimum z |
+| 0x06 | 2 | s16 | xLength | Extent along x |
+| 0x08 | 2 | s16 | zLength | Extent along z |
+| 0x0A | 2 | u16 | properties | Packed properties; narrower than retail |
+
 - Properties seen: 0x0202, 0x0105, 0x0401, 0x0901, 0x1F01. **Hypothesis:** high byte = light index (0x1F = none, as retail `WATERBOX_LIGHT_INDEX_NONE`), low byte = bgCam index; no room field.
 
 #### Actors and objects

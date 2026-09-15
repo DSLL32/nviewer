@@ -86,12 +86,12 @@ they are relative to the model container's `IMAG` section.
 
 Each file-table entry is assembled from three parallel arrays:
 
-| Field | Type | Meaning |
-|---|---|---|
-| `offset[i]` | `u32` | Inclusive physical ROM start |
-| `offset[i+1]` | `u32` | Exclusive physical ROM end |
-| `type[i]` | `u32` | `0` raw, `1` LZSS, `2` raw DEFLATE |
-| `size[i]` | `u32` | Decoded byte count |
+| Array base | Offset | Size | Type | Field | Description |
+|---|---:|---:|---|---|---|
+| ROM-offset array | 4 × i | 4 | u32 | romStart | Inclusive physical ROM start. |
+| ROM-offset array | 4 × (i + 1) | 4 | u32 | romEnd | Exclusive physical ROM end. |
+| Compression array | 4 × i | 4 | u32 | type | 0 raw, 1 LZSS, 2 raw DEFLATE. |
+| Decoded-size array | 4 × i | 4 | u32 | decodedSize | Decoded byte count. |
 
 The 182 entries comprise one raw file, 48 LZSS files, and 133 raw-DEFLATE
 files. File 9, the MusyX sample payload, is the raw entry.
@@ -182,8 +182,13 @@ shared by other regions or revisions.
 
 ### 3.2 Level container
 
-A `u32` at file offset 0 points to a sequence of 12-byte section descriptors.
-Descriptors continue to the end of the file.
+The file header points to 12-byte section descriptors, which continue to the end of the file.
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | directory | File-relative offset of the first section descriptor. |
+
+Section descriptor:
 
 <table class="byte-layout">
 <thead><tr><th>Offset</th><th>+0</th><th>+1</th><th>+2</th><th>+3</th><th>+4</th><th>+5</th><th>+6</th><th>+7</th></tr></thead>
@@ -461,12 +466,19 @@ controller operations with run-length delta times.
 The complete SNG header varies with track count and loop mode, so a field table
 is more useful than a fixed byte grid:
 
-| Offset | Type | Field | Description |
-|---:|---|---|---|
-| `0x04` | `u32` | `regionIndexOffset` | Table of file-relative event-region offsets |
-| `0x0C` | `u32` | `tempoTableOffset` | `{tick:u32, tempo:u32}` records, terminated by `0xFFFFFFFF` |
-| `0x10` | `u32` | `tempoWord` | Low 31 bits are initial BPM; high bit selects per-channel loop starts |
-| `0x14` | `u32[]` | `loopStartTicks` | One shared tick or channel-specific ticks |
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x04 | 4 | u32 | regionIndexOffset | File-relative pointer to event-region offsets. |
+| 0x0C | 4 | u32 | tempoTableOffset | Pointer to eight-byte tempo records; tick 0xFFFFFFFF terminates. |
+| 0x10 | 4 | u32 | tempoWord | Low 31 bits initial BPM; high bit selects per-channel loop starts. |
+| 0x14 | 4 × loopCount | u32[] | loopStartTicks | loopCount is one in shared mode, otherwise the channel count. |
+
+Tempo record, eight bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | tick | Absolute tick; 0xFFFFFFFF terminates the table. |
+| 0x04 | 4 | u32 | tempo | Tempo value. |
 
 ### 5.3 Instruments and sample encoding
 

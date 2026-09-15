@@ -79,14 +79,19 @@ General compressed assets use zlib 1.0.4; the linked image contains Mark Adler's
 `inflate 1.0.4` identification at ROM `0xBE010`. Retail routine `0x80001BF0`
 implements this outer format: [evidence: ROM bytes, disassembly]
 
-```text
-+0x00 u32 sourceSize       # complete outer container, including this header
-+0x04 u32 destinationSize  # concatenated uncompressed byte count
-+0x08 repeat until sourceSize bytes have been consumed:
-      u32 blockCompressedSize
-      u8  zlibStream[blockCompressedSize]
-      pad stream end to 2-byte alignment
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | sourceSize | Complete container size including header. |
+| 0x04 | 4 | u32 | destinationSize | Concatenated decoded byte count. |
+| 0x08 | Variable | block[] | blocks | Repeat until sourceSize bytes are consumed. |
+
+Each compressed block has a four-byte length header:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | blockCompressedSize | Compressed stream length. |
+| 0x04 | blockCompressedSize | u8[] | zlibStream | Independent zlib stream. |
+| Following | 0–1 | u8 | padding | Pads the stream end to two-byte alignment. |
 
 Each stream is independent. Every non-final block expands to exactly 16,000
 (`0x3E80`) bytes; the final block produces the remainder. The runtime alternates two
@@ -118,11 +123,11 @@ uncertain; it happens to work for this image. [evidence: ROM bytes, disassembly,
 
 Eight file tables inside each inflated primary map contain 12-byte records:
 
-```text
-+0x00 u32 packedStartRelativeToSecondaryBase
-+0x04 u32 packedEndRelativeToSecondaryBase
-+0x08 u32 metadataOffsetInInflatedPrimaryMap
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `+0x00` | 4 | `u32` | `packedStartRelativeToSecondaryBase` | — |
+| `+0x04` | 4 | `u32` | `packedEndRelativeToSecondaryBase` | — |
+| `+0x08` | 4 | `u32` | `metadataOffsetInInflatedPrimaryMap` | — |
 
 All 1,808 table records resolve in the bundle, begin at a strict zlib container, and
 end exactly at its declared `sourceSize`. Runtime fixup `0x80046DA8` adds the
@@ -145,15 +150,26 @@ The first 33 overlay records are placeholders. [evidence: disassembly, determini
 | 1 | `AB60D0–AEE3A8` / 33 | `B4D510–B84740` / 56 (33 placeholders) | 56 | `BB35D0–BB39F4` |
 | 2 | `AEE3B0–B1DB50` / 33 | `B84740–BB3194` / 55 (33 placeholders) | 55 | `BB3A00–BB3E24` |
 
-Each instrument map is `u32 count` plus `count` 96-byte note maps; all have 11
-instruments. `(instrument-1)*96 + note-1` selects a sample slot. [evidence: disassembly, deterministic decoding]
+Each instrument map contains 11 instruments. The entry at (instrument − 1) × 96 + note − 1 selects a sample slot. [evidence: disassembly, deterministic decoding]
 
-Normal sample records have a 0x94-byte header. `+0x04` is decoded PCM bytes (rounded
-to 32); `+0x0C` is initial pan; `+0x10/+0x11` are base-note/fine-tune; `+0x12` is
-default volume; `+0x14..+0x93` is the 128-byte predictor book. Flag bit 0 would add
-a 0x400-byte auxiliary table, but no music sample sets it. Encoded audio is standard
-N64 4-bit VADPCM: 9 bytes produce 16 samples, and stored bytes are
-`round_even((decodedBytes >> 5) * 9)`. [evidence: disassembly, deterministic decoding]
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | count | Instrument count, 11. |
+| 0x04 | 96 × count | u8[][96] | noteMaps | One sample-slot byte per note. |
+
+Normal sample records have a 0x94-byte header; known fields are below. Field widths not established in the evidence remain unknown. Flag bit 0 would add a 0x400-byte auxiliary table, but no music sample sets it. [evidence: disassembly, deterministic decoding]
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x04 | 4 | u32 | decodedBytes | Decoded PCM byte count, rounded to 32. |
+| 0x0C | Unknown | Unknown | initialPan | Initial pan. |
+| 0x10 | 1 | u8 | baseNote | Base note. |
+| 0x11 | 1 | u8 | fineTune | Fine tuning; signedness not established here. |
+| 0x12 | Unknown | Unknown | volume | Default volume. |
+| 0x14 | 0x80 | u8[] | predictorBook | 128-byte predictor book. |
+| 0x94 | Variable | u8[] | payload | Optional auxiliary table, then encoded audio. |
+
+Encoded audio is standard N64 4-bit VADPCM: 9 bytes produce 16 samples. Stored length is round_even((decodedBytes >> 5) × 9).
 
 Existing `decodeVadpcm` and `RESAMPLE_LUT` from `src/rom/music/libultra.ts` are useful;
 the sequencing/bank layer must be new. [evidence: nviewer source, viewer design]
@@ -184,12 +200,13 @@ The internal table is at ROM `0xBBDA0`, runtime `0x800BB1A0`, with 13 records of
 `0x5C` bytes. Code at `0x800495E8` selects `index * 0x5C` and calls loader
 `0x800494E0`. Important fields are: [evidence: ROM bytes, disassembly]
 
-| record offset | meaning |
-|---:|---|
-| `+0x00` | linked internal-name pointer |
-| `+0x14/+0x18` | complete bundle ROM start/end |
-| `+0x1C` | map flag; exact meaning unresolved |
-| `+0x20..+0x28` | environment/render values; exact roles unresolved |
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | name | Linked internal-name pointer. |
+| 0x14 | 4 | u32 | romStart | Complete bundle ROM start. |
+| 0x18 | 4 | u32 | romEnd | Exclusive bundle ROM end. |
+| 0x1C | 4 | u32 | flags | Map flags; semantics unresolved. |
+| 0x20 | 12 | u32[3] | environmentParameters | Environment/render values; meanings unresolved. |
 
 | internal ID | internal name | bundle ROM | primary packed → unpacked | meshes | collision | scenery | materials |
 |---:|---|---|---:|---:|---:|---:|---:|
@@ -245,23 +262,76 @@ Pointers in the inflated primary map are offsets from that blob's start. Its fir
 word is the exact inflated size in all 13 maps. Viewer-relevant header fields are:
 [evidence: ROM bytes, disassembly, deterministic decoding]
 
-| offset | contents |
-|---:|---|
-| `00C` | skydome `GeometryMeta` |
-| `048/04C/050/054/058` | collision file pointers/count, group pointers/count, file table |
-| `05C/060/064/068/06C` | track-mesh equivalent |
-| `074/078/07C/080/08C` | auxiliary/path-like equivalent |
-| `090..100` | five further path-file descriptors |
-| `108/10C` | tilt-line array/count |
-| `11C..140` | material-table bundle |
-| `144/148/14C` | parallel material setup/image/TLUT pointer arrays used by renderer |
-| `324/328` | scenery-object array/count |
-| `334..3A3` | spatial atmosphere/environment data |
-| `3B0/3C4` | probable coin-group count/pointer |
-| `3B4/3C8` | unresolved placement-group count/pointer |
-| `3B8/3D0` | probable booster-group count/pointer |
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x000 | 4 | u32 | fileSize | Exact inflated file size. |
+| 0x00C | 4 | u32 | sky | File-relative GeometryMeta pointer. |
+| 0x048 | 4 | u32 | collisionFiles | File-relative file-pointer-array offset. |
+| 0x04C | 4 | u32 | collisionFileCount | File count. |
+| 0x050 | 4 | u32 | collisionGroups | File-relative group-array offset. |
+| 0x054 | 4 | u32 | collisionGroupCount | Group count. |
+| 0x058 | 4 | u32 | collisionTable | File-relative secondary-file-table offset. |
+| 0x05C | 4 | u32 | meshFiles | File-relative file-pointer-array offset. |
+| 0x060 | 4 | u32 | meshFileCount | File count. |
+| 0x064 | 4 | u32 | meshGroups | File-relative group-array offset. |
+| 0x068 | 4 | u32 | meshGroupCount | Group count. |
+| 0x06C | 4 | u32 | meshTable | File-relative secondary-file-table offset. |
+| 0x074 | 4 | u32 | auxiliaryFiles | File-relative file-pointer-array offset. |
+| 0x078 | 4 | u32 | auxiliaryFileCount | File count. |
+| 0x07C | 4 | u32 | auxiliaryGroups | File-relative group-array offset. |
+| 0x080 | 4 | u32 | auxiliaryGroupCount | Group count. |
+| 0x08C | 4 | u32 | auxiliaryTable | File-relative secondary-file-table offset. |
+| 0x090 | 4 | u32 | path0Files | File-relative file-pointer-array offset. |
+| 0x094 | 4 | u32 | path0FileCount | File count. |
+| 0x098 | 4 | u32 | path0Groups | File-relative group-array offset. |
+| 0x09C | 4 | u32 | path0GroupCount | Group count. |
+| 0x0A4 | 4 | u32 | path0Table | File-relative secondary-file-table offset. |
+| 0x0A8 | 4 | u32 | path1Files | File-relative file-pointer-array offset. |
+| 0x0AC | 4 | u32 | path1FileCount | File count. |
+| 0x0B0 | 4 | u32 | path1Groups | File-relative group-array offset. |
+| 0x0B4 | 4 | u32 | path1GroupCount | Group count. |
+| 0x0BC | 4 | u32 | path1Table | File-relative secondary-file-table offset. |
+| 0x0C0 | 4 | u32 | path2Files | File-relative file-pointer-array offset. |
+| 0x0C4 | 4 | u32 | path2FileCount | File count. |
+| 0x0C8 | 4 | u32 | path2Groups | File-relative group-array offset. |
+| 0x0CC | 4 | u32 | path2GroupCount | Group count. |
+| 0x0D4 | 4 | u32 | path2Table | File-relative secondary-file-table offset. |
+| 0x0D8 | 4 | u32 | path3Files | File-relative file-pointer-array offset. |
+| 0x0DC | 4 | u32 | path3FileCount | File count. |
+| 0x0E0 | 4 | u32 | path3Groups | File-relative group-array offset. |
+| 0x0E4 | 4 | u32 | path3GroupCount | Group count. |
+| 0x0EC | 4 | u32 | path3Table | File-relative secondary-file-table offset. |
+| 0x0F0 | 4 | u32 | otherPathFiles | File-relative file-pointer-array offset. |
+| 0x0F4 | 4 | u32 | otherPathFileCount | File count. |
+| 0x0F8 | 4 | u32 | otherPathGroups | File-relative group-array offset. |
+| 0x0FC | 4 | u32 | otherPathGroupCount | Group count. |
+| 0x100 | 4 | u32 | otherPathTable | File-relative secondary-file-table offset. |
+| 0x108 | 4 | u32 | tiltLines | File-relative tilt-line pointer. |
+| 0x10C | 4 | u32 | tiltLineCount | Tilt-line count. |
+| 0x11C | 40 | u8[0x28] | materials | Material-table bundle; internal layout unresolved here. |
+| 0x144 | 4 | u32 | materialSetup | File-relative material setup-array pointer. |
+| 0x148 | 4 | u32 | materialImages | File-relative image-pointer array. |
+| 0x14C | 4 | u32 | materialTluts | File-relative TLUT-pointer array. |
+| 0x324 | 4 | u32 | scenery | File-relative scenery-object array. |
+| 0x328 | 4 | u32 | sceneryCount | Scenery-object count. |
+| 0x334 | 112 | u8[0x70] | environment | Spatial atmosphere/environment data. |
+| 0x3B0 | 2 | u16 | coinGroupCount | Probable coin-group count. |
+| 0x3B4 | 2 | u16 | placementGroupCount | Unresolved placement-group count. |
+| 0x3B8 | 2 | u16 | boosterGroupCount | Probable booster-group count. |
+| 0x3C4 | 4 | u32 | coinGroups | File-relative probable coin-group pointer. |
+| 0x3C8 | 4 | u32 | placementGroups | File-relative unresolved placement-group pointer. |
+| 0x3D0 | 4 | u32 | boosterGroups | File-relative probable booster-group pointer. |
 
-Each group header is `{u32 memberCount; u32 u16MemberIndicesPtr}`. Mesh, collision,
+Field widths are corroborated by the source-derived MapHeader decoder in the archived reference implementation; semantic uncertainty is retained above.
+
+Each group header is eight bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | memberCount | Number of members. |
+| 0x04 | 4 | u32 | memberIndices | Pointer to memberCount u16 indices. |
+
+Mesh, collision,
 and auxiliary descriptors have three groups: group 0 enumerates every file once;
 groups 1 and 2 are empty. Some path descriptors repeat members in all three groups,
 so a loader must honor actual groups instead of assuming only group 0. [evidence: deterministic decoding]
@@ -283,47 +353,66 @@ Across all maps the eight secondary tables contain: [evidence: deterministic dec
 
 Each primary-map scenery record is 0x28 bytes: [evidence: disassembly, deterministic decoding]
 
-```text
-+00 GeometryMeta
-+04/+08/+0C unknown
-+10 root transform node
-+14 animation-header array
-+18 animation-header count
-+1C scalar/flags, unresolved
-+20 runtime root-animation cache
-+24 optional pointer (zero in all 179 ROM records)
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | geometry | GeometryMeta pointer. |
+| 0x04 | 12 | u32[3] | unknown04 | Unknown. |
+| 0x10 | 4 | u32 | root | Root transform-node pointer. |
+| 0x14 | 4 | u32 | animations | Animation-header array pointer. |
+| 0x18 | 4 | u32 | animationCount | Animation-header count. |
+| 0x1C | 4 | u32 | unknown1C | Unresolved scalar/flags. |
+| 0x20 | 4 | u32 | animationCache | Runtime root-animation cache. |
+| 0x24 | 4 | u32 | optional | Optional pointer, zero in all 179 ROM records. |
 
-The root node starts with `f32 x,y,z` translation. Base placement is local s16
-vertex plus `translation * 32`. Relocation routine `0x80038940` proves recursive
-child pointers at node `+0x28` with count `+0x2C`, plus another array of 8-byte
-records at `+0x30/+0x34`. Intermediate transform fields may encode rotation/scale
-but are unresolved. [evidence: disassembly, open question]
+Transform node, known fields through +0x38. Base placement is local s16 vertex plus translation × 32. Recursive children and the auxiliary array are established by relocation routine 0x80038940. [evidence: disassembly, open question]
 
-All 179 scenery objects have at least one 0x20-byte animation header, 995 total.
-Pointer fields are `+0x14/+0x18/+0x1C`; `+0x00` is count-like and event code changes
-flag bits at `+0x10`. Routine `0x8004899C` caches the header whose `+0x18` transform
-matches the root. Base geometry and translation are enough for an initial viewer;
-keyframe/channel interpolation is a separate medium-high task. [evidence: disassembly, viewer design]
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 12 | f32[3] | translation | X, Y, Z. |
+| 0x0C | 0x1C | u8[] | unknown0C | May encode rotation/scale; unresolved. |
+| 0x28 | 4 | u32 | children | Recursive child-array pointer. |
+| 0x2C | 4 | u32 | childCount | Child count. |
+| 0x30 | 4 | u32 | auxiliary | Pointer to eight-byte records. |
+| 0x34 | 4 | u32 | auxiliaryCount | Auxiliary record count. |
+
+All 179 scenery objects have at least one animation header, 995 total. Headers are 0x20 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | countLike | Count-like value; exact semantics unresolved. |
+| 0x04 | 12 | u8[] | unknown04 | Unknown. |
+| 0x10 | 4 | u32 | flags | Event code changes flag bits. |
+| 0x14 | 4 | u32 | pointer14 | Pointer, role unresolved. |
+| 0x18 | 4 | u32 | transform | Transform pointer. |
+| 0x1C | 4 | u32 | pointer1C | Pointer, role unresolved. |
+
+Routine 0x8004899C caches the header whose transform matches the root. Base geometry and translation suffice for an initial viewer; keyframe/channel interpolation remains a separate task. [evidence: disassembly, viewer design]
 
 #### Song and pattern formats
 
 Every song metadata object is exactly `0x710` bytes: [evidence: ROM bytes, disassembly, deterministic decoding]
 
-```text
-+000 u16 orderCount
-+002 u16 restartOrder
-+004 u16 channels       # always 6
-+006 u16 patternCount
-+008 u16 initialSpeed   # always 2
-+00A u16 initialTempo   # always 130
-+00C u8  order[256]
-+110 u32 patternOffsets[256]  # relative to decoded pattern base
-+510 u16 patternRows[256]
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x000` | 2 | `u16` | `orderCount` | Number of active order entries. |
+| `0x002` | 2 | `u16` | `restartOrder` | Restart order. |
+| `0x004` | 2 | `u16` | `channels` | Always 6. |
+| `0x006` | 2 | `u16` | `patternCount` | Pattern count. |
+| `0x008` | 2 | `u16` | `initialSpeed` | Always 2. |
+| `0x00A` | 2 | `u16` | `initialTempo` | Always 130. |
+| `0x00C` | `0x100` | `u8[256]` | `order` | Pattern order. |
+| `0x110` | `0x400` | `u32[256]` | `patternOffsets` | Relative to the decoded pattern base. |
+| `0x510` | `0x200` | `u16[256]` | `patternRows` | Row counts. |
 
-A pattern payload starts with `u32 rawSize, u32 packedSize`, then Boss's custom
-LZ/RLE stream. The decoder consumes MSB-first 16-bit controls: 0 is a literal; 1 is
+Pattern payload:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | rawSize | Decoded size. |
+| 0x04 | 4 | u32 | packedSize | Packed size. |
+| 0x08 | Variable | u8[] | stream | Boss's custom LZ/RLE stream. |
+
+ The decoder consumes MSB-first 16-bit controls: 0 is a literal; 1 is
 either a 12-bit backward distance plus `(lowNibble+3)` copy length, or, with zero
 distance, `(next12+16)` repeats of the following byte. Leading `0x80` means an
 uncompressed remainder. All 14 payloads decode to their exact sizes. [evidence: disassembly, deterministic decoding]
@@ -351,39 +440,43 @@ The header retains a complete fourth path-file channel, but its count is zero in
 
 A mesh secondary record's metadata offset points to: [evidence: deterministic decoding]
 
-```text
-+00 u32 unknown/pointer
-+04 u32 unknown/pointer
-+08 u32 GeometryMeta
-+0C s32 originX     # signed 20.11 fixed point; divide by 2048
-+10 s32 originY
-+14 s32 originZ
-+18..24 unknown
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `+00` | 4 | `u32` | `unknown/pointer` | — |
+| `+04` | 4 | `u32` | `unknown/pointer` | — |
+| `+08` | 4 | `u32` | `GeometryMeta` | — |
+| `+0C` | 4 | `s32` | `originX` | # signed 20.11 fixed point; divide by 2048 |
+| `+10` | 4 | `s32` | `originY` | — |
+| `+14` | 4 | `s32` | `originZ` | — |
+| 0x18 | 0x10 | u8[] | unknown18 | Fields at +0x18, +0x1C, +0x20, +0x24 are unresolved. |
 
 The decoded origin is added to local vertices. `GeometryMeta` is shared by track,
 scenery, and sky geometry:
 
-```text
-+00 u32 vertices      +04 u32 vertexCount    # 3*s16, stride 6
-+08 u32 faces         +0C u32 faceCount      # stride 0x20
-+10 u32 texcoords     +14 u32 texcoordCount  # 2*s16, stride 4
-+18 u32 colors        +1C u32 colorCount     # RGBA8888, stride 4
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `+00` | 4 | `u32` | `vertices` | — |
+| `+04` | 4 | `u32` | `vertexCount` | # 3*s16, stride 6 |
+| `+08` | 4 | `u32` | `faces` | — |
+| `+0C` | 4 | `u32` | `faceCount` | # stride 0x20 |
+| `+10` | 4 | `u32` | `texcoords` | — |
+| `+14` | 4 | `u32` | `texcoordCount` | # 2*s16, stride 4 |
+| `+18` | 4 | `u32` | `colors` | — |
+| `+1C` | 4 | `u32` | `colorCount` | # RGBA8888, stride 4 |
 
 Faces are:
 
-```text
-+00 u16 unknown00
-+02 u16 unknown02
-+04 u8  materialIndex
-+05 u8  unknown05
-+06 u8  unknown06
-+07 u8  unknown07
-+08 s16 vertex[4]
-+10 s16 texcoord[4]
-+18 s16 color[4]
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `+00` | 2 | `u16` | `unknown00` | — |
+| `+02` | 2 | `u16` | `unknown02` | — |
+| `+04` | 1 | `u8` | `materialIndex` | — |
+| `+05` | 1 | `u8` | `unknown05` | — |
+| `+06` | 1 | `u8` | `unknown06` | — |
+| `+07` | 1 | `u8` | `unknown07` | — |
+| `+08` | 8 | `s16[4]` | `vertex[4]` | — |
+| `+10` | 8 | `s16[4]` | `texcoord[4]` | — |
+| `+18` | 8 | `s16[4]` | `color[4]` | — |
 
 `vertex[3] == -1` is a triangle; otherwise emit `(0,1,2)` and `(0,2,3)`.
 `+5..+7` are not padding: 11,033 of 49,290 track faces use a nonzero value.
@@ -407,15 +500,18 @@ viewer convention, not a stored field. [evidence: deterministic decoding, upstre
 Header `+0x11C` points to a 0x28-byte bundle relocated by retail routine
 `0x800476A0`: [evidence: ROM bytes, disassembly]
 
-```text
-+00 setupDlByMaterial[N]
-+04 textureLoadDlByMaterial[N]
-+08 paletteLoadDlByMaterial[N]
-+0C N
-+10 uniqueSetupDlPtrs       +14 count
-+18 uniqueTextureLoadDlPtrs +1C count
-+20 uniquePaletteLoadDlPtrs +24 count
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | setupDlByMaterial | Pointer to N setup-DL pointers. |
+| 0x04 | 4 | u32 | textureLoadDlByMaterial | Pointer to N texture-load-DL pointers. |
+| 0x08 | 4 | u32 | paletteLoadDlByMaterial | Pointer to N palette-load-DL pointers. |
+| 0x0C | 4 | u32 | N | Material count. |
+| 0x10 | 4 | u32 | uniqueSetupDlPtrs | Pointer to unique setup-DL pointer array. |
+| 0x14 | 4 | u32 | setupCount | Unique setup count. |
+| 0x18 | 4 | u32 | uniqueTextureLoadDlPtrs | Pointer to unique texture-DL pointer array. |
+| 0x1C | 4 | u32 | textureCount | Unique texture count. |
+| 0x20 | 4 | u32 | uniquePaletteLoadDlPtrs | Pointer to unique palette-DL pointer array. |
+| 0x24 | 4 | u32 | paletteCount | Unique palette count. |
 
 For face material `i`, execute the three parallel lists. Setup lists contain RDP
 other modes, combine/color state, and one to six `G_SETTILE`/
@@ -457,19 +553,46 @@ be reused after material-local TMEM reconstruction. [evidence: deterministic dec
 
 Collision secondary metadata is: [evidence: deterministic decoding]
 
-```text
-+00 faces       +04 faceCount       # stride 0x0A
-+08 vertices    +0C vertexCount     # stride 0x14
-+10 links       +14 linkCount       # stride 0x0C
-+18 fourthPtr   +1C fourthCount     # zero in every file
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | faces | Pointer to 0x0A-byte faces. |
+| 0x04 | 4 | u32 | faceCount | Face count. |
+| 0x08 | 4 | u32 | vertices | Pointer to 0x14-byte vertices. |
+| 0x0C | 4 | u32 | vertexCount | Vertex count. |
+| 0x10 | 4 | u32 | links | Pointer to 0x0C-byte links. |
+| 0x14 | 4 | u32 | linkCount | Link count. |
+| 0x18 | 4 | u32 | fourthPtr | Unused pointer; zero. |
+| 0x1C | 4 | u32 | fourthCount | Zero in every file. |
 
-A face is `{s16 vertex[3]; u16 unknown06; u16 unknown08}`. A vertex begins with
-three `f32` positions followed by `u32/u16/u16` unknown fields. The trailing face
+A face is:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 6 | `s16[3]` | `vertices` | — |
+| `0x06` | 2 | `u16` | `unknown06` | — |
+| `0x08` | 2 | `u16` | `unknown08` | — |
+
+Vertex record, 0x14 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 12 | f32[3] | position | X, Y, Z. |
+| 0x0C | 4 | u32 | unknown0C | Unknown. |
+| 0x10 | 2 | u16 | unknown10 | Unknown. |
+| 0x12 | 2 | u16 | unknown12 | Unknown. |
+
+The trailing face
 words have thousands of values, so calling them surface flags is unjustified.
 [evidence: deterministic decoding, open question]
 
-Each link contains three `(s16 sectionIndex, s16 faceIndex)` pairs. Across 355 files
+Each 0x0C-byte link contains three four-byte reference pairs:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | s16 | sectionIndex | Section index. |
+| 0x02 | 2 | s16 | faceIndex | Face index within section. |
+
+Across 355 files
 and 40,644 links, every pair is either `(-1,-1)` or targets a real section and an
 in-range face. These are adjacency/connectivity references **[hypothesis, strong]**;
 traversal semantics are not required to draw collision.
@@ -522,24 +645,51 @@ consumer is unresolved. They are possible environment-mode names only. [evidence
 
 #### Vehicles
 
-The vehicle catalog at ROM `0xACCC0` has 33 records of 0x3C bytes. `+0x00` is a
-name pointer and `+0x04..+0x2B` holds five ROM start/end pairs. The entries are A/B
+The vehicle catalog at ROM 0xACCC0 has 33 records of 0x3C bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | name | Name pointer. |
+| 0x04 | 0x28 | u32[5][2] | romRanges | Five inclusive-start/exclusive-end ROM pairs. |
+| 0x2C | 0x10 | u8[] | unknown2C | Fields not decoded here. |
+
+The entries are A/B
 versions of Z-Bucket, Desperado, Surf, Superfuzz, Wild Truck, Scimitar, Hysterion,
 Warbird, Del Raye, Cockroach, Apollo and Stottlemeyer, followed by Boss 1–5,
 Interceptor, Milk Truck, Twisted and Cupra. [evidence: ROM bytes, disassembly]
 
 Runtime loader `0x80045EC4` inflates the first two extents; the final three are
-raw. The first inflated blob contains eight palette destinations at `+0x7C..+0x98`,
-material bundles at `+0x9C` and `+0xC4`, their redundant slot counts at
-`+0xEC/+0xF0`, and 54 sixteen-byte geometry records at `+0xF4`. Each geometry
-record is a `GeometryMeta` pointer followed by three zero words. All 33 files reuse
+raw. Known fields in the first inflated blob:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x7C | 0x20 | u32[8] | paletteDestinations | Eight palette destination pointers. |
+| 0x9C | 0x28 | materialBundle | materials0 | First material bundle. |
+| 0xC4 | 0x28 | materialBundle | materials1 | Second material bundle. |
+| 0xEC | 4 | u32 | slotCount0 | Redundant first-bundle slot count. |
+| 0xF0 | 4 | u32 | slotCount1 | Redundant second-bundle slot count. |
+| 0xF4 | 54 × 16 | geometryRecord[] | geometry | Geometry records. |
+
+Geometry record, 16 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | geometry | GeometryMeta pointer. |
+| 0x04 | 12 | u32[3] | zero04 | Zero words. |
+
+All 33 files reuse
 the map/scenery vertex and face topology; slots 0–41 partition body faces by their
 material byte, while slots 42–53 are special submeshes and two pointer pairs are
 intentional duplicates. [evidence: disassembly, deterministic decoding]
 
 Vehicle faces are not drop-in map faces. None of the 1,716 unique geometry records
-has a separate UV array; face bytes `+0x10..+0x1F` instead hold packed per-corner
-attributes whose exact UV/lighting meaning is unresolved. The first material bundle
+has a separate UV array. Their face tail replaces map UVs:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x10 | 16 | u8[] | cornerAttributes | Packed per-corner attributes; exact UV/lighting meaning unresolved. |
+
+ The first material bundle
 has 42, 46, 47 or 48 slots; the second has four. Their setup/palette tables are null,
 so some render state is resident/shared rather than self-contained. [evidence: deterministic decoding, open question]
 
@@ -561,15 +711,38 @@ corner attributes and special-submesh transforms are high/optional. [evidence: d
 The following layouts validate across every map. Their gameplay labels are strong
 hypotheses inherited from spatial appearance and the historical viewer: [evidence: deterministic decoding, hypothesis]
 
-- Tilt lines: count/pointer `+0x10C/+0x108`, stride `0x2C`, float endpoints at
-  `+0x08/+0x14`.
-- Coin groups: count/pointer `+0x3B0/+0x3C4`, stride `0x38`; `u8` point count at
-  `+0x00`, float bounds at `+0x0C/+0x18`, and 0x10-byte point records via `+0x24`.
-  Totals: 108 groups, 494 points.
-- Booster groups: count/pointer `+0x3B8/+0x3D0`, stride `0x38`; `u8` line count at
-  `+0x03`, paired float endpoint arrays at `+0x30/+0x34`. Totals: 50 groups,
-  1,340 lines.
-- Header `+0x3B4/+0x3C8` describes an unresolved placement group in every map.
+Map header references:
+
+| Array | Count offset | Pointer offset | Record stride |
+|---|---:|---:|---:|
+| Tilt lines | 0x10C | 0x108 | 0x2C |
+| Coin groups | 0x3B0 | 0x3C4 | 0x38 |
+| Unresolved placement groups | 0x3B4 | 0x3C8 | Unknown |
+| Booster groups | 0x3B8 | 0x3D0 | 0x38 |
+
+Tilt-line known fields:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x08 | 12 | f32[3] | endpoint0 | First endpoint. |
+| 0x14 | 12 | f32[3] | endpoint1 | Second endpoint. |
+
+Coin-group known fields; 108 groups and 494 points:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | pointCount | Point count. |
+| 0x0C | 12 | f32[3] | bounds0 | First bound. |
+| 0x18 | 12 | f32[3] | bounds1 | Second bound. |
+| 0x24 | 4 | u32 | points | Pointer to 0x10-byte point records. |
+
+Booster-group known fields; 50 groups and 1,340 lines:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x03 | 1 | u8 | lineCount | Line count. |
+| 0x30 | 4 | u32 | endpoints0 | Pointer to first f32 XYZ endpoint array. |
+| 0x34 | 4 | u32 | endpoints1 | Pointer to second f32 XYZ endpoint array. |
 
 All float positions use `*32` to reach mesh units. Paths/coins/boosters should be
 markers or separate toggleable layers, not unlayered geometry. [viewer design]
@@ -578,14 +751,14 @@ markers or separate toggleable layers, not unlayered geometry. [viewer design]
 
 The environment block is embedded in the primary map: [evidence: ROM bytes, disassembly]
 
-```text
-+334 Vec3f[4] world-space sampling quad
-+364 Vec3f[4] byte-map coordinate quad
-+394 u32      byte-map offset
-+398 u32      width
-+39C u32      height
-+3A0 u8       red, green, blue, 0xFF
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x334` | `0x30` | `Vec3f[4]` | `worldQuad` | World-space sampling quad. |
+| `0x364` | `0x30` | `Vec3f[4]` | `mapQuad` | Byte-map coordinate quad. |
+| `0x394` | 4 | `u32` | `mapOffset` | Byte-map offset. |
+| `0x398` | 4 | `u32` | `width` | Map width. |
+| `0x39C` | 4 | `u32` | `height` | Map height. |
+| `0x3A0` | 4 | `u8[4]` | `color` | Red, green, blue, and `0xFF`. |
 
 Routine `0x8001B040` (“Calc fog table”) projects/intersects the current view with
 the two quads, interpolates 256 samples from the one-byte map, scales them by global

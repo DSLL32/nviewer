@@ -103,15 +103,67 @@ segmented, VROM, and file-relative addresses are named at each use.
 ##### Tables
 | Table | ROM / RAM | Record | Count | Users |
 |---|---|---|---|---|
-| Image records | 0xA6860 / 0x80116860 | 28 bytes: +0 u8 format, +1 u8 flags, +2 u16 width, +4 u16 height, +6/+8/+0xA u16 (unknown), +0xC and +0x10 pointers filled at runtime, +0x14 u32 cartStart, +0x18 u32 cartEndIncl | 196 (record 4 has start 0) | 0x8007BCF0(record, compressedFlag) |
-| Sound blobs | 0xA4710 / 0x80114710 | 8 bytes: u32 cartAddr, u32 size | 26 | 0x80097BC4, 0x80097CC8, 0x80097D14, 0x80097DF8 |
-| Scripts/cutscenes | 0xB53D0 / 0x801253D0 | 16 bytes: u32 type (=1), u32 cartStart, u32 cartEndIncl, u32 0 | 15 | 0x800D520C |
+| Image records | 0xA6860 / 0x80116860 | 28-byte image record below | 196 (record 4 has start 0) | 0x8007BCF0(record, compressedFlag) |
+| Sound blobs | 0xA4710 / 0x80114710 | Eight-byte sound-blob record below | 26 | 0x80097BC4, 0x80097CC8, 0x80097D14, 0x80097DF8 |
+| Scripts/cutscenes | 0xB53D0 / 0x801253D0 | 16-byte script/cutscene record below | 15 | 0x800D520C |
 | Campaign steps | 0xB54C0 / 0x801254C0 | u32 pointer to a step record, NULL-terminated | 34 | 0x800E9424 returns `ptrs[*(u32*)0x803A8310]` |
-| Mission (step) record | e.g. 0x80124B80 | +0 u32 type (0 = mission, 1 = script), +4 u32 levelId, +8 u32 mode, +0xC u8, +0xD..+0x11 u8[5], +0x50 u32, +0x64 u8, +0x6C u32 music id | 19 missions | 0x8009A6F8 |
+| Mission (step) record | e.g. 0x80124B80 | 0x70-byte mission record; known fields below | 19 missions | 0x8009A6F8 |
 | Level file switch | code 0x800E8380(levelId, flag, starts[], ends[]) returns the count; jump table 0x80075F60 | | 27 cases | 0x800AF43C |
 | Level names | code 0x800E8C88(levelId) returns char*; jump table 0x80075FD0 | | 27 cases | |
-| Map select (campaign and battle) | ROM 0xAB6A8 (8 USA tables) and 0xABCD8 (8 Europe tables), contiguous; RAM 0x8011B6A8 / 0x8011BCD8 | 16 bytes: u16 x, u16 y, char* name, u32 a (1..5), u32 levelId (27 = "GO TO EUROPE...." / "GO TO THE USA"). Verified by decoding the bytes (e.g. AIRPORT 26, BREAKOUT 0, SECRET BOATS 24, PANHANDLE 18). | 4..12 entries per table | 0x800C288C / 0x800C2D84 |
+| Map select (campaign and battle) | ROM 0xAB6A8 (8 USA tables) and 0xABCD8 (8 Europe tables), contiguous; RAM 0x8011B6A8 / 0x8011BCD8 | 16-byte map-select record below; level 27 changes between USA and Europe. Verified by decoding the bytes (e.g. AIRPORT 26, BREAKOUT 0, SECRET BOATS 24, PANHANDLE 18). | 4..12 entries per table | 0x800C288C / 0x800C2D84 |
 | Cheat codes | 0xB1C3C / 0x80121C3C (effect names at ROM 0xB1B14) | 33 char* | 33 | 0x800D0070; dispatcher 0x800D00F8, jump table 0x80074140 (section 10.1) |
+
+Image record, 28 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | format | Image format. |
+| 0x01 | 1 | u8 | flags | Flags. |
+| 0x02 | 2 | u16 | width | Width. |
+| 0x04 | 2 | u16 | height | Height. |
+| 0x06 | 6 | u16[3] | unknown06 | Unknown. |
+| 0x0C | 8 | u32[2] | runtimePointers | Filled at runtime. |
+| 0x14 | 4 | u32 | cartStart | Start cart address. |
+| 0x18 | 4 | u32 | cartEndIncl | Inclusive end cart address. |
+
+Sound-blob record, eight bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | cartAddr | Cart address. |
+| 0x04 | 4 | u32 | size | Stored length. |
+
+Script/cutscene record, 16 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | type | 1. |
+| 0x04 | 4 | u32 | cartStart | Start cart address. |
+| 0x08 | 4 | u32 | cartEndIncl | Inclusive end cart address. |
+| 0x0C | 4 | u32 | zero0C | Zero. |
+
+Map-select record, 16 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | u16 | x | Menu X. |
+| 0x02 | 2 | u16 | y | Menu Y. |
+| 0x04 | 4 | u32 | name | Name pointer. |
+| 0x08 | 4 | u32 | unknown08 | Values 1–5. |
+| 0x0C | 4 | u32 | levelId | 27 changes region; other values select maps. |
+
+Mission record, 0x70 bytes, known fields:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | type | 0 mission; 1 script. |
+| 0x04 | 4 | u32 | levelId | Level identifier. |
+| 0x08 | 4 | u32 | mode | Mode. |
+| 0x0C | 1 | u8 | unknown0C | Unknown. |
+| 0x0D | 5 | u8[5] | unknown0D | Unknown. |
+| 0x50 | 4 | u32 | unknown50 | Unknown. |
+| 0x64 | 1 | u8 | unknown64 | Unknown. |
+| 0x6C | 4 | u32 | musicId | Music identifier. |
 
 ##### Codec: LZARI (shared: identical in BTX1 and GA)
 LZARI is the only asset codec in **both** games; everything else is stored raw. Both games use the same parameters and stream layout. In BTX1 every one of its 70 LZARI files decodes, and each decode consumes between (stored size - 16) and (stored size + 4) bytes. The helper functions are:
@@ -133,7 +185,12 @@ In BTX1 the word after the size header is often 0xFFFFFFxx. That is coded data, 
 - **Callers (BTX1):** 32 call sites, including the level loader 0x80088CF0 (file A), 0x800DDA08 (file B) and the front-end image-bank loaders.
 
 The stream and algorithm are exactly Haruhiko Okumura's LZARI (1989):
-- **Header:** `+0 u32` decoded size. The function returns -1 if it is 0 or greater than maxOut. The arithmetic-coded bitstream starts at +4.
+- **Container:** the function returns -1 when the decoded size is 0 or exceeds maxOut.
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | decodedSize | Output byte count |
+| 0x04 | Variable | bitstream | data | Arithmetic-coded stream |
 - **Constants:** N = 4096 (ring), F = 60, THRESHOLD = 2, N_CHAR = 256 - THRESHOLD + F = 314. M = 15, so Q1 = 0x8000, Q2 = 0x10000, Q3 = 0x18000, Q4 = 0x20000, MAX_CUM = Q1 - 1 = 0x7FFF.
 - **Bit input:** MSB-first within each byte. GetBit shifts the mask right and loads the next byte with mask 0x80 when the mask reaches 0.
   - The decoder can look ahead up to about one byte past the compressed data.
@@ -299,7 +356,15 @@ Notes on the table:
 - **Ids 17-23 with flag 1** each branch into the next case, so they all end up in case 24's campaign path. That path loads 3F9B60 (SF BREAKOUT's base) plus 46B6A8, so Shore Patrol re-uses SF Breakout's terrain.
 - **Ids 17-23 with flag 0** load two files. The "battle:" column is the first; it acts as that arena's own base.
 
-**Campaign order** comes from the step list at 0x801254C0, indexed by `*(u32*)0x803A8310`. Records of type 0 are missions (level id at +4, mode at +8, music id at +0x6C); type 1 records are cutscene scripts. The 19 missions, in order:
+**Campaign order** comes from the step list at 0x801254C0, indexed by `*(u32*)0x803A8310`. Type 0 entries select 0x70-byte mission records; type 1 entries select cutscene scripts. Known mission fields:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x04 | Unknown | Unknown | levelId | Internal level identifier |
+| 0x08 | Unknown | Unknown | mode | Game mode |
+| 0x6C | Unknown | Unknown | musicId | Sound ID supplied to play |
+
+The 19 missions, in order:
 
 | # | Id | Level |
 |---|---|---|
@@ -408,17 +473,77 @@ Loaders: 0x800BA6C0 per file, 0x800BB53C for the common file.
 - Placements in a file index models of the same file.
 - The viewer should take instances from slot 0 and slot 1 only; the common file holds global objects, such as a 263-entry global model list (kind 33) used by 0x800BB2A0.
 
-**Sections** (header: 8 x u32, h0 = 0x20, h7 = file size):
+**Section directory (0x20 bytes).**
 
-| Section | Record | Layout |
-|---|---|---|
-| [h0,h1) | 4 B | u32 groupCount |
-| [h1,h2) | 16 B x groupCount | u16 placementCount, u16 firstPlacement, s16 minX, minY, minZ, maxX, maxY, maxZ |
-| [h2,h3) | 12 B | placement: s16 x, s16 y (up), s16 z, u16 yaw (0x10000 = 360°), u32 defOffset (relative to h3) |
-| [h3,h4) | variable | object definition; byte 0 = kind 0..45 (spawn switch 0x800DFA5C, jump table 0x80075950) |
-| [h4,h5) | 16 B | model: u8 partCount, u8 0, u16 firstPart, s16 minX, minY, minZ, maxX, maxY, maxZ |
-| [h5,h6) | 4 B | part: u8 poolRefCount, u8 0, u16 firstPoolRef. **Hypothesis:** parts are LOD levels. Only common-file models have more than one part, with triangle counts falling per part. |
-| [h6,h7) | 24 B | pool ref: s32 geoOff, geoSize, pbOff, pbSize, texOff (-1 = none), texSize |
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 0x20 | u32[8] | h | File-relative section boundaries; h[0] = 0x20, h[7] = file size |
+
+Sections:
+
+| Section | Record size | Contents |
+|---|---:|---|
+| [h0,h1) | 4 | Group count. |
+| [h1,h2) | 16 | Group records, groupCount entries. |
+| [h2,h3) | 12 | Placements. |
+| [h3,h4) | Variable | Object definitions; byte 0 is kind 0–45. |
+| [h4,h5) | 16 | Models. |
+| [h5,h6) | 4 | Parts. |
+| [h6,h7) | 24 | Pool references. |
+
+Object definitions are dispatched by 0x800DFA5C through jump table 0x80075950.
+
+Group-count section:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | groupCount | Number of groups. |
+
+Group:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | u16 | placementCount | Placement count. |
+| 0x02 | 2 | u16 | firstPlacement | First placement index. |
+| 0x04 | 12 | s16[6] | bounds | Minimum X,Y,Z; maximum X,Y,Z. |
+
+Placement:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 6 | s16[3] | position | X,Y,Z; Y is up. |
+| 0x06 | 2 | u16 | yaw | 0x10000 units per turn. |
+| 0x08 | 4 | u32 | defOffset | Definition offset relative to h3. |
+
+Model:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | partCount | Part count. |
+| 0x01 | 1 | u8 | zero01 | Zero. |
+| 0x02 | 2 | u16 | firstPart | First part index. |
+| 0x04 | 12 | s16[6] | bounds | Minimum X,Y,Z; maximum X,Y,Z. |
+
+Part:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | poolRefCount | Pool-reference count. |
+| 0x01 | 1 | u8 | zero01 | Zero. |
+| 0x02 | 2 | u16 | firstPoolRef | First pool-reference index. |
+
+Pool reference:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | s32 | geoOffset | Geometry-pool offset. |
+| 0x04 | 4 | s32 | geoSize | Geometry size. |
+| 0x08 | 4 | s32 | pbOffset | State-pool offset. |
+| 0x0C | 4 | s32 | pbSize | State size. |
+| 0x10 | 4 | s32 | texOffset | Texture-pool offset; −1 means none. |
+| 0x14 | 4 | s32 | texSize | Texture size. |
+
+**Hypothesis:** parts are LOD levels. Only common-file models have multiple parts, with decreasing triangle counts.
 
 **Placement transform** (0x8009EFD4, then guMtxF2L 0x80108DC0):
 - Column-vector form: `world = RotY(θ)·v + (x, y, z)`, with θ = yaw·2π/65536 and `RotY = [[c,0,s],[0,1,0],[-s,0,c]]`.
@@ -427,23 +552,98 @@ Loaders: 0x800BA6C0 per file, 0x800BB53C for the common file.
 
 **Object kinds.** Model indices are file-local; 0xFFFF or out of range means no model.
 
-| Kind(s) | Meaning | Model field(s) |
+| Kind(s) | Meaning | Model selection |
 |---|---|---|
-| 0, 1, 2, 11, 14, 22, 34, 35, 43, 44 | static model (0x800DF0D0) | u16 at +2 |
-| 12 | model gated by a player-count test | +4 |
-| 13 | 16 B; case 0x800E0E2C, then 0x800DE930 | u16 at +12. 223 of 248 have none, including all 23 in SF AIRPORT. |
-| 3, 4, 5, 10, 15, 21, 24, 26, 28, 29, 31, 32, 36, 40 | multi-model spawners (destructibles and animated objects). Take the first field as the initial model (**hypothesis:** the intact state). | 3: +2..+16; 4: +2..+10; 5: +2, +4, +6; 10: +2, +4, +6; 15: +2, +4, +6, +10; 21: +2..+12; 24: +2, +4, +6; 26: +6, +8, +10; 28: +2, +4, +6; 29: +2; 31: +2; 32: +2..+14; 36: +2, +4; 40: +2. Table `MODEL_FIELDS` in `lvl2/loader.ts`. |
-| 39 | conditional include {u8 39, u8 cond, u16 flag, u32 defOffset} (case 0x800E1468) | recurses into the target def |
-| 6 | waypoint {06, u8 chain, u8 index, 00} | none |
-| 7 | pickup (u8 +1 = type) | none |
-| 17 | player start {u8 17, u8 slot, u16 value}. Stored at *(0x80219498)+500+24·slot as f32 x, z, sin, cos, value. Campaign variants have none. | none |
+| 0, 1, 2, 11, 14, 22, 34, 35, 43, 44 | static model (0x800DF0D0) | model-reference layout below |
+| 12 | model gated by a player-count test | model-reference layout below |
+| 13 | 16 B; case 0x800E0E2C, then 0x800DE930 | model-reference layout below |
+| 3, 4, 5, 10, 15, 21, 24, 26, 28, 29, 31, 32, 36, 40 | multi-model spawners (destructibles and animated objects). Take the first field as the initial model (**hypothesis:** the intact state). | model-reference layout below; corroborated by MODEL_FIELDS in the research decoder. |
+| 39 | conditional include, eight bytes (layout below; case 0x800E1468) | recurses into the target def |
+| 6 | waypoint, four bytes (layout below) | none |
+| 7 | pickup; payload below | none |
+| 17 | player start, four bytes (layout below). Runtime slot at *(0x80219498)+500+24·slot; known fields below. Campaign variants have none. | none |
 | 30 | collision box, trigger or play-area rectangle (16 B, sub-switch on +1; 5.1.4) | none |
-| 42 | invisible solid with a model's bounds (4 B {42, 0, u16 model}; 5.1.4) | model u16 at +2, collision only |
+| 42 | invisible solid with a model's bounds (four-byte layout under Collision) | model-reference layout below, collision only |
 | 37 | fog and lights, 24 B (below) | none |
-| 38 | group ambient light, 4 B {38, r, g, b} | none |
+| 38 | group ambient light, four bytes (layout below) | none |
 | 33 | global model list (common file) | none |
 | 8, 16, 20, 23, 27, 41, 45 | logic, payload unknown | none |
 | 9, 18, 19, 25 | no-op | none |
+
+Model-reference fields in object definitions. Offsets are hexadecimal; each index is file-local and 0xFFFF or an out-of-range value means no model. Consecutive indices form a homogeneous array, not separate record headers.
+
+| Kind | Offset | Size | Type | Field | Description |
+|---|---:|---:|---|---|---|
+| 0, 1, 2, 11, 14, 22, 34, 35, 43, 44 | 0x02 | 2 | u16 | model | Static model. |
+| 12 | 0x04 | 2 | u16 | model | Player-count-gated model. |
+| 13 | 0x0C | 2 | u16 | model | 223 of 248 records have no model, including all 23 in SF AIRPORT. |
+| 3 | 0x02 | 16 | u16[8] | models | Multi-model spawner references. |
+| 4 | 0x02 | 10 | u16[5] | models | Multi-model spawner references. |
+| 5 | 0x02 | 6 | u16[3] | models | Multi-model spawner references. |
+| 10 | 0x02 | 6 | u16[3] | models | Multi-model spawner references. |
+| 15 | 0x02 | 6 | u16[3] | models | Multi-model spawner references. |
+| 21 | 0x02 | 12 | u16[6] | models | Multi-model spawner references. |
+| 24 | 0x02 | 6 | u16[3] | models | Multi-model spawner references. |
+| 26 | 0x06 | 6 | u16[3] | models | Multi-model spawner references. |
+| 28 | 0x02 | 6 | u16[3] | models | Multi-model spawner references. |
+| 29 | 0x02 | 2 | u16 | models | Multi-model spawner references. |
+| 31 | 0x02 | 2 | u16 | models | Multi-model spawner references. |
+| 32 | 0x02 | 14 | u16[7] | models | Multi-model spawner references. |
+| 36 | 0x02 | 4 | u16[2] | models | Multi-model spawner references. |
+| 40 | 0x02 | 2 | u16 | models | Multi-model spawner references. |
+| 15 | 0x0A | 2 | u16 | additionalModel | Additional spawner model. |
+| 42 | 0x02 | 2 | u16 | model | Model bounds used for collision only. |
+
+Pickup, known two-byte prefix:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | kind | 7. |
+| 0x01 | 1 | u8 | type | Pickup type. |
+
+Runtime player-start slot, 24-byte stride; offsets relative to its slot base:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | f32 | x | Stored player-start value. |
+| 0x04 | 4 | f32 | z | Stored player-start value. |
+| 0x08 | 4 | f32 | sinYaw | Stored player-start value. |
+| 0x0C | 4 | f32 | cosYaw | Stored player-start value. |
+| 0x10 | 4 | f32 | value | Stored player-start value. |
+| 0x14 | 4 | u8[4] | unknown_14 | Remaining slot bytes; not characterized. |
+
+Conditional include, eight bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | kind | 39. |
+| 0x01 | 1 | u8 | condition | Condition selector. |
+| 0x02 | 2 | u16 | flag | Flag index. |
+| 0x04 | 4 | u32 | defOffset | Target definition offset. |
+
+Waypoint, four bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | kind | 6. |
+| 0x01 | 1 | u8 | chain | Chain index. |
+| 0x02 | 1 | u8 | index | Waypoint index. |
+| 0x03 | 1 | u8 | zero03 | Zero. |
+
+Player start, four bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | kind | 17. |
+| 0x01 | 1 | u8 | slot | Player slot. |
+| 0x02 | 2 | u16 | value | Player-start value. |
+
+Group ambient light, four bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | kind | 38. |
+| 0x01 | 3 | u8[3] | color | R,G,B. |
 
 - **Kind 39 condition.** f(flag) = mode `*(u32)0x802194A0` ∈ {1, 3, 11} and `u8 0x80219582[flag] < u8 *0x802194A6` (function 0x800E8090). cond 0 includes the target if f is true; cond 1 if f is false.
   - Battle files carry four identical cond-0 groups (flags 0-3). In mode 0 none are included.
@@ -453,7 +653,15 @@ Loaders: 0x800BA6C0 per file, 0x800BB53C for the common file.
 **Pool chunks and load-time fix-ups.** Chunks are read with `rom_read(poolBase + off, heap, size)`. Registration and dedupe happen at 0x800B9FD4: up to 2800 GEO, 256 PB and 256 TEX, then packed with 8-byte alignment.
 - **GEO** (read at 0x800BB048):
   - Contents: G_VTX, G_TRI1 and G_ENDDL only; G_VTX w1 += chunk base.
-  - Vertex (16 B): s16 x, y, z, u16 0, s16 s, t, **s8 nx, ny, nz**, u8 alpha.
+  - Vertex (0x10 bytes):
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 6 | s16[3] | position | Local x, y, z |
+| 0x06 | 2 | u16 | flag | Zero |
+| 0x08 | 4 | s16[2] | st | Texture coordinates |
+| 0x0C | 3 | s8[3] | normal | Lighting normal x, y, z |
+| 0x0F | 1 | u8 | alpha | Opacity |
   - One malformed chunk sits at GEO offset 0x5D40 (vertices before commands); it is used only by unreachable level 23.
 - **TEX** (read at 0x800BAF74):
   - Command sequence: E3 (TLUT mode), FD G_SETTIMG (chunk-relative; w1 += chunk base), F5/E8 tile 7, E6, optional F0 LOADTLUT, F3 LOADBLOCK, DF. Texels start at +0x30.
@@ -482,7 +690,18 @@ Loaders: 0x800BA6C0 per file, 0x800BB53C for the common file.
 - Which caller culls or LODs static instances has not been identified (9.1).
 
 **Lighting.**
-- Kind 37 (24 B): +1..3 fog RGB (also the sky fill colour); +4..6 light 0 RGB; +7..9 light 0 direction (s8); +10..12 light 1 RGB; +13..15 light 1 direction; +16..21 unknown (passed to 0x800F7150).
+- Kind 37 (0x18 bytes):
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | kind | 37 |
+| 0x01 | 3 | u8[3] | fog | Fog and sky-fill RGB |
+| 0x04 | 3 | u8[3] | light0Color | RGB |
+| 0x07 | 3 | s8[3] | light0Direction | Direction |
+| 0x0A | 3 | u8[3] | light1Color | RGB |
+| 0x0D | 3 | s8[3] | light1Direction | Direction |
+| 0x10 | 6 | u8[6] | unknown_10 | Passed to 0x800F7150 |
+| 0x16 | 2 | u8[2] | unknown_16 | Unresolved |
   - Stored by 0x800B05F4, applied by 0x800B04E0 and 0x800A9C24.
 - Kind 38: group ambient RGB (0x800B06A8).
 - The runtime light MOVEMEMs in all three dumps equal the data:
@@ -508,19 +727,25 @@ Loaders: 0x800BA6C0 per file, 0x800BB53C for the common file.
 ##### GA collision (verified)
 GA has **no triangle collision against the level geometry and no heightfield**. The spawn switch 0x800DFA5C adds a flat list of **boxes** through 0x800B1898 while it spawns each placement. Walls are boxes, and the ground height comes from three kinds of "surface" box (platform, ramp, mound). Only the slot files (base and variant) register collision, not the common world file.
 
-**Collision entry** (40 B; 1400 slots at 0x803978E0; free-list head u16 at 0x803977E8; s16 unless noted):
+**Collision entry** (40 B; 1400 slots at 0x803978E0; free-list head u16 at 0x803977E8; offsets below are hexadecimal):
 
-| Offset | Field |
-|---|---|
-| +0 | u32 flags |
-| +4 | owner pointer (0 for level statics) |
-| +8 | u16[4] grid-cell next links |
-| +16 / +18 / +20 | x / z / y base |
-| +22 / +24 / +26 / +28 | minX / maxX / minZ / maxZ |
-| +30 / +32 | bottom / top (world span: y base + bottom .. y base + top) |
-| +34 | radius = max + 3·min/8 of the half extents |
-| +36 | u16 residual yaw |
-| +38 | u16 group |
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | flags | Collision flags. |
+| 0x04 | 4 | u32 | owner | RAM owner pointer; zero for level statics. |
+| 0x08 | 8 | u16[4] | next | Grid-cell next links. |
+| 0x10 | 2 | s16 | baseX | Coordinate or horizontal bound. |
+| 0x12 | 2 | s16 | baseZ | Coordinate or horizontal bound. |
+| 0x14 | 2 | s16 | baseY | Coordinate or horizontal bound. |
+| 0x16 | 2 | s16 | minX | Coordinate or horizontal bound. |
+| 0x18 | 2 | s16 | maxX | Coordinate or horizontal bound. |
+| 0x1A | 2 | s16 | minZ | Coordinate or horizontal bound. |
+| 0x1C | 2 | s16 | maxZ | Coordinate or horizontal bound. |
+| 0x1E | 2 | s16 | bottom | Vertical bound relative to baseY. |
+| 0x20 | 2 | s16 | top | Vertical bound relative to baseY. |
+| 0x22 | 2 | s16 | radius | max + 3 × min / 8 of the half-extents. |
+| 0x24 | 2 | u16 | yaw | Residual yaw. |
+| 0x26 | 2 | u16 | group | Collision group. |
 
 **Entry from a placement:**
 - **Centre:** the placement (x, z).
@@ -534,7 +759,15 @@ GA has **no triangle collision against the level geometry and no heightfield**. 
 - **Oriented-box corners** (0x800B2BE4): `X = x + c·lx + s·lz`, `Z = z − s·lx + c·lz`, the same rotation as the model matrix.
 - **Per-group grids** (24 B each at 0x803977F0; built by 0x800B06E0 / 0x800B07D4): origin at the group's minX/minZ (the union of the slot files' group bounds), `(size >> 10) + 3` cells of 1024 units per axis. An entry whose box does not overlap its group's grid is freed (4 fences in SF Airport are never registered). If only the centre is outside, 0x800B14A8 moves the centre onto the grid's min edge and keeps the absolute extents. Only placements listed in a group spawn.
 
-**Kind 30** (16 B, spawn case 0x800E11EC, sub jump table 0x80075A18): `{u8 30, u8 sub, s16 minX, minY, minZ, maxX, maxY, maxZ, u16 0}`, extents relative to the placement.
+**Kind 30** (0x10 bytes, spawn case 0x800E11EC, sub jump table 0x80075A18):
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | kind | 30 |
+| 0x01 | 1 | u8 | sub | Subtype below |
+| 0x02 | 6 | s16[3] | min | Minimum x, y, z relative to placement |
+| 0x08 | 6 | s16[3] | max | Maximum x, y, z relative to placement |
+| 0x0E | 2 | u16 | reserved | Zero |
 
 | sub | Effect | Count (all world files) |
 |---|---|---|
@@ -543,7 +776,13 @@ GA has **no triangle collision against the level geometry and no heightfield**. 
 | 2 | box, flag 0x00080000 (call at 0x800E13C8) | 45 |
 | 3, 4 | trigger object (0x800E9990) with a box, flag 0x10000 | 11 / 0 |
 
-**Kind 42** (4 B): `{42, 0, u16 model}`, an invisible solid (flag 0x1) with that model's bounds; nothing is drawn. 18 in all files (DC Mall 3, Shore Patrol 14, SF Airport 1).
+**Kind 42** is a four-byte invisible solid (flag 0x1) with its model's bounds; nothing is drawn. There are 18 in all files (DC Mall 3, Shore Patrol 14, SF Airport 1).
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | kind | 42 |
+| 0x01 | 1 | u8 | reserved | Zero |
+| 0x02 | 2 | u16 | model | Model index |
 
 **What registers** (all inside the spawn switch, so excluded kind-39 includes and the multi-player skips of kinds 10, 4 and 15 register nothing):
 
@@ -869,7 +1108,12 @@ Requirements from the verified runtime state in 5.0:
   - Song master volume is 12603 at boot. The options slider sets `360*n`, with default n = 35.
 
 ##### Files
-Sound file table: ROM 0xA4710 / RAM 0x80114710, 26 x {u32 cartAddr, u32 len}. All files are raw.
+Sound file table: ROM 0xA4710 / RAM 0x80114710, 26 eight-byte entries. All files are raw.
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | cartAddr | Cartridge address |
+| 0x04 | 4 | u32 | length | File byte count |
 
 | File | ROM | Length | Content |
 |---|---|---|---|
@@ -882,15 +1126,15 @@ Sound file table: ROM 0xA4710 / RAM 0x80114710, 26 x {u32 cartAddr, u32 len}. Al
 
 **Pointer bank** (offsets are file-relative until initialised):
 
-| Offset | Size | Field |
-|---|---|---|
-| 0x00 | 16 | `"N64 PtrTablesV2\0"` |
-| 0x10 | 4 | flags (bit 31 set once initialised) |
-| 0x14 | 12 | wave-bank name (zero) |
-| 0x20 | 4 | count |
-| 0x24 | 4 | offset of u8 basenote[count] |
-| 0x28 | 4 | offset of the detune array: 4 bytes per wave, only the MSB is read, as s8 cents |
-| 0x2C | 4 | offset of u32[count] pointers to ALWaveTable records |
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 16 | u8[16] | magic | N64 PtrTablesV2 followed by NUL. |
+| 0x10 | 4 | u32 | flags | Bit 31 set once initialized. |
+| 0x14 | 12 | u8[12] | waveBankName | Zero. |
+| 0x20 | 4 | u32 | count | Wave count. |
+| 0x24 | 4 | u32 | baseNotes | File-relative pointer to count u8 notes. |
+| 0x28 | 4 | u32 | detune | File-relative pointer to four bytes per wave; MSB read as s8 cents. |
+| 0x2C | 4 | u32 | waveList | File-relative pointer to count ALWaveTable offsets. |
 
 - Wave `base` is relative to the wave-bank file start, so sample data starts at +0x10.
 - At initialisation 0x800FD2A0 stores `detune = s8(detuneMSB)/100 + s8(basenote - 48)`, in semitones. In bank B every basenote and detune is 0, so **every music wave has detune -48.0**.
@@ -900,20 +1144,41 @@ Sound file table: ROM 0xA4710 / RAM 0x80114710, 26 x {u32 cartAddr, u32 len}. Al
 ##### Song file (version 0x215)
 All offsets are file-relative. They are relocated in place on the first MusStartSong, and the flag at +0x28 records that.
 
-| Offset | Field |
-|---|---|
-| 0x00 | u32 version = 0x215 |
-| 0x04 | s32 num_channels (12..24) |
-| 0x08 | s32 num_waves |
-| 0x0C | u32 offset of u32[num_channels] channel bytecode offsets (0 = unused channel) |
-| 0x10 | u32 offset of u32[num_channels] volume-stream offsets (0 = none) |
-| 0x14 | u32 offset of u32[num_channels] pitch-bend-stream offsets (0 = none) |
-| 0x18 | u32 offset of envelope records, 7 bytes each: {speed, init, attackTime, peak, decayTime, sustain, releaseTime} |
-| 0x1C | u32 offset of drum records, 6 bytes each: {u16 wave, u16 envelopeIndex, u8 pan (0..254, used >>1), u8 note} |
-| 0x20 | u32 offset of u16[num_waves]: song wave to pointer-bank wave index (0xFFFF = notes on it are rests) |
-| 0x24 | u32 offset of the master-track bytecode (tempo; no volume/bend streams) |
-| 0x28 | u32 relocated flag (0 in ROM) |
-| 0x2C..0x37 | 0 |
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | version | 0x215. |
+| 0x04 | 4 | s32 | channelCount | 12–24. |
+| 0x08 | 4 | s32 | waveCount | Number of song waves. |
+| 0x0C | 4 | u32 | channels | Pointer to channelCount channel bytecode offsets; zero means unused. |
+| 0x10 | 4 | u32 | volumes | Pointer to channelCount volume-stream offsets; zero means none. |
+| 0x14 | 4 | u32 | pitchBends | Pointer to channelCount pitch-bend-stream offsets; zero means none. |
+| 0x18 | 4 | u32 | envelopes | Pointer to seven-byte envelope records below. |
+| 0x1C | 4 | u32 | drums | Pointer to six-byte drum records below. |
+| 0x20 | 4 | u32 | waves | Pointer to waveCount u16 bank-wave indices; 0xFFFF means rests. |
+| 0x24 | 4 | u32 | masterTrack | Pointer to master-track tempo bytecode; no volume/bend streams. |
+| 0x28 | 4 | u32 | relocated | Zero in ROM; set after in-place relocation. |
+| 0x2C | 12 | u8[12] | reserved | Zero. |
+
+Envelope record, seven bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | speed | Envelope parameter. |
+| 0x01 | 1 | u8 | init | Envelope parameter. |
+| 0x02 | 1 | u8 | attackTime | Envelope parameter. |
+| 0x03 | 1 | u8 | peak | Envelope parameter. |
+| 0x04 | 1 | u8 | decayTime | Envelope parameter. |
+| 0x05 | 1 | u8 | sustain | Envelope parameter. |
+| 0x06 | 1 | u8 | releaseTime | Envelope parameter. |
+
+Drum record, six bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | u16 | wave | Wave index. |
+| 0x02 | 2 | u16 | envelopeIndex | Envelope index. |
+| 0x04 | 1 | u8 | pan | 0–254; shifted right one. |
+| 0x05 | 1 | u8 | note | Note. |
 
 **Song start** (0x800FDA60):
 - The master channel runs `MasterTrack`.
@@ -1115,12 +1380,42 @@ How the game picks a song:
 
 Both games play N64 VADPCM samples through libultra's synth and the RSP "audio" microcode. In GA every sample is VADPCM (6.1). BTX1 uses libultra ALBank files (6.2), whose waves are VADPCM or RAW16.
 
-**Wave and codebook structures**
-- `ALWaveTable` (20 bytes): +0 u32 base (offset into the sample file), +4 s32 len (bytes), +8 u8 type (0 = ADPCM, 1 = RAW16), +9 u8 flags, +0xC u32 loop offset (0 = none), +0x10 u32 book offset (ADPCM only).
-- `ALADPCMBook`: s32 order, s32 npredictors, then s16 book[order * npredictors * 8]. GA's banks all use order 2 with 4 predictors.
-- `ALADPCMloop`: u32 start, u32 end, u32 count (0 = no loop; 0xFFFFFFFF = infinite), s16 state[16].
+**ALWaveTable (0x14 bytes).** Pointers are control-bank-relative before relocation.
 
-**Frames.** Each frame is 9 bytes and produces 16 samples. The header byte gives `scale = hi nibble` and `pred = lo nibble`; 16 signed 4-bit residual nibbles follow, high nibble first.
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | base | Sample-file-relative byte offset |
+| 0x04 | 4 | s32 | length | Stored sample bytes |
+| 0x08 | 1 | u8 | type | 0 = VADPCM; 1 = RAW16 |
+| 0x09 | 1 | u8 | flags | Relocation flags |
+| 0x0A | 2 | u8[2] | padding | Alignment |
+| 0x0C | 4 | u32 | loopOffset | Loop record offset; 0 = no loop |
+| 0x10 | 4 | u32 | bookOffset | VADPCM predictor-book offset |
+
+**ALADPCMBook (variable size).** GA uses order 2 and four predictors in every bank.
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | s32 | order | Predictor order |
+| 0x04 | 4 | s32 | predictorCount | Number of predictors |
+| 0x08 | 16 × order × predictorCount | s16[] | coefficients | Eight coefficients per predictor order |
+
+**ALADPCMloop (0x2C bytes).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | start | First loop sample |
+| 0x04 | 4 | u32 | end | Exclusive loop end |
+| 0x08 | 4 | u32 | count | 0 = no loop; 0xFFFFFFFF = infinite |
+| 0x0C | 32 | s16[16] | state | Predictor history at loop start |
+
+**VADPCM frame (9 bytes; 16 decoded samples).**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 1 | u8 | header | High nibble = scale; low nibble = predictor index |
+| 0x01 | 8 | packed s4[16] | residuals | Signed residuals, high nibble first |
+
 - Residual: `r[i] = signExtend4(nibble) << scale`, which equals `((nibble << 12) as s16) >> (12 - scale)`.
 - Coefficients (order 2): `b1 = book[pred*16 .. +8]`, `b2 = book[pred*16+8 .. +16]`.
 - Each 8-sample half is predicted from the two previous output samples `(l1, l2)` and from that half's own residuals:

@@ -118,20 +118,35 @@ All 3354 `MIO0` magics in each ROM are 4-byte aligned, decode without error and 
 #### MIO0
 
 **Verified**: the TypeScript decoder reproduces every stream in all five ROMs; the game routine `mio0decode` (0x800400D0) reads the header fields as below.
-```
-+0x00 "MIO0"
-+0x04 u32 decompressedSize
-+0x08 u32 backrefOffset   (from the header start)
-+0x0C u32 literalOffset
-+0x10 control stream: u32 BE words, bits consumed MSB first
-bit 1: copy one byte from the literal stream
-bit 0: u16 v from the back-reference stream; copy (v >> 12) + 3 bytes, one at a time, from out[pos - (v & 0xFFF) - 1]
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `+0x00` | 4 | `char[4]` | `magic` | `MIO0`. |
+| `+0x04` | 4 | `u32` | `decompressedSize` | — |
+| `+0x08` | 4 | `u32` | `backrefOffset` | (from the header start) |
+| `+0x0C` | 4 | `u32` | `literalOffset` | — |
+| `+0x10` | variable | `u32[]` | `controlStream` | Big-endian control words; bits are consumed most-significant first. |
+
+| Control bit | Operand | Operation |
+|---:|---|---|
+| 1 | Next byte from the literal stream. | Copy that byte to the output. |
+| 0 | Next big-endian `u16 v` from the back-reference stream. | Copy `(v >> 12) + 3` bytes, one at a time, from `outputPosition - (v & 0xFFF) - 1`. |
 This is the same codec as Star Fox 64 (STARFOX.md *gCourseTable*): one shared decoder serves both games. Streams are contiguous (control words, back-references, literals), padded to 16 bytes (course and texture streams) or not padded (CourseVtx streams, followed by the packed list at the next 4-byte boundary).
 
 #### TKMK00
 
-63 `TKMK00` images at US ROM 0x7FA3C0-0x821D10 (**Verified** count and range) are decoded by `tkmk00decode` (main) into RGBA16 for menus (player select, options, character names). Header (Decomp `tools/libtkmk00.c`): `"TKMK00"`, u8 flags at +6, u16 width at +8, u16 height at +0xA, 8 x u32 stream offsets at +0xC, u32 bit flags at +0x2C, data from +0x30. No course, collision or 3D asset uses TKMK00; the viewer does not need a decoder.
+63 `TKMK00` images at US ROM 0x7FA3C0-0x821D10 (**Verified** count and range) are decoded by `tkmk00decode` (main) into RGBA16 for menus (player select, options, character names).
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 6 | `char[6]` | `magic` | `TKMK00`. |
+| `0x06` | 1 | `u8` | `flags` | Flags. |
+| `0x08` | 2 | `u16` | `width` | Image width. |
+| `0x0A` | 2 | `u16` | `height` | Image height. |
+| `0x0C` | `0x20` | `u32[8]` | `streamOffsets` | Component-stream offsets. |
+| `0x2C` | 4 | `u32` | `bitFlags` | Bit flags. |
+| `0x30` | variable | bytes | `data` | Stream payloads. |
+
+No course, collision or 3D asset uses TKMK00; the viewer does not need a decoder.
 
 #### Extracting everything
 
@@ -239,21 +254,21 @@ There is no test/debug course slot in the retail table or selector: the course t
 #### gCourseTable
 
 20 entries of 0x30 bytes at US ROM 0x122390 (RAM 0x802B8D80), followed by an all-zero entry: the award ceremony (id 20) has no entry. **Verified** by decoding all 20 entries in all five ROMs (and by the raw bytes of entries 0 and 1).
-```
-+0x00 u32 dlRomStart        ROM offset of the MIO0 course-data stream -> segment 6
-+0x04 u32 dlRomEnd          = next course's dlRomStart = align16(stream end)
-+0x08 u32 vertexRomStart    ROM offset of the vertex blob (copied raw -> segment F)
-+0x0C u32 vertexRomEnd      = align16(end of the packed display list)
-+0x10 u32 offsetsRomStart   ROM offset of the offsets file (raw -> segment 9)
-+0x14 u32 offsetsRomEnd
-+0x18 u32 vertexStart       always 0x0F000000: the CourseVtx MIO0 stream starts the blob
-+0x1C u32 vertexCount
-+0x20 u32 packedStart       0x0F......: the packed display list, at align4(end of the CourseVtx stream)
-+0x24 u32 finalDisplaylistOffset   offset of the last Gfx of the unpacked list (unpacked size - 8)
-+0x28 u32 textures          always 0x09000000: the texture list starts the offsets file
-+0x2C u16 unknown1          1 for Choco Mountain and Banshee Boardwalk, else 0; passed to unpack handlers that ignore it
-+0x2E u16 padding           0
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `+0x00` | 4 | `u32` | `dlRomStart` | ROM offset of the MIO0 course-data stream -> segment 6 |
+| `+0x04` | 4 | `u32` | `dlRomEnd` | = next course's dlRomStart = align16(stream end) |
+| `+0x08` | 4 | `u32` | `vertexRomStart` | ROM offset of the vertex blob (copied raw -> segment F) |
+| `+0x0C` | 4 | `u32` | `vertexRomEnd` | = align16(end of the packed display list) |
+| `+0x10` | 4 | `u32` | `offsetsRomStart` | ROM offset of the offsets file (raw -> segment 9) |
+| `+0x14` | 4 | `u32` | `offsetsRomEnd` | — |
+| `+0x18` | 4 | `u32` | `vertexStart` | always 0x0F000000: the CourseVtx MIO0 stream starts the blob |
+| `+0x1C` | 4 | `u32` | `vertexCount` | — |
+| `+0x20` | 4 | `u32` | `packedStart` | 0x0F......: the packed display list, at align4(end of the CourseVtx stream) |
+| `+0x24` | 4 | `u32` | `finalDisplaylistOffset` | offset of the last Gfx of the unpacked list (unpacked size - 8) |
+| `+0x28` | 4 | `u32` | `textures` | always 0x09000000: the texture list starts the offsets file |
+| `+0x2C` | 2 | `u16` | `unknown1` | 1 for Choco Mountain and Banshee Boardwalk, else 0; passed to unpack handlers that ignore it |
+| `+0x2E` | 2 | `u16` | `padding` | 0 |
 Pattern search (unique in all five ROMs): +0x18 = 0x0F000000, +0x28 = 0x09000000, +0x00 and +0x08 point at `MIO0`, and the next entry's +0x00 equals this entry's +0x04.
 
 Size checks that pass for every course of every ROM (**Verified**, `fs/proto/extract.ts`):
@@ -328,14 +343,15 @@ The podium ceremony (`load_ceremony_cutscene`, Decomp) sets `gCurrentCourseId` t
 #### Vertices: CourseVtx to Vtx
 
 The CourseVtx stream decodes to vertexCount x 14 bytes (**Verified**, all courses). Expansion per Decomp `func_802A86A8`:
-```
-CourseVtx (14 bytes): s16 x, y, z; s16 s, t; u8 ca[4]
-Vtx (16 bytes, segment 4): s16 x, y, z; u16 flag; s16 s, t; u8 r, g, b, a
-  x    = mirror mode ? -x : x          (a viewer ignores mirror mode)
-  y    = (s16)(y * vtxStretchY)        (1.0 in normal play)
-  flag = (ca[0] & 3) | ((ca[1] & 3) << 2)
-  r    = ca[0] & 0xFC;  g = ca[1] & 0xFC;  b = ca[2];  a = 0xFF   (ca[3] ignored)
-```
+| Structure | Offset | Size | Type | Field | Expansion |
+|---|---:|---:|---|---|---|
+| `CourseVtx` | `0x00` | 6 | `s16[3]` | `position` | X is negated only in mirror mode; Y is multiplied by `vtxStretchY` (1.0 normally). |
+| `CourseVtx` | `0x06` | 4 | `s16[2]` | `texcoord` | Copied to S and T. |
+| `CourseVtx` | `0x0A` | 4 | `u8[4]` | `ca` | Supplies the expanded flag and RGB; `ca[3]` is ignored. |
+| `Vtx` | `0x00` | 6 | `s16[3]` | `position` | Expanded position. |
+| `Vtx` | `0x06` | 2 | `u16` | `flag` | `(ca[0] & 3) \| ((ca[1] & 3) << 2)`. |
+| `Vtx` | `0x08` | 4 | `s16[2]` | `texcoord` | S and T. |
+| `Vtx` | `0x0C` | 4 | `u8[4]` | `color` | `(ca[0] & 0xFC, ca[1] & 0xFC, ca[2], 0xFF)`. |
 The 4-bit flag is used only by collision (*Vertex flags*). Some lists get their vertex alpha and colour rewritten after loading (*Load-time edits and animation*).
 
 #### Other 3D scenes
@@ -417,36 +433,148 @@ Every TrackSections table ends with section-255 records (walls, ramps, out-of-bo
 #### File formats (big-endian)
 
 **Sequence file:**
-```
-+0x00 u16 revision = 3
-+0x02 u16 count = 30
-+0x04 count x { u32 offset (from the file start), u32 size }   size 0 = alias (none in MK64)
-entries tile the file: offset[i+1] = align16(offset[i] + size[i])
-```
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 2 | `u16` | `revision` | Always 3. |
+| `0x02` | 2 | `u16` | `count` | Always 30. |
+| `0x04` | `8 × count` | entry array | `entries` | Each entry is an offset from the file start followed by a size. A zero size denotes an alias, although MK64 uses none. |
+
+Each entry begins at `align16(previousOffset + previousSize)`; together the entries tile the remainder of the file.
 
 **ctl bank file** and **AudioBank**:
-```
-file: u16 revision = 1, u16 count = 21, count x { u32 offset, u32 size }
-bank entry: +0x00 u32 numInstruments; +0x04 u32 numDrums; +0x08 u32 1; +0x0C u32 0x19960624 (a date);
-            +0x10 AudioBank, all offsets relative to entry + 0x10:
-AudioBank:  u32 drumListOffset (0 = none); u32 instrumentOffset[numInstruments] (0 = empty slot)
-drum list:  u32 drumOffset[numDrums] (0 = empty)
-Instrument (0x20): u8 loaded; u8 normalRangeLo; u8 normalRangeHi; u8 releaseRate; u32 envelopeOffset;
-                   3 x { u32 sampleOffset; f32 tuning }   (low, normal, high: note < lo -> low; <= hi -> normal; else high)
-Drum (0x10):       u8 releaseRate; u8 pan; u8 loaded; u8 pad; u32 sampleOffset; f32 tuning; u32 envelopeOffset
-Sample (0x14):     u8 unused; u8 loaded (0x80 = preloaded); u16 pad; u32 sampleAddr (within the bank's tbl entry);
-                   u32 loopOffset; u32 bookOffset; u32 sampleSize
-AdpcmLoop:         u32 start; u32 end; u32 count (0 none, 0xFFFFFFFF forever); u32 pad; if count != 0: s16 state[16]
-AdpcmBook:         s32 order (2); s32 npredictors; s16 book[8 x order x npredictors]
-Envelope:          s16 pairs {delay, arg}: delay > 0 ramp to arg; 0 disable; -1 hang; -2 goto index arg; -3 restart
-```
+
+Bank-file header:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 2 | `u16` | `revision` | Always 1. |
+| `0x02` | 2 | `u16` | `count` | Always 21. |
+| `0x04` | `8 × count` | entry array | `entries` | Records defined below. |
+
+| Entry offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 4 | `u32` | `offset` | Sequence offset from the file start. |
+| `0x04` | 4 | `u32` | `size` | Stored sequence size; zero would denote an alias, although MK64 uses none. |
+
+Bank-entry prefix; the `AudioBank` begins at entry offset `0x10`, and every internal offset is relative to that point:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 4 | `u32` | `numInstruments` | Number of instrument slots. |
+| `0x04` | 4 | `u32` | `numDrums` | Number of drum slots. |
+| `0x08` | 4 | `u32` | `unknown08` | Always 1. |
+| `0x0C` | 4 | `u32` | `date` | Always `0x19960624`. |
+| `0x10` | variable | `AudioBank` | `bank` | Bank body. |
+
+| AudioBank offset | Count | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 1 | `u32` | `drumListOffset` | Offset of the drum-offset array, or zero when absent. |
+| `0x04` | `numInstruments` | `u32[]` | `instrumentOffset` | Instrument offsets; zero denotes an empty slot. |
+
+Drum-list entry:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `4 × drumIndex` | 4 | `u32` | `drumOffset` | AudioBank-relative drum offset; zero denotes an empty slot. The list has `numDrums` entries. |
+
+Instrument record (`0x20` bytes):
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 1 | `u8` | `loaded` | Runtime load state. |
+| `0x01` | 1 | `u8` | `normalRangeLo` | Notes below this value use the low sample. |
+| `0x02` | 1 | `u8` | `normalRangeHi` | Notes through this value use the normal sample; higher notes use the high sample. |
+| `0x03` | 1 | `u8` | `releaseRate` | Release-envelope rate. |
+| `0x04` | 4 | `u32` | `envelopeOffset` | AudioBank-relative envelope offset. |
+| `0x08` | 4 | `u32` | `lowSampleOffset` | Low-range sample offset. |
+| `0x0C` | 4 | `f32` | `lowTuning` | Low-range pitch multiplier. |
+| `0x10` | 4 | `u32` | `normalSampleOffset` | Normal-range sample offset. |
+| `0x14` | 4 | `f32` | `normalTuning` | Normal-range pitch multiplier. |
+| `0x18` | 4 | `u32` | `highSampleOffset` | High-range sample offset. |
+| `0x1C` | 4 | `f32` | `highTuning` | High-range pitch multiplier. |
+
+Drum record (`0x10` bytes):
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 1 | `u8` | `releaseRate` | Release-envelope rate. |
+| `0x01` | 1 | `u8` | `pan` | Stereo position. |
+| `0x02` | 1 | `u8` | `loaded` | Runtime load state. |
+| `0x03` | 1 | `u8` | `padding` | Padding. |
+| `0x04` | 4 | `u32` | `sampleOffset` | AudioBank-relative sample offset. |
+| `0x08` | 4 | `f32` | `tuning` | Sample pitch multiplier. |
+| `0x0C` | 4 | `u32` | `envelopeOffset` | AudioBank-relative envelope offset. |
+
+Sample record (`0x14` bytes):
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 1 | `u8` | `unused` | Unused. |
+| `0x01` | 1 | `u8` | `loaded` | `0x80` denotes preloaded data. |
+| `0x02` | 2 | `u16` | `padding` | Padding. |
+| `0x04` | 4 | `u32` | `sampleAddr` | Offset within this bank's `tbl` entry. |
+| `0x08` | 4 | `u32` | `loopOffset` | AudioBank-relative `AdpcmLoop` offset. |
+| `0x0C` | 4 | `u32` | `bookOffset` | AudioBank-relative `AdpcmBook` offset. |
+| `0x10` | 4 | `u32` | `sampleSize` | Encoded sample size in bytes. |
+
+`AdpcmLoop` begins with a `0x10`-byte header:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 4 | `u32` | `start` | Loop start in decoded samples. |
+| `0x04` | 4 | `u32` | `end` | Loop end in decoded samples. |
+| `0x08` | 4 | `u32` | `count` | Zero means no loop; `0xFFFFFFFF` means infinite looping. |
+| `0x0C` | 4 | `u32` | `padding` | Padding. |
+| `0x10` | 32 when `count != 0` | `s16[16]` | `state` | Decoder state at the loop point; absent when the sample does not loop. |
+
+`AdpcmBook` is variable-length:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 4 | `s32` | `order` | Predictor order; always 2. |
+| `0x04` | 4 | `s32` | `npredictors` | Predictor count. |
+| `0x08` | `16 × order × npredictors` | `s16[]` | `book` | Eight coefficients per order per predictor. |
+
+An envelope is an array of four-byte command pairs:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 2 | `s16` | `delay` | Positive values ramp to `arg`; 0 disables; -1 hangs; -2 jumps to pair index `arg`; -3 restarts. |
+| `0x02` | 2 | `s16` | `arg` | Target value or control operand selected by `delay`. |
 - 21 banks, 279 instruments, 146 drums, 452 distinct samples, 113 envelopes; every book has order 2; sample data is 9-byte VADPCM frames of 16 samples (**Verified**).
 - **Tunings** are `sampleRate / 26800` (26800, 22050, 16000 Hz ... all occur), and the driver does not scale pitch by the output rate (**Verified** tunings; Decomp code). Pitch: `freqScale = gNoteFrequencies[note] x tuning`, with gNoteFrequencies[39] = 1.0; drums play at `tuning`.
 - **Loop state**: `state` holds the decoded samples of the frame containing `loop.start` for 199 of the 200 looped samples (the exception is a sound-effect sample): the convention of `libultra.ts prepareWave`. Non-looped samples stop at `loop.end`.
 
-**tbl file:** `u16 revision = 2, u16 count = 21, count x { u32 offset, u32 size }`; all 21 entries are `{0xB0, 0x24C3F0}`, one shared blob. Sample ROM offset = tbl + entry[bank].offset + sampleAddr.
+**tbl file:**
 
-**Bank sets:** `u16 offset[30]` (from the table start), and at each offset `u8 count, u8 bankId[count]`. Every sequence has exactly one bank: sequences 1-10 use banks 1-10; 11-15, 20, 22 use bank 11; 16 and 24 bank 12; 23 bank 13; 17 bank 14; 18 bank 15; 19 bank 16; 21 bank 17; 25 bank 18; 26, 27, 29 bank 19; 28 bank 20; sequence 0 (sound effects) bank 0.
+| Order | Count | Type | Field | Description |
+|---:|---:|---|---|---|
+| 1 | 1 | `u16` | `revision` | 2. |
+| 2 | 1 | `u16` | `count` | 21. |
+| 3 | `count` | 8-byte entry | `entries` | Every entry selects the same shared blob. |
+
+| Entry offset | Size | Type | Field | Value |
+|---:|---:|---|---|---|
+| `0x00` | 4 | `u32` | `offset` | `0x000000B0`. |
+| `0x04` | 4 | `u32` | `size` | `0x0024C3F0`. |
+
+Sample ROM offset = tbl + entry[bank].offset + sampleAddr.
+
+**Bank sets:**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 60 | `u16[30]` | `setOffset` | Table-relative offset of each sequence's bank set. |
+
+Each offset selects this variable-length record:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 1 | `u8` | `count` | Number of bank IDs. |
+| `0x01` | `count` | `u8[]` | `bankId` | Bank IDs used by the sequence. |
+
+Every sequence has exactly one bank: sequences 1-10 use banks 1-10; 11-15, 20, 22 use bank 11; 16 and 24 bank 12; 23 bank 13; 17 bank 14; 18 bank 15; 19 bank 16; 21 bank 17; 25 bank 18; 26, 27, 29 bank 19; 28 bank 20; sequence 0 (sound effects) bank 0.
 
 #### Level assembly and layers
 
@@ -615,13 +743,15 @@ Absent everywhere: G_QUAD, G_CULLDL, G_MTX, G_POPMTX, G_MOVEMEM, G_LOADTLUT, G_S
 #### Texture lists and segment 5
 
 The offsets file (segment 9) starts with the texture list (**Verified**, all courses):
-```
-16 bytes per entry, terminated by an all-zero entry:
-+0x0 u32 image            0x0F offset into other_textures: ROM = otherTexturesBase + (image & 0xFFFFFF)
-+0x4 u32 compressedSize   MIO0 stream bytes (the game copies align16 of it)
-+0x8 u32 size             decoded bytes: 0x800 (32x32) or 0x1000 (64x32, 32x64)
-+0xC u32 0
-```
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `+0x0` | 4 | `u32` | `image` | 0x0F offset into other_textures: ROM = otherTexturesBase + (image & 0xFFFFFF) |
+| `+0x4` | 4 | `u32` | `compressedSize` | MIO0 stream bytes (the game copies align16 of it) |
+| `+0x8` | 4 | `u32` | `size` | Decoded bytes: 0x800 (32x32) or 0x1000 (64x32 or 32x64). |
+| `+0xC` | 4 | `u32` | `0` | — |
+
+Each entry is 16 bytes; an all-zero entry terminates the list.
 The segment-5 offset of entry k is the sum of align16(size) of the entries before it. The rest of the offsets file holds the section Gfx* tables (*What makes up a static course*). The other_textures base per version is found by searching for the unique base at which every Mario Raceway entry points at a MIO0 stream of the listed size: US 0x641F70 (**Verified**; the other versions in *Version differences*).
 
 #### Textures
@@ -747,14 +877,18 @@ There is no collision file. At course load, `course_generate_collision_mesh` (ra
 - the ceremony and credits build none.
 
 **TrackSections** (segment 6, 8 bytes per record, terminated by a zero `addr`; **Verified**, all 15 tables parsed):
-```
-+0 u32 addr          display list (0x07...)
-+4 u8  surfaceType   read as s8 (*Surface types*)
-+5 u8  sectionId     path section 1..N; 255 = none. Also the render section of *What makes up a static course*
-+6 u16 flags         0x8000: skip floors and ceilings (|normal.y| > 0.9)
-                     0x2000: skip walls (|normal.y| < 0.1)
-                     0x4000: set triangle flag 0x200
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `+0` | 4 | `u32` | `addr` | display list (0x07...) |
+| `+4` | 1 | `u8` | `surfaceType` | read as s8 (*Surface types*) |
+| `+5` | 1 | `u8` | `sectionId` | path section 1..N; 255 = none. Also the render section of *What makes up a static course* |
+| `+6` | 2 | `u16` | `flags` | Collision-generation flags defined below. |
+
+| Mask | Meaning |
+|---:|---|
+| `0x2000` | Skip walls (`\|normal.y\| < 0.1`). |
+| `0x4000` | Set triangle flag `0x200`. |
+| `0x8000` | Skip floors and ceilings (`\|normal.y\| > 0.9`). |
 
 **generate_collision_mesh(list, surface, section)** follows at most 0x1FFF commands up to G_ENDDL: G_DL recurses; G_VTX binds `vtxBuffer[v0 + k] = &segment4[addr + 16k]`; G_TRI1 adds one triangle, G_TRI2 two, G_QUAD two. `add_collision_triangle(v1, v2, v3, surface, section)`:
 1. skip when all three `Vtx.flag == 4`;
@@ -767,15 +901,25 @@ There is no collision file. At course load, `course_generate_collision_mesh` (ra
 
 #### CollisionTriangle (RAM, 0x2C bytes)
 
-```
-+0x00 u16 flags          low byte: section id; 0x200/0x400/0x800/0x1000 as above; 0x2000/0x4000/0x8000 facing axis
-+0x02 u16 surfaceType
-+0x04 s16 minX, minY, minZ, maxX, maxY, maxZ
-+0x10 Vtx* vtx1, vtx2, vtx3   (segment-4 vertices)
-+0x1C f32 normalX, normalY, normalZ
-+0x28 f32 distance
-```
-Layout Decomp (`common_structs.h`); size **Verified** from `count * 44` in `func_80295C6C`. RAM (**Verified** by disassembly): `gCollisionMesh` 0x8015F580, `gCollisionMeshCount` 0x8015F588 (u16), slot counter 0x8015F58C, course bounds 0x8015F6E8-0x8015F6F2 (s16 maxX, minX, maxY, minY, maxZ, minZ). The grid cells widen by 20 units on each side.
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `+0x00` | 2 | `u16` | `flags` | low byte: section id; 0x200/0x400/0x800/0x1000 as above; 0x2000/0x4000/0x8000 facing axis |
+| `+0x02` | 2 | `u16` | `surfaceType` | — |
+| `+0x04` | 12 | `s16[6]` | `bounds` | Minimum and maximum X, Y, and Z. |
+| `+0x10` | 12 | `Vtx*[3]` | `vertices` | Three segment-4 vertex pointers. |
+| `+0x1C` | 12 | `f32[3]` | `normal` | Triangle normal X, Y, and Z. |
+| `+0x28` | 4 | `f32` | `distance` | — |
+
+Layout Decomp (`common_structs.h`); size **Verified** from `count * 44` in `func_80295C6C`. The corresponding RAM globals are:
+
+| Address | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x8015F580` | 4 | pointer | `gCollisionMesh` | Collision-mesh array. |
+| `0x8015F588` | 2 | `u16` | `gCollisionMeshCount` | Active triangle count. |
+| `0x8015F58C` | unknown | unknown | `collisionSlotCounter` | Slot counter; exact type remains unknown. |
+| `0x8015F6E8` | 12 | `s16[6]` | `courseBounds` | Maximum X, minimum X, maximum Y, minimum Y, maximum Z, and minimum Z. |
+
+These addresses are **Verified** by disassembly. The grid cells widen by 20 units on each side.
 
 #### Surface types
 
@@ -901,17 +1045,43 @@ using the bottom sky colour as `Level.clearColor` is a safe fallback.
 
 #### Runtime systems
 
-The game has two relevant object pools. `gActorList[100]` at US RAM 0x8015F9B8 uses 0x70-byte actors for foliage,
-item boxes, signs, vehicles and some course hazards. Position is three f32 values at +0x18, rotation three s16 values
-at +0x10, type s16 at +0, flags s16 at +2 and state s16 at +6. **Verified** by disassembly and the Mario Raceway RAM
-dump. A separate `gObjectList[550]` at 0x80165C18 holds 0xE0-byte particles, sprite/animated hazards and other
-code-created objects. **Verified** by `clear_object_list` zeroing exactly 0x1E140 bytes, indexed accesses multiplying by
-0xE0, and the next BSS symbol at 0x80183D58.
+The game has two relevant object pools. `gActorList[100]` at US RAM `0x8015F9B8` uses `0x70`-byte actors for foliage,
+item boxes, signs, vehicles, and some course hazards. Known fields are:
 
-`ActorSpawnData` in segment 6 is 8 bytes, big-endian: `s16 x, y, z; u16 id`, terminated by x = -32768. D.K.'s Jungle
-Parkway foliage instead uses 10 bytes: `s16 x, y, z, id, originalY`, with type in the low id byte and flags in the
-high byte. Mirror mode negates x; the viewer always uses the authored, unmirrored coordinates. **Verified:** every list
-below was decoded to its terminator and its segmented address appears as the constant passed by game code.
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 2 | `s16` | `type` | Actor type. |
+| `0x02` | 2 | `s16` | `flags` | Actor flags. |
+| `0x06` | 2 | `s16` | `state` | Actor state. |
+| `0x10` | 6 | `s16[3]` | `rotation` | X, Y, and Z rotation. |
+| `0x18` | 12 | `f32[3]` | `position` | X, Y, and Z world position. |
+
+This layout is verified by disassembly and the Mario Raceway RAM dump. A separate `gObjectList[550]` at `0x80165C18`
+holds `0xE0`-byte particles, sprite/animated hazards, and other code-created objects. This is verified by
+`clear_object_list` zeroing exactly `0x1E140` bytes, indexed accesses multiplying by `0xE0`, and the next BSS symbol
+at `0x80183D58`.
+
+Ordinary segment-6 `ActorSpawnData` record (`0x08` bytes):
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 2 | `s16` | `x` | X coordinate; -32768 terminates the list. |
+| `0x02` | 2 | `s16` | `y` | Y coordinate. |
+| `0x04` | 2 | `s16` | `z` | Z coordinate. |
+| `0x06` | 2 | `u16` | `id` | Actor identifier. |
+
+D.K.'s Jungle Parkway foliage record (`0x0A` bytes):
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 2 | `s16` | `x` | X coordinate; -32768 terminates the list. |
+| `0x02` | 2 | `s16` | `y` | Y coordinate. |
+| `0x04` | 2 | `s16` | `z` | Z coordinate. |
+| `0x06` | 2 | packed `u16` | `id` | Low byte is the actor type; high byte contains flags. |
+| `0x08` | 2 | `s16` | `originalY` | Original authored Y coordinate. |
+
+Mirror mode negates X; the viewer uses the authored, unmirrored coordinates. Every list below was decoded to its
+terminator, and its segmented address appears as the constant passed by game code.
 
 | id | course | spawn lists (segment 6, entries) |
 |---|---|---|
@@ -950,7 +1120,16 @@ below was decoded to its terminator and its segmented address appears as the con
 
 #### Kart and auxiliary paths
 
-`TrackPathPoint` is `s16 x, y, z; u16 trackSectionId` (8 bytes), terminated by all three coordinates 0x8000. The
+`TrackPathPoint` is eight bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 2 | `s16` | `x` | X coordinate. |
+| `0x02` | 2 | `s16` | `y` | Y coordinate. |
+| `0x04` | 2 | `s16` | `z` | Z coordinate. |
+| `0x06` | 2 | `u16` | `trackSectionId` | Track-section identifier. |
+
+All three coordinates equal to `0x8000` terminate the array. The
 pointer table at US ROM 0xDD4D0 / RAM 0x800DC8D0 holds up to four track paths per course; the allocation-size table is
 at ROM 0xDE5D0 / RAM 0x800DD9D0. **Verified** by ROM decode. Race-course point counts are:
 
@@ -973,8 +1152,16 @@ paths separately named and path point 0 marked as the start.
 
 #### sky, fog, clouds, camera: Clouds, stars and particles
 
-Cloud/star records are 8 bytes: `u16 yaw, screenHeight, scalePercent, subtype`, terminated by yaw 0xFFFF. **Verified**
-lists: Luigi/Mario clouds 13, Yoshi/Moo Moo 10, Koopa 6, Royal 13, Sherbet 12, Kalimari 13, Toad/Rainbow stars 43 and
+Cloud/star arrays use eight-byte records and terminate when `yaw` is `0xFFFF`:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 2 | `u16` | `yaw` | Camera-relative yaw; `0xFFFF` terminates the array. |
+| `0x02` | 2 | `u16` | `screenHeight` | Authored vertical screen position. |
+| `0x04` | 2 | `u16` | `scalePercent` | Sprite scale as a percentage. |
+| `0x06` | 2 | `u16` | `subtype` | Cloud/star variant. |
+
+**Verified** lists: Luigi/Mario clouds 13, Yoshi/Moo Moo 10, Koopa 6, Royal 13, Sherbet 12, Kalimari 13, Toad/Rainbow stars 43 and
 Wario stars 40. Game code tests camera yaw/FOV, maps yaw to the 320-pixel width, places the sprite relative to the
 computed horizon row, and draws common I4 cloud (64x32) or star (16x16) textures; stars vary alpha in five phases.
 (**Decomp** formulas; **Verified** records/textures.) They require optional camera-yaw screen sprites for fidelity.
@@ -1126,6 +1313,19 @@ Mario Kart 64 uses Nintendo EAD's sequence driver ("Nas"), the Super Mario 64 li
 
 **Audio session presets** (`gAudioSessionPresets`, US ROM 0xEB0D8, 6 x 0x28; reverb settings at 0xEB0D0) (**Verified** ROM; callers Decomp):
 
+Known fields in each `0x28`-byte preset record:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 4 | `u32` | `frequency` | Output frequency; observed range 8,000–48,000 Hz. |
+| `0x04` | 1 | `u8` | `one04` | Always 1. |
+| `0x05` | 1 | `u8` | `voiceCount` | Maximum simultaneous voices. |
+| `0x06` | 1 | `u8` | `reverbCount` | At most four. |
+| `0x07` | 1 | `u8` | `zero07` | Always zero. |
+| `0x08` | 4 | `u32` | `reverbSettings` | Pointer in the `0x80xxxxxx` range. |
+| `0x0C` | 2 | `u16` | `maxVolume` | Always `0x7FFF`. |
+| `0x0E` | `0x1A` | unknown | `unknown0E` | Remaining preset fields. |
+
 | preset | voices | reverb (window x 64 samples, gain) | used for |
 |---|---|---|---|
 | 0 | 24 | 2560, 0x4FFF | logo, title, menus |
@@ -1141,11 +1341,11 @@ Reverb feedback = `1 + s16(0x8000 + gain) / 32768`: 0x4FFF gives 0.625, 0x5FFF g
 
 | data | US ROM | size | how to find it (`mus/proto/mk64audio.ts`) |
 |---|---|---|---|
-| ctl bank file (revision 1, 21 banks) | 0x966260 | 0x13810 | 16-aligned header `u16 rev, u16 n`, first entry offset `align16(4 + 8n)`; rev 1 and each entry starts with `u32 numInstruments < 256, u32 numDrums < 256` |
+| ctl bank file (revision 1, 21 banks) | 0x966260 | 0x13810 | validated against the ctl header and bank-entry tables above; first entry is `align16(4 + 8 × count)` |
 | tbl sample file (revision 2, 21 entries) | 0x979AA0 | 0x24C4A0 | rev 2 with the same count as the ctl |
 | sequence file (revision 3, 30 sequences) | 0xBC5F60 | 0x23170 | rev 3 with every size < 0x40000 |
 | bank sets | 0xBE90E0 | 0x78 | first 16-aligned offset after the sequence file with `u16[0] == 2 x numSeqs`, offsets < 0x400, counts 1..8, bank ids < numBanks |
-| gAudioSessionPresets | 0xEB0D8 (RAM 0x800EA4D8) | 0xF0 | `u32 freq in 8000..48000, u8 1, u8 voices, u8 numReverbs <= 4, u8 0, u32 0x80xxxxxx, u16 0x7FFF` every 0x28 |
+| gAudioSessionPresets | 0xEB0D8 (RAM 0x800EA4D8) | 0xF0 | six `0x28`-byte records matching the preset layout above |
 | gPitchBendFrequencyScale | 0xF6820 (RAM 0x800F5C20) | 0x400 | f32 `0.5, 0.5, 0.502736`; then gNoteFrequencies at +0x400, the default envelope at +0x620, the pan tables at +0x650..+0xAF0, gWaveSamples pointers at -0x20 |
 
 All sequences, banks, instruments, drums, samples, loops, books and envelopes parse in all five ROMs (**Verified**, `mus/proto/check.ts`). Music data (sequences 1-29, music banks and samples) is identical in US, EU V1.0/V1.1 and J V1.0/V1.1; only the sound-effect sequence, bank and samples and build padding differ (**Verified**, `verdiff.ts`). The per-version offsets are in *Version differences*.

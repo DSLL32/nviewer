@@ -135,14 +135,14 @@ All compressed data uses ERZ version 2. **Verified—ROM/disassembly:** all
 1,584 streams decode to the sizes in their headers using a state-machine
 transcription of the resident decoder at `0x80000CF8`.
 
-```
-+0x00  char[3] "ERZ"
-+0x03  u8      version = 2
-+0x04  u32     decoded size
-+0x08  u32     compressed size
-+0x0C  u8[6]   skipped by this decoder
-+0x12           bitstream
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `+0x00` | 3 | `char[3]` | `"ERZ"` | — |
+| `+0x03` | 1 | `u8` | `version = 2` | — |
+| `+0x04` | 4 | `u32` | `decoded size` | — |
+| `+0x08` | 4 | `u32` | `compressed size` | — |
+| 0x0C | 6 | u8[6] | unknown0C | Skipped by the decoder. |
+| 0x12 | Variable | u8[] | bitstream | Compressed data. |
 
 The bitstream is an LZ-family code with literals, backreferences, a
 distance-zero fill path, extended distances, an aligned raw-run escape, and an
@@ -294,16 +294,18 @@ drawing begins at `0x800D1CE8`. **Verified—ROM/disassembly.**
 Group 3 contains 2,594 slots, of which 2,582 are nonempty. **Verified—ROM.**
 Each record begins:
 
-| offset | field |
-|---:|---|
-| `00` | printable 32-byte name |
-| `20/22` | BE u16 width/height |
-| `26` | format/bpp word |
-| `2A` | BE data size |
-| `2C/2D` | RDP S/T wrap values 0 repeat, 1 mirror, 2 clamp |
-| `2E` | alpha threshold |
-| `2F` | deliberately unaligned BE render flags |
-| `3F` | pixel data |
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 0x20 | u8[0x20] | name | Printable name. |
+| 0x20 | 2 | u16 | width | Width in texels. |
+| 0x22 | 2 | u16 | height | Height in texels. |
+| 0x26 | 2 | u16 | format | Format/bits-per-pixel word. |
+| 0x2A | 2 | u16 | dataSize | Stored pixel-data byte count. |
+| 0x2C | 1 | u8 | wrapS | 0 repeat, 1 mirror, 2 clamp. |
+| 0x2D | 1 | u8 | wrapT | 0 repeat, 1 mirror, 2 clamp. |
+| 0x2E | 1 | u8 | alphaThreshold | Alpha threshold. |
+| 0x2F | 2 | u16 | renderFlags | Intentionally unaligned. |
+| 0x3F | dataSize | u8[] | pixels | Pixel data, followed by palette when applicable. |
 
 Rows are padded to 64-bit TMEM words and odd rows exchange their two 32-bit
 halves. CI4 palettes are sixteen BE RGBA5551 entries following `dataSize`.
@@ -442,17 +444,31 @@ bank. **Verified—ROM and complete corpus cross-check.**
 
 Render-bank tables are recursive:
 
-```
-record -> mesh nodes
-node   -> float bounds, geometry-group table, vertex pool
-group  -> 12-byte descriptor, compact display-list tokens, triangle-flag table
-pool   -> u32 count, u32 zero, count * 16-byte F3DEX2 Vtx
-```
+| Structure | Contents |
+|---|---|
+| Record | Mesh-node references. |
+| Node | Floating-point bounds, geometry-group table, and vertex pool. |
+| Group | 12-byte descriptor, compact display-list tokens, and triangle-flag table. |
+| Vertex pool header | Eight-byte header below. |
+| Vertex pool body | `count` 16-byte F3DEX2 `Vtx` records, stored byte-plane-transposed as described below. |
+
+Vertex-pool header, eight bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | count | Vertex count. |
+| 0x04 | 4 | u32 | zero04 | Zero. |
 
 The pool is byte-plane-transposed: byte `k` of vertex `i` lives at
 `body[k*count+i]`. Node bounds distinguish this decisively from an ordinary
-interleaved pool. Reassembled vertices use the stock
-`s16 x,y,z; u16 flag; s16 s,t; u8 r,g,b,a` shape.
+interleaved pool. Reassembled vertices are 16 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 6 | s16[3] | position | X, Y, Z. |
+| 0x06 | 2 | u16 | flag | Vertex flag. |
+| 0x08 | 4 | s16[2] | texcoord | S, T. |
+| 0x0C | 4 | u8[4] | color | R, G, B, A. |
 
 Compact token grammar, **verified—ROM and renderer disassembly**:
 
@@ -536,16 +552,23 @@ note, signed fine tune, codebook, byte extent and optional loop state. There
 are 165 looped waves. **Verified—ROM.** BFX has 994 one-component effects and
 a 992-entry local-wave-to-PTR map:
 
-```
-u32 componentCount = 994
-u32 effectCount    = 994
-u32 localWaveCount = 992
-u32 zero, zero
-u32 localWaveTableOffset = 0x670E
-994 * { u32 componentOffset, s32 defaultPriority }
-component bytecode
-992 * u16 localWaveToPtrWave
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | componentCount | 994. |
+| 0x04 | 4 | u32 | effectCount | 994. |
+| 0x08 | 4 | u32 | localWaveCount | 992. |
+| 0x0C | 8 | u32[2] | zero0C | Zero. |
+| 0x14 | 4 | u32 | localWaveTableOffset | 0x670E. |
+| 0x18 | 8 × componentCount | component[] | components | Component index records. |
+| Following | Variable | u8[] | bytecode | Component commands. |
+| localWaveTableOffset | 2 × localWaveCount | u16[] | localWaveToPtrWave | Local-wave to PTR-wave indices. |
+
+Component index record, eight bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | componentOffset | Component bytecode offset. |
+| 0x04 | 4 | s32 | defaultPriority | Default priority. |
 
 Music components use `81 wave; 84 envelope[7]; 9C pan; A6 volume note length;
 80`. All effects 364–471 have indefinite event length and infinite PTR loop,

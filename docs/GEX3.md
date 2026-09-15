@@ -99,11 +99,32 @@ stored size, no checksum. The decompressor is zlib's `inflate_blocks` in the inf
 decompressed size is not stored anywhere; the game inflates into a heap with a capacity limit and
 uses the returned size, so a decoder must simply run to the final block.
 
-Bit level (standard DEFLATE): bits are read LSB-first; each block starts with `BFINAL`(1 bit) and
-`BTYPE`(2 bits). `BTYPE` 0 = stored (skip to byte boundary, `u16 LEN`, `u16 ~LEN`, `LEN` bytes,
-little-endian); 1 = fixed Huffman; 2 = dynamic Huffman (`HLIT`(5)+257, `HDIST`(5)+1, `HCLEN`(4)+4,
-3-bit code-length code lengths in the order 16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15, then
-run-length coded literal/length and distance code lengths using symbols 16/17/18). Huffman codes are
+Bits are read LSB-first. Each DEFLATE block begins with:
+
+| Bit offset | Width | Field | Meaning |
+|---:|---:|---|---|
+| 0 | 1 | BFINAL | Last block when set. |
+| 1 | 2 | BTYPE | 0 stored; 1 fixed Huffman; 2 dynamic Huffman; 3 invalid. |
+
+Stored blocks align to the next byte boundary and use little-endian halfwords:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | u16 | LEN | Uncompressed byte count. |
+| 0x02 | 2 | u16 | NLEN | Ones-complement of LEN. |
+| 0x04 | LEN | u8[] | data | Literal bytes. |
+
+Dynamic blocks follow the block header without alignment:
+
+| Bit offset | Width | Field | Meaning |
+|---:|---:|---|---|
+| 0 | 5 | HLIT | Literal/length alphabet count minus 257. |
+| 5 | 5 | HDIST | Distance alphabet count minus 1. |
+| 10 | 4 | HCLEN | Code-length alphabet count minus 4. |
+| 14 | 3 × (HCLEN + 4) | codeLengths | Three-bit lengths in order 16,17,18,0,8,7,9,6,10,5,11,4,12,3,13,2,14,1,15. |
+| Following | Variable | treeDescriptions | Literal/length and distance code lengths; repeat symbols 16–18. |
+
+Huffman codes are
 canonical and read MSB-first code-bit order. Literal 0..255, 256 = end of block, 257..285 = lengths
 3..258 with extra bits, distance codes 0..29 = distances 1..32768 with extra bits. The stream ends
 after the block with `BFINAL` = 1. **ROM ranges in the tables are padded to a 16-byte boundary**:
@@ -209,11 +230,11 @@ the retail level-select page (*Unused or hidden content*) is ids 0..26.
 
 #### Relocatable file format (objects and the player model; both games, verified)
 
-```
-u32 n
-u32 relocOffset[n]   ; offsets relative to DATA start; each marks a u32 pointer
-u8  DATA[]           ; every u32 at DATA+relocOffset[i] holds a DATA-relative offset
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | n | Relocation count. |
+| 0x04 | 4 × n | u32[] | relocOffsets | Offsets from DATA; each locates a u32 pointer. |
+| 0x04 + 4 × n | Variable | u8[] | DATA | Marked pointers hold DATA-relative offsets. |
 Loader (Gex 64 `0x8003B270`, Gex 3 `0x800314A0`): for each `i`, `*(DATA+off) += loadAddress`, then
 `memmove(DATA → loadAddress)`. A viewer can keep pointers file-relative (base 0) instead: skip the
 header, and treat each relocated word as an offset into `DATA`. Verified against RAM: Gex 64's 10
@@ -224,21 +245,30 @@ Gex 3: 20 of 25 relocated objects byte-exact, the rest differ in a few runtime b
 
 **Gex 3** — ROM `0x8013C` (vaddr `0x8007F53C`), 30 records of 0x54 bytes, index = level id (verified
 unless marked):
-```
-+0x00 char* name ("snow96")        +0x1C u32 level data ROM start (raw DEFLATE, -> 0x8024B000)
-+0x04 u16 string id: title         +0x20 u32 level data ROM end
-+0x06 u16 string id: genre         +0x24 u32 overlay ROM start (-> 0x80113910)
-+0x08 u16 string id: channel       +0x28 u32 overlay ROM end
-+0x0A u16 3 = TV/secret, 1 = hub   +0x2C u32 overlay RAM end incl. BSS
-      (hypothesis: mission count)  +0x30 u32 address inside the overlay (hypothesis: entry/init)
-+0x0C u16 category/slot: TV 5..0x10 +0x34 u32; low byte (+0x37) = first level-local voice-clip SFX id (*Gex 3 specifics (verified by disassembly and RDRAM unless marked)*)
-      (0x0D unused), bosses 0x11-0x13, +0x38 u32 ROM of 0x310 raw bytes -> 0x800FEE48 (lip-sync timing; 0 = none)
-      bonus 0x14, secret 0x15, 0 other +0x3C u32 ROM of 0x820-byte 64x64 CI4 channel logo -> 0x801FF7E0 (0 = none)
-+0x0E u16 x3 string ids: mission names +0x40 u32 ROM "N64 WaveTables" (level sample bank)
-+0x14 u16 x4 unknown                +0x44 u32 ROM "N64 PtrTablesV2" (level bank pointer table)
-                                    +0x48 u32 ROM level sound table (0xB40 bytes -> 0x800CFD20)
-                                    +0x4C u32 / +0x50 u32 ROM range of the DEFLATE level song -> 0x800FF290
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | name | String pointer, e.g. snow96. |
+| `+0x1C` | 4 | `u32` | `level data ROM start (raw DEFLATE, -> 0x8024B000)` | — |
+| `+0x04` | 2 | `u16` | `string id: title` | — |
+| `+0x20` | 4 | `u32` | `level data ROM end` | — |
+| `+0x06` | 2 | `u16` | `string id: genre` | — |
+| `+0x24` | 4 | `u32` | `overlay ROM start (-> 0x80113910)` | — |
+| `+0x08` | 2 | `u16` | `string id: channel` | — |
+| `+0x28` | 4 | `u32` | `overlay ROM end` | — |
+| 0x0A | 2 | u16 | missionCount | 3 for TV/secret, 1 for hub; mission count is a hypothesis. |
+| `+0x2C` | 4 | `u32` | `overlay RAM end incl. BSS` | — |
+| `+0x30` | 4 | `u32` | `address inside the overlay (hypothesis: entry/init)` | — |
+| 0x0C | 2 | u16 | category | TV 5..0x10 (0x0D unused); bosses 0x11..0x13; bonus 0x14; secret 0x15; other 0. |
+| 0x34 | 4 | u32 | voiceClip | Low byte is the first level-local voice-clip SFX id; upper bytes unknown. |
+| `+0x38` | 4 | `u32` | `ROM of 0x310 raw bytes -> 0x800FEE48 (lip-sync timing; 0 = none)` | — |
+| `+0x3C` | 4 | `u32` | `ROM of 0x820-byte 64x64 CI4 channel logo -> 0x801FF7E0 (0 = none)` | — |
+| `+0x0E` | 6 | `u16[3]` | `x3 string ids: mission names` | — |
+| `+0x40` | 4 | `u32` | `ROM "N64 WaveTables" (level sample bank)` | — |
+| `+0x14` | 8 | `u16[4]` | `x4 unknown` | — |
+| `+0x44` | 4 | `u32` | `ROM "N64 PtrTablesV2" (level bank pointer table)` | — |
+| `+0x48` | 4 | `u32` | `ROM level sound table (0xB40 bytes -> 0x800CFD20)` | — |
+| 0x4C | 4 | u32 | songRomStart | Raw-DEFLATE song ROM start. |
+| 0x50 | 4 | u32 | songRomEnd | Exclusive ROM end; decoded song loads at 0x800FF290. |
 String table: `char*[242]` at `0x80080110` (getter `0x800260A0`). Level lookup by name: `0x8004FF54`.
 Pointers in the table are main-image addresses (convert with ROM = vaddr − `0x7FFFF400`).
 
@@ -278,40 +308,88 @@ The design is the same as Gex 64 (*Shared structure (both games)*). The layouts 
 *fragments* that the game copies into the frame, not as callable display lists.
 
 **Header:**
-```
-+0x00 ptr   scene struct
-+0x08 u32   2 (all levels)
-+0x20 u32   sky patch count   +0x24 ptr sky patch table (16 bytes)   +0x28 ptr sky Vtx pool (segment 4)
-+0x2C ptr   material table {u32 n; ptr entry[n]}
-+0x30 s16 x,y,z, +0x36 s16 angle   player start (hypothesis)
-+0x44 ptr   object-name list {u32 n; char[8] x n} (patched into object pointers by the loader)
-+0x4C u8 r,g,b   fog colour AND clear colour
-+0x50 u8 r,g,b   second colour (hypothesis: ambient/object tint)
-+0x54 u16   8000..15100 (hypothesis: draw distance / far plane)
-+0x56 u16   fog min for gSPFogPosition(min, 1000); values >= 1000 clamp to 993
-+0x74 s32   -40000 (hypothesis: kill plane)
-+0x84 u32   instance count    +0x88 ptr instance array (0x34-byte records)
-+0x108/+0x10C/+0x110  sizes of the per-frame gfx/vertex buffers
-scene: +0x00 ptr root node  +0x10/+0x14 instance count/array  +0x18 u32 world vertex count
-       +0x1C u32 (hypothesis: collision related, e.g. hub 0xA9A)  +0x20 u32 collision record count
-       +0x24 u32 (unknown)  +0x28 u32 event table count  +0x2C u32 collision normal count
-       +0x30 ptr vertex pool (segment 1)   +0x38 ptr collision records (*Gex 3 collision (verified by code and on all 30 level files unless marked)*; earlier hypothesis "visibility" was wrong)
-       +0x3C ptr event table (ptr[+0x28])   +0x40 ptr collision normals (right after the vertex pool)
-       +0x58 ptr material DL pool (segment 2)   +0x5C ptr texture/TLUT pool (segment 3)
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `+0x00` | 4 | `ptr` | `scene struct` | — |
+| `+0x08` | 4 | `u32` | `2 (all levels)` | — |
+| `+0x20` | 4 | `u32` | `sky patch count` | — |
+| `+0x24` | 4 | `ptr` | `sky patch table (16 bytes)` | — |
+| `+0x28` | 4 | `ptr` | `sky Vtx pool (segment 4)` | — |
+| `+0x2C` | 4 | `ptr` | `materials` | — |
+| `+0x30` | 6 | `s16[3]` | `x,y,z,` | — |
+| `+0x36` | 2 | `s16` | `angle` | player start (hypothesis) |
+| `+0x44` | 4 | `ptr` | `objectNames` | — |
+| `+0x4C` | 3 | `u8[3]` | `r,g,b` | fog colour AND clear colour |
+| `+0x50` | 3 | `u8[3]` | `r,g,b` | second colour (hypothesis: ambient/object tint) |
+| `+0x54` | 2 | `u16` | `8000..15100 (hypothesis: draw distance / far plane)` | — |
+| `+0x56` | 2 | `u16` | `fog min for gSPFogPosition(min, 1000); values >= 1000 clamp to 993` | — |
+| `+0x74` | 4 | `s32` | `-40000 (hypothesis: kill plane)` | — |
+| `+0x84` | 4 | `u32` | `instance count` | — |
+| `+0x88` | 4 | `ptr` | `instance array (0x34-byte records)` | — |
+| 0x108 | 12 | u32[3] | bufferSizes | Per-frame graphics/vertex buffer sizes. |
+
+Scene known fields:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | rootNode | Data-relative root-node pointer. |
+| 0x10 | 4 | u32 | instanceCount | Instance count. |
+| 0x14 | 4 | u32 | instances | Data-relative instance-array pointer. |
+| `+0x18` | 4 | `u32` | `world vertex count` | — |
+| `+0x1C` | 4 | `u32` | `(hypothesis: collision related, e.g. hub 0xA9A)` | — |
+| `+0x20` | 4 | `u32` | `collision record count` | — |
+| `+0x24` | 4 | `u32` | `(unknown)` | — |
+| `+0x28` | 4 | `u32` | `event table count` | — |
+| `+0x2C` | 4 | `u32` | `collision normal count` | — |
+| `+0x30` | 4 | `ptr` | `vertex pool (segment 1)` | — |
+| `+0x38` | 4 | `ptr` | `collision records (*Gex 3 collision (verified by code and on all 30 level files unless marked)*; earlier hypothesis "visibility" was wrong)` | — |
+| `+0x3C` | 4 | `ptr` | `event table (ptr[+0x28])` | — |
+| `+0x40` | 4 | `ptr` | `collision normals (right after the vertex pool)` | — |
+| `+0x58` | 4 | `ptr` | `material DL pool (segment 2)` | — |
+| `+0x5C` | 4 | `ptr` | `texture/TLUT pool (segment 3)` | — |
+Material table:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | n | Material count. |
+| 0x04 | 4 × n | u32[] | entries | Material pointers. |
+
+Object-name list; loader replaces names with object pointers:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | n | Object-name count. |
+| 0x04 | 8 × n | u8[][8] | names | Eight-character names. |
+
 Segments 1–4 are set every frame by `0x80022230` (F3DEX2 `G_MOVEWORD` `DB06…`).
 
-**Tree** (24-byte nodes from `scene+0x00`): `+0x00 s16 minX, minY, minZ, maxX, maxY, maxZ` (AABB);
-`+0x0C u8 type` (1 = inner, 2 = leaf); `+0x0D u8` (leaf: collision record count); `+0x0E u16` (inner: split
-value, hypothesis; leaf: id); `+0x10 ptr` (inner: child A; leaf: collision records); `+0x14 ptr` (inner:
-child B). The hub has 1,556 inner nodes and 1,557 leaves.
+**Tree** nodes are 24 bytes from `scene+0x00`:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 12 | `s16[6]` | `bounds` | Minimum and maximum X, Y, and Z. |
+| `0x0C` | 1 | `u8` | `type` | 1 inner, 2 leaf. |
+| `0x0D` | 1 | `u8` | `collisionCount` | Leaf collision-record count. |
+| `0x0E` | 2 | `u16` | `splitOrId` | Inner split value (hypothesis), or leaf identifier. |
+| `0x10` | 4 | `ptr` | `childAOrCollision` | Inner child A, or leaf collision records. |
+| `0x14` | 4 | `ptr` | `childB` | Inner child B. |
+
+The hub has 1,556 inner nodes and 1,557 leaves.
 
 **Fragments** follow each leaf record inline and end with a `u32 0` plus 4 pad bytes `CDCDCDCD`:
-```
-Type A (flags bit0 = 0): u16 flags; u16 nbytes; u16 material; u16 0; u32 0; u32 0 (runtime)  + nbytes of commands
-Type B (flags bit0 = 1): u16 flags (5 or 9); u16 nbytes; ptr special-material record  + (nbytes-8) of commands + G_ENDDL
-commands: 01 G_VTX (segment-1 address), 05 G_TRI1, 06 G_TRI2 — type A has no G_DL and no G_ENDDL
-```
+| Fragment | Offset | Size | Type | Field | Description |
+|---|---:|---:|---|---|---|
+| A | `0x00` | 2 | `u16` | `flags` | Bit 0 is clear. |
+| A | `0x02` | 2 | `u16` | `nbytes` | Command byte count. |
+| A | `0x04` | 2 | `u16` | `material` | Material index. |
+| A | `0x06` | 2 | `u16` | `zero06` | Zero. |
+| A | `0x08` | 4 | `u32` | `zero08` | Zero. |
+| A | `0x0C` | 4 | `u32` | `runtime` | Runtime field. |
+| A | `0x10` | `nbytes` | Gfx | `commands` | Contains `G_VTX`, `G_TRI1`, and `G_TRI2`; no `G_DL` or `G_ENDDL`. |
+| B | `0x00` | 2 | `u16` | `flags` | Bit 0 is set; observed values are 5 and 9. |
+| B | `0x02` | 2 | `u16` | `nbytes` | Total fragment byte count. |
+| B | `0x04` | 4 | `ptr` | `specialMaterial` | Special-material record. |
+| B | `0x08` | `nbytes - 8` | Gfx | `commands` | Command bytes followed by `G_ENDDL`. |
 Each frame, for every visible material, the game emits `DE000000 {material DL}` followed by a verbatim
 copy of the commands of all visible type-A fragments with that material. That is why a level file
 has only ~300 `G_ENDDL`s. Flags value 2 marks fragments whose material is an animation record.
@@ -332,8 +410,14 @@ The texture pool holds 32-byte TLUTs followed by CI4 texels (mostly 32×32; some
 a few CI8; one RGBA32). Animated materials are driven by `0x8002A2C8` each frame. The kind is
 `(u16 record+0) & 0xE`:
 - **0:** a plain DL;
-- **2:** a flipbook `{u16 kind; u16 nframes; ptr DL[nframes]}` driven by the global frame counter
-  `[0x800A6174]`;
+- **2:** a flipbook driven by the global frame counter `[0x800A6174]`:
+
+  | Offset | Size | Type | Field | Description |
+  |---:|---:|---|---|---|
+  | 0x00 | 2 | u16 | kind | Material kind. |
+  | 0x02 | 2 | u16 | frameCount | Number of display-list pointers. |
+  | 0x04 | 4 × frameCount | u32[] | displayLists | Linked display-list pointers. |
+
 - **4:** a procedural texture (`0x80029690`);
 - **6:** handled by `0x800295FC`;
 - **8:** handled by `0x800291A0`.
@@ -350,7 +434,15 @@ carry extra DLs and colours (hypothesis: animated screens and water).
   snow96, beane1 and dsnw1 use 00A0F8, roo11 080838, tank11 00000C, water16 00141E, fly77 60C5DC.
 
 **Sky** (header +0x20/+0x24/+0x28):
-- Records are `{u32 0; s16 dirX, dirY, dirZ; s16 cone; ptr DL}`. Each DL is a segment-2 material
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 4 | `u32` | `zero` | Zero. |
+| `0x04` | 6 | `s16[3]` | `direction` | Direction X, Y, Z. |
+| `0x0A` | 2 | `s16` | `cone` | Visibility cone. |
+| `0x0C` | 4 | `ptr` | `displayList` | Segment-2 material followed by segment-4 vertices. |
+
+- Each display list is a segment-2 material
   followed by segment-4 vertices.
 - Drawn first with its own projection (`0x8007FF70`), a camera-centred modelview, the texel-only
   combiner `FCFFFFFF FFFCF279`, and no depth. The game only draws camera-facing patches; a viewer can
@@ -360,26 +452,78 @@ carry extra DLs and colours (hypothesis: animated screens and water).
   fly77 13.
 
 **Instances** (0x34 bytes, header +0x88, count +0x84):
-```
-+0x00 s32 name index into the header +0x44 list (-1 = none: 331 instances, triggers/cameras hypothesis)
-+0x04 ptr parameter block or 0
-+0x08 s16 angle A, +0x0A s16 angle B, +0x0C s16 angle C   (4096 = 360°; C = Z verified visually)
-+0x0E u16 flags/variant (hypothesis: mission/state group — explains objects placed but not visible in game)
-+0x10 s16 x, y, z   world position (verified by placement render)    +0x16 u16 radius
-+0x1C ptr parameter record (TV/warp links: {u16 a, u16 b, char namePrefix[]})   +0x28 ptr (door links)
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `+0x00` | 4 | `s32` | `name index into the header +0x44 list (-1 = none: 331 instances, triggers/cameras hypothesis)` | — |
+| `+0x04` | 4 | `ptr` | `parameter block or 0` | — |
+| `+0x08` | 2 | `s16` | `angle A,` | — |
+| `+0x0A` | 2 | `s16` | `angle B,` | — |
+| `+0x0C` | 2 | `s16` | `angle C   (4096 = 360°; C = Z verified visually)` | — |
+| `+0x0E` | 2 | `u16` | `flags/variant (hypothesis: mission/state group — explains objects placed but not visible in game)` | — |
+| `+0x10` | 6 | `s16[3]` | `x, y, z   world position (verified by placement render)` | — |
+| `+0x16` | 2 | `u16` | `radius` | — |
+| `+0x1C` | 4 | `ptr` | `TV/warp parameter record` | — |
+| `+0x28` | 4 | `ptr` | `(door links)` | — |
+TV/warp parameter record, four-byte prefix followed by a string:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | u16 | a | Hypothesis: remotes required. |
+| 0x02 | 2 | u16 | b | Unknown. |
+| 0x04 | Variable | u8[] | namePrefix | Target level-name prefix. |
+
 The rotation order is **hypothesis**. Gex 64's verified order is `T · Rx · Ry · Rz`; Gex 3 was only
 checked for Z rotations. Use the Gex 64 order and check in the viewer against the hub render.
 
 **Object files** (relocated, data-relative pointers):
-```
-+0x0C ptr mesh list   +0x10 ptr animation list (0 for static props)   +0x14 u16 x4 distances (hypothesis LOD/draw)
-+0x1C ptr script names   +0x20 ptr behaviour class name (8 chars)   +0x24 ptr object name   +0x28 ptr model list (344 objects)
-mesh: +0x00 u16 nverts  +0x04 u16 nfaces  +0x06 u16 nsegments  +0x08 ptr vertices (8 bytes: s16 x,y,z; u16)
-      +0x0C ptr colours (u32 RGBA per vertex)  +0x14 ptr faces (12 bytes: u16 v0,v1,v2; u8; u8 flags; u16 0; u16 uvRecordOffset)
-      +0x18 ptr segments (bone/part table)  +0x34 ptr texture pool (segment 5)
-uv record (20 bytes): u16 0; u16 material DL offset; s16 s0,t0,s1,t1,s2,t2; 4 bytes pad
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `+0x0C` | 4 | `ptr` | `mesh list` | — |
+| `+0x10` | 4 | `ptr` | `animation list (0 for static props)` | — |
+| `+0x14` | 8 | `u16[4]` | `x4 distances (hypothesis LOD/draw)` | — |
+| `+0x1C` | 4 | `ptr` | `script names` | — |
+| `+0x20` | 4 | `ptr` | `behaviour class name (8 chars)` | — |
+| `+0x24` | 4 | `ptr` | `object name` | — |
+| `+0x28` | 4 | `ptr` | `model list (344 objects)` | — |
+
+Mesh known fields:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `+0x00` | 2 | `u16` | `nverts` | — |
+| `+0x04` | 2 | `u16` | `nfaces` | — |
+| `+0x06` | 2 | `u16` | `nsegments` | — |
+| `+0x08` | 4 | `ptr` | `vertices (eight-byte layout below)` | — |
+| `+0x0C` | 4 | `ptr` | `colours (u32 RGBA per vertex)` | — |
+| `+0x14` | 4 | `ptr` | `faces (12-byte layout below)` | — |
+| `+0x18` | 4 | `ptr` | `segments (bone/part table)` | — |
+| `+0x34` | 4 | `ptr` | `texture pool (segment 5)` | — |
+
+UV record, 20 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | u16 | zero00 | Zero. |
+| 0x02 | 2 | u16 | materialOffset | Material display-list offset. |
+| 0x04 | 12 | s16[6] | texcoords | S0,T0,S1,T1,S2,T2. |
+| 0x10 | 4 | u8[4] | pad10 | Padding. |
+
+Mesh vertex, eight bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 6 | s16[3] | position | X, Y, Z. |
+| 0x06 | 2 | u16 | unknown06 | Unknown. |
+
+Mesh face, 12 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 6 | u16[3] | vertices | Vertex indices. |
+| 0x06 | 1 | u8 | unknown06 | Unknown. |
+| 0x07 | 1 | u8 | flags | Face flags. |
+| 0x08 | 2 | u16 | zero08 | Zero. |
+| 0x0A | 2 | u16 | uvRecordOffset | UV-record offset. |
 This layout is valid for 958 of 964 objects. The game draws objects like Gex 64: segment 5 = texture
 pool, the object's material DL, then CPU-transformed triangles. Rigid meshes (`nsegments == 1`) render
 correctly. Multi-segment (skinned) meshes need the segment transforms, which were **not decoded**:
@@ -415,18 +559,26 @@ their parts collapse at the origin. Behaviour class at object +0x20 (full list i
 **Collision records.** Each tree leaf lists `u8 count` (`+0x0D`) variable-length records at `ptr +0x10`. They are
 stored in tree order from `scene+0x38`, and the total equals `scene+0x20` in every level (338,922 faces in all).
 The reader is the collision loop at `0x80016F60..0x800172A4`:
-```
-+0x00 u16 base
-+0x02 u16 corners         vertex k = base + ((corners >> 5k) & 0x1F), k = 0..2 (bit 15 unused); world vertex pool (segment 1)
-+0x04 s16 normal          index into scene+0x40 (count scene+0x2C); negative = negated entry
-+0x06 u16 surface         low 5 bits = type; the query skips a face when (1 << type) & mask (0x80016F9C)
-+0x08 u16 event index     only when surface & 1 and (surface & 0xE) is 4, 10 or 12 (record size 10, else 8)
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `+0x00` | 2 | `u16` | `base` | — |
+| `+0x02` | 2 | `u16` | `corners` | vertex k = base + ((corners >> 5k) & 0x1F), k = 0..2 (bit 15 unused); world vertex pool (segment 1) |
+| `+0x04` | 2 | `s16` | `normal` | index into scene+0x40 (count scene+0x2C); negative = negated entry |
+| `+0x06` | 2 | `u16` | `surface` | low 5 bits = type; the query skips a face when (1 << type) & mask (0x80016F9C) |
+| `+0x08` | 2 | `u16` | `event index     only when surface & 1 and (surface & 0xE) is 4, 10 or 12 (record size 10, else 8)` | — |
 - **Record size rule:** it comes straight from the loop step at `0x80017254`. With it every leaf's run ends where the
   next leaf's starts, in all 30 levels. The last run ends 4–12 bytes before `scene+0x3C`, padded with `CDCD`.
 - **Corner decode:** also used by `0x80013AE8`, `0x80013C44` and `0x80013CC4`, which load `scene+0x30 + 16 × (base + delta)`.
   Typical quads are two records with corners `0x0820` (+2, +1, +0) and `0x0062` (+0, +3, +2).
-- **Normals:** 6-byte entries `{u16 w; s16 y; s16 z}` with x = the low 14 bits of w, sign-extended, in 4.12
+- **Normals:**
+
+  | Offset | Size | Type | Field | Description |
+  |---:|---:|---|---|---|
+  | `0x00` | 2 | `u16` | `w` | Low 14 bits are sign-extended X; high two bits are returned separately. |
+  | `0x02` | 2 | `s16` | `y` | 4.12 Y. |
+  | `0x04` | 2 | `s16` | `z` | 4.12 Z. |
+
+  X, Y, and Z are in 4.12
   (`0x80012B0C`). The top 2 bits of w are returned separately: 0 = x-dominant, 1 = y-dominant, 2 = z-dominant, 3 =
   mixed (from the entries' directions in 3 levels; **hypothesis:** the projection axis for the point-in-triangle test).
   338,878 of 338,891 non-degenerate faces have dot ≥ 0.98 between this normal and the winding normal. The maximum
@@ -550,7 +702,15 @@ through the viewer's loaders. Scratch scripts are in `gexcoll/`.
 
 #### Object tables (both games, same record layout, verified)
 
-16-byte records `{char name[8]; u32 romStart; u32 romEnd}`, sorted by name; names are 8 characters
+16-byte records, sorted by name:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 8 | u8[8] | name | Eight-character name. |
+| 0x08 | 4 | u32 | romStart | Inclusive ROM start. |
+| 0x0C | 4 | u32 | romEnd | Exclusive ROM end. |
+
+Names are 8 characters
 padded with `_` and **not** NUL-terminated (e.g. `gexeyes_`, `10tons__`). Lookup compares the two name
 words and stops at a record whose first byte is 0. Each file is DEFLATE of a *Relocatable file format (objects and the player model; both games, verified)* relocatable file.
 
@@ -656,7 +816,8 @@ s: `npx tsx render.ts all`) and `g3audio/gex3music.ts`.
 | `+0x40` | – | level SFX wave bank (ROM offset, streamed) |
 | `+0x48` | `0x800CFD20` | level *fx bank* (libmus effect file, below) |
 | `+0x38` | `0x800FEE48` | **not audio**: lip-sync table for Gex's voice clips |
-| `+0x4C/+0x50` | `0x800FF290` | the level **song** (raw DEFLATE). The **music pointer bank** ROM `0xD204A0..0xD2D3C0` is then read to `0x800D1E80`, with music wave bank ROM `0xBD2050` |
+| `+0x4C` | `0x800FF290` | Level song ROM start (raw DEFLATE). The **music pointer bank** ROM `0xD204A0..0xD2D3C0` is then read to `0x800D1E80`, with music wave bank ROM `0xBD2050` |
+| `+0x50` | — | Level song ROM end (exclusive). |
 | `+0x37` (low byte of `+0x34`) | – | first level-local SFX id of the voice-clip table |
 
 Global SFX: pointer bank ROM `0x255D10..0x25AEE0` (copied to `0x8010B370`), wave bank `0x25AEE0`, fx
@@ -666,17 +827,48 @@ channel structs, and channels 0–3 are voiceless master-track channels. Output 
 scaled by the options). Reverb is effectively off: `MusSetFxType(0)` gives a single section with gain 0.
 
 **Song header** (version `0x215` in all 15 songs):
-```
-+00 u32 version (0x215)    +04 u32 numChannels (14)   +08 u32 numWaves
-+0C u32 -> u32 channelData[numChannels]   +10 u32 -> volumeData[]   +14 u32 -> pitchBendData[]
-+18 u32 -> envelope table (7 bytes/entry)  +1C u32 -> drum table (6 bytes/entry {u16 wave, u16 env, u8 pan, u8 note})
-+20 u32 -> u16 waveTable[numWaves]  (song wave index -> music pointer-bank index; 0xFFFF = rest)
-+24 u32 -> master track (tempo + rests; runs on a voiceless channel 0..3)
-+28 u32 relocated flag (0 in ROM)
-```
-**Fx bank:** `+00 u32 n`, `+04 u32 effects`, `+08 u32 waves`, `+0C u32 flags`, `+10 u32 ptrBank`
-(runtime), `+14 -> u16 waveTable[waves]`, then `{u32 streamOffset, u32 priority}[n]`. Effect streams
-use the same command language.
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `+00` | 4 | `u32` | `version (0x215)` | — |
+| `+04` | 4 | `u32` | `numChannels (14)` | — |
+| `+08` | 4 | `u32` | `numWaves` | — |
+| `+0C` | 4 | `u32` | `-> u32 channelData[numChannels]` | — |
+| `+10` | 4 | `u32` | `-> volumeData[]` | — |
+| `+14` | 4 | `u32` | `-> pitchBendData[]` | — |
+| `+18` | 4 | `u32` | `-> envelope table (7 bytes/entry)` | — |
+| `+1C` | 4 | `u32` | `drums` | — |
+| `+20` | 4 | `u32` | `-> u16 waveTable[numWaves]  (song wave index -> music pointer-bank index; 0xFFFF = rest)` | — |
+| `+24` | 4 | `u32` | `-> master track (tempo + rests; runs on a voiceless channel 0..3)` | — |
+| `+28` | 4 | `u32` | `relocated flag (0 in ROM)` | — |
+Drum record, six bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 2 | u16 | wave | Wave index. |
+| 0x02 | 2 | u16 | env | Envelope index. |
+| 0x04 | 1 | u8 | pan | Pan. |
+| 0x05 | 1 | u8 | note | Note. |
+
+**Fx bank:**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 4 | `u32` | `effectCount` | Number of effect records. |
+| `0x04` | 4 | `u32` | `effects` | Effect table pointer/offset. |
+| `0x08` | 4 | `u32` | `waveCount` | Number of waves. |
+| `0x0C` | 4 | `u32` | `flags` | Flags. |
+| `0x10` | 4 | `u32` | `ptrBank` | Runtime pointer bank. |
+| `0x14` | `2 * waveCount` | `u16[]` | `waveTable` | Wave map. |
+| following | `8 * effectCount` | records | `effects` | Eight-byte effect records below. |
+
+Effect record, eight bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | streamOffset | Effect stream offset. |
+| 0x04 | 4 | u32 | priority | Effect priority. |
+
+Effect streams use the same command language.
 
 **Differences from the Gex 64 revision** (*Song format: Gex 64 revision and Gex 3 differences* applies otherwise):
 
@@ -763,21 +955,47 @@ levels was **not** observed at runtime. Reference renderer: `g3audio/gex3music.t
 
 **Pointer bank** (`.ptr`; offsets relative to the bank start, relocated at init by
 `MusPtrBankInitialize`):
-```
-+00 char label[16]   "N64 PtrTablesV2\0"
-+10 u32  flags       (bit 31 set at runtime = relocated)
-+14 char wbkName[12] e.g. "orchestr.wbk"
-+20 u32  count
-+24 u32  basenote   -> u8[count]
-+28 u32  detune     -> 4 bytes per wave; byte 0 = s8 cents (overwritten at init with an f32 pitch offset)
-+2C u32  waveList   -> u32[count] offsets of ALWaveTable records
-+30 ...  ALWaveTable records, each followed by its ALADPCMBook and ALADPCMloop
-ALWaveTable (24 bytes): u32 base (offset into the wave bank; the ROM address of the wave bank is added
-  unless the top byte is 0xFF), s32 len, u8 type (0 = AL_ADPCM_WAVE; every Gex wave is VADPCM),
-  u8 flags, u16 pad, u32 loop (-> ALADPCMloop, 0 = none), u32 book (-> ALADPCMBook), u32 pad
-ALADPCMBook: s32 order (2), s32 npredictors (4), s16 book[order * npredictors * 8]
-ALADPCMloop: u32 start, u32 end, s32 count (-1 = forever), s16 state[16]
-```
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `+00` | — | `char` | `label[16]` | "N64 PtrTablesV2\0" |
+| `+10` | 4 | `u32` | `flags` | (bit 31 set at runtime = relocated) |
+| `+14` | — | `char` | `wbkName[12] e.g. "orchestr.wbk"` | — |
+| `+20` | 4 | `u32` | `count` | — |
+| `+24` | 4 | `u32` | `basenote` | -> u8[count] |
+| `+28` | 4 | `u32` | `detune` | -> 4 bytes per wave; byte 0 = s8 cents (overwritten at init with an f32 pitch offset) |
+| `+2C` | 4 | `u32` | `waveList` | -> u32[count] offsets of ALWaveTable records |
+| 0x30 | Variable | wave records | waves | ALWaveTable records, each followed by its ALADPCMBook and ALADPCMloop. |
+
+ALWaveTable, 24 bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | base | Offset into wave bank; its ROM base is added unless the top byte is 0xFF. |
+| 0x04 | 4 | s32 | len | Encoded length. |
+| 0x08 | 1 | u8 | type | 0: VADPCM, as used by every Gex wave. |
+| 0x09 | 1 | u8 | flags | Flags. |
+| 0x0A | 2 | u16 | pad0A | Padding. |
+| 0x0C | 4 | u32 | loop | ALADPCMloop pointer; zero means absent. |
+| 0x10 | 4 | u32 | book | ALADPCMBook pointer. |
+| 0x14 | 4 | u32 | pad14 | Padding. |
+
+ALADPCMBook, eight-byte header plus coefficients:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | s32 | order | 2. |
+| 0x04 | 4 | s32 | npredictors | 4. |
+| 0x08 | 16 × order × npredictors | s16[] | book | Predictor coefficients. |
+
+ALADPCMloop, 0x2C bytes:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| 0x00 | 4 | u32 | start | First sample in loop. |
+| 0x04 | 4 | u32 | end | Exclusive loop end. |
+| 0x08 | 4 | s32 | count | −1 repeats forever. |
+| 0x0C | 0x20 | s16[16] | state | Decoder state. |
+
 Pitch offset per wave, in semitones: `pitchOffset[i] = (s8)detune[i*4] / 100 + (s8)(basenote[i] - 48)`.
 For example, basenote 244 gives −60, so note 60 plays the sample at 22050 Hz.
 
