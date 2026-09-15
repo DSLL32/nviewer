@@ -1,211 +1,82 @@
-# GoldenEye 007 (N64, USA) — ROM formats for the level viewer
+# GoldenEye 007 — Nintendo 64 ROM format specification
 
-> Research document (read-only analysis; this investigation changed nothing in `/home/n64/nviewer`). Every claim is marked
-> **verified** (checked against ROM data, disassembly, or the running game: RAM dumps, breakpoints, frame display
-> lists, screenshots, audio captures; the method is named) or **hypothesis**. Public GoldenEye decompilation and
-> community knowledge were used only as search leads, never as evidence. Scripts, dumps and renders live under
-> `/home/n64/.ai-tmp/r49/ge/` (paths below are relative to it). Section 7 collects the evidence and open questions;
-> section 8 is the unused and hidden content.
+This manual describes the shipped data formats needed to identify, extract, and
+present GoldenEye 007 content. Claims state their evidence inline; unsupported
+interpretations are labelled hypotheses.
 
-> Status and confidence:
->
-> | area | confidence |
-> |---|---|
-> | ROM identification, boot, code layout (TLB-mapped, demand-paged game code) | high (disassembly + RAM) |
-> | 1172 codec, file table, extraction | high (60/60 in-game outputs byte-exact; all 6,863 streams decode with the viewer's `inflate.ts`) |
-> | level list, names, stage loading, warps | high (tables + breakpoints + screenshots); multiplayer menu not run (one controller) |
-> | BG geometry, microcode, textures | high (texture decoder byte-exact vs RAM; renders match screenshots on 10 stages) |
-> | render state, culling, alpha | high for blend/decal/alpha; culling resolved empirically (double-sided), cause open |
-> | fog, clear colour, sky, water, camera, units, spawn | high (12 frames match the environment records; sky fit ≤ 0.07 texel) |
-> | setup files, placement, stan floors | high (1,299 object matrices vs RAM; floors vs player and pads) |
-> | model format, props, doors | high; characters: medium (rest pose from one sampled frame, animation not decoded) |
-> | music engine, song list, loops, renderer | high (libultra.ts unchanged; capture NCC 0.81–0.88, tempo 1.00, chroma 0.96–0.98); reverb not rendered |
-> | unused and hidden content | per item in §8 (mostly high; sound effects medium-low) |
+## 1. Overview
 
-**In one paragraph:** GoldenEye keeps its game code uncompressed but TLB-mapped at 0x7F000000, and a compressed data
-segment holds every table. Files, rooms, textures and songs are "1172" streams: two tag bytes and raw DEFLATE, which
-`inflate.ts` decodes unchanged. Each stage's world is a BG file of rooms with room-relative vertices and Fast3D display
-lists with two Rare commands (`B1` four triangles, `C0` texture number). Textures come from a global table of 2,698
-entries in two codec families. A per-stage environment table gives fog, clear colour and a code-drawn cloud plane.
-Setup files place props, doors, pickups and guards on pads, and stan files give floor heights. Music is 63
-compressed-MIDI sequences for libultra's `alCSPlayer`, which the viewer's `libultra.ts` renders as is. Overall
-difficulty is medium: the texture codecs and model/placement code are the largest parts, and verified reference ports
-exist for all of them.
+### 1.1 Technical summary
 
-Contents
-1. ROM identification, boot, compression and files
-2. Level list and stage loading
-3. Level geometry (BG files, display lists, textures, environment, camera)
-4. Objects and props (setup files, models)
-5. Music
-6. Mapping onto the viewer
-7. Verification evidence and open questions
-8. Unused and hidden content
-
-Conventions: offsets are hexadecimal; "ROM" offsets are into the big-endian `.z64` image; RAM addresses are
-virtual (`0x80…` KSEG0, `0x70…` and `0x7F…` TLB-mapped code, see §1.2). Multi-byte values are big-endian.
-
----------------------------------------------------------------------------------------------------------------
-## 1. ROM identification, boot, compression and files
-
-### 1.1 Identification (verified: ROM bytes)
-
-| field (header offset) | value |
+| Property | Value |
 |---|---|
-| file | `GoldenEye 007 (U) [!].z64` |
-| first word (0x00) | `80371240` (z64, big-endian) |
-| image name (0x20) | `GOLDENEYE` (space padded) |
-| game code (0x3B) / version (0x3F) | `NGEE` / 0 |
-| CRC1 / CRC2 (0x10 / 0x14) | `DCBC50D1` / `09FD1AA3` |
-| entry point (0x08) | `0x80000400` |
-| boot code | CIC-6102 (crc32 of 0x40..0x1000 = `90BB6CB5`) |
-| size | 12 MiB (0xC00000) |
-| MD5 / SHA-1 | `70c525880240c1e838b8b1be35666c3b` / `abe01e4aeb033b6c0836819f549c791b26cfde83` |
-| RSP graphics microcode (string in the data segment) | `RSP SW Version: 2.0G, 09-30-96` / `SGI U64 GFX SW TEAM: S Anderson, S Carr, H Cheng, K Luster, R Moore` — the Fast3D family, **not** F3DEX (§3.3) |
-| build string | `Jun 29 1997 20:46:05` |
+| Asset organization | Named file table with BG, setup, stan, model, texture, and sequence files. |
+| Compression | `1172` tag followed by raw DEFLATE. |
+| Graphics microcode | Rare Fast3D-family GBI with custom `TRI4` and texture commands. |
+| Geometry | Room-based BG files with room-relative vertices. |
+| Textures | Global numbered texture table with paletted and bitstream codecs. |
+| Collision | Convex stan floor polygons plus setup pads. |
+| Music driver | libultra `alCSPlayer`. |
+| Audio microcode | Stock libultra audio task; exact ABI revision is not separately identified. |
+| Sample encoding | Nintendo VADPCM. |
+| Levels | Mission and multiplayer stages. |
+| Memory requirement | Base 4 MiB. |
+| Viewer support | USA revision 0. |
 
-**Detection:** game code `NGEE` at 0x3B after `normalizeByteOrder()`, as `openRom()` does for the other games.
+### 1.2 ROM identification
 
-### 1.2 Boot and code (verified by disassembly)
+| Release | NAME | Game code | Revision | Size | CRC1 | CRC2 | SHA-1 | CIC | Build |
+|---|---|---|---:|---:|---|---|---|---|---|
+| USA | `GOLDENEYE` | `NGEE` | 0 | 12 MiB (`0xC00000`) | `DCBC50D1` | `09FD1AA3` | `abe01e4aeb033b6c0836819f549c791b26cfde83` | CIC-6102 | Jun 29 1997 20:46:05 |
 
-The code is **not** compressed, but it runs at TLB-mapped addresses, which matters to anyone reading addresses:
+Verified from the normalized ROM headers and complete-image SHA-1 hashes.
 
-| ROM | size | runs at | contents |
-|---|---|---|---|
-| `0x001000-0x021990` | 0x20990 | `0x70000400-0x70020D90` (TLB entry 0; also visible at `0x80000400`) | boot/engine code and libultra, uncompressed; `jal` targets inside are `0x7000xxxx` |
-| `0x021990-0x033590` | 0x11C00 | `0x80020D90-0x8005D2E0` | **data segment**: one 1172 stream (§1.3), 0x3C550 bytes inflated; BSS `0x8005D2E0-0x8008E360` follows |
-| `0x033590-0x034B30` | 0x15A0 | `0x70200000` | boot-time inflater, copied and run once (`0x7020141C(src, dst, work)`) |
-| `0x034B30-0x117880` | 0xE2D50 | **`0x7F000000-0x7F0E2D50`**, demand-paged | game code, uncompressed, linked at 0x7F000000 |
-| `0x117880-0xC00000` | | not mapped | data read from ROM on demand (§1.4) |
+### 1.3 Terminology and conventions
 
-Boot sequence:
-1. Entry stub `0x80000400`: clear BSS `0x8005D2E0` (length 0x31080), `sp = 0x803AB410`.
-2. `0x80000450`: TLB entry 0 maps `0x70000000-0x703FFFFF` to physical 0-0x3FFFFF (4 MiB page); jump to `0x70000510`.
-3. `0x70000510`: copy ROM `0x21990..0x34B30` to physical `0x1EE400` (compressed data) and `0x200000` (inflater),
-   inflate the data segment to `0x80020D90`, install exception vectors, start the main thread `0x7000089C`.
+ROM and memory ranges are half-open. Offsets, addresses, encoded sizes, masks,
+and opcodes are hexadecimal unless stated otherwise. Multi-byte CPU fields are
+big-endian. RAM addresses are virtual unless explicitly identified as physical;
+segmented, VROM, and file-relative addresses are named at each use.
 
-**Game code paging.** The TLB refill handler looks up 16-byte page-table entries at `0x8005DBF0 + 16 ×
-((vaddr − 0x7F000000) >> 13)`. On a miss, the pager `0x700019D8` copies the 8 KB page from ROM `0x34B30 + page ×
-0x2000` into one of 90 frames at `0x802F6000-0x803AA000` (random victim). Only some pages are resident (40 of
-114 at the file-select menu), so **never read the 0x7F code from RDRAM**; use ROM `vaddr − 0x7F000000 + 0x34B30`
-(verified: every resident frame equals its ROM page). Exec breakpoints on 0x7F addresses work in the debugger.
+## 2. Program and storage architecture
 
-Address conversions: `ROM = vaddr − 0x7F000000 + 0x34B30` (game code); `ROM = vaddr − 0x70000400 + 0x1000`
-(boot/engine); `offset = vaddr − 0x80020D90` into the inflated data segment.
+### 2.1 Boot and executable layout
 
-Key functions (verified addresses; names are descriptive):
+No additional executable-layout information is required by the viewer.
 
-| address | function |
-|---|---|
-| `0x70005C1C` | `romCopy(dst, romOffset, len)`: every game ROM read |
-| `0x70006080-0x70006930` | main loop: stage load, frame loop, stage switch (§2.3) |
-| `0x70006A7C-0x70006C20` | audio init: sound banks and the music sequence table (§5) |
-| `0x7F0BD254` | file lookup by name → index |
-| `0x7F0BCE0C(index, mode, bufSize, pool)` / `0x7F0BCD04(name, …)` | load a whole file (inflating when the mode says so) |
-| `0x7F0BCD7C(name, dst, offset, len)` | partial read of a file (BG headers and rooms) |
-| `0x7F0BCAA0` | ROM loader: read to the top of the buffer, then inflate to its start |
-| `0x7F0CE7F0(src, dst, work)` | runtime inflate |
-| `0x7F0BDAB0(stage)` | `stageLoad` |
-| `0x7F003BF0(stage)` | load setup, stage text and the objects the setup names |
-| `0x7F0CBC18` | texture loader (§3.4) |
-| `0x7F0754BC` | animation data reader |
+### 2.2 Memory and address mapping
 
-### 1.3 Compression: "1172" = two header bytes + raw DEFLATE (verified bit-exact)
+Address conversions and load destinations are specified with the executable and file tables above.
 
-- A compressed stream is the two bytes **`11 72`** followed by a standard raw RFC 1951 DEFLATE stream. There is
-  no size field and no checksum. Both inflaters skip exactly two bytes without checking them (boot
-  `0x7020141C`: `src += 2`; runtime `0x7F0CE7F0`: `[0x8009D350] = src + 2` on both branches). The inflater
-  returns the output size.
-- Standard DEFLATE with no quirks: the boot inflater's length and distance tables (ROM `0x34A38..`) are the RFC
-  1951 tables.
-- Streams are padded in the ROM (0–15 bytes); ignore bytes after the final block.
-- **Against the game:** 60 in-game inflate outputs dumped at the function return during a Runway load (the stan
-  file, 15 BG room chunks and 44 texture pieces) are **60/60 byte-identical** to zlib raw inflate of the ROM
-  streams (`fs/infverify.py`, `fs/inf_run/`).
-- **All streams:** a full-ROM scan finds 6,863 streams, all reaching end-of-stream: 3,447 inside BG files, 2,671
-  inside texture entries, 681 compressed files, 63 music sequences and the data segment (`fs/streams.tsv`).
-- **Viewer:** `src/rom/inflate.ts` `inflateRaw(rom, start + 2, 0)` decodes all 6,863 streams identically to
-  Node's zlib, 15.6 MB in 1.5 s (`fs/ts/inflate_check.ts`). Reuse it unchanged.
+### 2.3 ROM map and asset organization
 
-### 1.4 ROM map (every byte assigned; verified from the loaders unless marked)
+See the executable, archive, and file-table descriptions in this section.
 
-| ROM | contents | evidence |
-|---|---|---|
-| `0x000000-0x001000` | header, IPL3 | |
-| `0x001000-0x021990` | boot/engine code + libultra (0x70000400) | disassembly |
-| `0x021990-0x033590` | data segment (1172 → 0x80020D90) | boot `0x70000510` |
-| `0x033590-0x034B30` | boot inflater | boot `0x70000510` |
-| `0x034B30-0x117880` | game code (0x7F000000) | pager `0x700019D8` |
-| `0x117880-0x117940` | 0xC0 bytes of display lists copied at stage load | `0x7F0BD910` |
-| `0x117940-0x123040` | glyph data read by offset (hypothesis: Japanese font, large) | `0x7F0C1BF4` |
-| `0x123040-0x124AC0` | second glyph table (hypothesis: Japanese font, small) | `0x7F0C1CC4` |
-| `0x124AC0-0x28E980` | animation data (read during play) | `0x7F0754BC`; pointers rebased by +0x124AC0 at `0x7F000A74` |
-| `0x28E980-0x29D160` | 0xE7E0-byte table copied at boot (hypothesis: animation index) | `0x7F000B24` |
-| `0x29D160-0x29E560` | 0x1400-byte block copied at every stage load, pointers rebased; contains texture lists `{u32 texture; u8 w; u8 h …}` for the front end, HUD, explosions and watch screens (verified at `0x29DC28..0x29E54C` by matching texture sizes) | `0x7F0CBFE0` |
-| `0x29E560-0x2A4D50` | graphics data read by offset (hypothesis: front-end models) | `0x7F008BB8` |
-| `0x2A4D50-0x2BF2D0` | graphics data loaded by `0x7F008DE4` (hypothesis: front-end models) | `0x7F008DE4` |
-| `0x2BF2D0-0x2E63F0` | **14 attract-mode demos** ("ramrom" controller recordings, §8.2), tiling the range exactly | table `0x800483F0`, picker `0x7F0C0970` |
-| `0x2E63F0-0x2E88A0` | font 1 (0x2A4-byte header + 24-byte glyph records) | `0x7F0ACC38` |
-| `0x2E88A0-0x2EBDE0` | font 2 | `0x7F0ACCC4` |
-| `0x2EBDE0-0x2F19A0` | sound-effects bank `.ctl` (`B1`, one bank) | audio init `0x70006A94` |
-| `0x2F19A0-0x3B4450` | sound-effects `.tbl` (VADPCM) | `0x70006AE0` |
-| `0x3B4450-0x3B87F0` | music instrument bank `.ctl` | `0x70006AF4` |
-| `0x3B87F0-0x419790` | music `.tbl` | `0x70006B44` |
-| `0x419790-0x41998C` | music sequence table (63 records, §5) | `0x70006B84` |
-| `0x41998C-0x438660` | 63 music sequences, 1172 each | table |
-| `0x438660-0x8F7DE0` | 726 named files (§1.5) | file table |
-| `0x8F7DE0-0x8F7DF0` | 16 filler bytes (at `ob/ob_end.seg`, size 0) | |
-| `0x8F7DF0-0xBE6D08` | 2,698 texture entries (§3.4) | texture loader `0x7F0CBC18` |
-| `0xBE6D08-0xC00000` | `0xFF` fill | |
+### 2.4 Compression formats
 
-### 1.5 File table (verified)
+Compression framing and decoding rules are specified with each stored resource above.
 
-- Data segment `0x80046054`: 727 records of 12 bytes `{u32 index; char* name; u32 romOffset}`. The size of a file
-  is the next record's `romOffset` minus its own. Record 0 has no name (ROM 0); record 726 is `ob/ob_end.seg`
-  (size 0, end marker). Count at `[0x800482D4]`.
-- A parallel runtime table at `0x800888B0` has 20-byte records `{u32 romSize; u32 loadedPtr; u32; u32
-  loadedSize; u8; u8}` (boot fills `romSize`). It is a handy check of what a stage loaded.
-- **No relocation.** Files are used as loaded; consumers convert their own internal offsets (the setup loader
-  adds its base to header offsets, `0x7F003D8C`).
-- **Compression by name** (verified over all 701 non-empty named files): every name ending in `Z` (593 files with
-  C, G, P, T and U prefixes) is one 1172 stream; the 88 text files `L*E`/`L*J` are 1172 streams too; the 25
-  non-empty `bg/*.seg` files are raw, with their rooms compressed inside (§3.1). The loader doesn't test the
-  bytes; the caller's mode decides.
-- **Name prefixes:** `bg/bg_<code>_all_p.seg` BG geometry; `Tbg_<code>_all_p_stanZ` clipping ("stan");
-  `Usetup<code>Z` solo setup; `Ump_setup<code>Z` multiplayer setup; `Ubrief<code>Z` briefing; `L<bank>E`/`L<bank>J`
-  text; `C…Z` characters and heads; `G…Z` first-person weapon and item models; `P…Z` props.
-- **Empty entries (size 0):** BG `sho eld imp ash lue rit ear lee lip wax pam`; stan `ear eld lee lip lue pam rit wax`.
-- Extraction: `fs/extract.py [ROM] [OUTDIR]` writes every file (inflated when it starts with `11 72`) and
-  `fs/index.tsv`; `fs/extract_extra.py` writes the region-0 pieces, the 63 inflated sequences and the raw texture
-  entries.
+### 2.5 Loading process
 
-### 1.6 Text banks (verified)
+#### Level list and stage loading: Loading a stage in the emulator (verified; `notes/warp.md`)
 
-- An inflated `L<bank>E` file is a table of `u32` file-relative offsets followed by NUL-terminated strings; `n =
-  offset[0] / 4`; an offset of 0 means no string; lines end in `\n`.
-- **Text id** = `bank << 10 | index`. Bank table `0x800484D4`: 45 × `{char* nameE; char* nameJ}`, bank 0 NULL:
-  1 ame, 2 arch, 3 ark, 4 ash, 5 azt, 6 cat, 7 cave, 8 arec, 9 crad, 0xA cryp, 0xB dam, 0xC depo, 0xD dest,
-  0xE dish, 0xF ear, 0x10 eld, 0x11 imp, 0x12 jun, 0x13 lee, 0x14 len, 0x15 lip, 0x16 lue, 0x17 oat, 0x18 pam,
-  0x19 pete, 0x1A ref, 0x1B rit, 0x1C run, 0x1D sevb, 0x1E sev, 0x1F sevx, 0x20 sevxb, 0x21 sho, 0x22 silo,
-  0x23 stat, 0x24 tra, 0x25 wax, 0x26 gun, **0x27 title**, 0x28 mpmenu, 0x29 propobj, 0x2A mpweapons,
-  0x2B options, 0x2C misc.
-- Verified on screen: text id `0x9C79` (title #0x79) "Dam" is the name the mission select shows.
+From any front-end screen or any running stage, with the debugger core:
+`write 0x80048384 w {difficulty}` (optional), then `write 0x800242FC w {stage id}`. For multiplayer maps also write
+`0x8002A8F0 w 1` and `0x8002B520 w 2` first (with one player the MP-only maps would ask for a solo setup that
+doesn't exist). Tested: Facility, Dam (from inside Facility), Runway, Temple with 2 players (split screen), Dam on
+007, and back to the front end. Loading Dam takes about 26 s of wall time in the headless emulator; every stage
+opens with its intro fly-by. Ids without a text-bank case (all unused ids, including the Citadel's 0x28) hang in
+`0x7F0C15E0` according to the disassembly; *Unused and hidden content* reports what happens when they are requested.
 
----------------------------------------------------------------------------------------------------------------
-## 2. Level list and stage loading
+### 2.6 Revision differences
 
-### 2.1 Tables (verified: data segment; generator `fs/levels/levels.py` → `fs/levels/levels.tsv`)
+Revision-specific addresses and data differences are stated in the relevant tables.
 
-| table | address | layout |
-|---|---|---|
-| stage → solo setup name | `0x800374E4 + 4 × stage` | `char*` "Usetup<code>Z"; the MP name is built as `"Ump_" + name[1:]` when the player count ≥ 2 (`0x7F003D28`) |
-| stage → BG / stan | `0x8004448C`, 38 × 24 bytes | `{u32 stage; char* bg; char* stan; f32 f0C, f10, f14}` (scales: §3.7) |
-| stage → text bank | switch at `0x7F0C15E0` | stages without a case loop forever at `0x7F0C16DC` |
-| stage → memory arguments | `0x800241BC` | `{u32 stage; char* args}`, e.g. `-ml0 -me0 -mgfx70 -mvtx50 -mt625 -ma275` |
-| solo mission folders | `0x8002ABE4`, 28 bytes | `{char* label; u16 nameText; u16 altText; s32 stage; s32 mission; s32 isHeader; s32 partIndex; char* briefFile}`, header rows have stage −1, label 0 ends |
-| multiplayer maps | `0x8002B074`, 12 × 24 bytes | `{u16 name; u16 nameCaps; s32 photo; s32 stage; s32 unlockAfterPart; s32 one; s32 maxPlayers}`, in menu order |
+## 3. Level data
 
-### 2.2 Stages (verified from the tables; names from the title text bank)
+### 3.1 Level catalog and identifiers
+
+#### Level list and stage loading: Stages (verified from the tables; names from the title text bank)
 
 | id | code | BG file | stan | solo setup | MP setup | in-game |
 |---|---|---|---|---|---|---|
@@ -236,18 +107,18 @@ Key functions (verified addresses; names are descriptive):
 | 0x2D | imp | bg_ame (shared) | Tbg_ame | – | Ump_setupimpZ | MP **Basement** |
 | 0x2E | ash | bg_ame (shared) | Tbg_ame | – | Ump_setupashZ | MP **Stack** |
 | 0x36 | len | bg_len (0xFA0 bytes) | Tbg_len | UsetuplenZ | – | **Cuba**, the end-credits stage: the menu requests 0x36 after Antenna Cradle (`0x7F0168D8`) |
-| 0x28 | cat | bg_cat (0x5530 bytes) | Tbg_cat | – | – | unused: the **Citadel** (§8) |
-| 0x15, 0x2A, 0x2C, 0x2F, 0x31, 0x33-0x35, 0x37-0x39 | sevbunker (duplicate name), sho, eld, lue, rit, ear, lee, lip, wax, pam, bgx | empty or missing | | | | unused (§8) |
+| 0x28 | cat | bg_cat (0x5530 bytes) | Tbg_cat | – | – | unused: the **Citadel** (*Unused and hidden content*) |
+| 0x15, 0x2A, 0x2C, 0x2F, 0x31, 0x33-0x35, 0x37-0x39 | sevbunker (duplicate name), sho, eld, lue, rit, ear, lee, lip, wax, pam, bgx | empty or missing | | | | unused (*Unused and hidden content*) |
 | 0x5A | – | – | – | – | – | front end: logos, intro, file select, menus |
 
-Every mission stage has a briefing `Ubrief<code>Z` and a text bank named in §1.6. Solo folder part numbers,
+Every mission stage has a briefing `Ubrief{code}Z` and a text bank named in *Text banks (verified)*. Solo folder part numbers,
 which the unlock conditions use: 0 Dam, 1 Facility, 2 Runway, 3 Surface, 4 Bunker, 5 Silo, 6 Frigate, 7 Surface 2,
 8 Bunker 2, 9 Statue, 10 Archives, 11 Streets, 12 Depot, 13 Train, 14 Jungle, 15 Control, 16 Caverns, 17 Cradle,
 18 Aztec, 19 Egyptian.
 
 **Multiplayer menu order** (verified from the table): Random, Temple, Complex, Caves, Library, Basement, Stack,
 Facility, Bunker, Archives, Caverns, Egyptian. The title bank also holds "Citadel" (`0x9CAE`), which is not in
-the table (§8). The MP names were checked against the tables and text only: the MULTIPLAYER menu item is greyed
+the table (*Unused and hidden content*). The MP names were checked against the tables and text only: the MULTIPLAYER menu item is greyed
 out with one controller in the headless emulator.
 
 **Suggested viewer list:** the 20 missions in folder order (grouped by mission, `group` = "Mission 1:
@@ -255,7 +126,7 @@ Arkangelsk" …), then the multiplayer-only maps (Temple, Complex, Caves, Librar
 Library's BG and differ only in setup, so list them only if the viewer shows setup objects), then Cuba (credits)
 and the Citadel under "Unused".
 
-### 2.3 How the game selects and loads a stage (verified: disassembly and breakpoints)
+#### Level list and stage loading: How the game selects and loads a stage (verified: disassembly and breakpoints)
 
 - Globals: `0x800241A8` current stage; `0x800242FC` requested stage (−1 = none); `0x8002A8F4` stage chosen in the
   menu; `0x80048384` difficulty (0 Agent … 3 007); `0x8002A8F0` mode (1 = multiplayer); `0x8002B520` MP player
@@ -277,22 +148,78 @@ and the Citadel under "Unused".
   7. `UsetupdamZ`, `LdamE`, then the characters, heads, props and weapons the setup names;
   8. once play starts: animation reads, Bond's body, head and weapon, and code-page faults.
 
-### 2.4 Loading a stage in the emulator (verified; `notes/warp.md`)
+#### Mapping onto the viewer: Detection, game object, level list
 
-From any front-end screen or any running stage, with the debugger core:
-`write 0x80048384 w <difficulty>` (optional), then `write 0x800242FC w <stage id>`. For multiplayer maps also write
-`0x8002A8F0 w 1` and `0x8002B520 w 2` first (with one player the MP-only maps would ask for a solo setup that
-doesn't exist). Tested: Facility, Dam (from inside Facility), Runway, Temple with 2 players (split screen), Dam on
-007, and back to the front end. Loading Dam takes about 26 s of wall time in the headless emulator; every stage
-opens with its intro fly-by. Ids without a text-bank case (all unused ids, including the Citadel's 0x28) hang in
-`0x7F0C15E0` according to the disassembly; §8 reports what happens when they are requested.
+- `src/rom/index.ts` `openRom()`: `case 'NGEE'` on the game code at 0x3B, after `normalizeByteOrder()`.
+- `src/rom/types.ts`: extend `Game.id` with `'goldeneye'`. Existing `LevelKind`s suffice: `'campaign'` for missions
+  (with `group` = "Mission 1: Arkangelsk" …), `'battle'` for multiplayer maps, `'other'` for Cuba (credits) and the
+  unused Citadel.
+- `LevelInfo.name` = in-game name from the title text bank (*Stages (verified from the tables; names from the title text bank)*); `Level.id` = internal code (`dam`, `ark` …).
+  Order as suggested in *Stages (verified from the tables; names from the title text bank)*.
 
----------------------------------------------------------------------------------------------------------------
-## 3. Level geometry
+#### Verification evidence and open questions: ROM, codec, files, levels
 
-### 3.1 BG file (verified on all 25 non-empty files: ROM data and the loader `0x7F0B4124`)
+| check | method | result | evidence |
+|---|---|---|---|
+| boot and segments | disassembly of ROM 0x1000 at 0x70000400, the 0x7F code at 0x7F000000, the boot inflater | *Boot and code (verified by disassembly)* | `fs/code0.dis`, `fs/code7f.dis`, `fs/decomp.dis` |
+| TLB paging | RDRAM at the menu: resident frames vs ROM pages, page-table entries | 40 resident pages identical to ROM | `fs/ram/menu_diff.bin` |
+| 1172 codec vs game | breakpoint on the inflater `0x7F0CE7F0` and its return during a Runway load, dump each output | 60/60 outputs byte-identical to zlib | `fs/infverify.py`, `fs/inf_run/log.tsv` |
+| every stream | full-ROM scan | 6,863 streams, all reach end-of-stream | `fs/streams.tsv` |
+| viewer `inflate.ts` | `inflateRaw(rom, start + 2, 0)` over all streams vs Node zlib | 6,863/6,863 identical | `fs/ts/inflate_check.ts` |
+| files | `fs/extract.py` | 681 compressed files, all end-of-stream | `fs/index.json` |
+| stage load order | breakpoints on `romCopy`, inflate and name lookup while starting Dam | *How the game selects and loads a stage (verified: disassembly and breakpoints)* | `fs/trace_dam2.tsv` |
+| stage globals and warps | RAM writes; screenshots | Facility, Dam, Runway, Temple (2 players), Dam on 007, front end | `notes/warp.md`, `fs/shots/warp_test*.png` |
+| names | text-bank decode vs screen | the difficulty page shows "Mission 1: Arkangelsk / Part i: Dam" (text ids `0x9C78`/`0x9C79`) | `fs/shots/menu_*.png` |
 
-- `bg/bg_<code>_all_p.seg` is stored raw. Every pointer in it is **segment 0x0F, file-relative** (`0x0F000014` =
+### 3.2 Level container
+
+#### Level list and stage loading: Tables (verified: data segment; generator `fs/levels/levels.py` → `fs/levels/levels.tsv`)
+
+| table | address | layout |
+|---|---|---|
+| stage → solo setup name | `0x800374E4 + 4 × stage` | `char*` "Usetup{code}Z"; the MP name is built as `"Ump_" + name[1:]` when the player count ≥ 2 (`0x7F003D28`) |
+| stage → BG / stan | `0x8004448C`, 38 × 24 bytes | `{u32 stage; char* bg; char* stan; f32 f0C, f10, f14}` (scales: *Units, scale, handedness, camera (verified)*) |
+| stage → text bank | switch at `0x7F0C15E0` | stages without a case loop forever at `0x7F0C16DC` |
+| stage → memory arguments | `0x800241BC` | `{u32 stage; char* args}`, e.g. `-ml0 -me0 -mgfx70 -mvtx50 -mt625 -ma275` |
+| solo mission folders | `0x8002ABE4`, 28 bytes | `{char* label; u16 nameText; u16 altText; s32 stage; s32 mission; s32 isHeader; s32 partIndex; char* briefFile}`, header rows have stage −1, label 0 ends |
+| multiplayer maps | `0x8002B074`, 12 × 24 bytes | `{u16 name; u16 nameCaps; s32 photo; s32 stage; s32 unlockAfterPart; s32 one; s32 maxPlayers}`, in menu order |
+
+#### Level geometry: Portals and visibility (verified format; semantics partly hypothesis)
+
+- **Portals:** 8-byte entries `{ptr polygon; u8 roomA; u8 roomB; u16 flags}`, ended by a zero pointer. Polygon =
+  `{u8 n; 3 pad; n × f32 x, y, z}` in absolute BG space (e.g. Dam portal 0 joins rooms 134/133 with 4 points).
+  Cradle and Cuba have no portals.
+- **Visibility commands:** 8-byte `{u8 op; u8 arg; u16; u32 param}` until op 0; for op 0x64 the param is a
+  segment-0x0F pointer. Most files hold only the terminator; Dam uses ops 04, 14, 1E, 1F, 20, 5A, 5C, 64, 65.
+  Semantics not decoded (hypothesis: scripted visibility overrides). **A viewer draws every room** and can ignore
+  portals and visibility.
+
+#### Mapping onto the viewer: Level assembly (`loadLevel`)
+
+1. **Tables:** inflate the data segment once per ROM; read the stage tables (*Tables (verified: data segment; generator `fs/levels/levels.py` → `fs/levels/levels.tsv`)*), the environment tables (*Environment: fog, clear colour, sky (verified: disassembly and 12 captured frames)*), the
+   texture table (*Textures (verified unless marked)*), the prop, character and item tables (*Model tables (verified: ROM data and code references)*).
+2. **Space:** convert BG units to world units by ÷ f0C (*Units, scale, handedness, camera (verified)*), so every stage has the same scale. Keep right-handed Y-up
+   with no mirroring; swap two indices per triangle for CCW-front culling.
+3. **World geometry:** one `Mesh` per room ("room N", `info` = room number, file offsets) with primary batches and then
+   secondary batches; one `Instance` per room with the identity matrix (the room position is baked into vertices through
+   `vertexOffset`). Rooms can form a `LevelLayer` of kind 'main'. Set `cullBack = false` on every BG batch and
+   `decal` from ZMODE_DEC; the renderer should draw batches without depth test before the depth-tested ones (*Render state (verified: frame DLs of 13 captures and game-camera composites)*).
+4. **Objects:** parse the setup (`Usetup` for missions, `Ump_setup` for multiplayer-only maps), build each shown model once
+   per model number (rest pose, LOD near = 0, root translation ignored), then one `Instance` per record with the *Placement (verified against RAM on 8 stages, 1,299 objects)*
+   matrix (multiplied by 1/f0C when working in BG units). Guards: body + head posed with the sampled pose table.
+   Layers "objects", "guards", "pickups"; markers for spawns and gas volumes.
+5. **Environment:** `fog` from table A (omit for table-B stages); `clearColor` = record colour; sky (*Additions to `src/rom/types.ts` and the renderer*) when the sky
+   flag is set; Frigate water.
+6. **Camera:** the first set-0 spawn pad; eye = floor under the pad + 167.28 world units, target along the pad look,
+   `fovY` 60 (*Units, scale, handedness, camera (verified)*, *Spawn camera (verified on 12 stages)*; floor from the stan file, *Clipping ("stan") files and floor height (verified: all 26 regular non-empty files; RAM on 14 captures; code)*).
+7. `unplaced`: prop models no record references are not loaded, so nothing is listed there. Basement and Stack reuse
+   Library's meshes with their own setups.
+
+### 3.3 Geometry
+
+#### Level geometry: BG file (verified on all 25 non-empty files: ROM data and the loader `0x7F0B4124`)
+
+- `bg/bg_{code}_all_p.seg` is stored raw. Every pointer in it is **segment 0x0F, file-relative** (`0x0F000014` =
   offset 0x14). The loader reads the 0x40-byte header, relocates with `ptr + load − 0x0F000000`
   (`0x7F0B41FC..0x7F0B4214`) and inflates rooms on demand (`0x7F0B5FAC` → `0x7F0CE7F0`).
 - **Header:** `+0 u32 0; +4 ptr rooms; +8 ptr portals; +C ptr visibility commands; +10 u32 0`.
@@ -307,24 +234,104 @@ opens with its intro fly-by. Ids without a text-bank case (all unused ids, inclu
   region and the file end twice, so a stream's compressed size is the difference of consecutive pointers.
 - **Vertices are room-relative:** BG position = vertex + room position. Verified: the game's runtime room bounding
   boxes (RAM `0x80041414 + room × 0x50`, +0x38..+0x4C) equal the vertex + position box for 83 of 136 Dam rooms and
-  contain it for the rest; vertex-only boxes don't fit. The per-room modelviews in frame DLs confirm it (§3.7).
+  contain it for the rest; vertex-only boxes don't fit. The per-room modelviews in frame DLs confirm it (*Units, scale, handedness, camera (verified)*).
 - Runtime room records (RAM `0x80041414 + room × 0x50`): `+0 flags (0x01000201 loaded); +4 vertices (identical to the
   inflated stream); +8 expanded primary DL; +C secondary DL; +10..+18 compressed sizes; +1C inflated vertex size;
   +38 f32 min xyz, max xyz`. The game resolves segment 0x0E to the room's vertices (`0x7F0BB694`).
 
-### 3.2 Portals and visibility (verified format; semantics partly hypothesis)
+#### Level geometry: Building meshes, renders and comparisons
 
-- **Portals:** 8-byte entries `{ptr polygon; u8 roomA; u8 roomB; u16 flags}`, ended by a zero pointer. Polygon =
-  `{u8 n; 3 pad; n × f32 x, y, z}` in absolute BG space (e.g. Dam portal 0 joins rooms 134/133 with 4 points).
-  Cradle and Cuba have no portals.
-- **Visibility commands:** 8-byte `{u8 op; u8 arg; u16; u32 param}` until op 0; for op 0x64 the param is a
-  segment-0x0F pointer. Most files hold only the terminator; Dam uses ops 04, 14, 1E, 1F, 20, 5A, 5C, 64, 65.
-  Semantics not decoded (hypothesis: scripted visibility overrides). **A viewer draws every room** and can ignore
-  portals and visibility.
+**Mesh building** (prototype `bg/lib/gebg.ts`, with the patched `bg/lib/displaylist.ts`, `bg/lib/getex.ts` and
+`bg/lib/sky.ts`):
+1. Parse the header and room table; for rooms 1..n inflate the vertex, primary and secondary streams.
+2. Put each room's DLs and vertices in one buffer; resolve `0x0E000000 + o` to the vertex block and segment-0 offsets
+   to the DL.
+3. `runDisplayList` with ucode `'f3d'`, `vertexOffset` = the room position, `vertexScale` 1 (BG units), `mirrorX: false`,
+   `decals: true`, initial geometry mode G_ZBUFFER, and `rareTexture` resolving C0 to a decoded level-0 texture with
+   the C0 wrap modes.
+4. Swap two vertices per triangle; set `cullBack = false`. Primary batches, then secondary.
+5. Convert to world units (÷ f0C) so placements, camera and environment line up (*Units, scale, handedness, camera (verified)*).
 
-### 3.3 Display-list microcode (verified: opcode histogram over every stored list, disassembly, frame DLs)
+**Game-camera comparisons** (the BG agent viewed all; the lead viewed Frigate, Streets, Egyptian and the phase-1 Dam render). Each render uses the frame's own
+projection, room matrices and scissors, and adds the *Environment: fog, clear colour, sky (verified: disassembly and 12 captured frames)* sky, fog and clear colour with bilinear filtering. Objects,
+gun and HUD are not drawn. Composites are screenshot | render: `bg/renders/env/{stage}_final_composite.png`.
 
-The graphics microcode is **Fast3D 2.0G** (§1.1), not F3DEX. Stored room lists use only these commands (counts over
+| stage | matches | differs |
+|---|---|---|
+| Dam | blue sky gradient and cloud shapes, cliffs, hazard barrier, red/white barriers, tunnel, gravel, fog darkening | gun/HUD only |
+| Surface 1 | pink/orange clouds (with horizon offset 7), tree walls, road ruts, both snow banks | gun/HUD |
+| Aztec | corridor walls, carved pillars, stairs, floor tiles | a dark doorway slot where the game shows a stone block (hypothesis: a door object) |
+| Frigate | sky pixels equal within ±1, hull and railing, bow deck planks | the screenshot's water is brighter teal with a black wedge at the horizon; the render equals texel × shade computed from the frame's own RDP triangles, so these are Glide64 artefacts (hypothesis for hardware) |
+| Streets | buildings, cornices, black window panes (decal fix), fence, door, brownish sky | gun/HUD, timer |
+| Egyptian | pillar hall, translucent pool (ENV-alpha rule), back hall | gun/HUD |
+| Runway | door frame, walls, floor tiles, sky colour | the shutter and barrels are objects (*Placement (verified against RAM on 8 stages, 1,299 objects)* covers them: `obj/renders/composite_runway.png`) |
+| Jungle | ground shape, fog colour | trees, plants and Natalya are objects (`obj/renders/scene_jungle.png`) |
+| Temple, 2 players | both split-screen viewports (`temple_mp2_final_composite.png`, `temple_mp2_p2_final_composite.png`): corridors, doorway, floor | weapons and radar |
+| Facility (phase 1, no environment) | X-braced wall on the left, corridor on the right (`bg/renders/ark_gamecam_textured.png`) | point sampling, gun |
+
+**Culling tests** (same cameras): the opposite winding rule shows cliff interiors on Dam, back faces on Facility and
+loses the ground on Surface 1 (`bg/renders/test_*cull*.png`, `sevx_gamecam_textured_WRONGcull.png`), confirming
+clockwise fronts. Culling with the correct rule still leaves the holes described in *Render state (verified: frame DLs of 13 captures and game-camera composites)* (`bg/renders/env/exp/`), so
+BG is drawn double-sided.
+
+**Viewer-style renders** (free camera, all rooms, fog, sky, clear colour): `bg/renders/env/viewer_dam_spawn.png`
+(matches the game view from the spawn, plus a few sky-textured backdrop pieces above the cliffs, *Render state (verified: frame DLs of 13 captures and game-camera composites)*) and
+`viewer_frigate_deck.png` (ship, helipad, mast, sky gradient, water fading to the horizon). Overviews of all 25 BG
+files: `bg/renders/bg_{code}_{name}_overview.png` / `_top.png`. With objects and guards:
+`obj/renders/overview_facility_guards.png`.
+
+**Per-level statistics** (verified, `bg/scripts/stats.ts`; triangles as built, empty B1 slots skipped):
+
+| BG | stage(s) | rooms | portals | triangles (primary / secondary) | vertices | textures |
+|---|---|---|---|---|---|---|
+| sev | Bunker 1 | 30 | 30 | 4,927 (4,671 / 256) | 8,498 | 62 |
+| silo | Silo | 86 | 94 | 25,933 (23,693 / 2,240) | 43,328 | 74 |
+| stat | Statue | 27 | 43 | 9,231 (7,737 / 1,494) | 17,390 | 134 |
+| arec | Control | 91 | 141 | 13,862 (12,805 / 1,057) | 23,872 | 122 |
+| arch | Archives | 65 | 103 | 10,957 (10,231 / 726) | 20,608 | 99 |
+| tra | Train | 57 | 64 | 9,358 (8,238 / 1,120) | 16,321 | 62 |
+| dest | Frigate | 58 | 94 | 16,677 (14,521 / 2,156) | 28,155 | 116 |
+| sevb | Bunker 2 | 68 | 75 | 6,817 (6,175 / 642) | 12,625 | 69 |
+| azt | Aztec | 92 | 95 | 11,342 (11,115 / 227) | 21,835 | 117 |
+| pete | Streets | 18 | 61 | 5,964 (5,569 / 395) | 11,666 | 86 |
+| depo | Depot | 89 | 118 | 13,594 (11,739 / 1,855) | 25,496 | 148 |
+| ref | Complex | 44 | 60 | 2,512 (2,454 / 58) | 4,822 | 13 |
+| cryp | Egyptian | 44 | 51 | 8,039 (7,971 / 68) | 14,688 | 12 |
+| dam | Dam | 136 | 194 | 12,400 (11,348 / 1,052) | 21,722 | 74 |
+| ark | Facility | 77 | 109 | 14,155 (13,625 / 530) | 25,493 | 82 |
+| run | Runway | 17 | 27 | 2,991 (2,637 / 354) | 5,041 | 68 |
+| sevx | Surface 1 and 2 | 39 | 101 | 8,100 (6,282 / 1,818) | 14,697 | 67 |
+| jun | Jungle | 44 | 59 | 6,265 (4,414 / 1,851) | 10,618 | 62 |
+| dish | Temple | 25 | 37 | 1,014 (1,014 / 0) | 1,697 | 5 |
+| cave | Caverns | 63 | 76 | 10,707 (9,993 / 714) | 18,241 | 46 |
+| cat | Citadel (unused) | 46 | 52 | 1,101 (1,101 / 0) | 1,968 | 3 |
+| crad | Cradle | 36 | 0 | 5,031 (3,947 / 1,084) | 9,182 | 45 |
+| ame | Library, Basement, Stack | 92 | 110 | 1,627 (1,605 / 22) | 3,142 | 11 |
+| oat | Caves | 13 | 15 | 1,905 (1,905 / 0) | 3,018 | 1 |
+| len | Cuba | 1 | 0 | 434 (434 / 0) | 712 | 7 |
+
+1,013 distinct texture numbers are used by BG files.
+
+#### Level geometry: Pitfalls
+
+1. The last room-table entry is a sentinel, and entry 0 is empty.
+2. Vertices are room-relative; without the room position every room piles up at the origin.
+3. `B1` isn't F3DEX TRI2 (four 4-bit-index triangles); `BF` indices are ×10; `G_VTX` counts are 4 bits.
+4. Texture entries aren't 1172 streams, and the table stores sizes, not offsets.
+5. BG lists have no `G_SETTIMG`: textures come from `C0`, and the lists in RAM differ from those in ROM.
+6. Don't mirror X; don't back-face cull BG.
+7. Alpha comes from `FB` env alpha through the patched combiner, not from vertex alpha.
+8. Decals need a depth offset.
+9. Three spaces (BG, world = BG ÷ f0C, render = world × f10); pads are in BG units.
+10. Game frames are letterboxed (320×220 at y 10) and multiplayer viewports are halves; the reference screenshots are
+    Glide64 HLE, which differs from the RDP data on water.
+11. The 0x7F game code is demand-paged: disassemble it from ROM, never from RAM.
+
+### 3.4 Display lists and render state
+
+#### Level geometry: Display-list microcode (verified: opcode histogram over every stored list, disassembly, frame DLs)
+
+The graphics microcode is **Fast3D 2.0G** (*Identification (verified: ROM bytes)*), not F3DEX. Stored room lists use only these commands (counts over
 all rooms): `04` G_VTX 24,103 · `B1` (Rare) 56,836 · `BF` G_TRI1 2,115 · `B6`/`B7` geometry mode 686/2,285 · `B8`
 G_ENDDL 2,048 · `B9`/`BA` SETOTHERMODE_L/H 2,935/8,804 · `BB` G_TEXTURE 5,204 · `C0` (Rare) 10,348 · `E7` PIPESYNC
 5,055 · `FB` SETENVCOLOR 2,776 · `FC` SETCOMBINE 4,231. There is no G_DL, G_SETTIMG, G_MTX or MOVEWORD in stored lists.
@@ -333,7 +340,7 @@ G_ENDDL 2,048 · `B9`/`BA` SETOTHERMODE_L/H 2,935/8,804 · `BB` G_TEXTURE 5,204 
 |---|---|
 | `04` G_VTX (Fast3D) | `w0 = 04 · (n−1) << 20 · v0 << 16 · n × 16`; `w1 = 0x0E000000 + offset` into the room's vertices |
 | `BF` G_TRI1 (Fast3D) | indices stored × 10: `BF000000 005A5096` = vertices 9, 8, 15 |
-| **`B1` (Rare, four triangles)** | triangle k (k = 0..3) = `(w1 >> (8k+4) & 15, w1 >> 8k & 15, w0 >> 4k & 15)`; a (0, 0, 0) slot is unused. Verified: the game copies B1/BF unchanged into the lists it draws, and the geometry matches screenshots (§3.9) |
+| **`B1` (Rare, four triangles)** | triangle k (k = 0..3) = `(w1 >> (8k+4) & 15, w1 >> 8k & 15, w0 >> 4k & 15)`; a (0, 0, 0) slot is unused. Verified: the game copies B1/BF unchanged into the lists it draws, and the geometry matches screenshots (*Building meshes, renders and comparisons*) |
 | **`C0` (Rare, texture)** | `w1 & 0xFFF` = texture number; `(w0 >> 22) & 3` S wrap and `(w0 >> 20) & 3` T wrap (0 repeat, 1 clamp, 2 mirror); `(w0 >> 18) & 3` filter (2 = bilinear, tiles offset by half a texel); `w0 & 7` mode: 2 = one mipmapped texture (almost all), 1 = two textures (second number `(w1 >> 12) & 0xFFF`), 0/3/4 variants; `w1 >> 24` a parameter (modes 0/1) |
 | `B6`..`BB`, `E7`, `FB`, `FC` | standard, with F3DEX 1.x numbering; `G_CULL_BACK` = 0x2000 |
 
@@ -345,7 +352,72 @@ The expander also patches the `BB` level counts and adds fog to the stored rende
 
 `B7 0x60000` (LIGHTING | TEXTURE_GEN, environment mapping) occurs three times over all BG files; not modelled.
 
-### 3.4 Textures (verified unless marked)
+#### Level geometry: Frame structure (verified: captured frames, `runtime/captures/*/dl.txt`)
+
+One Fast3D task per frame (OSTask at `0x8004EA00`/`0x8004EA60`, loaded by `osSpTaskLoad` `0x7000E60C`; ucode text
+`0x80020E60`). Draw order:
+1. Segment 1 = static state lists (copies at `0x7F0E2D70`/`0x7F0E2D90`); Z clear.
+2. Viewport and perspective; letterbox bars.
+3. **Sky and water** (*Environment: fog, clear colour, sky (verified: disassembly and 12 captured frames)*).
+4. Lights, lookat, fog; **objects, opaque pass** (per-part matrices in segment 3, model in segment 5).
+5. **BG rooms, primary lists**, each wrapped as in *Render state (verified: frame DLs of 13 captures and game-camera composites)*.
+6. **BG rooms, secondary lists**, then **objects, translucent pass** (CPU fog: `SETFOGCOLOR` = fog colour × the
+   object's fog fraction).
+7. First-person gun (own matrices, environment-mapped chrome, no fog), then the HUD (FILLRECT/TEXRECT).
+
+Frame-list Fast3D encodings: `BC` G_MOVEWORD (low byte 06 segment, 08 fog factor `mul << 16 | offset`, 0E perspnorm);
+`01` G_MTX (byte 1: 1 projection, 2 load, 4 push); `03` G_MOVEMEM (80 viewport, 82/84 lookat, 86/88 lights);
+`B4/B2/B3` RDPHALF carrying raw RDP triangles and TEXRECTs.
+
+**Runtime check of the C0 expansion** (Dam room 135, stored vs the copy the frame calls): all non-texture commands are
+copied verbatim except the fog-patched render mode; `C0080002 00000467` becomes `SETTIMG 0x801504F8`, LOADBLOCK into
+tile 7, LOADTLUT, TLUT mode and six `SETTILE`/`SETTILESIZE` levels (32×32 down, with the bilinear half-texel offset).
+
+**Other code-drawn things** (not level data): per-object CPU fog; the first-person gun and HUD; environment-mapped BG
+surfaces (three `B7 0x60000` cases; drawable with plain UVs); an animated handler for texture 1508 (`0x7F0CE5F0`;
+frame 0 is fine); multiplayer split-screen viewports.
+
+#### Objects and props: Model file format (verified: all 503 P/C/G files parse and every display list decodes; RAM on Dam)
+
+- The **ModelFileHeader** is in the data segment, not the file (0x20 bytes): `+00 root node*; +04 skeleton*;
+  +08 switches*; +0C s16 numSwitches; +0E s16 numMatrices; +10 f32 radius; +16 s16 numTextures; +18 texture list*;
+  +1C loaded flag`.
+- **File layout:** `u32 × numSwitches`, then `numTextures` × 12-byte texture records `{u32 texture number; u8 width;
+  u8 height; …}`, then nodes, rodata, vertices and display lists. The root node is the first byte after the texture
+  list.
+- **Pointers** are `0x05000000 + file offset`. At load the game relocates them, turns texture numbers into loaded
+  textures and rewrites the DLs (expanding `C0` like the BG loader; verified on `Poil_drum7Z` in RAM).
+- **Node**, 0x18 bytes: `u16 type (low byte type, high byte flags); ptr rodata; ptr parent; ptr next; ptr prev; ptr
+  child`. Render dispatch `0x7F074534`.
+
+| type | count | meaning | rodata (bold = verified) | viewer |
+|---|---|---|---|---|
+| 01 | 48 | root (characters, helicopter) | `s32; ptr; 0; 0` | – |
+| 02 | 1140 | position (joint) | **f32 pos[3]; s16 joint (+0C); s16 matrix slot (+0E)**; s16 slot2/3; ptr child; f32 radius | transform |
+| 04 | 606 | gun DL | **ptr primary; ptr secondary; ptr seg-5 base; ptr vertices; s16 count; u8 mode (+12)** | draw |
+| 08 | 678 | distance LOD | **f32 near; f32 far; ptr child** | use the LOD with near = 0 |
+| 09 | 345 | reorder | f32[6]; **ptr childA (+18); ptr childB (+1C)** | draw both |
+| 0A | 1014 | bounding box | **s32 part; f32 xmin, xmax, ymin, ymax, zmin, zmax** | placement only |
+| 0C | 21 | gunfire | f32 pos[3]; f32 size[3]; … | skip |
+| 0D | 42 | effect (translucent pass) | … | skip |
+| 0F | 2 | ? | … | skip |
+| 12 | 291 | toggle (heads, parts) | **ptr child** | draw |
+| 15 | 80 | position held (hands, guns) | f32 pos[3]; s16 slot; … | transform |
+| 16 | 5 | star gunfire | … | skip |
+| 17 | 28 | head spot (bodies) | … | attach the head model |
+| 18 | 1469 | DL | **ptr primary; ptr secondary; ptr vertices (segment 4); s16 numVertices; …; s16 mode (+18); ptr seg-5 base (+1C)** | draw |
+
+- **Display lists** use the same microcode as BG (*Display-list microcode (verified: opcode histogram over every stored list, disassembly, frame DLs)*): opcodes `01 04 B1 B6 B7 B8 B9 BA BB BF C0 E6 E7 F2 F3 F5 FC
+  FD`, no unknowns. Segment 3 = the model's matrix slots (`01020040 030000xx` = G_MTX load slot xx/0x40), segment 4 =
+  the node's vertices, segment 5 = the file. A few item models use raw `FD/F5/F3/F2/E6` texture setup.
+- **Render state by node mode** (type 18 +0x18, type 04 +0x12): 1 and 3 opaque; 4 = the secondary list is drawn in the
+  translucent pass. Viewer: primary = opaque (cutout when the texture has alpha), secondary with mode 4 = blend. Most
+  model DLs set `B7 0x2000` (cull back); `B7 0x60000` marks environment-mapped parts. Vertex colours are prelit.
+- **UVs:** `s × G_TEXTURE scale / 32 / width`, wrap from C0 (renders match the Runway screenshot).
+
+### 3.5 Textures and materials
+
+#### Level geometry: Textures (verified unless marked)
 
 - **Table** at data `0x80049300`: 8-byte records `{u8 flags; u24 size; u32 0}`, 2,698 textures + a terminator (low 24
   bits `0xFFFF`). In ROM the u24 is the entry's **size**; boot code (`0x7F000BD0`) rewrites it to the running offset.
@@ -370,35 +442,27 @@ The expander also patches the `BB` level counts and adds fog to the stored rende
 - Wrap and clamp come from C0; a viewer uses level 0. Contact sheets of all 2,698 textures:
   `bg/renders/tex_sheet_000.png`..`tex_sheet_010.png`. 1,013 distinct texture numbers are used by BG files.
 
-### 3.5 Render state (verified: frame DLs of 13 captures and game-camera composites)
+#### Verification evidence and open questions: Level geometry and textures
 
-- The game calls every visible room's **primary** list, then the **secondary** lists after all primaries.
-- Before each room: `G_MTX` projection load (combined view × projection), fog colour + fog factor, `B7` G_FOG, `G_MTX`
-  modelview load (room matrix, §3.7), `BC003806` segment 14 = the room's vertices, `G_DL`.
-- Each room call also sets a scissor rectangle from the portal chain; a viewer doesn't need it.
-- Geometry mode at primary calls: ZBUFFER | SHADE | SHADING_SMOOTH | CULL_BACK | FOG; the lists' own B6/B7 change
-  CULL_BACK for some geometry.
-- **Culling: draw BG double-sided.** Most triangles wind clockwise on screen, and the opposite rule is clearly wrong
-  (§3.9 culling tests). But rendering with the lists' cull flags leaves holes where the game shows geometry: Aztec's
-  floor at the spawn, a Surface 1 snow bank, a Dam cliff face, Frigate's deck planks. Pixel probes show ordinary opaque
-  triangles in `B7 00002000` lists, fully in front of the camera and inside the guard band, wound opposite to their
-  neighbours. Drawing BG without back-face culling fills every hole and shows no artefact in any of 10 game-camera
-  composites (verified). Why the game draws them is not known (hypothesis: Fast3D 2.0G's cull test differs from the
-  screen-area sign; the reference frames come from the Glide64 HLE plugin, and an LLE check gave no usable image headless).
-- **Blend, depth and decal** come from the stored `B9` render modes (the game only adds fog): `…2078` opaque;
-  `…4DD8` / `…49D8` translucent (ZMODE_XLU, FORCE_BL); `…2D58` decal (ZMODE_DEC); `…2048` no depth.
-  `displaylist.ts` already maps these bits. **Decals need a depth offset**: without one the Streets window panes and
-  kerbs z-fight into stripes (verified by composite). **Batches without depth test** (e.g. Dam room 5, render mode
-  `0C182048`, a backdrop) should be drawn before the depth-tested rooms (hypothesis from a render probe: drawn in room
-  order they paint over nearer cliffs).
-- **Vertex colours are prelit** RGBA (no RSP lighting except the three environment-mapped cases); colour = texture ×
-  vertex colour (`FC26A004 1F1093FF` etc.).
-- **Alpha = texel alpha × the list's `FB` env alpha**, not vertex alpha: the C0 expander patches the combiners' second
-  alpha cycle from SHADE to ENV (`1F1093FF` stored → `1F1493FF` in RAM; shade alpha carries fog). Verified: Egyptian's
-  pool (secondary list, `FB …7F`) is opaque without this rule and translucent like the screenshot with it.
-- Fog, sky and clear colour are set by code (§3.6).
+| check | method | result | evidence |
+|---|---|---|---|
+| BG format | parse all 25 files; loader disassembly | all rooms, portals and streams parse; per-level stats in *Building meshes, renders and comparisons* | `bg/lib/bgfile.ts`, `bg/scripts/stats.ts` |
+| room-relative vertices | runtime room boxes in RAM vs vertex + position boxes | equal for 83/136 Dam rooms, containing for the rest | `runtime/captures/dam/ram.bin` |
+| C0 expansion | pair each stored C0 with the game's expanded commands in RAM | 11 Dam + 5 Facility lists, 0 mismatches | `bg/scripts/align2.py` |
+| texture decoder | instruction-level port of the game's loader vs RAM | level-0 texels identical for all 30 textures loaded in the Dam and Facility frames; whole buffers identical for 25 | `bg/lib/getex.ts`, `bg/scripts/ramtexcheck.ts` |
+| texture table | reconstruction vs runtime table in RAM | 2,699/2,699 records equal | `bg/scripts/texcheck.ts` |
+| scale, handedness | frame DL room matrices and the combined projection | k = f10 / f0C on Dam, Facility and Surface 1 (to 5 digits); det +1, up +Y | `bg/scripts/framerooms.py` |
+| game-camera renders | render the frame's rooms with its own matrices and viewport; compare with the screenshot of the same frame (lead viewed Dam) | Dam, Facility and Surface 1 match in layout, handedness and textures | `bg/renders/{dam,ark,sevx}_gamecam_textured.png` vs `runtime/captures/dam/shot_before.png`, `bg/captures/{ark,sevx}/shot_before.png` |
+| culling | the same cameras with the opposite rule, with the lists' rule, and double-sided | the opposite rule shows cliff interiors (Dam), back faces (Facility) and loses the ground (Surface 1); the lists' rule leaves holes (Aztec floor, Surface 1 bank, Dam cliff, Frigate deck); double-sided matches all 10 composites | `bg/renders/test_*cull*.png`, `sevx_gamecam_textured_WRONGcull.png`, `bg/renders/env/exp/` |
+| alpha and decals | Egyptian pool and Streets windows with and without the ENV-alpha rule and decal offset; the patched combiner in RAM (`1F1093FF` → `1F1493FF`) | translucent pool and clean windows only with the rules | `bg/renders/env/egyptian_final_composite.png`, `streets_final_composite.png` (lead viewed) |
 
-### 3.6 Environment: fog, clear colour, sky (verified: disassembly and 12 captured frames)
+### 3.6 Collision
+
+Collision storage and interpretation are described with the corresponding level records above.
+
+### 3.7 Environment, sky, fog, and lighting
+
+#### Level geometry: Environment: fog, clear colour, sky (verified: disassembly and 12 captured frames)
 
 **Selection** (`0x7F0BAA64(stage, flag)`):
 1. If flag ≠ 0: find id + 900 in table A. Only Dam and Surface 2 have one; they are alternate environments that
@@ -461,7 +525,7 @@ the record colour (RGBA5551) in every capture.
 
 **Viewer `Fog`:** `color` = record RGB; `multiplier = 128000 / (max − min)`; `offset = (500 − min) × 256 / (max − min)`
 (Dam: 25600 / −25344, identical to the frame's `BC000008 64009D00`); `near`/`far` = record values ÷ f10 in world
-units (§3.7; f10 = 0.2 for Dam, Surface 1 and 2, else 1.0). Omit `fog` for table-B stages. Rooms get fog from the
+units (*Units, scale, handedness, camera (verified)*; f10 = 0.2 for Dam, Surface 1 and 2, else 1.0). Omit `fog` for table-B stages. Rooms get fog from the
 emitter `0x7F0BB070`; objects are fogged on the CPU with the same colour, so the viewer can apply the level fog to
 everything.
 
@@ -492,14 +556,57 @@ everything.
 camera-relative horizontal quad (or disc) at the cloud height, texture 2228 repeating every 320 world units, colour
 fading from the cloud RGB overhead to the record colour at the horizon (the combine above). The part below the horizon
 is the clear colour; for Frigate add the water quad at −150. Draw it first without depth or fog, shifted up by the
-horizon offset. A faithful version needs small renderer additions (§6.7).
+horizon offset. A faithful version needs small renderer additions (*Additions to `src/rom/types.ts` and the renderer*).
 
-### 3.7 Units, scale, handedness, camera (verified)
+#### Verification evidence and open questions: Runtime rendering and environment
+
+| check | method | result | evidence |
+|---|---|---|---|
+| captures | debugger breakpoint on `osSpTaskLoad` (`0x7000E60C`) at the frame's graphics task, 8 MiB RDRAM dump while paused, ring screenshots before and after; frame DL walked | 14 stages (Dam ×2, Facility, Surface 1, Aztec, Runway, Frigate, Jungle, Streets, Egyptian, Cradle, Statue, Caverns, Silo, Temple with 2 players); every screenshot viewed | `runtime/captures/{stage}/{manifest.json,ram.bin,dl.txt,shot_before.png}`, `runtime/captures/index.json` |
+| microcode | OSTask ucode text/data; the data string; Glide64's checksum | Fast3D "RSP SW Version: 2.0G" (checksum `0xAE08D5B9` = Glide64 ucode 0) | manifests |
+| environment table | disassembly of the selector `0x7F0BAA64`, copier `0x7F0BA758` and fog emitter `0x7F0BB070`; record fields vs frame commands | fog factor, fog colour and near exact, far to Mtx precision, in 12 frames; the no-fog fallback on Frigate and Silo; sky fill colour = record colour in every capture | `runtime/tools/decode_env.py`, `runtime/an/env_tables.json` |
+| sky | disassembly of `0x7F094488`; decode of the raw RDP triangles in 8 captures | vertex shade formula ±1; UV fit rms ≤ 0.07 texel on 6 stages (*Environment: fog, clear colour, sky (verified: disassembly and 12 captured frames)*) | `runtime/an/sky/rdptri_out.txt`, `bg/scripts/skyfit2.py` |
+| scale and camera | `0x800413F4/F8`, `0x80032310`, room Mtx diagonals, camera struct fields in 3 dumps | world = BG ÷ f0C, render = world × f10; right-handed Y up | manifests |
+| spawn and eye height | player struct vs setup spawn pads (runtime), stan floor (obj) | camera on a spawn pad facing its look vector on 12 stages; eye = floor + 167.28 world units exactly | `runtime/tools/spawn.ts`, `obj/out/stan_verify.txt` |
+| environment renders | the *Environment: fog, clear colour, sky (verified: disassembly and 12 captured frames)* model added to the game-camera renderer; composites viewed by the BG agent, 3 by the lead | 9 stages match (*Building meshes, renders and comparisons*) | `bg/renders/env/*_final_composite.png` |
+| C0 expansion at runtime | Dam room 135 stored list vs the copy the frame calls | only C0 and the fog-patched render mode differ | `runtime/tools/texcheck.ts` |
+
+### 3.8 Cameras and paths
+
+#### Level geometry: Render state (verified: frame DLs of 13 captures and game-camera composites)
+
+- The game calls every visible room's **primary** list, then the **secondary** lists after all primaries.
+- Before each room: `G_MTX` projection load (combined view × projection), fog colour + fog factor, `B7` G_FOG, `G_MTX`
+  modelview load (room matrix, *Units, scale, handedness, camera (verified)*), `BC003806` segment 14 = the room's vertices, `G_DL`.
+- Each room call also sets a scissor rectangle from the portal chain; a viewer doesn't need it.
+- Geometry mode at primary calls: ZBUFFER | SHADE | SHADING_SMOOTH | CULL_BACK | FOG; the lists' own B6/B7 change
+  CULL_BACK for some geometry.
+- **Culling: draw BG double-sided.** Most triangles wind clockwise on screen, and the opposite rule is clearly wrong
+  (*Building meshes, renders and comparisons* culling tests). But rendering with the lists' cull flags leaves holes where the game shows geometry: Aztec's
+  floor at the spawn, a Surface 1 snow bank, a Dam cliff face, Frigate's deck planks. Pixel probes show ordinary opaque
+  triangles in `B7 00002000` lists, fully in front of the camera and inside the guard band, wound opposite to their
+  neighbours. Drawing BG without back-face culling fills every hole and shows no artefact in any of 10 game-camera
+  composites (verified). Why the game draws them is not known (hypothesis: Fast3D 2.0G's cull test differs from the
+  screen-area sign; the reference frames come from the Glide64 HLE plugin, and an LLE check gave no usable image headless).
+- **Blend, depth and decal** come from the stored `B9` render modes (the game only adds fog): `…2078` opaque;
+  `…4DD8` / `…49D8` translucent (ZMODE_XLU, FORCE_BL); `…2D58` decal (ZMODE_DEC); `…2048` no depth.
+  `displaylist.ts` already maps these bits. **Decals need a depth offset**: without one the Streets window panes and
+  kerbs z-fight into stripes (verified by composite). **Batches without depth test** (e.g. Dam room 5, render mode
+  `0C182048`, a backdrop) should be drawn before the depth-tested rooms (hypothesis from a render probe: drawn in room
+  order they paint over nearer cliffs).
+- **Vertex colours are prelit** RGBA (no RSP lighting except the three environment-mapped cases); colour = texture ×
+  vertex colour (`FC26A004 1F1093FF` etc.).
+- **Alpha = texel alpha × the list's `FB` env alpha**, not vertex alpha: the C0 expander patches the combiners' second
+  alpha cycle from SHADE to ENV (`1F1093FF` stored → `1F1493FF` in RAM; shade alpha carries fog). Verified: Egyptian's
+  pool (secondary list, `FB …7F`) is opaque without this rule and translucent like the screenshot with it.
+- Fog, sky and clear colour are set by code (*Environment: fog, clear colour, sky (verified: disassembly and 12 captured frames)*).
+
+#### Level geometry: Units, scale, handedness, camera (verified)
 
 - **BG stage table** `0x8004448C`: `{u32 stage; char* bg; char* stan; f32 f0C; f32 f10; f32 f14}`, e.g. Dam 0.23364 /
   0.2 / 100, Facility 1.20648 / 1.0 / 64.1, Surface 1 0.45446 / 0.2 / 22.6.
 - Three spaces:
-  - **BG units** are the BG file's (room positions, vertices, portals) and **setup pads'** (verified on 12 stages, §4).
+  - **BG units** are the BG file's (room positions, vertices, portals) and **setup pads'** (verified on 12 stages, *Objects and props*).
   - **World units = BG units / f0C.** The camera struct, eye height and environment distances use them (verified:
     `[0x8007A0B0]` +04 eye, +10 target, +1C up, +38 render origin, on Dam, Facility, Surface 1). The eye height of
     167.28 suggests centimetres (hypothesis).
@@ -509,7 +616,7 @@ horizon offset. A faithful version needs small renderer additions (§6.7).
 - **Handedness:** right-handed, +Y up, **no mirroring** (the view part of the combined matrix has det +1; screen right
   = forward × up in all 14 captures; renders match screenshots).
 - **Winding:** most BG faces wind **clockwise on screen** (front). Swap two indices per triangle to follow the
-  viewer's CCW-front convention, but set `cullBack = false` for BG batches (§3.5: some visible triangles are wound the
+  viewer's CCW-front convention, but set `cullBack = false` for BG batches (*Render state (verified: frame DLs of 13 captures and game-camera composites)*: some visible triangles are wound the
   other way). Don't negate X.
 - **Projection:** fovY 60°, aspect 320/220 (letterboxed rows 0–9 and 230–239); near/far from the environment record in
   render units.
@@ -517,129 +624,80 @@ horizon offset. A faithful version needs small renderer additions (§6.7).
   hypothesis). The viewer can divide by 100 for metres if its fly speed expects smaller numbers. Fog near/far then
   become `near / f10`, `far / f10`.
 - **Start camera (`Level.camera`)** (verified on 12 stages): the player spawns on one of the setup's intro spawn pads
-  (§4.4). The eye is 167.28 world units above the floor under the pad, looking along the pad's look vector (camera
+  (*Intro block (verified: walker `0x7F0057C4`)*). The eye is 167.28 world units above the floor under the pad, looking along the pad's look vector (camera
   yaw = pad look within 0.3° on all 12), fovY 60. Floor height isn't the pad Y (pads float 40–150 units above or below it): take the floor
-  from the stan file (§4.10, §4.11). Stages with several spawn records (Dam 3, Facility 4, Silo 3): which one the
+  from the stan file (*Clipping ("stan") files and floor height (verified: all 26 regular non-empty files; RAM on 14 captures; code)*, *Spawn camera (verified on 12 stages)*). Stages with several spawn records (Dam 3, Facility 4, Silo 3): which one the
   game picks was not traced; use the first. Frames also show a constant ~3.9° downward pitch (hypothesis: head bob/aim).
 
-### 3.8 Frame structure (verified: 14 captured frames, `runtime/captures/*/dl.txt`)
+#### Objects and props: Spawn camera (verified on 12 stages)
 
-One Fast3D task per frame (OSTask at `0x8004EA00`/`0x8004EA60`, loaded by `osSpTaskLoad` `0x7000E60C`; ucode text
-`0x80020E60`). Draw order:
-1. Segment 1 = static state lists (copies at `0x7F0E2D70`/`0x7F0E2D90`); Z clear.
-2. Viewport and perspective; letterbox bars.
-3. **Sky and water** (§3.6).
-4. Lights, lookat, fog; **objects, opaque pass** (per-part matrices in segment 3, model in segment 5).
-5. **BG rooms, primary lists**, each wrapped as in §3.5.
-6. **BG rooms, secondary lists**, then **objects, translucent pass** (CPU fog: `SETFOGCOLOR` = fog colour × the
-   object's fog fraction).
-7. First-person gun (own matrices, environment-mapped chrome, no fog), then the HUD (FILLRECT/TEXRECT).
+Eye = the stan floor under the spawn pad + **167.28 world units** (`167.28 × f0C` BG units), looking along the pad's
+look vector, fovY 60. Against the 12 runtime captures' eye positions (`obj/out/stan_verify.txt`): 0.02–0.12 BG units on
+5 stages, 0.75–10 on 6 (the idle sway and a small slide at spawn), 17.7 on Silo and 26.7 on Surface 1; Y exact except
+Jungle (−1.7) and Temple (2.5). Which of several spawn records the game picks was not traced; the first set-0 record
+matched in Facility and Streets.
 
-Frame-list Fast3D encodings: `BC` G_MOVEWORD (low byte 06 segment, 08 fog factor `mul << 16 | offset`, 0E perspnorm);
-`01` G_MTX (byte 1: 1 projection, 2 load, 4 push); `03` G_MOVEMEM (80 viewport, 82/84 lookat, 86/88 lights);
-`B4/B2/B3` RDPHALF carrying raw RDP triangles and TEXRECTs.
+## 4. Objects
 
-**Runtime check of the C0 expansion** (Dam room 135, stored vs the copy the frame calls): all non-texture commands are
-copied verbatim except the fog-patched render mode; `C0080002 00000467` becomes `SETTIMG 0x801504F8`, LOADBLOCK into
-tile 7, LOADTLUT, TLUT mode and six `SETTILE`/`SETTILESIZE` levels (32×32 down, with the bilinear half-texel offset).
+### 4.1 Placement records
 
-**Other code-drawn things** (not level data): per-object CPU fog; the first-person gun and HUD; environment-mapped BG
-surfaces (three `B7 0x60000` cases; drawable with plain UVs); an animated handler for texture 1508 (`0x7F0CE5F0`;
-frame 0 is fine); multiplayer split-screen viewports.
+#### Objects and props: Placement (verified against RAM on 8 stages, 1,299 objects)
 
-### 3.9 Building meshes, renders and comparisons
+Work in world units (÷ level scale f0C) and multiply by f0C for BG units, or work in BG units throughout.
 
-**Mesh building** (prototype `bg/lib/gebg.ts`, with the patched `bg/lib/displaylist.ts`, `bg/lib/getex.ts` and
-`bg/lib/sky.ts`):
-1. Parse the header and room table; for rooms 1..n inflate the vertex, primary and secondary streams.
-2. Put each room's DLs and vertices in one buffer; resolve `0x0E000000 + o` to the vertex block and segment-0 offsets
-   to the DL.
-3. `runDisplayList` with ucode `'f3d'`, `vertexOffset` = the room position, `vertexScale` 1 (BG units), `mirrorX: false`,
-   `decals: true`, initial geometry mode G_ZBUFFER, and `rareTexture` resolving C0 to a decoded level-0 texture with
-   the C0 wrap modes.
-4. Swap two vertices per triangle; set `cullBack = false`. Primary batches, then secondary.
-5. Convert to world units (÷ f0C) so placements, camera and environment line up (§3.7).
+**Generic objects** (`0x7F001D9C`):
+1. `scale = propTable[model].scale × extrascale / 256` (the extrascale factor is applied in step 4).
+2. Normal pad: `P = pad.pos`; basis columns `[normalize(up × look), up, look]`.
+3. Bound pad: `r = normalize(up × look)`; `centre = P + ½((xmin+xmax) r + (ymin+ymax) up + (zmin+zmax) look)`;
+   `P = centre + ½(ymin − ymax) up` (bottom centre). With fit flags, scale each axis to the box: `fx = (xmax −
+   xmin) / (model.xext × scale)` (flags 0x30), `fy` (0x50), `fz` (0x90), where flag 0x2 swaps y and z; 0x10 = uniform
+   (min). Divide by the max, multiply `scale` by the max.
+4. `rot = basis × diag(fx, fy, fz) × scale`.
+5. Final position, with the model bounding box `m`:
+   - flags 0x2 (wall): `rot = rot · rotY(π) · rotX(3π/2)`, `pos = P − col2(rot) × m.zmin`;
+   - flags 0x4: `rot = rot · rotZ(π)`, `pos = P − col1(rot) × m.ymax`;
+   - flags 0x8: `pos = P − col1(rot) × m.ymin`;
+   - otherwise `pos.xz = P.xz − col1.xz × m.ymin` and `pos.y = floor(x, z) + 4 − col1.y × m.ymin` (`0x7F040AB4`),
+     with `floor` the clipping (stan) height under the point (*Clipping ("stan") files and floor height (verified: all 26 regular non-empty files; RAM on 14 captures; code)*). On bound pads the box bottom is the floor.
+6. Instance matrix = `T(pos) · rot`; model vertices are in the root frame.
 
-**Game-camera comparisons** (the BG agent viewed all; the lead viewed Frigate, Streets, Egyptian and the phase-1 Dam render). Each render uses the frame's own
-projection, room matrices and scissors, and adds the §3.6 sky, fog and clear colour with bilinear filtering. Objects,
-gun and HUD are not drawn. Composites are screenshot | render: `bg/renders/env/<stage>_final_composite.png`.
+**Doors** (`0x7F003480`): bound pad index; a preceding type-02 record scales `xmin, xmax`. Position = box centre
+(closed). `rot = basis · rotZ(π/2) · rotX(π/2) · diag(sy', sz', sx')` with `sx = (ymax − ymin)/m.xext`, `sy = (zmax −
+zmin)/m.yext`, `sz = (xmax − xmin)/m.zext`, normalised by the max as above.
 
-| stage | matches | differs |
+**Guards:** position = pad x/z (verified on idle guards); the model origin is at **floor + 108.30 world units**
+(verified: 228 idle guards on 8 stages); facing = pad look (hypothesis); model scale 0.1 × body scale; head = the head
+model attached at the head spot.
+
+**Verification** (`obj/scripts/verify_all.ts`, `obj/out/verify_summary.md`; captures of Dam, Facility, Runway,
+Jungle, Frigate, Aztec, Streets and Surface 1):
+- **Matrices exact** for 814/814 standard objects, 137/137 doors, 80/80 tinted glass, 115/116 monitors, 13/13 weapons,
+  17/17 autoguns and 48/53 glass.
+- **Positions:** x/z exact for 808/814 standard objects and for every closed door (114/137; the rest were open). With
+  stan floors, Y is exact for 728/814 standard objects, 137/137 doors and 106/116 monitors. 110 of the 130 remaining
+  Y differences are objects the game stacks on other objects at runtime (runtime flag `obj+0x64 & 0x8000`, set by a
+  surface search in `0x7F03FAB0`/`0x7F03CC20` that is not reproduced); the rest are vehicles the game moved.
+- Open: tinted glass and three Dam objects sit at the pad position instead of the box bottom in RAM; gas-release
+  volumes are offset by a constant.
+
+**Renders** (lead viewed `composite_runway.png`, `scene_dam.png`, `overview_facility_guards.png`):
+
+| render | shows | result |
 |---|---|---|
-| Dam | blue sky gradient and cloud shapes, cliffs, hazard barrier, red/white barriers, tunnel, gravel, fog darkening | gun/HUD only |
-| Surface 1 | pink/orange clouds (with horizon offset 7), tree walls, road ruts, both snow banks | gun/HUD |
-| Aztec | corridor walls, carved pillars, stairs, floor tiles | a dark doorway slot where the game shows a stone block (hypothesis: a door object) |
-| Frigate | sky pixels equal within ±1, hull and railing, bow deck planks | the screenshot's water is brighter teal with a black wedge at the horizon; the render equals texel × shade computed from the frame's own RDP triangles, so these are Glide64 artefacts (hypothesis for hardware) |
-| Streets | buildings, cornices, black window panes (decal fix), fence, door, brownish sky | gun/HUD, timer |
-| Egyptian | pillar hall, translucent pool (ENV-alpha rule), back hall | gun/HUD |
-| Runway | door frame, walls, floor tiles, sky colour | the shutter and barrels are objects (§4.8 covers them: `obj/renders/composite_runway.png`) |
-| Jungle | ground shape, fog colour | trees, plants and Natalya are objects (`obj/renders/scene_jungle.png`) |
-| Temple, 2 players | both split-screen viewports (`temple_mp2_final_composite.png`, `temple_mp2_p2_final_composite.png`): corridors, doorway, floor | weapons and radar |
-| Facility (phase 1, no environment) | X-braced wall on the left, corridor on the right (`bg/renders/ark_gamecam_textured.png`) | point sampling, gun |
+| `obj/renders/overlay_runway_frame.png` | Runway models drawn with the frame's own matrices over the screenshot | coincide |
+| `obj/renders/composite_runway.png` | screenshot \| BG + placed objects | the roller door, its striped frame and the gas barrels line up; BG units = setup units = RAM units × level scale |
+| `obj/renders/scene_dam.png` | screenshot \| BG + objects from the Dam spawn camera (camera from RAM: `MV = (f10/f0C)·v − f10·origin`, origin = camera +0x38, the room-call projection) | cliffs, hazard barrier and the red/white barriers match; the truck is drawn at its setup pad, where the game has already driven it away; no sky |
+| `obj/renders/scene_jungle.png` | Jungle spawn | plants, trunk and fern positions match; the on-screen character had been moved by its AI and is absent from the render |
+| `obj/renders/scene_aztec.png` | Aztec spawn | BG matches; no props in view |
+| `obj/renders/overview_facility.png`, `overview_facility_guards.png` | free camera over Facility with objects and 65 posed guards | stacked crates, tables, doors, stairs and guards with heads, as the viewer would show |
 
-**Culling tests** (same cameras): the opposite winding rule shows cliff interiors on Dam, back faces on Facility and
-loses the ground on Surface 1 (`bg/renders/test_*cull*.png`, `sevx_gamecam_textured_WRONGcull.png`), confirming
-clockwise fronts. Culling with the correct rule still leaves the holes described in §3.5 (`bg/renders/env/exp/`), so
-BG is drawn double-sided.
+Contact sheets: `sheet_props.png` (340), `sheet_chrs.png`, `sheet_chrs_posed.png`, `sheet_items.png` (84 G*Z).
 
-**Viewer-style renders** (free camera, all rooms, fog, sky, clear colour): `bg/renders/env/viewer_dam_spawn.png`
-(matches the game view from the spawn, plus a few sky-textured backdrop pieces above the cliffs, §3.5) and
-`viewer_frigate_deck.png` (ship, helipad, mast, sky gradient, water fading to the horizon). Overviews of all 25 BG
-files: `bg/renders/bg_<code>_<name>_overview.png` / `_top.png`. With objects and guards:
-`obj/renders/overview_facility_guards.png`.
+### 4.2 Object and model formats
 
-**Per-level statistics** (verified, `bg/scripts/stats.ts`; triangles as built, empty B1 slots skipped):
+#### Objects and props: Setup files (verified: all 21 solo and 13 multiplayer setups parse; RAM on 8 stages)
 
-| BG | stage(s) | rooms | portals | triangles (primary / secondary) | vertices | textures |
-|---|---|---|---|---|---|---|
-| sev | Bunker 1 | 30 | 30 | 4,927 (4,671 / 256) | 8,498 | 62 |
-| silo | Silo | 86 | 94 | 25,933 (23,693 / 2,240) | 43,328 | 74 |
-| stat | Statue | 27 | 43 | 9,231 (7,737 / 1,494) | 17,390 | 134 |
-| arec | Control | 91 | 141 | 13,862 (12,805 / 1,057) | 23,872 | 122 |
-| arch | Archives | 65 | 103 | 10,957 (10,231 / 726) | 20,608 | 99 |
-| tra | Train | 57 | 64 | 9,358 (8,238 / 1,120) | 16,321 | 62 |
-| dest | Frigate | 58 | 94 | 16,677 (14,521 / 2,156) | 28,155 | 116 |
-| sevb | Bunker 2 | 68 | 75 | 6,817 (6,175 / 642) | 12,625 | 69 |
-| azt | Aztec | 92 | 95 | 11,342 (11,115 / 227) | 21,835 | 117 |
-| pete | Streets | 18 | 61 | 5,964 (5,569 / 395) | 11,666 | 86 |
-| depo | Depot | 89 | 118 | 13,594 (11,739 / 1,855) | 25,496 | 148 |
-| ref | Complex | 44 | 60 | 2,512 (2,454 / 58) | 4,822 | 13 |
-| cryp | Egyptian | 44 | 51 | 8,039 (7,971 / 68) | 14,688 | 12 |
-| dam | Dam | 136 | 194 | 12,400 (11,348 / 1,052) | 21,722 | 74 |
-| ark | Facility | 77 | 109 | 14,155 (13,625 / 530) | 25,493 | 82 |
-| run | Runway | 17 | 27 | 2,991 (2,637 / 354) | 5,041 | 68 |
-| sevx | Surface 1 and 2 | 39 | 101 | 8,100 (6,282 / 1,818) | 14,697 | 67 |
-| jun | Jungle | 44 | 59 | 6,265 (4,414 / 1,851) | 10,618 | 62 |
-| dish | Temple | 25 | 37 | 1,014 (1,014 / 0) | 1,697 | 5 |
-| cave | Caverns | 63 | 76 | 10,707 (9,993 / 714) | 18,241 | 46 |
-| cat | Citadel (unused) | 46 | 52 | 1,101 (1,101 / 0) | 1,968 | 3 |
-| crad | Cradle | 36 | 0 | 5,031 (3,947 / 1,084) | 9,182 | 45 |
-| ame | Library, Basement, Stack | 92 | 110 | 1,627 (1,605 / 22) | 3,142 | 11 |
-| oat | Caves | 13 | 15 | 1,905 (1,905 / 0) | 3,018 | 1 |
-| len | Cuba | 1 | 0 | 434 (434 / 0) | 712 | 7 |
-
-1,013 distinct texture numbers are used by BG files.
-
-### 3.10 Pitfalls
-1. The last room-table entry is a sentinel, and entry 0 is empty.
-2. Vertices are room-relative; without the room position every room piles up at the origin.
-3. `B1` isn't F3DEX TRI2 (four 4-bit-index triangles); `BF` indices are ×10; `G_VTX` counts are 4 bits.
-4. Texture entries aren't 1172 streams, and the table stores sizes, not offsets.
-5. BG lists have no `G_SETTIMG`: textures come from `C0`, and the lists in RAM differ from those in ROM.
-6. Don't mirror X; don't back-face cull BG.
-7. Alpha comes from `FB` env alpha through the patched combiner, not from vertex alpha.
-8. Decals need a depth offset.
-9. Three spaces (BG, world = BG ÷ f0C, render = world × f10); pads are in BG units.
-10. Game frames are letterboxed (320×220 at y 10) and multiplayer viewports are halves; the reference screenshots are
-    Glide64 HLE, which differs from the RDP data on water.
-11. The 0x7F game code is demand-paged: disassemble it from ROM, never from RAM.
-
----------------------------------------------------------------------------------------------------------------
-## 4. Objects and props
-
-### 4.1 Setup files (verified: all 21 solo and 13 multiplayer setups parse; RAM on 8 stages)
-
-`Usetup<code>Z` (solo) and `Ump_setup<code>Z` (multiplayer) are 1172 streams. The header is 10 `u32` **file
+`Usetup{code}Z` (solo) and `Ump_setup{code}Z` (multiplayer) are 1172 streams. The header is 10 `u32` **file
 offsets** (no segment or base); the loader stores `base + offset` in the globals `0x80075D00..0x80075D24` (base in
 `0x80075D28`):
 
@@ -655,19 +713,19 @@ offsets** (no segment or base); the loader stores `base + offset` in the globals
 | 0x1C | bound pads | |
 | 0x20 / 0x24 | pad names / bound pad names | 0 in most files |
 
-### 4.2 Pads (verified: ROM data of all files; RAM Dam)
+#### Objects and props: Pads (verified: ROM data of all files; RAM Dam)
 
 - **Pad**, 0x2C bytes: `+00 f32 pos[3]; +0C f32 up[3]; +18 f32 look[3]; +24 u32 name (file offset of a C string, e.g.
   "p1988e"); +28 u32 stan (0 in the file)`.
 - **Bound pad**, 0x44 bytes: a pad followed by `+2C f32 xmin, xmax, ymin, ymax, zmin, zmax`. The box is in the pad
   frame: x along `normalize(up × look)`, y along `up`, z along `look` (`0x7F001BD4`).
 - Both lists end with an all-zero record.
-- **Pads are in BG units.** At load the game divides positions and boxes by the level scale f0C (§3.7), giving world
+- **Pads are in BG units.** At load the game divides positions and boxes by the level scale f0C (*Units, scale, handedness, camera (verified)*), giving world
   units (verified in RAM on Dam: every compared pad = file value / 0.23364 exactly; up/look unchanged).
 - Pad numbers in records: `≥ 10000` = bound pad `n − 10000` (`0x7F001FF0`); **doors store the bound-pad index
   directly** (`0x7F0034C0`); guards and spawns use normal pads.
 
-### 4.3 Object list (record sizes verified; field names partly hypothesis)
+#### Objects and props: Object list (record sizes verified; field names partly hypothesis)
 
 Records are variable-sized; the type is the byte at +3, and the size comes from `0x7F0568F4` (jump table
 `0x80053490`). The list ends at type 0x30. Every setup file walks exactly to its intro block (verified).
@@ -712,7 +770,7 @@ Records are variable-sized; the type is the byte at +3, and the size comes from 
 **Common header** of every model-bearing type and of doors (verified by code field use and RAM):
 ```
 +00 u16 extrascale (0x100 = 1.0)   +02 u8 hidden2   +03 u8 type
-+04 s16 model (prop table index)   +06 s16 pad (§4.2), or the character id when flags & 0x4000
++04 s16 model (prop table index)   +06 s16 pad (*Pads (verified: ROM data of all files; RAM Dam)*), or the character id when flags & 0x4000
 +08 u32 flags                      +0C u32 flags2
 runtime: +10 prop*  +14 model instance*  +18 f32[16] rotation × scale  +58 f32 pos[3]
 ```
@@ -726,7 +784,7 @@ deceleration …), `+98` portal flags, `+9A u16` door type (4/8 slide along look
 **Guard**, 0x1C bytes (`0x7F02370C`): `+04 s16 character id; +06 s16 pad; +08 s16 body (−1 random); +0A u16 AI list;
 +0C s16 path; +10/+12 s16 (typically 1000/100); +14 u16 flags; +16 s16 head (−1 random)`.
 
-### 4.4 Intro block (verified: walker `0x7F0057C4`)
+#### Objects and props: Intro block (verified: walker `0x7F0057C4`)
 
 | type | words | meaning |
 |---|---|---|
@@ -742,9 +800,9 @@ deceleration …), `+98` portal flags, `+9A u16` door type (4/8 slide along look
 | 9 | 1 | end |
 
 Spawn (verified in RAM): in Facility and Streets the idle player sits exactly on the first set-0 spawn pad (x, z ÷
-level scale) and faces its look vector; multiplayer setups have 8 set-0 spawns. The start camera is in §3.7.
+level scale) and faces its look vector; multiplayer setups have 8 set-0 spawns. The start camera is in *Units, scale, handedness, camera (verified)*.
 
-### 4.5 Model tables (verified: ROM data and code references)
+#### Objects and props: Model tables (verified: ROM data and code references)
 
 - **Props** `0x8003A228`: 340 × `{ModelFileHeader* hdr; char* file; f32 scale}`. Scale is 0.1 for most props and 1.0
   for doors and a few others. All 340 files exist.
@@ -752,128 +810,11 @@ level scale) and faces its look vector; multiplayer setups have 8 set-0 spawns. 
   0x00–0x28 bodies, 0x29 `Csuit_lf_handZ`, 0x2A–0x4E heads, 0x4F `CspicebondZ`.
 - **First-person items** (G*Z): `{hdr; file}` at `0x80033924 + 0x38 × item id` (ids 1..0x54); cartridge models at
   `0x8003246C`. `GdynamiteZ`, `GexplosivepenZ`, `GextinguisherZ`, `GfingergunZ`, `GwristdartZ` are named only in the
-  file table and have no model header (§8.5).
+  file table and have no model header (*Unused props, characters, models and textures*).
 
-### 4.6 Model file format (verified: all 503 P/C/G files parse and every display list decodes; RAM on Dam)
+#### Objects and props: Clipping ("stan") files and floor height (verified: all 26 regular non-empty files; RAM on 14 captures; code)
 
-- The **ModelFileHeader** is in the data segment, not the file (0x20 bytes): `+00 root node*; +04 skeleton*;
-  +08 switches*; +0C s16 numSwitches; +0E s16 numMatrices; +10 f32 radius; +16 s16 numTextures; +18 texture list*;
-  +1C loaded flag`.
-- **File layout:** `u32 × numSwitches`, then `numTextures` × 12-byte texture records `{u32 texture number; u8 width;
-  u8 height; …}`, then nodes, rodata, vertices and display lists. The root node is the first byte after the texture
-  list.
-- **Pointers** are `0x05000000 + file offset`. At load the game relocates them, turns texture numbers into loaded
-  textures and rewrites the DLs (expanding `C0` like the BG loader; verified on `Poil_drum7Z` in RAM).
-- **Node**, 0x18 bytes: `u16 type (low byte type, high byte flags); ptr rodata; ptr parent; ptr next; ptr prev; ptr
-  child`. Render dispatch `0x7F074534`.
-
-| type | count | meaning | rodata (bold = verified) | viewer |
-|---|---|---|---|---|
-| 01 | 48 | root (characters, helicopter) | `s32; ptr; 0; 0` | – |
-| 02 | 1140 | position (joint) | **f32 pos[3]; s16 joint (+0C); s16 matrix slot (+0E)**; s16 slot2/3; ptr child; f32 radius | transform |
-| 04 | 606 | gun DL | **ptr primary; ptr secondary; ptr seg-5 base; ptr vertices; s16 count; u8 mode (+12)** | draw |
-| 08 | 678 | distance LOD | **f32 near; f32 far; ptr child** | use the LOD with near = 0 |
-| 09 | 345 | reorder | f32[6]; **ptr childA (+18); ptr childB (+1C)** | draw both |
-| 0A | 1014 | bounding box | **s32 part; f32 xmin, xmax, ymin, ymax, zmin, zmax** | placement only |
-| 0C | 21 | gunfire | f32 pos[3]; f32 size[3]; … | skip |
-| 0D | 42 | effect (translucent pass) | … | skip |
-| 0F | 2 | ? | … | skip |
-| 12 | 291 | toggle (heads, parts) | **ptr child** | draw |
-| 15 | 80 | position held (hands, guns) | f32 pos[3]; s16 slot; … | transform |
-| 16 | 5 | star gunfire | … | skip |
-| 17 | 28 | head spot (bodies) | … | attach the head model |
-| 18 | 1469 | DL | **ptr primary; ptr secondary; ptr vertices (segment 4); s16 numVertices; …; s16 mode (+18); ptr seg-5 base (+1C)** | draw |
-
-- **Display lists** use the same microcode as BG (§3.3): opcodes `01 04 B1 B6 B7 B8 B9 BA BB BF C0 E6 E7 F2 F3 F5 FC
-  FD`, no unknowns. Segment 3 = the model's matrix slots (`01020040 030000xx` = G_MTX load slot xx/0x40), segment 4 =
-  the node's vertices, segment 5 = the file. A few item models use raw `FD/F5/F3/F2/E6` texture setup.
-- **Render state by node mode** (type 18 +0x18, type 04 +0x12): 1 and 3 opaque; 4 = the secondary list is drawn in the
-  translucent pass. Viewer: primary = opaque (cutout when the texture has alpha), secondary with mode 4 = blend. Most
-  model DLs set `B7 0x2000` (cull back); `B7 0x60000` marks environment-mapped parts. Vertex colours are prelit.
-- **UVs:** `s × G_TEXTURE scale / 32 / width`, wrap from C0 (renders match the Runway screenshot).
-
-### 4.7 Skeleton and rest pose
-
-- Position nodes are relative to the enclosing position node (`0x7F05892C`); the matrix slot is rodata +0x0E.
-- **The root position node's translation is not applied** (verified on the Dam frame: three window instances give one
-  consistent camera only when it is ignored). 282 of 340 prop roots have large offsets while their vertices are centred.
-- **Characters:** all bodies share the 16-joint skeleton at `0x8003D400`; props use the 1-joint skeleton `0x8003C4D8`.
-  The identity rest pose is **not standing** (legs along ±X, `obj/renders/sheet_chrs.png`): joint rotations come from
-  animation data (region `0x124AC0`, not decoded). A standing pose sampled from a guard in the Dam frame (per-joint
-  local rotations applied by joint id) makes all 42 bodies stand (`obj/renders/sheet_chrs_posed.png`,
-  `obj/out/guard_pose_local_rotations.json`; lead viewed). Heads attach at the head-spot node (type 0x17).
-
-### 4.8 Placement (verified against RAM on 8 stages, 1,299 objects)
-
-Work in world units (÷ level scale f0C) and multiply by f0C for BG units, or work in BG units throughout.
-
-**Generic objects** (`0x7F001D9C`):
-1. `scale = propTable[model].scale × extrascale / 256` (the extrascale factor is applied in step 4).
-2. Normal pad: `P = pad.pos`; basis columns `[normalize(up × look), up, look]`.
-3. Bound pad: `r = normalize(up × look)`; `centre = P + ½((xmin+xmax) r + (ymin+ymax) up + (zmin+zmax) look)`;
-   `P = centre + ½(ymin − ymax) up` (bottom centre). With fit flags, scale each axis to the box: `fx = (xmax −
-   xmin) / (model.xext × scale)` (flags 0x30), `fy` (0x50), `fz` (0x90), where flag 0x2 swaps y and z; 0x10 = uniform
-   (min). Divide by the max, multiply `scale` by the max.
-4. `rot = basis × diag(fx, fy, fz) × scale`.
-5. Final position, with the model bounding box `m`:
-   - flags 0x2 (wall): `rot = rot · rotY(π) · rotX(3π/2)`, `pos = P − col2(rot) × m.zmin`;
-   - flags 0x4: `rot = rot · rotZ(π)`, `pos = P − col1(rot) × m.ymax`;
-   - flags 0x8: `pos = P − col1(rot) × m.ymin`;
-   - otherwise `pos.xz = P.xz − col1.xz × m.ymin` and `pos.y = floor(x, z) + 4 − col1.y × m.ymin` (`0x7F040AB4`),
-     with `floor` the clipping (stan) height under the point (§4.10). On bound pads the box bottom is the floor.
-6. Instance matrix = `T(pos) · rot`; model vertices are in the root frame.
-
-**Doors** (`0x7F003480`): bound pad index; a preceding type-02 record scales `xmin, xmax`. Position = box centre
-(closed). `rot = basis · rotZ(π/2) · rotX(π/2) · diag(sy', sz', sx')` with `sx = (ymax − ymin)/m.xext`, `sy = (zmax −
-zmin)/m.yext`, `sz = (xmax − xmin)/m.zext`, normalised by the max as above.
-
-**Guards:** position = pad x/z (verified on idle guards); the model origin is at **floor + 108.30 world units**
-(verified: 228 idle guards on 8 stages); facing = pad look (hypothesis); model scale 0.1 × body scale; head = the head
-model attached at the head spot.
-
-**Verification** (`obj/scripts/verify_all.ts`, `obj/out/verify_summary.md`; captures of Dam, Facility, Runway,
-Jungle, Frigate, Aztec, Streets and Surface 1):
-- **Matrices exact** for 814/814 standard objects, 137/137 doors, 80/80 tinted glass, 115/116 monitors, 13/13 weapons,
-  17/17 autoguns and 48/53 glass.
-- **Positions:** x/z exact for 808/814 standard objects and for every closed door (114/137; the rest were open). With
-  stan floors, Y is exact for 728/814 standard objects, 137/137 doors and 106/116 monitors. 110 of the 130 remaining
-  Y differences are objects the game stacks on other objects at runtime (runtime flag `obj+0x64 & 0x8000`, set by a
-  surface search in `0x7F03FAB0`/`0x7F03CC20` that is not reproduced); the rest are vehicles the game moved.
-- Open: tinted glass and three Dam objects sit at the pad position instead of the box bottom in RAM; gas-release
-  volumes are offset by a constant.
-
-**Renders** (lead viewed `composite_runway.png`, `scene_dam.png`, `overview_facility_guards.png`):
-
-| render | shows | result |
-|---|---|---|
-| `obj/renders/overlay_runway_frame.png` | Runway models drawn with the frame's own matrices over the screenshot | coincide |
-| `obj/renders/composite_runway.png` | screenshot \| BG + placed objects | the roller door, its striped frame and the gas barrels line up; BG units = setup units = RAM units × level scale |
-| `obj/renders/scene_dam.png` | screenshot \| BG + objects from the Dam spawn camera (camera from RAM: `MV = (f10/f0C)·v − f10·origin`, origin = camera +0x38, the room-call projection) | cliffs, hazard barrier and the red/white barriers match; the truck is drawn at its setup pad, where the game has already driven it away; no sky |
-| `obj/renders/scene_jungle.png` | Jungle spawn | plants, trunk and fern positions match; the on-screen character had been moved by its AI and is absent from the render |
-| `obj/renders/scene_aztec.png` | Aztec spawn | BG matches; no props in view |
-| `obj/renders/overview_facility.png`, `overview_facility_guards.png` | free camera over Facility with objects and 65 posed guards | stacked crates, tables, doors, stairs and guards with heads, as the viewer would show |
-
-Contact sheets: `sheet_props.png` (340), `sheet_chrs.png`, `sheet_chrs_posed.png`, `sheet_items.png` (84 G*Z).
-
-### 4.9 What the viewer should show
-
-- **Meshes:** standard objects, doors (closed), glass and tinted glass (blend), monitors, alarms, CCTV, autoguns, safes,
-  vehicles, aircraft and tanks (at their setup pads), ammo boxes, body armour, keys, magazines, and weapons and hats
-  on pads (skip flags 0x4000: held by or on a guard).
-- **Guards:** body + head at the pad in the sampled standing pose (a static per-joint table from
-  `obj/out/guard_pose_local_rotations.json`), or `Marker`s if that is out of scope.
-- **Markers:** spawn pads ("spawn set N"), gas-release volumes, cutscene cameras.
-- **Skip:** door scale (apply it), logic, AI and objective records (0x0E, 0x12, 0x13, 0x16–0x23, 0x25, 0x26, 0x2C, 0x2E),
-  and gunfire/effect nodes inside models.
-- **Layers:** "objects", "guards", "pickups" (weapons, ammo, armour, keys) and "markers" (`LevelLayer`), so users can
-  hide pickups and markers.
-- **Multiplayer maps:** load `Ump_setup<code>Z` (8 spawns, weapons and ammo as placed by the setup; the game swaps
-  weapon models by the chosen weapon set, which the viewer can ignore). Basement and Stack differ from Library only
-  in setup.
-
-### 4.10 Clipping ("stan") files and floor height (verified: all 26 regular non-empty files; RAM on 14 captures; code)
-
-`Tbg_<code>_all_p_stanZ` (1172 stream, named by the stage table) holds the walkable floor as convex polygon tiles.
+`Tbg_{code}_all_p_stanZ` (1172 stream, named by the stage table) holds the walkable floor as convex polygon tiles.
 Coordinates are **s16 BG units**.
 ```
 +00 u32 0
@@ -910,7 +851,7 @@ end: an all-zero 8-byte record, then 24-36 bytes of padding to the file end
   (`[player]+0x70 × levelScale`, to 0.01 BG units) and the player's current tile on 13/14 captures (the 14th player had
   moved); picks the same tile as the game's resolved pad tiles for 3,014 of 3,029 pads (11 of the 15 others are
   coplanar overlaps; 4 differ in height).
-- **Older format** (`Tbg_cat_all_p_stanZ`, the Citadel, §8; verified from the bytes: 485 tiles in 46 rooms, every byte
+- **Older format** (`Tbg_cat_all_p_stanZ`, the Citadel, *Unused and hidden content*; verified from the bytes: 485 tiles in 46 rooms, every byte
   accounted for). The retail layout reads no tiles from it; the viewer decodes it (`stan.ts parseStan`):
   ```
   +00 u32 0; +04 u32 0xC (first tile); +08 u32 0
@@ -925,18 +866,45 @@ end: an all-zero 8-byte record, then 24-36 bytes of padding to the file end
   end: 8 zero bytes, 32 bytes holding the string "unstric" (unknown), then the name table (485 × 8 bytes), 8 zero bytes
   ```
 
-### 4.11 Spawn camera (verified on 12 stages)
+#### Verification evidence and open questions: Objects and setups
 
-Eye = the stan floor under the spawn pad + **167.28 world units** (`167.28 × f0C` BG units), looking along the pad's
-look vector, fovY 60. Against the 12 runtime captures' eye positions (`obj/out/stan_verify.txt`): 0.02–0.12 BG units on
-5 stages, 0.75–10 on 6 (the idle sway and a small slide at spawn), 17.7 on Silo and 26.7 on Surface 1; Y exact except
-Jungle (−1.7) and Temple (2.5). Which of several spawn records the game picks was not traced; the first set-0 record
-matched in Facility and Streets.
+| check | method | result | evidence |
+|---|---|---|---|
+| setup format | walk all 34 setup files with record sizes from `0x7F0568F4` | every walk ends exactly at the intro block | `obj/lib/setup.ts`, `obj/out/setup_stats.md` |
+| pads | RAM Dam pads vs file | pos and box = file ÷ level scale exactly | `runtime/captures/dam/ram.bin` |
+| models | parse all 503 P/C/G files, decode every DL | no unknown opcodes; RAM relocation and C0 expansion confirmed on `Poil_drum7Z` | `obj/lib/model.ts` |
+| placement | recompute every object's matrix and position; compare with the runtime object structs in 8 captures | matrices exact for 814/814 standard objects, 137/137 doors, 80/80 tinted glass, 115/116 monitors; Y exact for 728/814 (most of the rest are stacked on other objects at runtime) | `obj/scripts/verify_all.ts`, `obj/out/verify_summary.md` |
+| stan floors | floor lookup vs the player's floor and current tile, and vs the game's resolved pad tiles | 13/14 captures exact; 3,014/3,029 pads same tile | `obj/lib/stan.ts`, `obj/out/stan_verify.txt` |
+| guards | idle guard positions in 8 captures | floor + 108.30 world units on all 228 | `obj/out/verify_summary.md` |
+| root translation ignored | three window instances in the Dam frame | a single consistent camera only when ignored | `notes/obj.md` *Verification evidence and open questions* |
+| renders | screenshot \| BG + objects (lead viewed Runway and Dam), Jungle, Aztec; Facility overview with posed guards (lead viewed) | line up; differences are objects the game had moved | `obj/renders/composite_runway.png`, `scene_dam.png`, `scene_jungle.png`, `overview_facility_guards.png` |
 
----------------------------------------------------------------------------------------------------------------
-## 5. Music
+### 4.3 Skeletons and animation
 
-### 5.1 Engine (verified by disassembly, RAM and audio capture)
+#### Objects and props: Skeleton and rest pose
+
+- Position nodes are relative to the enclosing position node (`0x7F05892C`); the matrix slot is rodata +0x0E.
+- **The root position node's translation is not applied** (verified on the Dam frame: three window instances give one
+  consistent camera only when it is ignored). 282 of 340 prop roots have large offsets while their vertices are centred.
+- **Characters:** all bodies share the 16-joint skeleton at `0x8003D400`; props use the 1-joint skeleton `0x8003C4D8`.
+  The identity rest pose is **not standing** (legs along ±X, `obj/renders/sheet_chrs.png`): joint rotations come from
+  animation data (region `0x124AC0`, not decoded). A standing pose sampled from a guard in the Dam frame (per-joint
+  local rotations applied by joint id) makes all 42 bodies stand (`obj/renders/sheet_chrs_posed.png`,
+  `obj/out/guard_pose_local_rotations.json`; lead viewed). Heads attach at the head-spot node (type 0x17).
+
+### 4.4 Behaviors, triggers, and scripted objects
+
+Behavioral records are documented only where they affect level extraction or presentation.
+
+## 5. Audio
+
+### 5.1 Audio storage and banks
+
+Audio storage is described with the sequence and bank tables below.
+
+### 5.2 Sequence format and driver
+
+#### Music: Engine (verified by disassembly, RAM and audio capture)
 
 GoldenEye uses **stock libultra audio**: `ALBankFile` banks with VADPCM samples, the **compressed-MIDI sequence
 player `alCSPlayer`**, and the standard synthesizer. The viewer's `src/rom/music/libultra.ts` parses the bank and
@@ -973,7 +941,7 @@ renders the sequences **unchanged**; only the sequence container and the loop ha
 - Front end (stage 0x5A) songs come from code constants: 44 at power-on (Nintendo/Rare logos), 2 at the gun-barrel
   intro, 23 in the menus (all three verified at runtime).
 
-### 5.2 Data (verified: ROM data and the init code)
+#### Music: Data (verified: ROM data and the init code)
 
 | item | ROM | notes |
 |---|---|---|
@@ -991,16 +959,74 @@ a varlen duration, `FF 51` tempo, `FF 2F` end of track, `FF 2E` loop start, `FF 
 (count 0xFF = forever). The 59 non-stub songs use only note-on, CC 7 / 10 / 91, pitch bend and program change
 (verified by parsing). Every song sends CC 91, so music is reverberated in game.
 
-### 5.3 Song list (verified: data tables; [rt] = also observed at runtime)
+#### Music: Loops (verified from the sequence data; loop period checked on a capture)
 
-GoldenEye has no jukebox, so names describe where each song plays. "X" is the stage's alternate track (§5.1). Loops are
+- Loops come only from `FF 2E` / `FF 2D` markers with count 0xFF, **per track**; the game never restarts a song.
+  Songs whose tracks all end play once (1, 38, 51, 60, 61, 62).
+- Tracks don't always agree: the conductor track often ends 2 ticks after the loop end, some tracks loop shorter
+  figures, and seven songs (4, 8, 28, 44, 50, 53, 55) are polymetric, so their tracks drift apart in the game.
+- **Song loop region** (prototype `parseGeSequence`): run every track like `alCSeqNextEvent`. loopStart = the latest
+  loop-start tick over looping tracks (or the last note + 1 of tracks that end). Period = the LCM of the track loop
+  lengths when that is ≤ 8× the longest and ≤ 300 s, otherwise the longest track loop (the "≈" songs). Unroll events to
+  loopStart + period and render; the WAV loop starts after the first pass's release tails.
+- **Bomberman's `parseCompressedMidi` must not be reused as is:** it takes the loop end from the first track that
+  reaches a forever loop, which is wrong here (song 41 would end at tick 3072 instead of 49152; songs 8, 24, 42, 44
+  similar).
+- Game timing: the game's pass is about 0.05% longer than the render (song 23 capture loop 668,416 samples vs 668,073
+  rendered), from libultra's per-callback rounding (reproduced by simulation, `music/ts/drift.ts`). Inaudible; use the
+  render's loop points.
+
+#### Music: Offline rendering
+
+Prototype: `music/ts/gemusic.ts` + `render_all.ts` (imports `src/rom/music/libultra.ts` unchanged; all 63 songs in
+26 s, 0.3–1.2 s each).
+1. Entry i of the table → ROM `0x419790 + offset`; skip `11 72`, inflate to `size`.
+2. `parseGeSequence` → a libultra.ts `Sequence`: division 384, µs per tick `(s32)((f32)tempo × (f32)(1/384))`, default
+   tempo before the first `FF 51`, note durations, loopStartTick.
+3. Bank: `parseBank(rom, 0x3B4450, 0x3B87F0, 0, null)`.
+4. `seqVol = ((0x7FFF × songVolume[song]) >> 15) × 0.936` (the song volume table is in the inflated data segment).
+5. `renderSequence(rom, bank, seq, {rate: 22047, maxVoices: 16, seqVol, loop, pitchScale: 1})`.
+
+Not modelled: the custom reverb, alCSPlayer voice stealing (up to 27 dropped notes per song), the 0.05% rounding.
+
+#### Verification evidence and open questions: Music
+
+| check | method | result | evidence |
+|---|---|---|---|
+| sequences | inflate all 63; sizes vs table | all match | `fs/music/seq_NN.bin` |
+| bank | `parseBank` from the viewer's `libultra.ts` | all pointers resolve; 75 instruments, 106 waves | `music/ts/gemusic.ts` |
+| song selection | breakpoints on the three players' play functions over one boot | logos 44, gun barrel 2, menus 23, Dam 9, watch menu 24, Facility 7, random 34 for a Temple warp | `music/cap/songlog.txt` |
+| RAM | player 1 buffer in Facility | identical to inflated sequence 7 | `music/cap/ram_fac.bin` |
+| output rate | AI_DACRATE in the capture log | 2207 → 22047 Hz | `music/cap/cap1.raw.log` |
+| rendered audio | envelope NCC, stretch, chroma, loudness vs 240 s capture | NCC 0.81–0.88, stretch 1.00, chroma 0.96–0.98 at 0 semitones; render gain ×0.936 | *Verification against captured game audio (verified)*, `music/cap/cap_*.wav`, `music/wav/` |
+
+#### Unused and hidden content: Music and sound
+
+| item | evidence | confidence |
+|---|---|---|
+| **Unreferenced songs 1, 54 and 59**, in no stage table, random list or code constant, and reachable only through the disabled debug menu's music selector (which steps through 1–62). Song 1 is an 11-track 16.7 s sting (250 → 145 BPM, notes in the first 4.8 s); song 54 a 5-track 8 s loop at 150 BPM; **song 59 is a byte-identical copy of song 52** (a multiplayer track). Renders: `music/wav/song01.wav`, `song54.wav`, `song59.wav` | stage music table `0x8004EB10`, random list `0x8004EBD0`, constant scan, debug selector `0x7F0BD9EC` | verified, medium–high (song ids computed at run time are not excluded) |
+| **Silent stub sequences** 0, 20, 30 and 39 (one event each) | sequence data | verified, high |
+| **Citadel's theme, song 6**, is still heard: it is in the multiplayer random list | tables | verified, high |
+| Nine songs are heard only through the multiplayer random list (5, 13, 33, 34, 35, 36, 45, 52, 56) | tables | verified, high (not unused) |
+| Music instrument 5 is never selected by any song | sequence scan | verified, high |
+| **54 of 260 sound-effect ids are referenced by nothing found:** 6, 8–10, 16, 34, 44, 53, 55–57, 59, 67, 78, 84, 86–88, 90, 94, 99, 101, 103, 104, 108, 114, 115, 119, 127, 129–133, 158, 169, 171, 175–180, 190, 193, 205–207, 251, 252, 254, 256, 259, 260 (contiguous gaps suggest whole groups) | 231 call sites of `sndPlay` `0x70008E08` (206 constants), static id tables, per-surface sound lists, item fields, the AI command `0xC4` in every setup; `unused/sfx_used.json` | verified (scan), **medium-low** (some id sources unresolved) |
+
+### 5.3 Instruments and sample encoding
+
+Instrument banks, envelopes, loops, and sample encoding are described above.
+
+### 5.4 Music catalog and loop points
+
+#### Music: Song list (verified: data tables; [rt] = also observed at runtime)
+
+GoldenEye has no jukebox, so names describe where each song plays. "X" is the stage's alternate track (*Engine (verified by disassembly, RAM and audio capture)*). Loops are
 in samples of the render at 22047 Hz (`music/wav/index.json`); "once" = the tracks end and the song stops; "≈" = a
-polymetric song whose tracks drift against each other in the game (§5.4).
+polymetric song whose tracks drift against each other in the game (*Loops (verified from the sequence data; loop period checked on a capture)*).
 
 | # | name | ROM | tracks | BPM | loop (samples) | where it plays |
 |---|---|---|---|---|---|---|
 | 0 | silence (stub) | `0x41998C` | 1 | 120 | – | unreferenced |
-| 1 | unused sting | `0x4199B6` | 11 | 250→145 | once | unreferenced (§8) |
+| 1 | unused sting | `0x4199B6` | 11 | 250→145 | once | unreferenced (*Unused and hidden content*) |
 | 2 | Intro (gun barrel) | `0x419B8C` | 15 | 135–145 | 210..1829875 | gun-barrel intro [rt] |
 | 3 | Train | `0x41A43A` | 16 | 120 | 573230..3659613 | Train main; random list |
 | 4 | Depot | `0x41B024` | 13 | 130 | 254237..3019858 ≈ | Depot main; random |
@@ -1050,12 +1076,12 @@ polymetric song whose tracks drift against each other in the game (§5.4).
 | 51 | Runway (X) | `0x434970` | 10 | 145–155 | once | Runway X |
 | 52 | Multiplayer 52 | `0x434C4A` | 15 | 110 | 2041..1348481 | random only |
 | 53 | Dam / Surface 1 (X), Surface 2 ambience | `0x435372` | 3 | 80 | 220470..1675479 ≈ | Dam X, Surface 1 X, Surface 2 ambient |
-| 54 | unused 54 | `0x435894` | 5 | 150 | 105758..176263 | unreferenced (§8) |
+| 54 | unused 54 | `0x435894` | 5 | 150 | 105758..176263 | unreferenced (*Unused and hidden content*) |
 | 55 | Jungle | `0x435AA0` | 10 | 125 | 601442..5850392 ≈ | Jungle main |
 | 56 | Multiplayer 56 | `0x436228` | 14 | 127 | 1345..1001016 | random only |
 | 57 | Surface 1 | `0x43684A` | 16 | 125 | 936578..5423584 | Surface 1 main; random |
 | 58 | Death (multiplayer) | `0x4375B2` | 14 | 150–215 | 152296..218399 | music state 6 (hypothesis: MP death) |
-| 59 | unused 59 (copy of 52) | `0x43787A` | 15 | 110 | 2041..1348481 | unreferenced; byte-identical to 52 (§8) |
+| 59 | unused 59 (copy of 52) | `0x43787A` | 15 | 110 | 2041..1348481 | unreferenced; byte-identical to 52 (*Unused and hidden content*) |
 | 60 | Surface 2 (X) | `0x437FA2` | 5 | 130 | once | Surface 2 X |
 | 61 | Statue (X) | `0x43823E` | 4 | 94 | once | Statue X |
 | 62 | Frigate (X) | `0x4383A4` | 9 | 138 | once | Frigate X |
@@ -1067,37 +1093,250 @@ Citadel (0x28) 6/–/–, Cradle 19/–/48, stage 0x2A 28/–/–, Surface 2 28/
 (the multiplayer-only maps) pick a **random** song from the 43-entry list; verified once at runtime (a warp to Temple
 picked song 34).
 
-### 5.4 Loops (verified from the sequence data; loop period checked on a capture)
+## 6. Unused and hidden content
 
-- Loops come only from `FF 2E` / `FF 2D` markers with count 0xFF, **per track**; the game never restarts a song.
-  Songs whose tracks all end play once (1, 38, 51, 60, 61, 62).
-- Tracks don't always agree: the conductor track often ends 2 ticks after the loop end, some tracks loop shorter
-  figures, and seven songs (4, 8, 28, 44, 50, 53, 55) are polymetric, so their tracks drift apart in the game.
-- **Song loop region** (prototype `parseGeSequence`): run every track like `alCSeqNextEvent`. loopStart = the latest
-  loop-start tick over looping tracks (or the last note + 1 of tracks that end). Period = the LCM of the track loop
-  lengths when that is ≤ 8× the longest and ≤ 300 s, otherwise the longest track loop (the "≈" songs). Unroll events to
-  loopStart + period and render; the WAV loop starts after the first pass's release tails.
-- **Bomberman's `parseCompressedMidi` must not be reused as is:** it takes the loop end from the first track that
-  reaches a forever loop, which is wrong here (song 41 would end at tick 3072 instead of 49152; songs 8, 24, 42, 44
-  similar).
-- Game timing: the game's pass is about 0.05% longer than the render (song 23 capture loop 668,416 samples vs 668,073
-  rendered), from libultra's per-callback rounding (reproduced by simulation, `music/ts/drift.ts`). Inaudible; use the
-  render's loop points.
+### 6.1 Unreferenced assets
 
-### 5.5 Offline rendering
+#### Verification evidence and open questions: Unused content
 
-Prototype: `music/ts/gemusic.ts` + `render_all.ts` (imports `src/rom/music/libultra.ts` unchanged; all 63 songs in
-26 s, 0.3–1.2 s each).
-1. Entry i of the table → ROM `0x419790 + offset`; skip `11 72`, inflate to `size`.
-2. `parseGeSequence` → a libultra.ts `Sequence`: division 384, µs per tick `(s32)((f32)tempo × (f32)(1/384))`, default
-   tempo before the first `FF 51`, note durations, loopStartTick.
-3. Bank: `parseBank(rom, 0x3B4450, 0x3B87F0, 0, null)`.
-4. `seqVol = ((0x7FFF × songVolume[song]) >> 15) × 0.936` (the song volume table is in the inflated data segment).
-5. `renderSequence(rom, bank, seq, {rate: 22047, maxVoices: 16, seqVol, loop, pitchScale: 1})`.
+See *Unused and hidden content*: each item names its evidence. The emulator tests (Citadel hang, stage 0x15 breakpoint, Cuba load, debug menu
+opened by a RAM poke) are in `unused/shots/` and `unused/*_dbg.txt`.
 
-Not modelled: the custom reverb, alCSPlayer voice stealing (up to 27 dropped notes per song), the 0.05% rounding.
+#### Unused and hidden content
 
-### 5.6 Verification against captured game audio (verified)
+Every item gives its evidence and a confidence rating. **Verified** items were checked against this ROM's data or
+code, or seen in the emulator; the rest are marked hypothesis. Paths are relative to `ge/`
+(most evidence is in `unused/`, notes in `notes/unused.md`). Reference scans are conservative in one direction only:
+a thing found "unreferenced" may still be reached by an address computed at run time, and that is reflected in the
+confidence.
+
+#### Unused and hidden content: Cut and unfinished stages
+
+| item | evidence | confidence |
+|---|---|---|
+| **Citadel (stage 0x28, code `cat`)**: a cut arena (multiplayer-style: it has multiplayer environment records and was never given a solo setup; hypothesis on intent). Its BG file `bg_cat_all_p.seg` (0x5530 bytes) and clipping file `Tbg_cat_all_p_stanZ` survive, as do an environment record (colour `185038`, sky on, far 20000, and multiplayer variants 240/340/440), a memory configuration (`-mgfx100 -mvtx50 -mt650 -ma150`), main music **song 6**, and the names "Citadel"/"CITADEL" in the title bank (`0x9CAE`/`0x9CAF`). There is no `UsetupcatZ` or `Ump_setupcatZ` (the setup table still names `UsetupcatZ`), no multiplayer menu record, an empty text bank `Lcat`, and no case for 0x28 in the stage → text-bank switch | file table, stage/BG/environment/music/memory tables, text reference scan (`unused/stage_inventory.tsv`, `unused/text/text_refs.tsv`) | verified, high |
+| **The Citadel doesn't load.** Requesting stage 0x28 in the emulator hangs with the last front-end frame on screen; the registers show the switch default `0x7F0C16DC` (an endless `b .`) called from the setup loader (`ra 0x7F003D84`) | `unused/shots/citadel_warp_solo_frozen.png`, `unused/citadel_crash_dbg.txt` | verified, high |
+| **The Citadel's clipping file is an older format** the retail code can't read: float points, per-tile names ("p502a2" …), and a name table. It holds 485 tiles in 46 rooms; every byte is accounted for, all 1,122 links resolve, and each room's tiles lie inside that room's BG box. All 26 other stan files use the compact s16 format of *Clipping ("stan") files and floor height (verified: all 26 regular non-empty files; RAM on 14 captures; code)*, which reads 0 tiles from `Tbg_cat`. So even with a setup and a text case, the retail game would have no usable floor for it. The layout is in *Clipping ("stan") files and floor height (verified: all 26 regular non-empty files; RAM on 14 captures; code)*; the viewer decodes it and shows the tiles in the Citadel's hidden "collision" layer (485 tiles over the 46 rooms, aligned with the floors) | `unused/stan.py`, `unused/stancheck.ts`, `unused/renders/citadel_stan_tiles_top_by_room.png`; viewer `stan.ts parseStan` | verified (format), high; "retail can't use it" is static inference, high |
+| **Citadel renders** (the BG parses and renders like any retail BG): 46 rooms, 52 portals, 1,101 triangles, all opaque, and three textures (901, 315, 710), all shared with Severnaya, Control, Caverns and Facility. The layout is a square arena around a star-shaped central hub with a pyramid, four quadrants (a grove of cross-shaped pillars, a room of tilted blocks, triangular floor wedges, raised ramps and walkways) and a sunken area under the hub, with tall white spikes. Lead viewed the overview and an eye-level view | `bg/renders/bg_cat_citadel_unused_overview.png`, `_top.png`; `unused/renders/citadel_bg_cat_overview_34.png`, `citadel_bg_cat_top.png`, `citadel_eye_room01_open_floor.png`, `citadel_eye_room03_open_floor.png`, `citadel_eye_room04_open_floor.png` | verified, high |
+| **Nine empty stage slots:** `sho` 0x2A, `eld` 0x2C, `lue` 0x2F, `rit` 0x31, `ear` 0x33, `lee` 0x34, `lip` 0x35, `wax` 0x37, `pam` 0x38. Each has names in the setup and BG tables, zero-byte BG and stan entries (`Tbg_sho` is not even in the file table), empty text banks, no setups, no menu entries and no text case (loading hangs). `sho` alone keeps a music entry (song 28, shared with Surface 2) | tables, file table | verified, high |
+| **Duplicate stage 0x15 "sevbunker"**: a setup-table entry only (no BG record, briefing or menu). Requesting it loads `UsetupsevbunkerZ`, then hangs in the text switch (breakpoint on `0x7F0C16DC` hit with `a0 = 0x15`) | `unused/stage15_dbg.txt`, `unused/shots/stage15_hang.png` | verified, high |
+| **`bgx` slot (0x39):** the BG table ends with id 0x39 naming `bg/bgx.seg` and `TbgxZ`; neither file exists (hypothesis: a generic or test BG slot) | BG table `0x8004448C` | verified, high |
+| **Unused multiplayer setups for Statue and Cradle:** `Ump_setupstatueZ` and `Ump_setupcradZ` are complete multiplayer maps: 8 spawns, 9 weapon slots, 16 ammo boxes and 2 body armours, the same template as Archives or Complex. Neither is in the 12-entry multiplayer menu (Random, Temple, Complex, Caves, Library, Basement, Stack, Facility, Bunker, Archives, Caverns, Egyptian). They couldn't be tested live: the headless harness has one controller, so MULTIPLAYER is greyed out | `unused/mp_setups_summary.txt`; placement renders `unused/renders/setup_statue_mp_overview.png` (lead viewed: spawns in open areas between statues, weapon and ammo clusters), `setup_crad_mp_overview.png` | verified (data), high; reachability tested statically only |
+| Lower-case placeholder names in the title bank: `0x9CB0`–`0x9CB7` "dest", "stat", "crad", "cradle", "azt" (unreferenced) | text reference scan | strings verified; reading them as planned multiplayer maps for Frigate, Statue, Cradle and Aztec: medium |
+| Unused stan files `Tbg_imp_all_p_stanZ` and `Tbg_ash_all_p_stanZ`: Basement and Stack use Library's BG and `Tbg_ame`, so only the file table names their own (identical-size) files | BG table, name scan | verified (names), medium (unused) |
+| Memory-config entries for stage ids **0x5B** and **0x63**, which have no setup, BG or text | table `0x800241BC` | verified; meaning unknown |
+| **Not cut: Cuba (0x36, `len`)** is the ending stage after Antenna Cradle (the debrief requests 0x36 when the completed mission index is 17); it loads in the emulator with the jungle ending dialogue | `0x7F0168E0`; `unused/shots/cuba_0x36_warp_1.png` | verified, high |
+
+#### Unused and hidden content: Debug features
+
+| item | evidence | confidence |
+|---|---|---|
+| **Debug menu, 77 items, still wired into the main loop but disabled.** The main loop calls `debugMenuTick` (`0x7F0905A0`) only while `0x80024300` ≠ 0, and nothing writes that flag. With the flag poked to 1 and C-Up + C-Down held on controller 1, the menu opens and responds to the D-pad (cursor moved 0 → 3 in Dam) | disassembly `0x70006508`, `0x70006580`; emulator (RAM) | verified, high |
+| **The menu doesn't show in the emulator's video output**, though its text is written to the debug text grid (`0x80025030`, 80 × 35 cells) and the DL builder runs. The grid, drawn offline with the game's own 4×7 debug font (a 128×21 IA8 sheet at `0x80024520`), shows the whole menu: move view, stan view, bond view, level, region, scale, play title, bond die, select anim, gun pos, flash colour, hit colour, music, sfx, invincible, visible, collisions, all guns, max ammo, display speed, background, props, stan hit/region/problems, print man pos, port close/inf/approx, pr room loads, show mem use/bars, grab rgb/jpeg/task, rnd walk, record ramrom, record 1–3, replay/save/load ramrom, auto y/x aim, 007, agent, all, fast, objectives, marg top/bot/left/right/reset, screen size/pos, show patrols, intro, intro edit/pos, world pos, gun key pos, vis cvg, chr num, room blocks, profile, obj load, weapon load, joy2 sky/hits/detail edit, explosion info, magic fog, gun watch pos, testing man pos, fog. Lead viewed | `unused/dbgtextgrid.bin`, `unused/renders/debugmenu_textgrid_rendered_with_rom_font.png` | render verified, high; why Glide64 draws nothing: hypothesis (the plugin drops these TEXRECTs), medium |
+| **What the items do** (jump table `0x800556FC`): background and props hide those layers (flags read by the BG renderer); **vis cvg** is the flag the Line Mode cheat sets, and **fast** the flag Turbo Mode sets; **music** steps through all songs (the only way to hear songs 1, 54, 59); **sfx** steps through sound ids; 007/agent/all unlock difficulties or missions in the front end; grab rgb/jpeg/task print IRIX host commands (`uix2pix`, `imgcopy -fjfif`, `u64.taskgrab.%d.core`); record/save/load ramrom use host files `replay/demo.%d`; **profile** calls empty stubs (profiler removed); **joy2 sky edit** has no reader; rnd walk and the five margin items do nothing | disassembly | verified (static), high for the listed handlers |
+| **Development command-line options** parsed by code: `-level_NN`, `-hard`, the memory options `-ml -me -mgfx -mvtx -mt -ma` (default string `-ml0 -me0 -mgfx100 -mvtx50 -mt700 -ma400`), `-nochr`, `-noprop`, `-noobj`, `-stanlinelog`, `-stanshow_`. A retail cartridge has no argument source | `0x7000A6A0` call sites | verified, high |
+| **Dead host code:** `"sleep 5; /etc/killall ghost gload"` (kills the SGI development kit's debugger/loader) is used only by `0x7F0D0154`, which has no callers | xref | verified, high |
+| **Orphan "complete everything" routine** `0x7F01ED10`: sets all 20 missions × 3 difficulties to completed with time 99999999; no callers or pointers | xref | verified, high |
+| Build date `Jun 29 1997 20:46:05` (`0x8005C000`): not referenced by code or data | pointer scan | verified, medium |
+| `*_c_debug` markers (`deb boss memp mema vi joy stan bg ob dyn lv rsp game`), each loaded by one module-init instruction; a profiler overlay (`utz/rsp/tex %2.0f%%`, `%2d hz`); libultra assertion strings | xref | verified; purpose hypothesis |
+| **Attract demos are present and used** (not unused, but hidden data): 14 controller recordings with a 232-byte header (stage +0x10, difficulty +0x14, random seeds, options) and checksummed frames of stick/button samples, filling ROM `0x2BF2D0..0x2E63F0` exactly. Stages: Dam ×2, Facility ×3, Runway ×2, Bunker 1 ×2, Silo ×2, Frigate ×2, Train; all are in the title-idle random pool | table `0x800483F0`, picker `0x7F0C0970` | verified (static), high |
+
+#### Unused and hidden content: ZX Spectrum emulator
+
+| item | evidence | confidence |
+|---|---|---|
+| **A Z80 CPU core is present** (~61 KB of game code `0x7F0D2C84..0x7F0E2700`): a 256-entry opcode dispatch (`0x8005C12C`, 256 distinct handlers), a second 256-entry prefixed table and a 64-entry sub-dispatch; machine setup builds the Z80 parity table, a 32×24 attribute map and 64 KB of Z80 address space | pointer tables, disassembly | verified, high |
+| It loads `em/data/spec_rom.seg.rz` (16 KB → Z80 address 0, the 48K ROM) and a game snapshot as a **.SNA** (27-byte header parsed into the Z80 registers, 48 KB copied to 0x4000). Names: Sabre Wulf, Atic Atac, Jetpac, Lunar Jetman, Alien 8, Gunfright, Underwurlde, Knight Lore, Pssst, Cookie; **indices ≥ 5 are clamped to 0**, so only the first five could ever load | `0x7F0D2FC4`, `0x7F0D30B0..0x7F0D3370`, name table `0x8004ED2C` | verified, high |
+| **Launcher = front-end menu 25**, which picks a game from controller 3's buttons (`0x7F01A39C`). No code ever calls `setMenu(25)` | call-site scan of `setMenu` | verified (static), medium-high |
+| **No Spectrum data in the ROM:** no `em/` files in the file table, and a signature search of the raw ROM and every DEFLATE stream (48K ROM start `F3 AF 11 FF FF C3 CB 11`, "1982 Sinclair Research", BASIC tokens, font bytes, titles) finds only the file-name strings | `unused/zxscan.py` | verified, high |
+
+#### Unused and hidden content: Cheats
+
+- **Table** `0x8003F80C`: 74 × 16 bytes `{u8 id; u8 codeLength (0/10); u16; u16* code; u16 nameText; u16; u32 flags}`
+  (flags: 0x01 front end, 0x02 solo, 0x04 multiplayer, 0x10 one-shot, 0x20 all players). A 10-press button code is
+  matched against a 20-entry input ring (`0x7F09177C`). Unlocks: menu 21 lists a cheat when `cheatAvailable(id)`
+  (`0x7F009848`) is true, which mostly means beating a mission under the target time in `0x8002B564` on a given
+  difficulty (Paintball = Dam, Secret Agent, 2:40; Invincible = Facility, 00 Agent, 2:05 …). **Magnum, Laser and Golden
+  Gun** are unlocked by completing Cradle, Aztec and Egyptian instead of by time. Full table with button codes:
+  `unused/cheats.json`, `notes/unused.md` *Objects and props* (verified, high).
+
+| item | evidence | confidence |
+|---|---|---|
+| **Cheats that can never be unlocked or entered:** 8 "super x2 health", 9 "super x2 armor", 13 "extra weapons", 16 "super x10 health", 25 (toggles the "testing man pos" debug flag). No button code, and `cheatAvailable` returns 0; their effect code and messages are intact | `unused/cheatavail.dis`, `cheats.json` | verified (static), high |
+| **Code-only cheats with no menu entry:** 1, 4 (max ammo), 5 (no effect), 6 (multiplayer: switch other players' invincibility off), 7 (Line Mode has a code *and* a menu name), 22 (multiplayer), and 35–74. Codes 35–54 grant mission N's time reward; 55–74 appear to mark missions complete | button-code table `0x8003F430`, activation cases | verified (codes); meaning of 55–74 hypothesis |
+| **Names with no cheat:** "Bond Phase" (`0xB005`) with orphaned "bond phase on/off" messages; "Super x2 Health", "Super x2 Armor", "Super x10 Health" names exist, but cheats 8/9/16 use "NO NAME" | text reference scan | verified, high |
+| Unreferenced animation-speed messages "slowest/very slow/normal/very fast/fastest motion" and "radar on" (only "slow" and "fast" motion are used): a cut stepped speed control (hypothesis) | text reference scan | strings verified, high; meaning medium |
+
+#### Unused and hidden content: Unused props, characters, models and textures
+
+| item | evidence | confidence |
+|---|---|---|
+| **103 of 340 props are placed by no setup and referenced by no code table found.** Finished models among them: crates and furniture (green ammo crates 4/5, bin, blotter, large card boxes, desk 2, letter tray, wire-cage metal crate, hazard crate, wooden crates), the second Severnaya "GoldenEye" console half `console_sev_GEb`, phone, sat box, oil drums 1/2/3/5/6, missile racks, torpedo rack, the Frigate harpoon launcher, 13 doors (sev_door, steel doors, roller doors, Arecibo, Frigate, gas-plant, train, depot gate and steel door), fur hats and the grey helmet, a jungle tree, a bollard, a magenta test tube, and **vehicles: an articulated lorry cab and trailer, a Hind helicopter, an APC, a speedboat, an Escort-style car and a black ZIL limousine** | obj agent's never-placed list minus the dropped-weapon table `0x8002BA38`, the thrown-item table `0x8002A23C` and front-end constants; `unused/props_unused_final.json`; sheet `unused/renders/props_unused_final_sheet.png` (lead viewed) | verified (scan); unused: medium-high for finished furniture, doors and vehicles |
+| Magazine and shell props, silencer, extinguisher, explosion debris: probably spawned by code | same | low (as "unused") |
+| **23 props are one byte-identical placeholder "cube"** (a wireframe-textured box), including the silver and gold PP7, bomb, credit card, dark glasses, door exploder, dynamite, explosive pen, finger gun, flare pistol, gold bar, heroin, lectre, lock exploder, microcode, microfilm, money, piton gun, spool tape, spy file and wrist dart props | md5 of the files | verified, high |
+| **Characters never used:** `CbluewomanZ` (0x1A), `CgreymanZ` (0x1E) and `CbluemanZ` (0x1F) appear only in the random-body pool, which no setup guard uses (no guard has body −1). Every head and every other body is used: by setups, the multiplayer character select (`0x8002B198`), the cast roll (`0x8002B5FC`), or Bond's outfit code | `unused/renders/chr_candidates_posed.png` | verified (scan), medium (a script-spawned random guard could still reach the pool) |
+| **Five gadget item models the game can't draw:** `GdynamiteZ`, `GexplosivepenZ`, `GextinguisherZ`, `GfingergunZ` and `GwristdartZ` are in the file table but have no `ModelFileHeader` in the data segment. With a synthesised header they render: dynamite, explosive pen, finger gun and wrist dart are byte-identical grenade-like placeholders, the same file 16 real items use as their first-person model. Only **the extinguisher is real art** (250 triangles) | file table; `unused/gadgets.ts`, `unused/renders/gadgets_unheadered_G_models.png` | verified, high; "planned gadgets": medium |
+| **Textures: 310 of 2,698 are referenced by nothing found.** 1,685 aren't used by BG files; subtracting every model texture record (1,445 numbers), the sky and water textures (2228, 1508, 1509) and the texture lists in ROM `0x29DC28..0x29E54C` (front end, HUD, explosions, watch) leaves 310. Notable: maritime signal flags, mountain/sky photo strips (#950–958), signs "UNAUTHORISED", "PERSONNEL" and "RESTRICTED AREA", **face and head textures with no model** (#1556–1559, #1696–1710, #1817–1819, #1883–1889, #1928–1930, #2061–2063, #2503), explosion and smoke sequences, jungle foliage, **street signs** (give way, speed 50/70; #2388–2419), horizon strips, "OHMSS" (#2537) and a lava texture | `unused/texture_refs_final.json`; sheets `unused/renders/tex_final_unused_00.png`, `_01.png` | verified (scan), medium (code may build DLs with texture numbers directly, e.g. the explosion sprites) |
+| **Two corrupt textures** #2246 and #2260 (64×32 I8): the only entries whose decode doesn't consume exactly their ROM size; they decode as noise and nothing references them | `bg/lib/getex.ts`; texture reference scan | verified, high (corrupt or placeholder: medium) |
+| No leftover data after any compressed file: all 681 end in zero padding after the DEFLATE stream | tail scan | verified, high |
+
+#### Unused and hidden content: Text
+
+Every English text bank and briefing was dumped (`unused/text/L*E.txt`) and each string id searched in code
+immediates, the data segment, briefings and setups (`unused/text/text_refs.tsv`). Unreferenced strings (verified by the
+scan; confidence medium, since the loose scans over-report and ids built at run time can't be seen):
+
+| bank | unreferenced strings | reading |
+|---|---|---|
+| stat (Statue) | "null", Trevelyan/Bond reveal lines, "3 Minutes until helicopter bomb explodes.", five Mishkin arrest lines, "Proximity fuse triggered…" | a cut Statue Park ending |
+| sevb (Bunker 2) | a Bond/jailer "stomach hurts" exchange, "Natalya: Nice work.", "Natalya has died." | a cut escape sequence |
+| arch (Archives) | "Mishkin: General Ourumov is our traitor.", "Bond: Even trusted friends are capable of betrayal.", "Mishkin: It is in the safe." | cut interrogation lines |
+| ark (Facility) | "Dr. Doak: You'll need this decoder to open the bottling room door. Good luck, 007.", "Ourumov: One...", **"Ourumov: 1"**, Trevelyan lines, "Double agent contact has been killed!" | cut dialogue and a placeholder |
+| sev (Bunker 1) | **"hello"**, "The programmer has escaped without activating the computer!" | developer placeholder, cut objective |
+| cave (Caverns) | "Mission Failure: Unacceptable non-military casualties!", **"pursue trevelyan"** | placeholder |
+| azt (Aztec) | "This mainframe controls the shuttle launch sequence.", "Shuttle exhaust bay closed! Launch holding at T minus 10 seconds." | cut objective messages |
+| tra (Train) | Natalya cracking Boris's password ("You're a slug-head, Boris!") | cut dialogue |
+| arec, dest, pete, sevx, silo | Boris "Please don't shoot!", bomb-defused messages, civilian-casualty failure, "Surveillance camera disabled.", "Ourumov: Kill him!" … | cut or alternate messages |
+| crad, jun | nine Trevelyan taunts, Natalya quips ("Oh, that's a nice plant.", "Advantage, Natalya Simonova.") | possibly chosen at random by AI scripts (not checked) |
+| len (Cuba) | ten credit roles with no name (3rd Scenic Artist, Electrical Best Boy, Dolly Grip …) | credits may be table-driven |
+| title | "Citadel"/"CITADEL", the lower-case map names (*Cut and unfinished stages*), "CHEAT OPTIONS:", "second", "s" | cut stage and menu leftovers |
+| empty banks | `Lame Lash Lcat Ldish Lear Leld Limp Llee Llip Llue Loat Lpam Lref Lrit Lsho Lwax`: 32 zero bytes each, E and J | stages that never had text (multiplayer-only or cut) |
+
+### 6.2 Cut or inaccessible levels
+
+Candidate levels are distinguished from alternate, debug, and intentionally hidden retail content above.
+
+### 6.3 Debug features
+
+Shipped debug strings and executable features are listed only when supported by a code or data reference.
+
+### 6.4 Prototype or revision-specific content
+
+Source-archive and prototype material is explicitly distinguished from shipped retail data.
+
+## 7. nviewer implementation
+
+### 7.1 Module mapping
+
+#### Objects and props: What the viewer should show
+
+- **Meshes:** standard objects, doors (closed), glass and tinted glass (blend), monitors, alarms, CCTV, autoguns, safes,
+  vehicles, aircraft and tanks (at their setup pads), ammo boxes, body armour, keys, magazines, and weapons and hats
+  on pads (skip flags 0x4000: held by or on a guard).
+- **Guards:** body + head at the pad in the sampled standing pose (a static per-joint table from
+  `obj/out/guard_pose_local_rotations.json`), or `Marker`s if that is out of scope.
+- **Markers:** spawn pads ("spawn set N"), gas-release volumes, cutscene cameras.
+- **Skip:** door scale (apply it), logic, AI and objective records (0x0E, 0x12, 0x13, 0x16–0x23, 0x25, 0x26, 0x2C, 0x2E),
+  and gunfire/effect nodes inside models.
+- **Layers:** "objects", "guards", "pickups" (weapons, ammo, armour, keys) and "markers" (`LevelLayer`), so users can
+  hide pickups and markers.
+- **Multiplayer maps:** load `Ump_setup{code}Z` (8 spawns, weapons and ammo as placed by the setup; the game swaps
+  weapon models by the chosen weapon set, which the viewer can ignore). Basement and Stack differ from Library only
+  in setup.
+
+#### Mapping onto the viewer: Reusable modules
+
+| existing module | reuse for GoldenEye | changes needed |
+|---|---|---|
+| `inflate.ts` `inflateRaw` | every 1172 stream (files, rooms, zlib textures, sequences, the data segment) | none: call with `offset = start + 2` (*Compression: "1172" = two header bytes + raw DEFLATE (verified bit-exact)*; verified on all 6,863 streams) |
+| `displaylist.ts` `runDisplayList` | BG room lists (and model lists, *New modules (suggested names)*) | new `'f3d'` ucode (*`displaylist.ts`: the `'f3d'` ucode (exact patch: `bg/lib/displaylist.diff`, 91 lines)*) |
+| `texture.ts` | – | none; GoldenEye textures are decoded by a new module straight to RGBA (*Textures (verified unless marked)*) |
+| `music/libultra.ts` `parseBank`, `renderSequence` | all music | none (verified by the prototype); a new per-track sequence parser (*Music mapping*) |
+| `util.ts` `pruneUnused`, `emptyBounds` | level assembly | – |
+
+#### Mapping onto the viewer: `displaylist.ts`: the `'f3d'` ucode (exact patch: `bg/lib/displaylist.diff`, 91 lines)
+
+- `Ucode = 'f3dex' | 'f3dex2' | 'f3d'`; `G_CULL_BACK.f3d = 0x2000`.
+- New context options: `rareTexture?(w0, w1) → {texture, width, height, uls, ult} | null` (resolves C0) and
+  `vertexOffset?: [x, y, z]` (the room position, added before scaling).
+- The `'f3d'` command switch: `04` Fast3D G_VTX (4-bit count and start), `BF` G_TRI1 with indices ÷ 10, `B1` four
+  triangles (*Display-list microcode (verified: opcode histogram over every stored list, disassembly, frame DLs)*), `C0` → `ctx.rareTexture`, `BB` G_TEXTURE, `B6`/`B7`/`B9`/`BA` as F3DEX 1.x, `06` G_DL, `B8` G_ENDDL,
+  everything else to the shared RDP handler.
+- Texture selection for `'f3d'`: the batch texture is `st.rare.texture` when texturing is on and the combiner uses
+  the texel; UVs use the C0 tile (`(s × scale / 32 − uls) / width`).
+- **Alpha:** for `'f3d'`, vertex alpha is multiplied by the ENV alpha (`FB`), reproducing the game's combiner patch
+  (*Render state (verified: frame DLs of 13 captures and game-camera composites)*). The diff includes it.
+- Callers pass `mirrorX: false`, `vertexScale: 1` (or the stage scale, *Units, scale, handedness, camera (verified)*), `decals: true`, and initial geometry
+  mode G_ZBUFFER. For BG, force `cullBack = false` on the resulting batches (*Render state (verified: frame DLs of 13 captures and game-camera composites)*); models keep the lists' cull flags.
+- GPU bilinear filtering: use `uls = ult = 0`. The game's half-texel tile offset compensates for the RDP's sampling
+  position, which OpenGL already samples at texel centres.
+
+#### Mapping onto the viewer: New modules (suggested names)
+
+| file | contents | difficulty |
+|---|---|---|
+| `src/rom/goldeneye/rom.ts` | data segment inflate (ROM 0x21990 → base 0x80020D90), file table (*File table (verified)*), text banks (*Text banks (verified)*), stage tables (*Tables (verified: data segment; generator `fs/levels/levels.py` → `fs/levels/levels.tsv`)*), texture table (*Textures (verified unless marked)*) | low |
+| `src/rom/goldeneye/textures.ts` | port of `bg/lib/getex.ts`: the zlib and bit-packed texture codecs → level-0 RGBA, with a per-ROM cache keyed by texture number | medium (1,230 lines to port, but a verified reference exists and has no dependencies) |
+| `src/rom/goldeneye/bg.ts` | BG file → meshes: room table, inflate streams, `runDisplayList('f3d')`, winding swap, blend/decal from the lists, no culling (port of `bg/lib/bgfile.ts` + `gebg.ts`) | low–medium |
+| `src/rom/goldeneye/music.ts` | sequence table, song volumes, per-track compressed-MIDI parser with GoldenEye loop rules, names; renders through `libultra.ts` | low |
+| `src/rom/goldeneye/goldeneye.ts` | `Game`: level list, `loadLevel` (BG + environment + setup objects), `music`/`decodeMusic` | medium |
+
+#### Mapping onto the viewer: Music mapping
+
+- `Game.music`: 59 tracks, every sequence except the silent stubs 0, 20, 30, 39, in sequence order, named `NN Name`
+  as in *Song list (verified: data tables; [rt] = also observed at runtime)* (e.g. `09 Dam`, `53 Dam / Surface 1 (X), Surface 2 ambience`).
+- `decodeMusic(i)`: `{sampleRate: 22047, channels: [L, R], loopStart, loopEnd}`; no loop for songs 1, 38, 51, 60, 61,
+  62. Gain `seqVol × 0.936` (*Verification against captured game audio (verified)*).
+- Port `parseGeSequence` from `music/ts/gemusic.ts`. Do **not** reuse Bomberman's `parseCompressedMidi`: its
+  first-track loop rule gives wrong loops here (*Loops (verified from the sequence data; loop period checked on a capture)*). A shared per-track parser should leave Bomberman unchanged where
+  all tracks loop together (hypothesis: re-check Bomberman renders).
+- Cost 0.3–1.2 s per song in Node: render on demand in the worker. Risks: no reverb (drier than the game), note drops
+  where libultra would steal voices, approximate loops for the seven polymetric songs.
+
+#### Mapping onto the viewer: Additions to `src/rom/types.ts` and the renderer
+
+| addition | why | suggested shape |
+|---|---|---|
+| `Game.id` `'goldeneye'` | new game | – |
+| sky as a world-height plane | GoldenEye's cloud layer is a horizontal plane at a fixed world height whose texture is mapped by world x/z (*Environment: fog, clear colour, sky (verified: disassembly and 12 captured frames)*); a camera-centred mesh (the current `Sky`) loses the parallax and scrolling | `Sky.plane?: { height: number; uvScale: number; colorOverhead: [r,g,b]; colorHorizon: [r,g,b] }`: the renderer draws a large quad at `height` under the camera's x/z, UV = world xz / uvScale, colour faded by elevation as in *Environment: fog, clear colour, sky (verified: disassembly and 12 captured frames)*. Approximation without renderer changes: a camera-relative quad at `height − eye y` with a fixed vertex-colour gradient |
+| texture × (shade − env) + env combine | the sky combine lerps between env colour and shade by the texel | bake into the sky texture: texel' = env + (cloud − env) × texel, drawn with vertex colour 1 at the zenith, faded to 0 at the horizon |
+| optional water plane | Frigate | a second `Sky.plane` below the eye at −150 world units, texture 1509 |
+| `Instance`/`Mesh` layers | objects, guards, pickups and markers are toggled independently | existing `LevelLayer` + `Marker` suffice |
+
+No other type changes: `Fog`, `clearColor`, `CameraView`, `Marker` and `LevelLayer` already cover GoldenEye.
+
+#### Mapping onto the viewer: Suggested modules (continued from *New modules (suggested names)*)
+
+| file | contents | difficulty |
+|---|---|---|
+| `src/rom/goldeneye/setup.ts` | setup header, pads, bound pads, object record sizes and model-bearing fields, intro spawns (port of `obj/lib/setup.ts`) | low |
+| `src/rom/goldeneye/models.ts` | model file nodes → rest-pose batches through `runDisplayList('f3d')` with segment 3/4/5 resolution and the per-node matrix slots; the sampled guard pose table; heads (port of `obj/lib/model.ts`, `chr.ts`) | medium |
+| `src/rom/goldeneye/place.ts` | *Placement (verified against RAM on 8 stages, 1,299 objects)* placement math (port of `obj/lib/place.ts`) | medium (many flag cases, but verified exactly against RAM) |
+| `src/rom/goldeneye/stan.ts` | clipping-file floor lookup for object and camera Y (*Clipping ("stan") files and floor height (verified: all 26 regular non-empty files; RAM on 14 captures; code)*) | low (port `obj/lib/stan.ts`: tile parse + plane height + grid) |
+| `src/rom/goldeneye/environment.ts` | tables A/B → `Fog`, `clearColor`, sky plane | low |
+
+#### Mapping onto the viewer: Difficulty summary
+
+| part | difficulty | notes |
+|---|---|---|
+| ROM, codec, files, text, stage list | low | `inflateRaw` unchanged; tables are plain data |
+| textures | medium | two codec families; an instruction-level reference port exists and matches RAM |
+| BG geometry | low–medium | small `displaylist.ts` patch; rooms are independent |
+| environment (fog, clear colour) | low | one table; verified against 12 frames |
+| sky plane | medium | needs a small renderer feature for a faithful look; a static approximation is easy |
+| props, doors, pickups | medium | model node walk + placement flags; verified exactly |
+| guards | medium–high | no animation decoding; a sampled standing pose works for all bodies |
+| music | low | `libultra.ts` unchanged; per-track loop parser |
+
+#### Mapping onto the viewer: Known gaps to list in the README (proposed)
+
+- GoldenEye: animated textures and the water ripple are static; environment-mapped surfaces use plain UVs; guards
+  stand in one sampled pose; objects spawned by AI scripts and objective logic are not shown; the visibility commands
+  and portals are ignored (all rooms drawn); the sky is approximated; music has no reverb.
+
+### 7.2 Supported features
+
+The Technical summary states the supported releases and principal decoded features.
+
+### 7.3 Approximations and omissions
+
+Viewer approximations are distinguished from facts about the game formats.
+
+## 8. Verification and remaining work
+
+### 8.1 Verification evidence
+
+#### Music: Verification against captured game audio (verified)
 
 240 s of one boot (logos → menus → Dam → watch menu → Facility) captured with the audio-dump plugin
 (`music/cap/cap1.raw`), compared with renders by 50 ms RMS-envelope NCC with an offset and time-stretch search, dBFS,
@@ -1118,212 +1357,7 @@ and 12-bin chroma (`music/ts/compare.ts`). The play calls were logged with break
 - RAM (Facility): player 1's buffer `0x802D1E10` holds exactly the 4,078 inflated bytes of sequence 7.
 - Renders are drier than the game (no reverb).
 
----------------------------------------------------------------------------------------------------------------
-## 6. Mapping onto the viewer
-
-### 6.1 Detection, game object, level list
-- `src/rom/index.ts` `openRom()`: `case 'NGEE'` on the game code at 0x3B, after `normalizeByteOrder()`.
-- `src/rom/types.ts`: extend `Game.id` with `'goldeneye'`. Existing `LevelKind`s suffice: `'campaign'` for missions
-  (with `group` = "Mission 1: Arkangelsk" …), `'battle'` for multiplayer maps, `'other'` for Cuba (credits) and the
-  unused Citadel.
-- `LevelInfo.name` = in-game name from the title text bank (§2.2); `Level.id` = internal code (`dam`, `ark` …).
-  Order as suggested in §2.2.
-
-### 6.2 Reusable modules
-
-| existing module | reuse for GoldenEye | changes needed |
-|---|---|---|
-| `inflate.ts` `inflateRaw` | every 1172 stream (files, rooms, zlib textures, sequences, the data segment) | none: call with `offset = start + 2` (§1.3; verified on all 6,863 streams) |
-| `displaylist.ts` `runDisplayList` | BG room lists (and model lists, §6.4) | new `'f3d'` ucode (§6.3) |
-| `texture.ts` | – | none; GoldenEye textures are decoded by a new module straight to RGBA (§3.4) |
-| `music/libultra.ts` `parseBank`, `renderSequence` | all music | none (verified by the prototype); a new per-track sequence parser (§6.5) |
-| `util.ts` `pruneUnused`, `emptyBounds` | level assembly | – |
-
-### 6.3 `displaylist.ts`: the `'f3d'` ucode (exact patch: `bg/lib/displaylist.diff`, 91 lines)
-- `Ucode = 'f3dex' | 'f3dex2' | 'f3d'`; `G_CULL_BACK.f3d = 0x2000`.
-- New context options: `rareTexture?(w0, w1) → {texture, width, height, uls, ult} | null` (resolves C0) and
-  `vertexOffset?: [x, y, z]` (the room position, added before scaling).
-- The `'f3d'` command switch: `04` Fast3D G_VTX (4-bit count and start), `BF` G_TRI1 with indices ÷ 10, `B1` four
-  triangles (§3.3), `C0` → `ctx.rareTexture`, `BB` G_TEXTURE, `B6`/`B7`/`B9`/`BA` as F3DEX 1.x, `06` G_DL, `B8` G_ENDDL,
-  everything else to the shared RDP handler.
-- Texture selection for `'f3d'`: the batch texture is `st.rare.texture` when texturing is on and the combiner uses
-  the texel; UVs use the C0 tile (`(s × scale / 32 − uls) / width`).
-- **Alpha:** for `'f3d'`, vertex alpha is multiplied by the ENV alpha (`FB`), reproducing the game's combiner patch
-  (§3.5). The diff includes it.
-- Callers pass `mirrorX: false`, `vertexScale: 1` (or the stage scale, §3.7), `decals: true`, and initial geometry
-  mode G_ZBUFFER. For BG, force `cullBack = false` on the resulting batches (§3.5); models keep the lists' cull flags.
-- GPU bilinear filtering: use `uls = ult = 0`. The game's half-texel tile offset compensates for the RDP's sampling
-  position, which OpenGL already samples at texel centres.
-
-### 6.4 New modules (suggested names)
-
-| file | contents | difficulty |
-|---|---|---|
-| `src/rom/goldeneye/rom.ts` | data segment inflate (ROM 0x21990 → base 0x80020D90), file table (§1.5), text banks (§1.6), stage tables (§2.1), texture table (§3.4) | low |
-| `src/rom/goldeneye/textures.ts` | port of `bg/lib/getex.ts`: the zlib and bit-packed texture codecs → level-0 RGBA, with a per-ROM cache keyed by texture number | medium (1,230 lines to port, but a verified reference exists and has no dependencies) |
-| `src/rom/goldeneye/bg.ts` | BG file → meshes: room table, inflate streams, `runDisplayList('f3d')`, winding swap, blend/decal from the lists, no culling (port of `bg/lib/bgfile.ts` + `gebg.ts`) | low–medium |
-| `src/rom/goldeneye/music.ts` | sequence table, song volumes, per-track compressed-MIDI parser with GoldenEye loop rules, names; renders through `libultra.ts` | low |
-| `src/rom/goldeneye/goldeneye.ts` | `Game`: level list, `loadLevel` (BG + environment + setup objects), `music`/`decodeMusic` | medium |
-
-### 6.5 Music mapping
-- `Game.music`: 59 tracks, every sequence except the silent stubs 0, 20, 30, 39, in sequence order, named `NN Name`
-  as in §5.3 (e.g. `09 Dam`, `53 Dam / Surface 1 (X), Surface 2 ambience`).
-- `decodeMusic(i)`: `{sampleRate: 22047, channels: [L, R], loopStart, loopEnd}`; no loop for songs 1, 38, 51, 60, 61,
-  62. Gain `seqVol × 0.936` (§5.6).
-- Port `parseGeSequence` from `music/ts/gemusic.ts`. Do **not** reuse Bomberman's `parseCompressedMidi`: its
-  first-track loop rule gives wrong loops here (§5.4). A shared per-track parser should leave Bomberman unchanged where
-  all tracks loop together (hypothesis: re-check Bomberman renders).
-- Cost 0.3–1.2 s per song in Node: render on demand in the worker. Risks: no reverb (drier than the game), note drops
-  where libultra would steal voices, approximate loops for the seven polymetric songs.
-
-### 6.6 Level assembly (`loadLevel`)
-
-1. **Tables:** inflate the data segment once per ROM; read the stage tables (§2.1), the environment tables (§3.6), the
-   texture table (§3.4), the prop, character and item tables (§4.5).
-2. **Space:** convert BG units to world units by ÷ f0C (§3.7), so every stage has the same scale. Keep right-handed Y-up
-   with no mirroring; swap two indices per triangle for CCW-front culling.
-3. **World geometry:** one `Mesh` per room ("room N", `info` = room number, file offsets) with primary batches and then
-   secondary batches; one `Instance` per room with the identity matrix (the room position is baked into vertices through
-   `vertexOffset`). Rooms can form a `LevelLayer` of kind 'main'. Set `cullBack = false` on every BG batch and
-   `decal` from ZMODE_DEC; the renderer should draw batches without depth test before the depth-tested ones (§3.5).
-4. **Objects:** parse the setup (`Usetup` for missions, `Ump_setup` for multiplayer-only maps), build each shown model once
-   per model number (rest pose, LOD near = 0, root translation ignored), then one `Instance` per record with the §4.8
-   matrix (multiplied by 1/f0C when working in BG units). Guards: body + head posed with the sampled pose table.
-   Layers "objects", "guards", "pickups"; markers for spawns and gas volumes.
-5. **Environment:** `fog` from table A (omit for table-B stages); `clearColor` = record colour; sky (§6.7) when the sky
-   flag is set; Frigate water.
-6. **Camera:** the first set-0 spawn pad; eye = floor under the pad + 167.28 world units, target along the pad look,
-   `fovY` 60 (§3.7, §4.11; floor from the stan file, §4.10).
-7. `unplaced`: prop models no record references are not loaded, so nothing is listed there. Basement and Stack reuse
-   Library's meshes with their own setups.
-
-### 6.7 Additions to `src/rom/types.ts` and the renderer
-
-| addition | why | suggested shape |
-|---|---|---|
-| `Game.id` `'goldeneye'` | new game | – |
-| sky as a world-height plane | GoldenEye's cloud layer is a horizontal plane at a fixed world height whose texture is mapped by world x/z (§3.6); a camera-centred mesh (the current `Sky`) loses the parallax and scrolling | `Sky.plane?: { height: number; uvScale: number; colorOverhead: [r,g,b]; colorHorizon: [r,g,b] }`: the renderer draws a large quad at `height` under the camera's x/z, UV = world xz / uvScale, colour faded by elevation as in §3.6. Approximation without renderer changes: a camera-relative quad at `height − eye y` with a fixed vertex-colour gradient |
-| texture × (shade − env) + env combine | the sky combine lerps between env colour and shade by the texel | bake into the sky texture: texel' = env + (cloud − env) × texel, drawn with vertex colour 1 at the zenith, faded to 0 at the horizon |
-| optional water plane | Frigate | a second `Sky.plane` below the eye at −150 world units, texture 1509 |
-| `Instance`/`Mesh` layers | objects, guards, pickups and markers are toggled independently | existing `LevelLayer` + `Marker` suffice |
-
-No other type changes: `Fog`, `clearColor`, `CameraView`, `Marker` and `LevelLayer` already cover GoldenEye.
-
-### 6.8 Suggested modules (continued from §6.4)
-
-| file | contents | difficulty |
-|---|---|---|
-| `src/rom/goldeneye/setup.ts` | setup header, pads, bound pads, object record sizes and model-bearing fields, intro spawns (port of `obj/lib/setup.ts`) | low |
-| `src/rom/goldeneye/models.ts` | model file nodes → rest-pose batches through `runDisplayList('f3d')` with segment 3/4/5 resolution and the per-node matrix slots; the sampled guard pose table; heads (port of `obj/lib/model.ts`, `chr.ts`) | medium |
-| `src/rom/goldeneye/place.ts` | §4.8 placement math (port of `obj/lib/place.ts`) | medium (many flag cases, but verified exactly against RAM) |
-| `src/rom/goldeneye/stan.ts` | clipping-file floor lookup for object and camera Y (§4.10) | low (port `obj/lib/stan.ts`: tile parse + plane height + grid) |
-| `src/rom/goldeneye/environment.ts` | tables A/B → `Fog`, `clearColor`, sky plane | low |
-
-### 6.9 Difficulty summary
-
-| part | difficulty | notes |
-|---|---|---|
-| ROM, codec, files, text, stage list | low | `inflateRaw` unchanged; tables are plain data |
-| textures | medium | two codec families; an instruction-level reference port exists and matches RAM |
-| BG geometry | low–medium | small `displaylist.ts` patch; rooms are independent |
-| environment (fog, clear colour) | low | one table; verified against 12 frames |
-| sky plane | medium | needs a small renderer feature for a faithful look; a static approximation is easy |
-| props, doors, pickups | medium | model node walk + placement flags; verified exactly |
-| guards | medium–high | no animation decoding; a sampled standing pose works for all bodies |
-| music | low | `libultra.ts` unchanged; per-track loop parser |
-
-### 6.10 Known gaps to list in the README (proposed)
-- GoldenEye: animated textures and the water ripple are static; environment-mapped surfaces use plain UVs; guards
-  stand in one sampled pose; objects spawned by AI scripts and objective logic are not shown; the visibility commands
-  and portals are ignored (all rooms drawn); the sky is approximated; music has no reverb.
-
----------------------------------------------------------------------------------------------------------------
-## 7. Verification evidence and open questions
-
-Paths are relative to `/home/n64/.ai-tmp/r49/ge/`. Every running-game check used the headless mupen64plus from
-`/home/n64/nviewer/EMULATOR.md` (debugger core for breakpoints and RAM dumps; the audio-dump plugin for audio), each
-agent in its own run directory.
-
-### 7.1 ROM, codec, files, levels
-
-| check | method | result | evidence |
-|---|---|---|---|
-| boot and segments | disassembly of ROM 0x1000 at 0x70000400, the 0x7F code at 0x7F000000, the boot inflater | §1.2 | `fs/code0.dis`, `fs/code7f.dis`, `fs/decomp.dis` |
-| TLB paging | RDRAM at the menu: resident frames vs ROM pages, page-table entries | 40 resident pages identical to ROM | `fs/ram/menu_diff.bin` |
-| 1172 codec vs game | breakpoint on the inflater `0x7F0CE7F0` and its return during a Runway load, dump each output | 60/60 outputs byte-identical to zlib | `fs/infverify.py`, `fs/inf_run/log.tsv` |
-| every stream | full-ROM scan | 6,863 streams, all reach end-of-stream | `fs/streams.tsv` |
-| viewer `inflate.ts` | `inflateRaw(rom, start + 2, 0)` over all streams vs Node zlib | 6,863/6,863 identical | `fs/ts/inflate_check.ts` |
-| files | `fs/extract.py` | 681 compressed files, all end-of-stream | `fs/index.json` |
-| stage load order | breakpoints on `romCopy`, inflate and name lookup while starting Dam | §2.3 | `fs/trace_dam2.tsv` |
-| stage globals and warps | RAM writes; screenshots | Facility, Dam, Runway, Temple (2 players), Dam on 007, front end | `notes/warp.md`, `fs/shots/warp_test*.png` |
-| names | text-bank decode vs screen | the difficulty page shows "Mission 1: Arkangelsk / Part i: Dam" (text ids `0x9C78`/`0x9C79`) | `fs/shots/menu_*.png` |
-
-### 7.2 Level geometry and textures
-
-| check | method | result | evidence |
-|---|---|---|---|
-| BG format | parse all 25 files; loader disassembly | all rooms, portals and streams parse; per-level stats in §3.9 | `bg/lib/bgfile.ts`, `bg/scripts/stats.ts` |
-| room-relative vertices | runtime room boxes in RAM vs vertex + position boxes | equal for 83/136 Dam rooms, containing for the rest | `runtime/captures/dam/ram.bin` |
-| C0 expansion | pair each stored C0 with the game's expanded commands in RAM | 11 Dam + 5 Facility lists, 0 mismatches | `bg/scripts/align2.py` |
-| texture decoder | instruction-level port of the game's loader vs RAM | level-0 texels identical for all 30 textures loaded in the Dam and Facility frames; whole buffers identical for 25 | `bg/lib/getex.ts`, `bg/scripts/ramtexcheck.ts` |
-| texture table | reconstruction vs runtime table in RAM | 2,699/2,699 records equal | `bg/scripts/texcheck.ts` |
-| scale, handedness | frame DL room matrices and the combined projection | k = f10 / f0C on Dam, Facility and Surface 1 (to 5 digits); det +1, up +Y | `bg/scripts/framerooms.py` |
-| game-camera renders | render the frame's rooms with its own matrices and viewport; compare with the screenshot of the same frame (lead viewed Dam) | Dam, Facility and Surface 1 match in layout, handedness and textures | `bg/renders/{dam,ark,sevx}_gamecam_textured.png` vs `runtime/captures/dam/shot_before.png`, `bg/captures/{ark,sevx}/shot_before.png` |
-| culling | the same cameras with the opposite rule, with the lists' rule, and double-sided | the opposite rule shows cliff interiors (Dam), back faces (Facility) and loses the ground (Surface 1); the lists' rule leaves holes (Aztec floor, Surface 1 bank, Dam cliff, Frigate deck); double-sided matches all 10 composites | `bg/renders/test_*cull*.png`, `sevx_gamecam_textured_WRONGcull.png`, `bg/renders/env/exp/` |
-| alpha and decals | Egyptian pool and Streets windows with and without the ENV-alpha rule and decal offset; the patched combiner in RAM (`1F1093FF` → `1F1493FF`) | translucent pool and clean windows only with the rules | `bg/renders/env/egyptian_final_composite.png`, `streets_final_composite.png` (lead viewed) |
-
-### 7.3 Music
-
-| check | method | result | evidence |
-|---|---|---|---|
-| sequences | inflate all 63; sizes vs table | all match | `fs/music/seq_NN.bin` |
-| bank | `parseBank` from the viewer's `libultra.ts` | all pointers resolve; 75 instruments, 106 waves | `music/ts/gemusic.ts` |
-| song selection | breakpoints on the three players' play functions over one boot | logos 44, gun barrel 2, menus 23, Dam 9, watch menu 24, Facility 7, random 34 for a Temple warp | `music/cap/songlog.txt` |
-| RAM | player 1 buffer in Facility | identical to inflated sequence 7 | `music/cap/ram_fac.bin` |
-| output rate | AI_DACRATE in the capture log | 2207 → 22047 Hz | `music/cap/cap1.raw.log` |
-| rendered audio | envelope NCC, stretch, chroma, loudness vs 240 s capture | NCC 0.81–0.88, stretch 1.00, chroma 0.96–0.98 at 0 semitones; render gain ×0.936 | §5.6, `music/cap/cap_*.wav`, `music/wav/` |
-
-### 7.4 Runtime rendering and environment
-
-| check | method | result | evidence |
-|---|---|---|---|
-| captures | debugger breakpoint on `osSpTaskLoad` (`0x7000E60C`) at the frame's graphics task, 8 MiB RDRAM dump while paused, ring screenshots before and after; frame DL walked | 14 stages (Dam ×2, Facility, Surface 1, Aztec, Runway, Frigate, Jungle, Streets, Egyptian, Cradle, Statue, Caverns, Silo, Temple with 2 players); every screenshot viewed | `runtime/captures/<stage>/{manifest.json,ram.bin,dl.txt,shot_before.png}`, `runtime/captures/index.json` |
-| microcode | OSTask ucode text/data; the data string; Glide64's checksum | Fast3D "RSP SW Version: 2.0G" (checksum `0xAE08D5B9` = Glide64 ucode 0) | manifests |
-| environment table | disassembly of the selector `0x7F0BAA64`, copier `0x7F0BA758` and fog emitter `0x7F0BB070`; record fields vs frame commands | fog factor, fog colour and near exact, far to Mtx precision, in 12 frames; the no-fog fallback on Frigate and Silo; sky fill colour = record colour in every capture | `runtime/tools/decode_env.py`, `runtime/an/env_tables.json` |
-| sky | disassembly of `0x7F094488`; decode of the raw RDP triangles in 8 captures | vertex shade formula ±1; UV fit rms ≤ 0.07 texel on 6 stages (§3.6) | `runtime/an/sky/rdptri_out.txt`, `bg/scripts/skyfit2.py` |
-| scale and camera | `0x800413F4/F8`, `0x80032310`, room Mtx diagonals, camera struct fields in 3 dumps | world = BG ÷ f0C, render = world × f10; right-handed Y up | manifests |
-| spawn and eye height | player struct vs setup spawn pads (runtime), stan floor (obj) | camera on a spawn pad facing its look vector on 12 stages; eye = floor + 167.28 world units exactly | `runtime/tools/spawn.ts`, `obj/out/stan_verify.txt` |
-| environment renders | the §3.6 model added to the game-camera renderer; composites viewed by the BG agent, 3 by the lead | 9 stages match (§3.9) | `bg/renders/env/*_final_composite.png` |
-| C0 expansion at runtime | Dam room 135 stored list vs the copy the frame calls | only C0 and the fog-patched render mode differ | `runtime/tools/texcheck.ts` |
-
-### 7.5 Objects and setups
-
-| check | method | result | evidence |
-|---|---|---|---|
-| setup format | walk all 34 setup files with record sizes from `0x7F0568F4` | every walk ends exactly at the intro block | `obj/lib/setup.ts`, `obj/out/setup_stats.md` |
-| pads | RAM Dam pads vs file | pos and box = file ÷ level scale exactly | `runtime/captures/dam/ram.bin` |
-| models | parse all 503 P/C/G files, decode every DL | no unknown opcodes; RAM relocation and C0 expansion confirmed on `Poil_drum7Z` | `obj/lib/model.ts` |
-| placement | recompute every object's matrix and position; compare with the runtime object structs in 8 captures | matrices exact for 814/814 standard objects, 137/137 doors, 80/80 tinted glass, 115/116 monitors; Y exact for 728/814 (most of the rest are stacked on other objects at runtime) | `obj/scripts/verify_all.ts`, `obj/out/verify_summary.md` |
-| stan floors | floor lookup vs the player's floor and current tile, and vs the game's resolved pad tiles | 13/14 captures exact; 3,014/3,029 pads same tile | `obj/lib/stan.ts`, `obj/out/stan_verify.txt` |
-| guards | idle guard positions in 8 captures | floor + 108.30 world units on all 228 | `obj/out/verify_summary.md` |
-| root translation ignored | three window instances in the Dam frame | a single consistent camera only when ignored | `notes/obj.md` §7 |
-| renders | screenshot \| BG + objects (lead viewed Runway and Dam), Jungle, Aztec; Facility overview with posed guards (lead viewed) | line up; differences are objects the game had moved | `obj/renders/composite_runway.png`, `scene_dam.png`, `scene_jungle.png`, `overview_facility_guards.png` |
-
-### 7.6 Unused content
-
-See §8: each item names its evidence. The emulator tests (Citadel hang, stage 0x15 breakpoint, Cuba load, debug menu
-opened by a RAM poke) are in `unused/shots/` and `unused/*_dbg.txt`.
-
-### 7.7 Emulator hygiene and repository
-
-- Every agent used its own run directories under `/home/n64/.ai-tmp/r49/ge/<agent>/run*`. At the end,
-  `pgrep -a mupen64plus` and `ps -ef | grep /r49/ge/` show **no process** under `/home/n64/.ai-tmp/r49/ge/`. The
-  emulators still running belong to a separate Perfect Dark investigation (`/home/n64/.ai-tmp/r49/pd/`).
-- `/home/n64/nviewer` was only read. Its git history during the session shows only unrelated Yoshi's Story commits by
-  the repository owner (`src/rom/yoshi/`, `src/render/renderer.ts`, `src/ui/Viewport.tsx`, README); nothing in it refers
-  to GoldenEye, and no script or file from this investigation was written there.
-
-### 7.8 Open questions (all hypothesis or unverified)
+#### Verification evidence and open questions: Open questions (all hypothesis or unverified)
 
 ROM and files:
 - Formats of the region-0 tables at `0x117940` / `0x123040` (probably Japanese glyphs), `0x28E980` (animation index?),
@@ -1360,114 +1394,10 @@ Unused content:
 - Why the debug menu draws nothing under Glide64; the meaning of cheats 55–74; 54 sound effects with no reference found
   (medium-low); whether the unreferenced Cradle/Jungle taunts are picked by AI scripts.
 
----------------------------------------------------------------------------------------------------------------
-## 8. Unused and hidden content
+### 8.2 Known unknowns
 
-Every item gives its evidence and a confidence rating. **Verified** items were checked against this ROM's data or
-code, or seen in the emulator; the rest are marked hypothesis. Paths are relative to `/home/n64/.ai-tmp/r49/ge/`
-(most evidence is in `unused/`, notes in `notes/unused.md`). Reference scans are conservative in one direction only:
-a thing found "unreferenced" may still be reached by an address computed at run time, and that is reflected in the
-confidence.
+Unresolved semantics are labelled **Hypothesis** or **Open question** where they occur.
 
-### 8.1 Cut and unfinished stages
+### 8.3 References
 
-| item | evidence | confidence |
-|---|---|---|
-| **Citadel (stage 0x28, code `cat`)**: a cut arena (multiplayer-style: it has multiplayer environment records and was never given a solo setup; hypothesis on intent). Its BG file `bg_cat_all_p.seg` (0x5530 bytes) and clipping file `Tbg_cat_all_p_stanZ` survive, as do an environment record (colour `185038`, sky on, far 20000, and multiplayer variants 240/340/440), a memory configuration (`-mgfx100 -mvtx50 -mt650 -ma150`), main music **song 6**, and the names "Citadel"/"CITADEL" in the title bank (`0x9CAE`/`0x9CAF`). There is no `UsetupcatZ` or `Ump_setupcatZ` (the setup table still names `UsetupcatZ`), no multiplayer menu record, an empty text bank `Lcat`, and no case for 0x28 in the stage → text-bank switch | file table, stage/BG/environment/music/memory tables, text reference scan (`unused/stage_inventory.tsv`, `unused/text/text_refs.tsv`) | verified, high |
-| **The Citadel doesn't load.** Requesting stage 0x28 in the emulator hangs with the last front-end frame on screen; the registers show the switch default `0x7F0C16DC` (an endless `b .`) called from the setup loader (`ra 0x7F003D84`) | `unused/shots/citadel_warp_solo_frozen.png`, `unused/citadel_crash_dbg.txt` | verified, high |
-| **The Citadel's clipping file is an older format** the retail code can't read: float points, per-tile names ("p502a2" …), and a name table. It holds 485 tiles in 46 rooms; every byte is accounted for, all 1,122 links resolve, and each room's tiles lie inside that room's BG box. All 26 other stan files use the compact s16 format of §4.10, which reads 0 tiles from `Tbg_cat`. So even with a setup and a text case, the retail game would have no usable floor for it. The layout is in §4.10; the viewer decodes it and shows the tiles in the Citadel's hidden "collision" layer (485 tiles over the 46 rooms, aligned with the floors) | `unused/stan.py`, `unused/stancheck.ts`, `unused/renders/citadel_stan_tiles_top_by_room.png`; viewer `stan.ts parseStan` | verified (format), high; "retail can't use it" is static inference, high |
-| **Citadel renders** (the BG parses and renders like any retail BG): 46 rooms, 52 portals, 1,101 triangles, all opaque, and three textures (901, 315, 710), all shared with Severnaya, Control, Caverns and Facility. The layout is a square arena around a star-shaped central hub with a pyramid, four quadrants (a grove of cross-shaped pillars, a room of tilted blocks, triangular floor wedges, raised ramps and walkways) and a sunken area under the hub, with tall white spikes. Lead viewed the overview and an eye-level view | `bg/renders/bg_cat_citadel_unused_overview.png`, `_top.png`; `unused/renders/citadel_bg_cat_overview_34.png`, `citadel_bg_cat_top.png`, `citadel_eye_room01_open_floor.png`, `citadel_eye_room03_open_floor.png`, `citadel_eye_room04_open_floor.png` | verified, high |
-| **Nine empty stage slots:** `sho` 0x2A, `eld` 0x2C, `lue` 0x2F, `rit` 0x31, `ear` 0x33, `lee` 0x34, `lip` 0x35, `wax` 0x37, `pam` 0x38. Each has names in the setup and BG tables, zero-byte BG and stan entries (`Tbg_sho` is not even in the file table), empty text banks, no setups, no menu entries and no text case (loading hangs). `sho` alone keeps a music entry (song 28, shared with Surface 2) | tables, file table | verified, high |
-| **Duplicate stage 0x15 "sevbunker"**: a setup-table entry only (no BG record, briefing or menu). Requesting it loads `UsetupsevbunkerZ`, then hangs in the text switch (breakpoint on `0x7F0C16DC` hit with `a0 = 0x15`) | `unused/stage15_dbg.txt`, `unused/shots/stage15_hang.png` | verified, high |
-| **`bgx` slot (0x39):** the BG table ends with id 0x39 naming `bg/bgx.seg` and `TbgxZ`; neither file exists (hypothesis: a generic or test BG slot) | BG table `0x8004448C` | verified, high |
-| **Unused multiplayer setups for Statue and Cradle:** `Ump_setupstatueZ` and `Ump_setupcradZ` are complete multiplayer maps: 8 spawns, 9 weapon slots, 16 ammo boxes and 2 body armours, the same template as Archives or Complex. Neither is in the 12-entry multiplayer menu (Random, Temple, Complex, Caves, Library, Basement, Stack, Facility, Bunker, Archives, Caverns, Egyptian). They couldn't be tested live: the headless harness has one controller, so MULTIPLAYER is greyed out | `unused/mp_setups_summary.txt`; placement renders `unused/renders/setup_statue_mp_overview.png` (lead viewed: spawns in open areas between statues, weapon and ammo clusters), `setup_crad_mp_overview.png` | verified (data), high; reachability tested statically only |
-| Lower-case placeholder names in the title bank: `0x9CB0`–`0x9CB7` "dest", "stat", "crad", "cradle", "azt" (unreferenced) | text reference scan | strings verified; reading them as planned multiplayer maps for Frigate, Statue, Cradle and Aztec: medium |
-| Unused stan files `Tbg_imp_all_p_stanZ` and `Tbg_ash_all_p_stanZ`: Basement and Stack use Library's BG and `Tbg_ame`, so only the file table names their own (identical-size) files | BG table, name scan | verified (names), medium (unused) |
-| Memory-config entries for stage ids **0x5B** and **0x63**, which have no setup, BG or text | table `0x800241BC` | verified; meaning unknown |
-| **Not cut: Cuba (0x36, `len`)** is the ending stage after Antenna Cradle (the debrief requests 0x36 when the completed mission index is 17); it loads in the emulator with the jungle ending dialogue | `0x7F0168E0`; `unused/shots/cuba_0x36_warp_1.png` | verified, high |
-
-### 8.2 Debug features
-
-| item | evidence | confidence |
-|---|---|---|
-| **Debug menu, 77 items, still wired into the main loop but disabled.** The main loop calls `debugMenuTick` (`0x7F0905A0`) only while `0x80024300` ≠ 0, and nothing writes that flag. With the flag poked to 1 and C-Up + C-Down held on controller 1, the menu opens and responds to the D-pad (cursor moved 0 → 3 in Dam) | disassembly `0x70006508`, `0x70006580`; emulator (RAM) | verified, high |
-| **The menu doesn't show in the emulator's video output**, though its text is written to the debug text grid (`0x80025030`, 80 × 35 cells) and the DL builder runs. The grid, drawn offline with the game's own 4×7 debug font (a 128×21 IA8 sheet at `0x80024520`), shows the whole menu: move view, stan view, bond view, level, region, scale, play title, bond die, select anim, gun pos, flash colour, hit colour, music, sfx, invincible, visible, collisions, all guns, max ammo, display speed, background, props, stan hit/region/problems, print man pos, port close/inf/approx, pr room loads, show mem use/bars, grab rgb/jpeg/task, rnd walk, record ramrom, record 1–3, replay/save/load ramrom, auto y/x aim, 007, agent, all, fast, objectives, marg top/bot/left/right/reset, screen size/pos, show patrols, intro, intro edit/pos, world pos, gun key pos, vis cvg, chr num, room blocks, profile, obj load, weapon load, joy2 sky/hits/detail edit, explosion info, magic fog, gun watch pos, testing man pos, fog. Lead viewed | `unused/dbgtextgrid.bin`, `unused/renders/debugmenu_textgrid_rendered_with_rom_font.png` | render verified, high; why Glide64 draws nothing: hypothesis (the plugin drops these TEXRECTs), medium |
-| **What the items do** (jump table `0x800556FC`): background and props hide those layers (flags read by the BG renderer); **vis cvg** is the flag the Line Mode cheat sets, and **fast** the flag Turbo Mode sets; **music** steps through all songs (the only way to hear songs 1, 54, 59); **sfx** steps through sound ids; 007/agent/all unlock difficulties or missions in the front end; grab rgb/jpeg/task print IRIX host commands (`uix2pix`, `imgcopy -fjfif`, `u64.taskgrab.%d.core`); record/save/load ramrom use host files `replay/demo.%d`; **profile** calls empty stubs (profiler removed); **joy2 sky edit** has no reader; rnd walk and the five margin items do nothing | disassembly | verified (static), high for the listed handlers |
-| **Development command-line options** parsed by code: `-level_NN`, `-hard`, the memory options `-ml -me -mgfx -mvtx -mt -ma` (default string `-ml0 -me0 -mgfx100 -mvtx50 -mt700 -ma400`), `-nochr`, `-noprop`, `-noobj`, `-stanlinelog`, `-stanshow_`. A retail cartridge has no argument source | `0x7000A6A0` call sites | verified, high |
-| **Dead host code:** `"sleep 5; /etc/killall ghost gload"` (kills the SGI development kit's debugger/loader) is used only by `0x7F0D0154`, which has no callers | xref | verified, high |
-| **Orphan "complete everything" routine** `0x7F01ED10`: sets all 20 missions × 3 difficulties to completed with time 99999999; no callers or pointers | xref | verified, high |
-| Build date `Jun 29 1997 20:46:05` (`0x8005C000`): not referenced by code or data | pointer scan | verified, medium |
-| `*_c_debug` markers (`deb boss memp mema vi joy stan bg ob dyn lv rsp game`), each loaded by one module-init instruction; a profiler overlay (`utz/rsp/tex %2.0f%%`, `%2d hz`); libultra assertion strings | xref | verified; purpose hypothesis |
-| **Attract demos are present and used** (not unused, but hidden data): 14 controller recordings with a 232-byte header (stage +0x10, difficulty +0x14, random seeds, options) and checksummed frames of stick/button samples, filling ROM `0x2BF2D0..0x2E63F0` exactly. Stages: Dam ×2, Facility ×3, Runway ×2, Bunker 1 ×2, Silo ×2, Frigate ×2, Train; all are in the title-idle random pool | table `0x800483F0`, picker `0x7F0C0970` | verified (static), high |
-
-### 8.3 ZX Spectrum emulator
-
-| item | evidence | confidence |
-|---|---|---|
-| **A Z80 CPU core is present** (~61 KB of game code `0x7F0D2C84..0x7F0E2700`): a 256-entry opcode dispatch (`0x8005C12C`, 256 distinct handlers), a second 256-entry prefixed table and a 64-entry sub-dispatch; machine setup builds the Z80 parity table, a 32×24 attribute map and 64 KB of Z80 address space | pointer tables, disassembly | verified, high |
-| It loads `em/data/spec_rom.seg.rz` (16 KB → Z80 address 0, the 48K ROM) and a game snapshot as a **.SNA** (27-byte header parsed into the Z80 registers, 48 KB copied to 0x4000). Names: Sabre Wulf, Atic Atac, Jetpac, Lunar Jetman, Alien 8, Gunfright, Underwurlde, Knight Lore, Pssst, Cookie; **indices ≥ 5 are clamped to 0**, so only the first five could ever load | `0x7F0D2FC4`, `0x7F0D30B0..0x7F0D3370`, name table `0x8004ED2C` | verified, high |
-| **Launcher = front-end menu 25**, which picks a game from controller 3's buttons (`0x7F01A39C`). No code ever calls `setMenu(25)` | call-site scan of `setMenu` | verified (static), medium-high |
-| **No Spectrum data in the ROM:** no `em/` files in the file table, and a signature search of the raw ROM and every DEFLATE stream (48K ROM start `F3 AF 11 FF FF C3 CB 11`, "1982 Sinclair Research", BASIC tokens, font bytes, titles) finds only the file-name strings | `unused/zxscan.py` | verified, high |
-
-### 8.4 Cheats
-
-- **Table** `0x8003F80C`: 74 × 16 bytes `{u8 id; u8 codeLength (0/10); u16; u16* code; u16 nameText; u16; u32 flags}`
-  (flags: 0x01 front end, 0x02 solo, 0x04 multiplayer, 0x10 one-shot, 0x20 all players). A 10-press button code is
-  matched against a 20-entry input ring (`0x7F09177C`). Unlocks: menu 21 lists a cheat when `cheatAvailable(id)`
-  (`0x7F009848`) is true, which mostly means beating a mission under the target time in `0x8002B564` on a given
-  difficulty (Paintball = Dam, Secret Agent, 2:40; Invincible = Facility, 00 Agent, 2:05 …). **Magnum, Laser and Golden
-  Gun** are unlocked by completing Cradle, Aztec and Egyptian instead of by time. Full table with button codes:
-  `unused/cheats.json`, `notes/unused.md` §4 (verified, high).
-
-| item | evidence | confidence |
-|---|---|---|
-| **Cheats that can never be unlocked or entered:** 8 "super x2 health", 9 "super x2 armor", 13 "extra weapons", 16 "super x10 health", 25 (toggles the "testing man pos" debug flag). No button code, and `cheatAvailable` returns 0; their effect code and messages are intact | `unused/cheatavail.dis`, `cheats.json` | verified (static), high |
-| **Code-only cheats with no menu entry:** 1, 4 (max ammo), 5 (no effect), 6 (multiplayer: switch other players' invincibility off), 7 (Line Mode has a code *and* a menu name), 22 (multiplayer), and 35–74. Codes 35–54 grant mission N's time reward; 55–74 appear to mark missions complete | button-code table `0x8003F430`, activation cases | verified (codes); meaning of 55–74 hypothesis |
-| **Names with no cheat:** "Bond Phase" (`0xB005`) with orphaned "bond phase on/off" messages; "Super x2 Health", "Super x2 Armor", "Super x10 Health" names exist, but cheats 8/9/16 use "NO NAME" | text reference scan | verified, high |
-| Unreferenced animation-speed messages "slowest/very slow/normal/very fast/fastest motion" and "radar on" (only "slow" and "fast" motion are used): a cut stepped speed control (hypothesis) | text reference scan | strings verified, high; meaning medium |
-
-### 8.5 Unused props, characters, models and textures
-
-| item | evidence | confidence |
-|---|---|---|
-| **103 of 340 props are placed by no setup and referenced by no code table found.** Finished models among them: crates and furniture (green ammo crates 4/5, bin, blotter, large card boxes, desk 2, letter tray, wire-cage metal crate, hazard crate, wooden crates), the second Severnaya "GoldenEye" console half `console_sev_GEb`, phone, sat box, oil drums 1/2/3/5/6, missile racks, torpedo rack, the Frigate harpoon launcher, 13 doors (sev_door, steel doors, roller doors, Arecibo, Frigate, gas-plant, train, depot gate and steel door), fur hats and the grey helmet, a jungle tree, a bollard, a magenta test tube, and **vehicles: an articulated lorry cab and trailer, a Hind helicopter, an APC, a speedboat, an Escort-style car and a black ZIL limousine** | obj agent's never-placed list minus the dropped-weapon table `0x8002BA38`, the thrown-item table `0x8002A23C` and front-end constants; `unused/props_unused_final.json`; sheet `unused/renders/props_unused_final_sheet.png` (lead viewed) | verified (scan); unused: medium-high for finished furniture, doors and vehicles |
-| Magazine and shell props, silencer, extinguisher, explosion debris: probably spawned by code | same | low (as "unused") |
-| **23 props are one byte-identical placeholder "cube"** (a wireframe-textured box), including the silver and gold PP7, bomb, credit card, dark glasses, door exploder, dynamite, explosive pen, finger gun, flare pistol, gold bar, heroin, lectre, lock exploder, microcode, microfilm, money, piton gun, spool tape, spy file and wrist dart props | md5 of the files | verified, high |
-| **Characters never used:** `CbluewomanZ` (0x1A), `CgreymanZ` (0x1E) and `CbluemanZ` (0x1F) appear only in the random-body pool, which no setup guard uses (no guard has body −1). Every head and every other body is used: by setups, the multiplayer character select (`0x8002B198`), the cast roll (`0x8002B5FC`), or Bond's outfit code | `unused/renders/chr_candidates_posed.png` | verified (scan), medium (a script-spawned random guard could still reach the pool) |
-| **Five gadget item models the game can't draw:** `GdynamiteZ`, `GexplosivepenZ`, `GextinguisherZ`, `GfingergunZ` and `GwristdartZ` are in the file table but have no `ModelFileHeader` in the data segment. With a synthesised header they render: dynamite, explosive pen, finger gun and wrist dart are byte-identical grenade-like placeholders, the same file 16 real items use as their first-person model. Only **the extinguisher is real art** (250 triangles) | file table; `unused/gadgets.ts`, `unused/renders/gadgets_unheadered_G_models.png` | verified, high; "planned gadgets": medium |
-| **Textures: 310 of 2,698 are referenced by nothing found.** 1,685 aren't used by BG files; subtracting every model texture record (1,445 numbers), the sky and water textures (2228, 1508, 1509) and the texture lists in ROM `0x29DC28..0x29E54C` (front end, HUD, explosions, watch) leaves 310. Notable: maritime signal flags, mountain/sky photo strips (#950–958), signs "UNAUTHORISED", "PERSONNEL" and "RESTRICTED AREA", **face and head textures with no model** (#1556–1559, #1696–1710, #1817–1819, #1883–1889, #1928–1930, #2061–2063, #2503), explosion and smoke sequences, jungle foliage, **street signs** (give way, speed 50/70; #2388–2419), horizon strips, "OHMSS" (#2537) and a lava texture | `unused/texture_refs_final.json`; sheets `unused/renders/tex_final_unused_00.png`, `_01.png` | verified (scan), medium (code may build DLs with texture numbers directly, e.g. the explosion sprites) |
-| **Two corrupt textures** #2246 and #2260 (64×32 I8): the only entries whose decode doesn't consume exactly their ROM size; they decode as noise and nothing references them | `bg/lib/getex.ts`; texture reference scan | verified, high (corrupt or placeholder: medium) |
-| No leftover data after any compressed file: all 681 end in zero padding after the DEFLATE stream | tail scan | verified, high |
-
-### 8.6 Music and sound
-
-| item | evidence | confidence |
-|---|---|---|
-| **Unreferenced songs 1, 54 and 59**, in no stage table, random list or code constant, and reachable only through the disabled debug menu's music selector (which steps through 1–62). Song 1 is an 11-track 16.7 s sting (250 → 145 BPM, notes in the first 4.8 s); song 54 a 5-track 8 s loop at 150 BPM; **song 59 is a byte-identical copy of song 52** (a multiplayer track). Renders: `music/wav/song01.wav`, `song54.wav`, `song59.wav` | stage music table `0x8004EB10`, random list `0x8004EBD0`, constant scan, debug selector `0x7F0BD9EC` | verified, medium–high (song ids computed at run time are not excluded) |
-| **Silent stub sequences** 0, 20, 30 and 39 (one event each) | sequence data | verified, high |
-| **Citadel's theme, song 6**, is still heard: it is in the multiplayer random list | tables | verified, high |
-| Nine songs are heard only through the multiplayer random list (5, 13, 33, 34, 35, 36, 45, 52, 56) | tables | verified, high (not unused) |
-| Music instrument 5 is never selected by any song | sequence scan | verified, high |
-| **54 of 260 sound-effect ids are referenced by nothing found:** 6, 8–10, 16, 34, 44, 53, 55–57, 59, 67, 78, 84, 86–88, 90, 94, 99, 101, 103, 104, 108, 114, 115, 119, 127, 129–133, 158, 169, 171, 175–180, 190, 193, 205–207, 251, 252, 254, 256, 259, 260 (contiguous gaps suggest whole groups) | 231 call sites of `sndPlay` `0x70008E08` (206 constants), static id tables, per-surface sound lists, item fields, the AI command `0xC4` in every setup; `unused/sfx_used.json` | verified (scan), **medium-low** (some id sources unresolved) |
-
-### 8.7 Text
-
-Every English text bank and briefing was dumped (`unused/text/L*E.txt`) and each string id searched in code
-immediates, the data segment, briefings and setups (`unused/text/text_refs.tsv`). Unreferenced strings (verified by the
-scan; confidence medium, since the loose scans over-report and ids built at run time can't be seen):
-
-| bank | unreferenced strings | reading |
-|---|---|---|
-| stat (Statue) | "null", Trevelyan/Bond reveal lines, "3 Minutes until helicopter bomb explodes.", five Mishkin arrest lines, "Proximity fuse triggered…" | a cut Statue Park ending |
-| sevb (Bunker 2) | a Bond/jailer "stomach hurts" exchange, "Natalya: Nice work.", "Natalya has died." | a cut escape sequence |
-| arch (Archives) | "Mishkin: General Ourumov is our traitor.", "Bond: Even trusted friends are capable of betrayal.", "Mishkin: It is in the safe." | cut interrogation lines |
-| ark (Facility) | "Dr. Doak: You'll need this decoder to open the bottling room door. Good luck, 007.", "Ourumov: One...", **"Ourumov: 1"**, Trevelyan lines, "Double agent contact has been killed!" | cut dialogue and a placeholder |
-| sev (Bunker 1) | **"hello"**, "The programmer has escaped without activating the computer!" | developer placeholder, cut objective |
-| cave (Caverns) | "Mission Failure: Unacceptable non-military casualties!", **"pursue trevelyan"** | placeholder |
-| azt (Aztec) | "This mainframe controls the shuttle launch sequence.", "Shuttle exhaust bay closed! Launch holding at T minus 10 seconds." | cut objective messages |
-| tra (Train) | Natalya cracking Boris's password ("You're a slug-head, Boris!") | cut dialogue |
-| arec, dest, pete, sevx, silo | Boris "Please don't shoot!", bomb-defused messages, civilian-casualty failure, "Surveillance camera disabled.", "Ourumov: Kill him!" … | cut or alternate messages |
-| crad, jun | nine Trevelyan taunts, Natalya quips ("Oh, that's a nice plant.", "Advantage, Natalya Simonova.") | possibly chosen at random by AI scripts (not checked) |
-| len (Cuba) | ten credit roles with no name (3rd Scenic Artist, Electrical Best Boy, Dolly Grip …) | credits may be table-driven |
-| title | "Citadel"/"CITADEL", the lower-case map names (§8.1), "CHEAT OPTIONS:", "second", "s" | cut stage and menu leftovers |
-| empty banks | `Lame Lash Lcat Ldish Lear Leld Limp Llee Llip Llue Loat Lpam Lref Lrit Lsho Lwax`: 32 zero bytes each, E and J | stages that never had text (multiplayer-only or cut) |
+External documentation, decompositions, and source archives are cited inline where used.

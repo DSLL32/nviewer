@@ -1,183 +1,107 @@
-# Perfect Dark (N64, USA V1.0): ROM formats, rendering and music for the level viewer
+# Perfect Dark — Nintendo 64 ROM format specification
 
-> This is a research document: it analyses the ROM read-only and changes nothing in the viewer.
-> - **Scope:** `Perfect Dark (U) (V1.0) [!].z64` (game code `NPDE`, revision 0). Other revisions are covered only where
->   differences were verified (§1.2).
-> - **Evidence:** every statement is marked **verified** (checked against ROM data, by disassembly, or in the running
->   game in headless mupen64plus: RDRAM dumps, breakpoints, frame display lists, screenshots, audio captures) or
->   **hypothesis**. Where a field name or lead came from the public n64decomp/perfect_dark decompilation, it was
->   checked against this ROM; claims that rest on the decompilation alone are marked hypothesis or "decomp only".
-> - **Research material:** scripts, dumps, captures, prototypes and renders are under `/home/n64/.ai-tmp/r49/pd/`.
->   Paths below are relative to it. The topic notes behind each section are in `notes/` (`fs.md`, `stages.md`,
->   `bg.md`, `runtime.md`, `obj.md`, `anim.md`, `music.md`, `unused_debug.md`, `unused_text_stages.md`,
->   `unused_assets.md`).
-> - **Other sections:** §8 lists the evidence, §9 collects the open questions, and §10 covers unused and hidden content.
+This manual describes the shipped data formats needed to identify, extract, and
+present Perfect Dark content. Claims state their evidence inline; unsupported
+interpretations are labelled hypotheses.
 
-## 0. At a glance
+## 1. Overview
 
-| | Perfect Dark (U V1.0) |
+### 1.1 Technical summary
+
+| Property | Value |
 |---|---|
-| ROM | 32 MiB, CIC-6105, entry 0x80001000; Expansion Pak required for the solo game |
-| Code | boot raw at 0x70001000; lib and data rarezip-compressed; game code TLB-mapped at 0x7F000000, stored as 442 rarezip 4 KiB pages (§1.3) |
-| Compression | "rarezip" `11 73` + u24 size + raw DEFLATE, bit-exact against the game (498/498 decompressions in RAM); the viewer's `inflate.ts` works unchanged (§2.1) |
-| Files | 2,013 named files; ROM offset table in the data segment, name table at ROM 0x1D5CA00. BG `.seg` containers, `_tilesZ`, `_padsZ`, setups `U*`, models `P*`/`C*`/`G*`, text `L*`, MP3 voice clips `A*` (§2.2) |
-| Outside the file table | animations, fonts, sound and music banks, sequences, global textures (§2.3) |
-| Level unit | stage: one stage-table record = BG + tiles + pads + solo setup + MP setup (61 records; §3). 17 solo missions, 4 special assignments, Carrington Institute, 16 Combat Simulator arenas; several stages share a BG |
-| Geometry | BG file of rarezip sections: rooms (tree of blocks with display lists, 12-byte vertices, RGBA colour arrays), portals, visibility commands, lights, bounding boxes (§4) |
-| Microcode | Rare's GBI1-family microcode (glide64 "ucode 7"): 12-byte `G_VTX`, `G_COL` colour arrays, `TRI4`, and a file-only `C0` texture macro. It **can't be run by `displaylist.ts` unchanged** (§4.5) |
-| Textures | global store of 3,503 textures by number, two decoders (zlib paletted; bitstream Huffman/RLE/lookup/blur), texels identical to RDRAM (§4.6); plus embedded tiles in model files |
-| Space | right-handed, +Y up, game units (the player's eye is 159 units above the floor), no mirroring; three stages are drawn at 0.5 scale in the game, which the viewer can ignore (§4.7, §4.9) |
-| Environment | two environment tables by stage: fog (`gSPFogPosition`), sky and clear colour, clouds/water/suns; sky rooms drawn camera-relative (§4.9) |
-| Lighting | baked vertex colours; the game dims some entries at run time (§4.10) |
-| Objects | pads + setup command lists (0x3B types); models with node trees (LOD, bbox, head spot) in the same microcode; placement math verified against 285 RAM objects (§5) |
-| Characters | body + head models authored in a "splits" bind pose; animation format decoded (joint matrices equal RAM), so characters can stand in their idle frame (§5.6) |
-| Music | libultra **n_audio** compressed-MIDI player, ALBank + VADPCM, 22018 Hz, 119 sequences, a stage-music table with primary/ambient/X tracks; renders match captured game audio in tempo, pitch and level with gain 1.0 (§6) |
-| Viewer | a new `src/rom/perfectdark/` module set; medium difficulty overall (§7) |
+| Asset organization | 2,013 named files; ROM offset table in the data segment, name table at ROM 0x1D5CA00. BG `.seg` containers, `_tilesZ`, `_padsZ`, setups `U*`, models `P*`/`C*`/`G*`, text `L*`, MP3 voice clips `A*` (*File table (verified: ROM, RAM, loader disassembly, load trace)*) |
+| Compression | "rarezip" `11 73` + u24 size + raw DEFLATE, bit-exact against the game (498/498 decompressions in RAM); the viewer's `inflate.ts` works unchanged (*Compression: rarezip "1173" (verified bit-exact against the game)*) |
+| Graphics microcode | Rare's GBI1-family microcode (glide64 "ucode 7"): 12-byte `G_VTX`, `G_COL` colour arrays, `TRI4`, and a file-only `C0` texture macro. It **can't be run by `displaylist.ts` unchanged** (*Display lists (verified: opcode histogram of all 4,367 leaf lists; decoded identically by the frame-DL walker; renders)*) |
+| Geometry | BG file of rarezip sections: rooms (tree of blocks with display lists, 12-byte vertices, RGBA colour arrays), portals, visibility commands, lights, bounding boxes (*Level geometry*) |
+| Textures | global store of 3,503 textures by number, two decoders (zlib paletted; bitstream Huffman/RLE/lookup/blur), texels identical to RDRAM (*Global textures (verified: disassembly, all 3,502 non-empty textures decode, texels identical to RDRAM)*); plus embedded tiles in model files |
+| Collision | Per-stage tile polygons plus pad records in named `_tilesZ` and `_padsZ` files. |
+| Music driver | libultra **n_audio** compressed-MIDI player, ALBank + VADPCM, 22018 Hz, 119 sequences, a stage-music table with primary/ambient/X tracks; renders match captured game audio in tempo, pitch and level with gain 1.0 (*Music*) |
+| Audio microcode | Rare's `naudio_mp3` task. |
+| Sample encoding | libultra **n_audio** compressed-MIDI player, ALBank + VADPCM, 22018 Hz, 119 sequences, a stage-music table with primary/ambient/X tracks; renders match captured game audio in tempo, pitch and level with gain 1.0 (*Music*) |
+| Levels | stage: one stage-table record = BG + tiles + pads + solo setup + MP setup (61 records; *Levels*). 17 solo missions, 4 special assignments, Carrington Institute, 16 Combat Simulator arenas; several stages share a BG |
+| Memory requirement | Expansion Pak; a separate reduced-memory menu path exists. |
+| Viewer support | USA and European retail data; stages, objects, collision, environment, characters, and music. |
+| Outside the file table | animations, fonts, sound and music banks, sequences, global textures (*ROM map (verified; 41 regions cover every byte, `fs/rommap.tsv`)*) |
+| Space | right-handed, +Y up, game units (the player's eye is 159 units above the floor), no mirroring; three stages are drawn at 0.5 scale in the game, which the viewer can ignore (*Coordinates, units, culling (verified)*, *How the game draws a frame, environment, fog and sky (verified: 13 RDRAM captures with frame display lists, disassembly)*) |
+| Environment | two environment tables by stage: fog (`gSPFogPosition`), sky and clear colour, clouds/water/suns; sky rooms drawn camera-relative (*How the game draws a frame, environment, fog and sky (verified: 13 RDRAM captures with frame display lists, disassembly)*) |
+| Lighting | baked vertex colours; the game dims some entries at run time (*Lighting at run time (verified: RAM colour arrays vs BG file in 9 stages)*) |
+| Objects | pads + setup command lists (0x3B types); models with node trees (LOD, bbox, head spot) in the same microcode; placement math verified against 285 RAM objects (*Objects and props*) |
+| Characters | body + head models authored in a "splits" bind pose; animation format decoded (joint matrices equal RAM), so characters can stand in their idle frame (*Animations and standing characters (verified: lib `anim.c` disassembly, all 1,207 table records, joint matrices vs RAM)*) |
+| Viewer | a new `src/rom/perfectdark/` module set; medium difficulty overall (*Mapping onto the viewer*) |
 
-Status and confidence:
+### 1.2 ROM identification
 
-| Area | Confidence |
+| Release | NAME | Game code | Revision | Size | CRC1 | CRC2 | SHA-1 | CIC | Build |
+|---|---|---|---:|---:|---|---|---|---|---|
+| USA V1.0 | `Perfect Dark` | `NPDE` | 0 | 32 MiB (`0x2000000`) | `DDF460CC` | `3CA634C0` | `60dfe17923c03875b499b3cd3200f05cb538b7ad` | CIC-6105 | — |
+| USA V1.1 | `Perfect Dark` | `NPDE` | 1 | 32 MiB (`0x2000000`) | `41F2B98F` | `B458B466` | `af8788ac4d1a57260eae9c53ffe851fcf2a3319b` | CIC-6105 | — |
+| Europe | `Perfect Dark` | `NPDP` | 0 | 32 MiB (`0x2000000`) | `E4B08007` | `A602FF33` | `a663d3f4eee0b198471132db92e9639a9edd1985` | CIC-6105 | — |
+| Japan | `PERFECT DARK` | `NPDJ` | 0 | 32 MiB (`0x2000000`) | `96747EB4` | `104BB243` | `99bcaaa4841b09c845e1094006df8f637862f02e` | CIC-6105 | — |
+
+Verified from the normalized ROM headers and complete-image SHA-1 hashes.
+
+### 1.3 Terminology and conventions
+
+ROM and memory ranges are half-open. Offsets, addresses, encoded sizes, masks,
+and opcodes are hexadecimal unless stated otherwise. Multi-byte CPU fields are
+big-endian. RAM addresses are virtual unless explicitly identified as physical;
+segmented, VROM, and file-relative addresses are named at each use.
+
+## 2. Program and storage architecture
+
+### 2.1 Boot and executable layout
+
+No additional executable-layout information is required by the viewer.
+
+### 2.2 Memory and address mapping
+
+#### Filesystem and compression: Addressing of loaded data (verified: disassembly and trace)
+
+| Data | Pointer convention |
 |---|---|
-| ROM identification, boot, code segments, revisions | high (RDRAM equal to the decompressed images; CIC checksum reproduced) |
-| Compression and file table | high (bit-exact against 498 in-game decompressions; viewer decoder checked on all streams) |
-| Stage list, names, loading | high (tables + two emulator load traces) |
-| BG format, textures, coordinates | high (all 31 BGs parse with cross-checks; texels equal RDRAM; 11 game-camera renders match their screenshots) |
-| Fog, clear colour, environment table | high (frame values equal the table in all captures) |
-| Sky construction (clouds, water) | medium-high (planes, heights, colours verified against 4 frames; texture phase and axis order hypothesis; water texture and suns from code only) |
-| Runtime lighting | medium (baked colours verified; run-time dimming observed, cause hypothesis) |
-| Setups, pads, placement | high (placement vs 285 + 334 RAM objects; renders with objects match screenshots) |
-| Models (props, doors, weapons) | high (all 686 models parse; renders) |
-| Characters standing | high for the animation decoder (joint matrices equal RAM); medium for character placement (pad + yaw + root height; floor snap needed) |
-| Music engine, formats, song list | high (RAM player state, tables, AI script walk) |
-| Rendered music | high (5 capture comparisons: tempo exact, pitch correct, level within ±3 dB; reverb not rendered) |
-| Unused and hidden content | per item in §10 |
+| models `C*`, `G*`, `P*` | virtual addresses based at **0x05000000**. The loader (0x70022A24) adds `load − 0x05000000` to the header fields and walks the node tree. A viewer uses `ptr − 0x05000000` as the file offset |
+| setups `Usetup*`, `Ump_setup*` | file-relative offsets in the header (+0x0C, +0x10, +0x14, +0x18) |
+| BG `.seg` | read in parts: a 0x40-byte header, a primary block, then compressed room sections at file offsets (*Level geometry*) |
+| global display lists | ROM 0x7EB270, segment 2 (`[0x800AB550] = ptr − 0x02000000`) |
+| global textures | by texture number (*Level geometry*) |
+| voice clips | ROM address and size, streamed |
 
-Contents
-0. At a glance
-1. ROM identification and boot
-2. Filesystem and compression
-3. Levels
-4. Level geometry
-5. Objects and props
-6. Music
-7. Mapping onto the viewer
-8. Verification evidence
-9. Open questions
-10. Unused and hidden content
+### 2.3 ROM map and asset organization
 
-Conventions: offsets are hexadecimal; "ROM" offsets are into the big-endian `.z64`; RAM addresses are KSEG0
-(`0x80…`), `0x70…` (the boot/lib TLB mirror of low RAM) or `0x7F…` (TLB-mapped game code); multi-byte values are
-big-endian.
+#### Filesystem and compression: ROM map (verified; 41 regions cover every byte, `fs/rommap.tsv`)
 
-## 1. ROM identification and boot
-
-### 1.1 Header and hashes (verified: ROM bytes; checksum recomputed)
-
-| Offset | Field | Value |
-|---|---|---|
-| 0x00 | PI config | `80 37 12 40` (big-endian .z64) |
-| 0x04 | clock rate | 0x0000000F |
-| 0x08 | entry point | **0x80001000** (not the usual 0x80000400) |
-| 0x0C | release | 0x00001449 |
-| 0x10 / 0x14 | CRC1 / CRC2 | 0xDDF460CC / 0x3CA634C0 |
-| 0x20 | name | `Perfect Dark` padded with spaces |
-| 0x3B | game code | `NPDE` |
-| 0x3F | revision | 0 |
-
-- **File:** 32 MiB. MD5 `7f4171b0c8d17815be37913f535e4e93`, SHA-1 `60dfe17923c03875b499b3cd3200f05cb538b7ad`.
-- **IPL3:** crc32(0x40..0x1000) = `98BC2C86`, **CIC-NUS-6105**. Verified three ways (`fs/scripts/cic.py`,
-  `fs/ram/title1.bin`):
-  - the 6105 checksum algorithm reproduces the header CRCs of all four PD dumps;
-  - all four dumps share the same IPL3;
-  - the IPL3 leaves `0xC86E2000` at 0x800002E8, and boot hangs at 0x700017D8 unless that word is present.
-- **Anti-tamper (verified):** the first ROM read longer than 128 bytes XORs its first 8 words with 0x0330C820 and
-  then with ROM word 0x340. With the genuine IPL3 the two cancel out. This doesn't matter for an offline parser.
-- **RAM:** the solo game needs the Expansion Pak (8 MiB). The game also boots with 4 MiB, using demand paging (§1.3).
-
-### 1.2 Revisions (verified: `fs/scripts/revs.py`, `revcode.py`, `fs/revs.txt`)
-
-| | U V1.0 (this spec) | U V1.1 | E (M5) | J |
-|---|---|---|---|---|
-| file | `Perfect Dark (U) (V1.0) [!].z64` | `(U) (V1.1) [!]` | `(E) (M5) [!]` | `(J) [!]` |
-| game code / rev | NPDE / 0 | NPDE / 1 | NPDP / 0 | NPDJ / 0 (name `PERFECT DARK`) |
-| CRC1 CRC2 | DDF460CC 3CA634C0 | 41F2B98F B458B466 | E4B08007 A602FF33 | 96747EB4 104BB243 |
-| MD5 | 7f4171b0… | e03b088b… | d9b5cd30… | 538d2b75… |
-| data segment vaddr / size | 0x80059FE0 / 0x30E40 | same | 0x80059C90 / 0x316E0 | 0x80059EA0 / 0x315F0 |
-| game code end / pages | 0x7F1B9870 / 442 | 0x7F1B99E0 / 442 | 0x7F1BB040 / 444 | 0x7F1BA950 / 443 |
-| file table | data+0x28080, 2,015 offsets | same | data+0x28910, 2,015 | data+0x28800, 2,017 |
-| name table (ROM) | 0x1D5CA00 | 0x1D5CA00 | 0x1D534E0 | 0x1D58A20 |
-| first file (ROM) | 0xED83A0 | 0xED83A0 | 0xEC6930 | 0xECA7C0 |
-
-All four dumps share the same ROM positions for the IPL3, boot (0x1000), lib (0x3050), data (0x39850), the boot
-inflater (0x4E850) and the game page table (0x4FC40). Differences found by comparing the decompressed files by name:
-- **V1.1:** the same 2,013 files; only `UsetupaztZ` differs. The lib and game code differ; the game code shifts
-  from 0x7F000442 on.
-- **E:** the same names; 175 files differ: 160 language files, 13 setups (`ame azt cave dam depo dish eld lue pam
-  rit sev sho wax`), `bg_lue_tilesZ` and `bg_mp9_tilesZ`. No BG, model or voice file differs.
-- **J:** adds `PjaplogoZ` and `PjappdZ`; 212 files differ: 180 language files, 15 setups, the same two tiles files,
-  and 15 Joanna body/head models.
-- **Code:** the E and J game images are different builds (only 1–2% of words equal at the same offset).
-
-**For the viewer:** accept `NPDE` with `rom[0x3F] == 0` and this address map. All the addresses below can also be
-derived from the boot code for any revision, as `fs/extract.py` does. Other revisions would need their own tables
-(e.g. the stage and environment tables in the data segment move).
-
-### 1.3 Boot chain and code segments (verified: disassembly; RDRAM equal to the decompressed images)
-
-```
-IPL3 (6105) copies ROM 0x1000..0x101000 to 0x80001000 and jumps there
-0x80001000 boot: clear BSS 0x8008AE20..0x800AD1C0; sp = 0x80000F10
-0x80001050 TLB entry 0: 0x70000000 -> phys 0 (two 4 MiB pages), so 0x70xxxxxx mirrors 0x80xxxxxx
-0x700016CC copy the data zip and boot inflater to 0x701EB000 (the inflater lands at 0x70200000),
-           copy the lib zip to 0x70280000;
-           inflate(0x70280000 -> 0x70003050)   lib, at its link address
-           inflate(0x701EB000 -> 0x80059FE0)   data
-           check [0xA00002E8] == 0xC86E2000; start threads
-lib 0x700070D0 game code: memSize > 4 MiB ? unpack all pages to phys 0x220000 and map them : demand paging
-```
-
-| Segment | ROM | Stored as | Load/link address | Size |
-|---|---|---|---|---|
-| header + IPL3 | 0x0–0x1000 | raw | – | 0x1000 |
-| boot | 0x1000–0x3050 | raw | 0x70001000 (entry alias 0x80001000) | 0x2050 |
-| lib (libultra, rarezip, audio, animation, PI file access) | 0x3050–0x2EA72 | rarezip | 0x70003050 | 0x56F90 |
-| unused stale bytes | 0x2EA72–0x39850 | – | – | §10 |
-| data | 0x39850–0x4A786 | rarezip | 0x80059FE0 (BSS 0x8008AE20–0x800AD1C0) | 0x30E40 |
-| zeros | 0x4A786–0x4E850 | – | – | – |
-| boot inflater (gzip `inflate.c` port; skips 5 header bytes unchecked) | 0x4E850–0x4FC40 | raw | 0x70200000 | 0x13F0 |
-| game page table | 0x4FC40–0x5032C | u32[443], offsets relative to 0x4FC40 | – | 0x6EC |
-| game code pages | 0x5032C–0x156DB4 | 442 page records | **0x7F000000**–0x7F1B9870 (TLB-mapped) | 0x1B9870 |
-| unused duplicate of pages 0–102 | 0x1574A0–0x194785 | – | – | §10 |
-
-**Game page record** `i` (0 ≤ i < 442) is at `0x4FC40 + u32(0x4FC40 + 4i)`. It holds a u16 (never read; meaning
-unknown) and then a rarezip stream of 0x1000 bytes (0x870 for the last page). The pages concatenate into the image at
-0x7F000000.
-- **8 MiB:** everything is unpacked to phys 0x220000 (`[0x80090B00] = 0x80220000`) and mapped with 64 KiB TLB
-  pairs. An 8 MiB RDRAM dump therefore holds the game code at file offset 0x220000.
-- **4 MiB:** the TLB-refill handler at 0x80001180 inflates pages on demand into a 268-page pool.
-  - The page table pointer is `[0x8008AE24]` (8 bytes per page), and the relocated ROM offsets are at `[0x8008AE30]`.
-  - Verified: 129 demand-loaded pages in a 4 MiB title-screen dump are all byte-identical to the image.
-
-Code images, with disassemblies, are in `fs/code/`: `boot_70001000`, `lib_70003050`, `data_80059fe0`,
-`inflate_70200000` and `game_7f000000`. The boot, lib and game images are byte-identical to RDRAM at the title
-screen. The data image differs only in 1,292 bytes of runtime globals.
-
-Key functions (U V1.0):
-
-| Address | Function |
+| ROM | Contents |
 |---|---|
-| 0x700074F0 | `rarezipInflate(src, dst, scratch)` → bytes written |
-| 0x7000D410 | `romRead(dst, romOffset, len)` (chunks of 0x4000 through the PI manager) |
-| 0x7F166C00 / 0x7F166C3C | `fileGetRomAddress(id)` / `fileGetRomSize(id)` |
-| 0x7F166C74 | `fileLoadInternal(dst, bufsize, &romOffset[id], &outSize)` |
-| 0x7F166DB0 | `fileLoadPart(id, dst, offset, len)` (raw partial reads of BG files) |
-| 0x7F166EBC / 0x7F166FC0 | `fileLoadToNew(id, method)` / `fileLoadToAddr(id, method, dst, size)` |
-| 0x7F1A7554 | model loader (file load plus pointer fix-up from base 0x05000000) |
-| 0x7000E95C | `mainChangeToStage(stage)` (writes the pending stage to 0x8005DD54) |
+| 0x0000000–0x0001000 | header, IPL3 (CIC-6105) |
+| 0x0001000–0x0194785 | boot, lib, data, boot inflater, game pages (*Boot chain and code segments (verified: disassembly; RDRAM equal to the decompressed images)*); stale bytes and an unused page duplicate |
+| 0x0194440–0x01A15C0 | an older Japanese glyph set (small 16×12 cells from 0x194440, overlapping the duplicate page run; large 16×16 cells from 0x19FB40), addressed by U code but never used because U text is ASCII (*Text and strings*) |
+| 0x01A15C0–0x07CD1A0 | animation data, read in place in small pieces (base constant at lib 0x70023828) |
+| 0x07CD1A0–0x07D0A40 | animation table (read whole) |
+| 0x07D0A40–0x07D1C20 | Combat Simulator challenge configurations |
+| 0x07D1C20–0x07E9D20 | multiplayer strings: 7 blocks × 0x3700 (ranges in data at 0x800887C4) |
+| 0x07E9D20–0x07EB270 | Carrington Institute firing-range data (loaded by 0x7F19D320; identity medium-high) |
+| 0x07EB270–0x07EBDC0 | global display lists and texture-config tables linked at **0x02000000** (segment 2) |
+| 0x07EBDC0–0x07F2390 | block loaded by 0x7F015E28 (size 0x65D0; hypothesis: more segment-2 data) |
+| 0x07F2390–0x07F7860 | an unused font in the game's font format (*ROM leftovers and revision-only content*) |
+| 0x07F7860–0x0803DA0 | 6 fonts |
+| 0x0803DA0–0x080A250 | a second unused font (*ROM leftovers and revision-only content*) |
+| 0x080A250–0x0839DD0 | sound-effect instrument bank (`sfx.ctl`, "B1") |
+| 0x0839DD0–0x0CFBF30 | sound-effect samples (`sfx.tbl`) |
+| 0x0CFBF30–0x0D05F90 | music instrument bank ("B1") |
+| 0x0D05F90–0x0E82000 | music samples |
+| 0x0E82000–0x0ED83A0 | sequence table (u16 count = 119, 8-byte records) + 119 rarezip sequences |
+| 0x0ED83A0–0x1D5CA00 | the 2,013 files (*File table (verified: ROM, RAM, loader disassembly, load trace)*) |
+| 0x1D5CA00–0x1D6573D | file name table |
+| 0x1D6573D–0x1D65F40 | zeros |
+| 0x1D65F40–0x1FF7C95 | global textures, 3,503 entries (*Level geometry*) |
+| 0x1FF7CA0–0x1FFEA20 | global texture table: 8-byte entries `{u8 flags, u24 offset; u32 0}` |
+| 0x1FFEA20–0x1FFFE00 | two rarezip boot screens, 507×48 RGBA5551: "Copyright Rare Ltd. 2000" and "Accessing Controller Pak" (lib 0x7000D740) |
+| 0x1FFFE00–0x2000000 | 0xFF fill (0x1FFFF00 is the developer boot-argument area, *Debug features left in the retail code*) |
 
-## 2. Filesystem and compression
+### 2.4 Compression formats
 
-### 2.1 Compression: rarezip "1173" (verified bit-exact against the game)
+#### Filesystem and compression: Compression: rarezip "1173" (verified bit-exact against the game)
 
 ```
 u8  0x11
@@ -200,7 +124,7 @@ u24 size        big-endian decompressed size (exact)
 - **The viewer's decoder works unchanged:** `src/rom/inflate.ts` `inflateRaw(rom, off + 5, size)` equals zlib on all
   1,403 compressed files plus lib and data (`fs/scripts/inflate_check.ts`, about 0.8 s in total).
 
-### 2.2 File table (verified: ROM, RAM, loader disassembly, load trace)
+#### Filesystem and compression: File table (verified: ROM, RAM, loader disassembly, load trace)
 
 ```
 data + 0x28080 = vaddr 0x80082060: u32 romOffset[2015]    absolute ROM offsets
@@ -213,15 +137,15 @@ fields. A viewer can rely on the names for lookup, because they are stable withi
 
 | Kind | Names | Count | Stored |
 |---|---|---|---|
-| BG geometry | `bgdata/bg_<code>.seg` (ids 1–60) | 60 | raw file; sections inside are 1173. Many are 0x200-byte stubs |
+| BG geometry | `bgdata/bg_{code}.seg` (ids 1–60) | 60 | raw file; sections inside are 1173. Many are 0x200-byte stubs |
 | marker | `ob/ob_mid.seg` (id 61) | 1 | size 0 |
 | characters and heads | `C*Z` | 148 | 1173 |
 | guns, hands, items | `G*Z` | 106 | 1173 |
 | props | `P*Z` | 433 | 1173 (`PexplosionbitZ` has size 0) |
-| solo setups | `Usetup<code>Z` | 61 | 1173 |
-| multiplayer setups | `Ump_setup<code>Z` | 60 | 1173 |
-| pads, clipping tiles | `bgdata/bg_<code>_padsZ`, `bgdata/bg_<code>_tilesZ` | 60 + 60 | 1173 |
-| text | `L<name>E/J/P`, `L<name>_str_g/f/s/iZ` | 476 (7 × 68) | 1173 |
+| solo setups | `Usetup{code}Z` | 61 | 1173 |
+| multiplayer setups | `Ump_setup{code}Z` | 60 | 1173 |
+| pads, clipping tiles | `bgdata/bg_{code}_padsZ`, `bgdata/bg_{code}_tilesZ` | 60 + 60 | 1173 |
+| text | `L{name}E/J/P`, `L{name}_str_g/f/s/iZ` | 476 (7 × 68) | 1173 |
 | voice clips | `A*M` | 548 | raw MPEG-2 Layer III, 24 kbit/s, 22,050 Hz mono (all 69,155 frames parse), streamed from ROM |
 
 **Loader** (`fileLoadToNew`, 0x7F166EBC):
@@ -229,52 +153,43 @@ fields. A viewer can rely on the names for lookup, because they are stable withi
 2. Read the compressed bytes to the end of that buffer and inflate them to the start.
 3. Shrink the allocation to the real size.
 
-The file layer never relocates; format code converts pointers afterwards (§2.4).
+The file layer never relocates; format code converts pointers afterwards (*Addressing of loaded data (verified: disassembly and trace)*).
 
-### 2.3 ROM map (verified; 41 regions cover every byte, `fs/rommap.tsv`)
+#### Verification evidence: ROM, boot, codec, files
 
-| ROM | Contents |
-|---|---|
-| 0x0000000–0x0001000 | header, IPL3 (CIC-6105) |
-| 0x0001000–0x0194785 | boot, lib, data, boot inflater, game pages (§1.3); stale bytes and an unused page duplicate |
-| 0x0194440–0x01A15C0 | an older Japanese glyph set (small 16×12 cells from 0x194440, overlapping the duplicate page run; large 16×16 cells from 0x19FB40), addressed by U code but never used because U text is ASCII (§10.10) |
-| 0x01A15C0–0x07CD1A0 | animation data, read in place in small pieces (base constant at lib 0x70023828) |
-| 0x07CD1A0–0x07D0A40 | animation table (read whole) |
-| 0x07D0A40–0x07D1C20 | Combat Simulator challenge configurations |
-| 0x07D1C20–0x07E9D20 | multiplayer strings: 7 blocks × 0x3700 (ranges in data at 0x800887C4) |
-| 0x07E9D20–0x07EB270 | Carrington Institute firing-range data (loaded by 0x7F19D320; identity medium-high) |
-| 0x07EB270–0x07EBDC0 | global display lists and texture-config tables linked at **0x02000000** (segment 2) |
-| 0x07EBDC0–0x07F2390 | block loaded by 0x7F015E28 (size 0x65D0; hypothesis: more segment-2 data) |
-| 0x07F2390–0x07F7860 | an unused font in the game's font format (§10.11) |
-| 0x07F7860–0x0803DA0 | 6 fonts |
-| 0x0803DA0–0x080A250 | a second unused font (§10.11) |
-| 0x080A250–0x0839DD0 | sound-effect instrument bank (`sfx.ctl`, "B1") |
-| 0x0839DD0–0x0CFBF30 | sound-effect samples (`sfx.tbl`) |
-| 0x0CFBF30–0x0D05F90 | music instrument bank ("B1") |
-| 0x0D05F90–0x0E82000 | music samples |
-| 0x0E82000–0x0ED83A0 | sequence table (u16 count = 119, 8-byte records) + 119 rarezip sequences |
-| 0x0ED83A0–0x1D5CA00 | the 2,013 files (§2.2) |
-| 0x1D5CA00–0x1D6573D | file name table |
-| 0x1D6573D–0x1D65F40 | zeros |
-| 0x1D65F40–0x1FF7C95 | global textures, 3,503 entries (§4) |
-| 0x1FF7CA0–0x1FFEA20 | global texture table: 8-byte entries `{u8 flags, u24 offset; u32 0}` |
-| 0x1FFEA20–0x1FFFE00 | two rarezip boot screens, 507×48 RGBA5551: "Copyright Rare Ltd. 2000" and "Accessing Controller Pak" (lib 0x7000D740) |
-| 0x1FFFE00–0x2000000 | 0xFF fill (0x1FFFF00 is the developer boot-argument area, §10.2) |
+| Check | Method | Result | Evidence |
+|---|---|---|---|
+| CIC-6105 | header CRCs recomputed with the 6105 algorithm; IPL3 crc32; RAM word 0x800002E8 | all four dumps match; `98BC2C86`; `C86E2000` | `fs/scripts/cic.py`, `fs/ram/title1.bin` |
+| code images | RDRAM at the title screen vs decompressed boot, lib, data, game (8 MiB); demand-paged game code (4 MiB) | boot, lib and game identical; data differs only in 1,292 bytes of globals; 129/129 pages identical | `fs/scripts/cmp_ram.py`, `fs/ram/boot4mb.bin` |
+| rarezip vs the game | breakpoints at the decompressor entry and return during a Defection load; output buffers dumped | 498/498 identical to zlib (text, setup, pads, tiles, 66 models, 409 textures, 10 BG sections, 3 sequences) | `fs/trace/defection.tsv`, `fs/trace/z/` |
+| viewer `inflate.ts` | tsx over all compressed files + lib + data | 1,405 streams identical to zlib | `fs/scripts/inflate_check.ts` |
+| voice clips | MPEG frame parser | 548/548 MPEG-2 Layer III 24 kbit/s 22,050 Hz mono | `fs/scripts/afiles.py` |
+| ROM map | contiguity and fill checks | 41 regions cover the ROM | `fs/rommap.tsv` |
+| revisions | structural extraction of U V1.0/V1.1, E, J; decompressed file comparison by name | *Revisions (verified: `fs/scripts/revs.py`, `revcode.py`, `fs/revs.txt`)* | `fs/revs.txt`, `unused/revs/fundiff_U10_U11.txt` |
 
-### 2.4 Addressing of loaded data (verified: disassembly and trace)
+### 2.5 Loading process
 
-| Data | Pointer convention |
-|---|---|
-| models `C*`, `G*`, `P*` | virtual addresses based at **0x05000000**. The loader (0x70022A24) adds `load − 0x05000000` to the header fields and walks the node tree. A viewer uses `ptr − 0x05000000` as the file offset |
-| setups `Usetup*`, `Ump_setup*` | file-relative offsets in the header (+0x0C, +0x10, +0x14, +0x18) |
-| BG `.seg` | read in parts: a 0x40-byte header, a primary block, then compressed room sections at file offsets (§4) |
-| global display lists | ROM 0x7EB270, segment 2 (`[0x800AB550] = ptr − 0x02000000`) |
-| global textures | by texture number (§4) |
-| voice clips | ROM address and size, streamed |
+Level and asset selection is described by the tables and loader call paths above.
 
-## 3. Levels
+### 2.6 Revision differences
 
-### 3.1 Tables (verified: ROM data plus disassembly of the users; `stages/stagetable.py`, `stages/menus.py`)
+#### Unused and hidden content: ROM leftovers and revision-only content
+
+| Item | Evidence | Confidence |
+|---|---|---|
+| **two unused fonts** in the game's font format at ROM 0x7F2390 (a squared "Handel Gothic"-like face with small caps) and 0x803DA0 (a square pixel face). Not referenced in U, V1.1 or E; removed in J; not GoldenEye fonts. Sheet `unused/rom/fonts_all_8_sheets.png`, rows 7–8 | format match, renders, reference scans of all revisions | high |
+| boot screens at 0x1FFEA20/0x1FFF550 (507 × 48 RGBA5551): "Copyright Rare Ltd. 2000 / Published by Rareware." and "Accessing Controller Pak" (hold START at power-on). Used; English even in J. `unused/rom/bootimg_*_x3.png` | disassembly lib 0x7000D740, decoded | high (used) |
+| 0x2EA72–0x39850: a stale byte copy of ROM 0x1050–0xBE2E (build-tool padding); present in every revision | ROM compare | high |
+| 0x156DB4–0x194786: a truncated second copy of the game-code zip block (103 of 442 pages) with a zeroed page table; every revision has one | ROM compare | high (leftover), medium (cause) |
+| 0x7E9D20: Carrington Institute firing-range data (used); 0x7EBDC0: a segment-2 block loaded by title code (content unknown) | disassembly | medium-high / low |
+| V1.1 code: 28 game and 3 lib functions changed. Controller Pak/EEPROM code; BG decompression slack 0x800→0x8000; a Deep Sea-specific check; an audio-library NULL check | relocation-masked function diff `unused/revs/fundiff_U10_U11.txt` | high (what), low–medium (why) |
+| E and J setups add or remove no objects or characters (edits inside AI lists and field values); J changes 15 Joanna models and adds the two logo models | setup and file diffs | high |
+
+## 3. Level data
+
+### 3.1 Level catalog and identifiers
+
+#### Levels: Tables (verified: ROM data plus disassembly of the users; `stages/stagetable.py`, `stages/menus.py`)
 
 | Table | vaddr (data offset) | Layout | Users |
 |---|---|---|---|
@@ -292,7 +207,7 @@ The file layer never relocates; format code converts pointers afterwards (§2.4)
 | Offset | Type | Meaning |
 |---|---|---|
 | +0x00 | s16 | stage id (**verified**) |
-| +0x02..+0x05 | u8 × 4 | 2, 0xFF, 100, 100 in every stage except Deep Sea (8, 0x60, 0x50, 0xC8) (hypothesis: fog or light type; see §4) |
+| +0x02..+0x05 | u8 × 4 | 2, 0xFF, 100, 100 in every stage except Deep Sea (8, 0x60, 0x50, 0xC8) (hypothesis: fog or light type; see *Level geometry*) |
 | +0x08 | u16 | **BG file id** `bgdata/bg_*.seg` (**verified**: loader and emulator) |
 | +0x0A | u16 | **tiles (collision) file id** (**verified**) |
 | +0x0C | u16 | **pads file id** (**verified**) |
@@ -301,7 +216,7 @@ The file layer never relocates; format code converts pointers afterwards (§2.4)
 | +0x14 | f32 | 1.0 (0.1004 for 0x36 `len`) (hypothesis: world scale) |
 | +0x18 | f32 | 1.0; 0.5 for 0x1C, 0x27, 0x2C, 0x4C (copied to a per-player field) |
 | +0x1C | f32 | 100.0 (6.684 for 0x36); 0x7F15C664 returns +0x1C / +0x14 |
-| +0x20..+0x34 | | u32, u32, f32 0.15, u16/u16 (e.g. 0x2BC/0x190), u32, f32 1.0 (hypothesis: sky and fog parameters; see §4) |
+| +0x20..+0x34 | | u32, u32, f32 0.15, u16/u16 (e.g. 0x2BC/0x190), u32, f32 1.0 (hypothesis: sky and fog parameters; see *Level geometry*) |
 
 **Global variables** (verified by RAM reads in Defection and Skedar):
 
@@ -312,7 +227,7 @@ The file layer never relocates; format code converts pointers afterwards (§2.4)
 | 0x80099FC0 | `g_Vars`; +0x4B4 holds the stage number again |
 | 0x8007FC00 | stage-table index |
 
-### 3.2 How a stage loads (verified: disassembly; order confirmed with file-load breakpoints for stages 0x30 and 0x32)
+#### Levels: How a stage loads (verified: disassembly; order confirmed with file-load breakpoints for stages 0x30 and 0x32)
 
 1. `mainChangeToStage(s)` stores the pending stage; the lib main loop moves it to 0x8005D9B4 and applies the
    stage's memory arguments.
@@ -331,9 +246,9 @@ The file layer never relocates; format code converts pointers afterwards (§2.4)
    - Skedar arena: 0x178, 0x1E, `Ump_setupoatZ` 0x118, `LoatE` 0x6C0, 0x177 (`stages/bp_skedar_named.tsv`).
 
 A viewer loads a stage from the table in the same way: BG + tiles + pads + (solo or MP) setup, with names from the
-text files (§3.4).
+text files (*Text files (verified: all 476 parse; `langGet` 0x7F16E584)*).
 
-### 3.3 Stage list
+#### Levels: Stage list
 
 **Solo missions** (menu order; names from Loptions, verified):
 
@@ -382,8 +297,8 @@ disassembly).
 | Stage | Meaning | Status |
 |---|---|---|
 | 0x5A | title screen / attract | verified |
-| 0x5B | boot Controller Pak menu (hold START at power-on) | verified by code constants (`li a0,91` in 6 places, §10.2) |
-| 0x5C | end credits (loads Ltitle) | verified: a forced load shows the credits (§10.1) |
+| 0x5B | boot Controller Pak menu (hold START at power-on) | verified by code constants (`li a0,91` in 6 places, *Debug features left in the retail code*) |
+| 0x5C | end credits (loads Ltitle) | verified: a forced load shows the credits (*Cut, test and unfinished stages*) |
 | 0x5D | menu without Expansion Pak | verified by code constants (`li a0,93` in 4 places); not load-tested |
 
 **Table entries with no menu entry:**
@@ -394,11 +309,11 @@ disassembly).
 - **Stub BGs** (0x200 bytes): 0x18, 0x1A, 0x23, 0x24, 0x28, 0x2B, 0x36, 0x4D, 0x4E, 0x50, and 10 unused multiplayer
   slots (mp2, mp6–8, mp14, mp16–20).
 
-These appear in the unused-content catalogue in §10.
+These appear in the unused-content catalogue in *Unused and hidden content*.
 
-### 3.4 Text files (verified: all 476 parse; `langGet` 0x7F16E584)
+#### Levels: Text files (verified: all 476 parse; `langGet` 0x7F16E584)
 
-- **Naming:** 68 topics × 7 language slots. The slots are `L<topic>E`, `J`, `P`, `_str_gZ`, `_str_fZ`, `_str_sZ`
+- **Naming:** 68 topics × 7 language slots. The slots are `L{topic}E`, `J`, `P`, `_str_gZ`, `_str_fZ`, `_str_sZ`
   and `_str_iZ`.
 - **Topics:** one per stage code, plus gun, title (the credits), mpmenu, propobj, mpweapons, options (menus and mission
   names) and misc.
@@ -408,7 +323,7 @@ These appear in the unused-content catalogue in §10.
   is non-zero.
   - Example: 0x5685 = bank 43 (Loptions) string 133, "dataDyne Central".
 - **Encoding in the U ROM:** every string is 7-bit ASCII. P is PAL English, and g/f/s/i are byte copies of P. The J
-  slot is an older English draft (§10.10). NTSC code reads slot E, or slot J when `[0x80084120]` is non-zero (the
+  slot is an older English draft (*Text and strings*). NTSC code reads slot E, or slot J when `[0x80084120]` is non-zero (the
   `-j` boot argument).
 - **E (PAL) ROM:** the g/f/s/i slots hold real German, French, Spanish and Italian (Latin-1).
 - **Japanese ROM:** the bank order and most text ids are the same as U. The `L*J` files are Japanese: ASCII plus 2-byte
@@ -418,26 +333,48 @@ These appear in the unused-content catalogue in §10.
   to `Ldish`. Use per-revision text.
 - **Dumps:** `unused2/text/{U,E,J}/*.txt` (all ROMs). The first dumper, `stages/text/`, missed every string of the seven `Ldish` files, because string 0 is null: the table length is the smallest non-zero offset / 4, not offset[0] / 4.
 
-### 3.5 Proposed viewer level list
+### 3.2 Level container
 
-- **Groups:**
-  - "Mission 1" … "Mission 9", then "Special Assignments": 21 levels, each with its own pads and setup even when the
-    BG is shared.
-  - "Carrington Institute": 1.
-  - "Combat Simulator – Dark" and "Combat Simulator – Classic": 13 + 3 levels.
-  - "Unused": 0x14 silo and 0x1B sevb (real geometry, no setup).
-- **Names:** the menu names above. `Level.id` = the stage code plus the stage id (e.g. `ame-30`).
-- **Hidden:** entries with stub BGs.
-- **Setup:** the solo setup for missions, the hub and special assignments; the multiplayer setup for arenas.
-- **Counts:** 41 table entries over 31 distinct BG files have real geometry. 38 of them are reachable from menus.
+#### Level geometry: Room gfx data (one stream per room; pointers relative to the room pointer)
 
-## 4. Level geometry
+Header (0x18; verified in RDRAM: Defection room 2 loaded at 0x80161470 with `base + (ptr − roomPtr)`):
+`ptr vertices; ptr colours; ptr opaqueBlocks; ptr xluBlocks (0 = none); s16 lightsIndex; s16 numLights; s16 numVtx
+(set at load); s16 numColours (set at load)`, then the 0x14-byte block records.
 
-Research material: `notes/bg.md`, the prototype in `bg/lib/` (`pdbg.ts`, `pdtex.ts`, `pdtiles.ts`) and renders in `bg/renders/`.
+| Block offset | Leaf (type 0) | Parent (type 1) |
+|---|---|---|
+| +0x00 | u8 0, pad | u8 1, pad |
+| +0x04 | ptr next sibling | ptr next sibling |
+| +0x08 | ptr display list | ptr first child |
+| +0x0C | ptr vertex array (bound to RSP segment 14 when drawn) | ptr `{coord pos; coord normal}` split plane (hypothesis: child draw order) |
+| +0x10 | ptr colour array (segment 13) | – |
+
+- Stream order: header, blocks, vertices, colours, display lists. 4,367 leaves, 542 parents in all BGs.
+- **Vertex** (12 bytes): `s16 x, y, z; u8 flags; u8 colourOffset; s16 s, t`. The colour is `u32 RGBA` at
+  `colourArray[G_COL offset + colourOffset]` (a byte offset, multiple of 4). **verified** (all offsets in range in
+  every BG; RDRAM vertex bytes identical; renders).
+- **Colours:** u32 RGBA baked vertex colours. **verified** (RAM colour buffer = file for Defection room 2).
+
+#### Mapping onto the viewer: Level assembly (`loadLevel`)
+
+1. Stage record (*Tables (verified: ROM data plus disassembly of the users; `stages/stagetable.py`, `stages/menus.py`)*) → BG, pads, setup (solo +0x0E or MP +0x10) file ids.
+2. BG (*Level geometry*): one `Mesh` per room (room-local positions), `Instance` = `translate(room.pos)`; sky rooms → `Level.skies`;
+   textures from the global store (one viewer texture per number × wrap mode).
+3. Setup (*Objects and props*): one `Mesh` per model file (lowest LOD distance band, opaque + xlu batches), one `Instance` per placed
+   object with the *Placement (verified against RAM: rotations 238/285, positions 257/285; doors 45/46 and 44/46)* matrix (column-major, already in world units); layers "props", "doors", "glass", "weapons",
+   "characters", "vehicles" and "markers" (spawn pads, MP pads, chr pads when characters are markers).
+4. Environment (*How the game draws a frame, environment, fog and sky (verified: 13 RDRAM captures with frame display lists, disassembly)*): `Level.fog`, `Level.clearColor`, sky.
+5. `Level.camera`: first SPAWN pad + 112 up, target = eye + look (*Placement (verified against RAM: rotations 238/285, positions 257/285; doors 45/46 and 44/46)*).
+6. Optional: tiles as a hidden `collision` layer (*Tiles (collision) and pads (verified: all 60 tiles files parse exactly)*); difficulty filter default Agent.
+
+### 3.3 Geometry
+
+#### Level geometry
+
 The public n64decomp/perfect_dark decompilation was used only as a lead: claims that rest on it alone are marked
 hypothesis.
 
-### 4.1 At a glance
+#### Level geometry: At a glance
 
 | | Perfect Dark |
 |---|---|
@@ -451,7 +388,7 @@ hypothesis.
 | lighting | baked vertex colours (prelit); environment-mapped surfaces store normals and are lit by room lights at run time |
 | totals | 31 non-stub BG files (29 are 0x200-byte stubs); e.g. lue 270 rooms / 36,350 triangles, mp15 32 rooms / 1,562 |
 
-### 4.2 BG file container (verified: all 31 non-stub BGs parse exactly to the file end; disassembly of `bgReset` 0x7F15B304..0x7F15B6C4)
+#### Level geometry: BG file container (verified: all 31 non-stub BGs parse exactly to the file end; disassembly of `bgReset` 0x7F15B304..0x7F15B6C4)
 
 | Offset | Type | Field |
 |---|---|---|
@@ -465,10 +402,10 @@ hypothesis.
 | next | u16, u16 + stream | section 3: for rooms 1..N−1: `s16 min xyz, max xyz` (room-relative bbox) ×N−1, then `u16 gfxLen/16` ×N−1 (allocation `align16(v·16 + 0x100)`), then `u8 numLights` ×N−1 |
 
 The game reads the file in parts (`fileLoadPart`): the 0x40-byte header, the primary stream, section 2 and 3, then
-room streams on demand as rooms become visible (§3.2). **Stubs:** 0x200-byte files (one trivial room);
+room streams on demand as rooms become visible (*How a stage loads (verified: disassembly; order confirmed with file-load breakpoints for stages 0x30 and 0x32)*). **Stubs:** 0x200-byte files (one trivial room);
 `bg_ash.seg` (0x660, stage 0x2E) holds a single room of 40 triangles.
 
-### 4.3 Primary data (inflated; pointers are `0x0F000000 + offset`)
+#### Level geometry: Primary data (inflated; pointers are `0x0F000000 + offset`)
 
 Header (verified: the loader adds `base − 0x0F000000` to words 1..5):
 
@@ -496,34 +433,30 @@ Header (verified: the loader adds `base − 0x0F000000` to words 1..5):
   have lights (all solo stages, MP Ruins). They describe light fixtures used for dynamic effects (shooting lights
   out); the baked look doesn't need them.
 
-### 4.4 Room gfx data (one stream per room; pointers relative to the room pointer)
+#### Level geometry: Coordinates, units, culling (verified)
 
-Header (0x18; verified in RDRAM: Defection room 2 loaded at 0x80161470 with `base + (ptr − roomPtr)`):
-`ptr vertices; ptr colours; ptr opaqueBlocks; ptr xluBlocks (0 = none); s16 lightsIndex; s16 numLights; s16 numVtx
-(set at load); s16 numColours (set at load)`, then the 0x14-byte block records.
+- Right-handed, **+Y up**, game units; **no X mirroring** (the game's own matrices reproduce the screenshot with the
+  file geometry, sign orientation intact). A viewer uses `mirrorX: false`, `vertexScale: 1`.
+- Room placement: `world = room.pos + vertex` (identity rotation, no scale). In the Defection frame all 26 BG calls
+  used modelview `translate(room.pos − worldOffset)` with one camera-relative offset.
+- Projection in the Defection frame: fovY 60°, aspect 320/220, near 10, far 10000; viewport 320×220 centred in the
+  320×240 frame. A standing player's eye is 158.8 units above the floor.
+- Culling: back faces culled, counter-clockwise front faces (OpenGL convention); lists set `G_CULL_BACK` themselves
+  (opaque) or clear culling (most translucent lists). Rendering with the opposite rule removes the helipad floor
+  (`bg/renders/defection_a_gamecam_cullfront.png`).
+- Stage table +0x18 is 0.5 for Crash Site, Air Base, Villa and stage 0x4C: the game renders the whole world (BG, props,
+  characters) at that scale. A viewer ignores it and draws everything in BG units (verified, *How the game draws a frame, environment, fog and sky (verified: 13 RDRAM captures with frame display lists, disassembly)*).
 
-| Block offset | Leaf (type 0) | Parent (type 1) |
-|---|---|---|
-| +0x00 | u8 0, pad | u8 1, pad |
-| +0x04 | ptr next sibling | ptr next sibling |
-| +0x08 | ptr display list | ptr first child |
-| +0x0C | ptr vertex array (bound to RSP segment 14 when drawn) | ptr `{coord pos; coord normal}` split plane (hypothesis: child draw order) |
-| +0x10 | ptr colour array (segment 13) | – |
+### 3.4 Display lists and render state
 
-- Stream order: header, blocks, vertices, colours, display lists. 4,367 leaves, 542 parents in all BGs.
-- **Vertex** (12 bytes): `s16 x, y, z; u8 flags; u8 colourOffset; s16 s, t`. The colour is `u32 RGBA` at
-  `colourArray[G_COL offset + colourOffset]` (a byte offset, multiple of 4). **verified** (all offsets in range in
-  every BG; RDRAM vertex bytes identical; renders).
-- **Colours:** u32 RGBA baked vertex colours. **verified** (RAM colour buffer = file for Defection room 2).
-
-### 4.5 Display lists (verified: opcode histogram of all 4,367 leaf lists; decoded identically by the frame-DL walker; renders)
+#### Level geometry: Display lists (verified: opcode histogram of all 4,367 leaf lists; decoded identically by the frame-DL walker; renders)
 
 | Op | Count | Meaning (PD encoding) |
 |---|---|---|
 | `04` G_VTX | 37,857 | w0 bits 20–23 = count−1, bits 16–19 = first slot, bits 0–15 = count×12; w1 = `0x0E000000 + offset` (segment 14 = block vertices). 16 slots |
 | `07` G_COL | 4,395 | w0 bits 16–23 = (n−1)×4, bits 0–15 = n×4; w1 = `0x0D000000 + offset` (segment 13 = block colours) |
 | `B1` G_TRI4 | 90,281 | triangle k (0..3) = (`w1 >> 8k & 15`, `w1 >> (8k+4) & 15`, `w0 >> 4k & 15`); skip triangles with three equal indices |
-| `BF` G_TRI1 | 0 | F3D layout, index = byte / 10 (used by models, §5) |
+| `BF` G_TRI1 | 0 | F3D layout, index = byte / 10 (used by models, *Objects and props*) |
 | `B6` / `B7` | 1,499 / 4,267 | clear / set geometry mode (F3DEX 1.x bits: CULL_BACK 0x2000; LIGHTING \| TEXTURE_GEN 0x60000 on env-mapped surfaces) |
 | `B8` | 4,367 | end |
 | `B9` | 5,438 | render mode (shift 3, len 0x1D) |
@@ -571,12 +504,14 @@ textures reach 16 KiB. Recommendation: a PD-specific interpreter ported from `bg
 (~200 lines, emits viewer `Batch`es with texture, blend, depth, cullBack, decal and triSource; reuses `evalCombine`'s
 approach for the combiner fold).
 
-### 4.6 Global textures (verified: disassembly, all 3,502 non-empty textures decode, texels identical to RDRAM)
+### 3.5 Textures and materials
+
+#### Level geometry: Global textures (verified: disassembly, all 3,502 non-empty textures decode, texels identical to RDRAM)
 
 - **List:** ROM 0x1FF7CA0, 3,504 × `{u32 w0; u32 w1}`: w0 bits 0–23 = data offset (unaligned), bits 24–27 surface
   type, 28–31 sound type (names hypothesis); w1 = detail-tile nibbles (hypothesis). Data `ROM 0x1D65F40 + offset[n] ..
   offset[n+1]`; numbers ≥ 3503 rejected. Referenced by number from BG `C0` macros and from model files
-  (`FD…… ABCDnnnn`, §5).
+  (`FD…… ABCDnnnn`, *Objects and props*).
 - **Header byte:** `hasLodData:1 zlib:1 numLods:6` (numLods clamped to 5).
 - **zlib (paletted) textures** (2,886): MSB-first bit reader: `u8 format` (9 CI8/RGBA16, 10 CI4/RGBA16, 11 CI8/IA16,
   12 CI4/IA16), `u8 numColours − 1`, `u16 palette[n]`; per stored image `u8 width, u8 height` + a 1173 stream of indices
@@ -595,23 +530,48 @@ approach for the combiner fold).
 - **Wrap/filter:** wrap from the `C0` macro (wrap/clamp/mirror → `Texture.wrapS/T`), bilinear filtering; mip-maps can
   be approximated from LOD 0. Contact sheets: `bg/renders/textures/{arec,ame,dam,pete,dish,lue}_sec2.png`.
 
-### 4.7 Coordinates, units, culling (verified)
+#### Verification evidence: Level geometry, textures and environment
 
-- Right-handed, **+Y up**, game units; **no X mirroring** (the game's own matrices reproduce the screenshot with the
-  file geometry, sign orientation intact). A viewer uses `mirrorX: false`, `vertexScale: 1`.
-- Room placement: `world = room.pos + vertex` (identity rotation, no scale). In the Defection frame all 26 BG calls
-  used modelview `translate(room.pos − worldOffset)` with one camera-relative offset.
-- Projection in the Defection frame: fovY 60°, aspect 320/220, near 10, far 10000; viewport 320×220 centred in the
-  320×240 frame. A standing player's eye is 158.8 units above the floor.
-- Culling: back faces culled, counter-clockwise front faces (OpenGL convention); lists set `G_CULL_BACK` themselves
-  (opaque) or clear culling (most translucent lists). Rendering with the opposite rule removes the helipad floor
-  (`bg/renders/defection_a_gamecam_cullfront.png`).
-- Stage table +0x18 is 0.5 for Crash Site, Air Base, Villa and stage 0x4C: the game renders the whole world (BG, props,
-  characters) at that scale. A viewer ignores it and draws everything in BG units (verified, §4.9).
+| Check | Method | Result | Evidence |
+|---|---|---|---|
+| BG container, rooms, portals, lights, bboxes | parse of all 31 non-stub BGs with cross-checks (vertices inside boxes, light counts, texture lists, colour offsets, no unknown opcodes) | 0 problems | `bg/renders/overview_all.log`, `bg/renders/{code}_overview.png` |
+| BG relocation in RAM | Defection RDRAM: primary data at segment 15, room 2 header and leaf pointers, vertex bytes | match | `runtime/captures/defection_a/ram.bin` |
+| microcode | glide64 ucode checksum; 13 frames walked with no unknown opcodes; BG vertices found byte-exact in the frame (98 runs in Defection) | ucode 7 "Perfect Dark" | `runtime/tools/pdwalk.py`, `runtime/captures/*/dl_*.txt` |
+| textures | 3,502/3,503 decode; 116 Defection pool textures vs RDRAM | LOD 0 + palette identical 115/116 (1 false hit); all levels 106 (9 hit a game bug) | `bg/scripts/texram.ts`, `bg/dumps/texram_defection_a.json` |
+| **game-camera renders** | BG rendered with each frame's own projection, view, world scale and draw offset, next to the screenshot of the same moment | layout, handedness, textures and vertex colours match in all 11 gameplay/cutscene captures (*How the game draws a frame, environment, fog and sky (verified: 13 RDRAM captures with frame display lists, disassembly)* table); sky polygons, particles and HUD are not drawn | `bg/renders/{defection_a,chicago_a,ci_a,crashsite_a,villa_a,pelagic_a,pelagic_intro_cutscene,airbase_a,airbase_b,attackship_a,skedarruins_a,skedarruins_b,mp_skedar_a}_side_by_side.png` |
+| culling | same camera, opposite cull rule | the helipad floor disappears | `bg/renders/defection_a_gamecam_cullfront.png` |
+| sky rooms | frame modelview of ame room 1, sho room 2, lee room 0x71 = room position with a translation-free projection | exact | frame DLs |
+| world scale | room modelviews in Crash Site, Villa, Air Base | 0.5 on the diagonal, constant offset | `bg/scripts/scalecheck.ts` |
+| fog replacement | room lists in RAM vs file | Crash Site 9/9, Villa 17/17, Pelagic 8/8 and 10/10: PASS → FOG_SHADE_A; none on non-fog stages | `bg/scripts/fogmodes.py` |
+| fog values | frame movewords vs environment table | equal in Crash Site, Villa, Pelagic II | `runtime/captures/*/manifest.json` |
+| clear colour, near/far | FILLRECT colour and view struct vs environment record | 6 stages (colour), 13 captures (near/far) | same |
+| run-time lighting | RAM colour arrays vs BG file | identical in Defection/CI/Villa; 0.8–0.97 dimming of some entries elsewhere | `runtime/tools/colordiff.py` |
+| sky planes and colours | CPU-rasterised RDP triangles decoded from 5 frames vs the model from `skyRender` | W·depth constant per plane; vertex colours within ~2/255; horizon = sky colour | `runtime/tools/rdptri.py`, `skymodel.py`, `runtime/captures/*/sky_compare.png` |
+| world-space camera | player struct `+0x1BB0` vs frame eye in 10 stages | `campos − eye/scale` = the constant draw offset per stage, equal to the offsets solved from BG calls | `notes/runtime.md` *How a stage loads (verified: disassembly; order confirmed with file-load breakpoints for stages 0x30 and 0x32)*, `obj/dumps/capture_offsets.json` |
 
-### 4.8 Tiles (collision) and pads (verified: all 60 tiles files parse exactly)
+#### Unused and hidden content: Textures
 
-- **Tiles** (`bg_<code>_tilesZ`, 1173-compressed): `u32 roomCount` (BG rooms + 1), `u32 offset[roomCount + 1]`
+- **Coverage:** 3,188 of the 3,503 global textures are referenced by BG and model files. Code tables in the global
+  display-list block and code constants add most of the rest.
+- **Unreferenced: 100**, plus 2 referenced only in the decompilation. Sheet: `unused3/renders/textures_unreferenced.png`;
+  exact numbers are in its `.txt`. Scan limit: textures chosen by computed numbers would also appear here.
+
+| Textures | Content | Confidence |
+|---|---|---|
+| 0x1D0, 0x1D1 | handwritten, mirrored white scrawl | high (meaning low) |
+| 0x581, 0x582, 0xD2F | photographs of real faces (chin, mouth, ear), not used by any head | high |
+| 0x713, 0x71A, 0x71C, 0x873 | warning signs ("no guns", biohazard, worker hazard), a ring gauge | high |
+| 0x720–0x722 | three blurry painted portraits | high |
+| **0xBA0–0xBC5** (~30) | a jungle/temple set: foliage walls, green marble tiles, red/gold column, stone door panels, palm and fern leaves (hypothesis: a cut stage or GoldenEye Jungle/Temple re-exports; not compared) | high (unused) |
+| 0xC17–0xC30 | brick-wall explosion chunks, foliage clumps, pebbles, skin/leather tones | high |
+| 0xD02–0xD0E | 13 dark reflection/environment panels | high |
+| 0x058 and others | a dotted test grid, noise, bars, a faded face | high |
+
+### 3.6 Collision
+
+#### Level geometry: Tiles (collision) and pads (verified: all 60 tiles files parse exactly)
+
+- **Tiles** (`bg_{code}_tilesZ`, 1173-compressed): `u32 roomCount` (BG rooms + 1), `u32 offset[roomCount + 1]`
   (file-relative; room r's records span `offset[r]..offset[r+1]`), then per room records `{u8 type; u8 numVertices;
   u16 flags}`:
   - type 0: `u16 floorType; u8 xmin, ymin, zmin, xmax, ymax, zmax; u16 floorColour; numVertices × s16 x, y, z` (14 + 6n
@@ -641,13 +601,15 @@ approach for the combiner fold).
     - sight/shot blocker grey-blue, ladder cyan, underwater blue, death red;
     - darker for higher floor types.
     - Overlay renders: `../impl/pd_col/renders/*_overlay.png`.
-- **Pads**: §5.
+- **Pads**: *Objects and props*.
 
-### 4.9 How the game draws a frame, environment, fog and sky (verified: 13 RDRAM captures with frame display lists, disassembly)
+### 3.7 Environment, sky, fog, and lighting
 
-Captures (`runtime/captures/<name>/`: screenshots, 8 MiB RDRAM, walked display lists, `cam.json`, `manifest.json`):
+#### Level geometry: How the game draws a frame, environment, fog and sky (verified: RDRAM captures with frame display lists, disassembly)
 
-| Capture | Stage | BG | World scale | Near/far | Fog (mul, off) | Clear colour | Game-camera render vs screenshot (`bg/renders/<name>_side_by_side.png`) |
+Captures (`runtime/captures/{name}/`: screenshots, 8 MiB RDRAM, walked display lists, `cam.json`, `manifest.json`):
+
+| Capture | Stage | BG | World scale | Near/far | Fog (mul, off) | Clear colour | Game-camera render vs screenshot (`bg/renders/{name}_side_by_side.png`) |
 |---|---|---|---|---|---|---|---|
 | defection_a | 0x30 Defection | ame | 1 | 10/10000 | – | black | matches (layout, sign, helipad, textures, colours); moon sky room placed as in the frame |
 | ci_a | 0x26 Carrington Institute | dish | 1 | 15/10000 | – | (98, 180, 255) | matches (skylight grid, panels, floor) |
@@ -666,7 +628,7 @@ With placed objects: `obj/renders/defection_side_by_side.png`, `villa_side_by_si
 
 **Microcode** (verified): the graphics task's ucode text (0x8005A0B0) checksums to 0x47D46E86, which glide64mk2 maps to
 its ucode 7 "Perfect Dark"; all 13 frames decode with no unknown opcodes. It is a GBI1-family (Fast3D/F3DEX 1.x
-numbering) Rare variant with the vertex/colour/TRI4 changes of §4.5, plus `B5` TRI2 (index/2), `BE` CULLDL (/40),
+numbering) Rare variant with the vertex/colour/TRI4 changes of *Display lists (verified: opcode histogram of all 4,367 leaf lists; decoded identically by the frame-DL walker; renders)*, plus `B5` TRI2 (index/2), `BE` CULLDL (/40),
 Fast3D `MOVEWORD` types (0x06 segment, 0x08 fog, 0x0E perspnorm) and `B4/B2/B3` raw RDP words (CPU-rasterised
 triangles for the sky).
 
@@ -676,7 +638,7 @@ triangles for the sky).
 |---|---|---|---|
 | 1 | setup | – | shared state DLs 0x800613A0 (textfilt bilerp, 1-cycle) and 0x80061380 (`ZBUFFER \| SHADE \| SMOOTH`) |
 | 2 | Z clear, colour clear | – | viewport 320×220 (centred on 320×240); colour fill 0x0001, then the environment sky colour when non-black |
-| 3 | sky | sky projection (near 3), camera rotation only | Defection: ~34 two-pixel FILLRECT stars; Air Base/Villa/Crash Site: FILLRECT + CPU-built textured RDP triangles (clouds) (§4.9.3) |
+| 3 | sky | sky projection (near 3), camera rotation only | Defection: ~34 two-pixel FILLRECT stars; Air Base/Villa/Crash Site: FILLRECT + CPU-built textured RDP triangles (clouds) (*Sky*) |
 | 4 | world rooms (opaque) | projection slot = V·P; modelview = `worldScale · T(roomOrigin)` | render mode `C8102078` (fog) or `C4112078`; G_FOG when the stage has fog; each room scissored to its portal box |
 | 5 | props and characters, interleaved with rooms | P + full modelview (characters 0.1 × body scale × world scale) | `C4112078`; G_LIGHTING + TEXGEN on some parts |
 | 6 | translucent room lists | V·P | `C41049D8` |
@@ -692,7 +654,7 @@ is therefore `eye/s + offset`; the eye is 159 BG units above the floor in all 11
 everything (BG, props, characters, held weapons) uniformly: a viewer draws BG and objects unscaled in BG units**
 (verified: villa placement vs RAM 272/334 exact, crash-site model matrices = 0.5 × gameplay scale).
 
-#### 4.9.1 Environment table (verified: disassembly 0x7F165D40/0x7F16574C/0x7F165A0C, ROM data, RAM live struct = record in every capture)
+##### Environment table (verified: disassembly 0x7F165D40/0x7F16574C/0x7F165A0C, ROM data, RAM live struct = record in every capture)
 
 `envChoose(stage, allowOverride)` (0x7F165D40) looks up `stage + 900` (if allowed) or `stage` in the **fog table**
 (0x80081164, 0x2C-byte records, s16 id, 0-terminated). If found it applies the record with fog on; otherwise it uses
@@ -731,9 +693,9 @@ Also present (no menu stage): fog records for 0x24 and 0x2B (`sevx`/`sevxb` slot
 0x36 (sky (48, 64, 16)), 0x14, 0x3A, 0x3E–0x40, 0x46–0x4C. The stage table's +0x2C/+0x2E fields are not fog (Villa uses
 981..1047 from the fog table).
 
-#### 4.9.2 Fog and clear colour (verified: frame movewords equal the formula in 3 stages; clear colour in 6)
+##### Fog and clear colour (verified: frame movewords equal the formula in 3 stages; clear colour in 6)
 
-- Fog only for stages in the fog table: rooms get G_FOG and the cycle-1 fog render mode (§4.5), and the frame
+- Fog only for stages in the fog table: rooms get G_FOG and the cycle-1 fog render mode (*Display lists (verified: opcode histogram of all 4,367 leaf lists; decoded identically by the frame-DL walker; renders)*), and the frame
   sets `gSPFogPosition(fogMin, fogMax)`: `multiplier = 128000/(max − min)`, `offset = (500 − min)·256/(max − min)`
   (Crash Site 994..1000 → 21333/−21077, Villa 981..1047 → 1939/−1865, Pelagic 995..1000 → 25600/−25344, all equal to
   the frames). Fog colour = sky colour. The viewer's `Fog` type takes these directly with `near`/`far` = the stage's
@@ -743,7 +705,7 @@ Also present (no menu stage): fog records for 0x24 and 0x2B (`sevx`/`sevxb` slot
 - Some rooms use a darker fog colour with alpha < 0xFF (hypothesis: per-room brightness); non-fog stages set odd
   `SETFOGCOLOR` values without G_FOG (unused by the viewer).
 
-#### 4.9.3 Sky
+##### Sky
 Verified by disassembly (`skyRender` 0x7F11F754) and against the RDP primitives decoded from Air Base (two frames),
 Villa, Crash Site and Air Force One (`runtime/tools/rdptri.py`, `skymodel.py`):
 
@@ -786,7 +748,7 @@ Villa, Crash Site and Air Force One (`runtime/tools/rdptri.py`, `skymodel.py`):
   - A mirrored disc at `waterHeight` when water is enabled.
   - Sky rooms (Defection moon, Skedar Ruins gradient, Attack Ship) are extra entries in `Level.skies`.
 
-### 4.10 Lighting at run time (verified: RAM colour arrays vs BG file in 9 stages)
+#### Level geometry: Lighting at run time (verified: RAM colour arrays vs BG file in 9 stages)
 
 | Capture | Room VTX runs | Colour arrays identical to the file | Modified in RAM |
 |---|---|---|---|
@@ -810,88 +772,60 @@ Villa, Crash Site and Air Force One (`runtime/tools/rdptri.py`, `skymodel.py`):
 - **For the viewer: use the file's vertex colours.** That is exactly what 3 of 9 stages draw and within 0.8–1.0 of the
   others.
 
-### 4.11 Building viewer meshes
+### 3.8 Cameras and paths
 
-- One `Mesh` per room (room-local positions, opaque and translucent blocks in the same mesh, batches carry `blend`),
-  one `Instance` per room with `matrix = translate(room.pos)` and `info = {room, fileOffset}`. Mesh radius and
-  `Level.bounds` from the section-3 boxes.
-- Sky rooms (§4.9) go to `Level.skies`.
-- Environment-mapped surfaces: normals from the colour entries with the room lights, or draw them with their vertex
-  colour treated as white (the prototype's approximation, visibly wrong on chrome).
-- Textures: one viewer `Texture` per (texture number, wrap mode).
-- Start camera: the first SPAWN pad + 112 units up (the eye ends 159 units above the floor), looking along the pad's look
-  vector (§5.5).
-- Per-stage numbers (all verified):
+Camera defaults and path data are described with the level data where known.
 
-| Code | Stage(s) | Rooms | Portals | Lights | Leaf lists | Triangles | Textures |
-|---|---|---|---|---|---|---|---|
-| ame | dataDyne Central (Defection, Extraction, Mr. Blonde's Revenge) | 167 | 295 | 327 | 298 | 19,780 | 118 |
-| ear | dataDyne Research | 110 | 133 | 135 | 132 | 14,276 | 88 |
-| eld | Carrington Villa | 149 | 304 | 58 | 205 | 17,211 | 114 |
-| pete | Chicago | 106 | 128 | 63 | 191 | 8,205 | 98 |
-| depo | G5 Building | 98 | 149 | 76 | 226 | 6,734 | 81 |
-| lue | Area 51 (Infiltration, Rescue, Escape, Maian SOS) | 270 | 345 | 416 | 527 | 36,350 | 112 |
-| cave | Air Base | 146 | 199 | 61 | 192 | 13,380 | 67 |
-| rit | Air Force One | 103 | 123 | 116 | 172 | 21,577 | 72 |
-| azt | Crash Site | 101 | 163 | 9 | 109 | 12,511 | 73 |
-| dam | Pelagic II | 129 | 156 | 202 | 280 | 26,961 | 123 |
-| pam | Deep Sea | 195 | 207 | 107 | 260 | 27,967 | 138 |
-| dish | Carrington Institute (+ Defense, The Duel) | 140 | 178 | 161 | 188 | 11,519 | 78 |
-| lee | Attack Ship | 113 | 127 | 265 | 152 | 30,245 | 89 |
-| sho | Skedar Ruins (+ WAR!) | 137 | 191 | 82 | 238 | 15,395 | 70 |
-| oat | MP Skedar (+ stage 0x14) | 66 | 81 | 0 | 68 | 2,246 | 15 |
-| crad | MP Pipes | 76 | 106 | 0 | 104 | 2,141 | 13 |
-| arec | MP Ravine | 41 | 51 | 0 | 47 | 804 | 24 |
-| cryp | MP G5 Building | 35 | 53 | 0 | 55 | 2,298 | 22 |
-| mp10 | MP Sewers | 85 | 104 | 0 | 99 | 2,535 | 24 |
-| mp4 | MP Warehouse | 48 | 63 | 0 | 75 | 2,583 | 30 |
-| mp15 | MP Grid | 32 | 44 | 0 | 35 | 1,562 | 18 |
-| mp9 | MP Ruins | 103 | 121 | 15 | 113 | 2,149 | 31 |
-| mp3 | MP Area 52 | 41 | 59 | 0 | 42 | 2,326 | 19 |
-| mp1 | MP Base | 52 | 63 | 0 | 65 | 2,391 | 25 |
-| mp12 | MP Fortress | 118 | 137 | 0 | 150 | 5,962 | 28 |
-| mp13 | MP Villa | 70 | 79 | 0 | 70 | 2,882 | 25 |
-| mp5 | MP Car Park | 40 | 53 | 0 | 115 | 1,912 | 15 |
-| jun | MP Temple | 25 | 37 | 0 | 31 | 1,272 | 12 |
-| ref | MP Complex | 44 | 60 | 0 | 74 | 2,559 | 17 |
-| mp11 | MP Felicity | 39 | 53 | 0 | 53 | 4,954 | 37 |
-| ash | unused stage 0x2E | 1 | 0 | 0 | 1 | 40 | 2 |
+## 4. Objects
 
-(Rooms exclude room 0.)
+### 4.1 Placement records
 
-**Pitfalls found:** (1) don't inflate a BG file as one stream; locate room streams through room pointers; (2) room 0
-is unused and the last room entry is an end marker; (3) vertex colours are indexed through `G_COL` + the vertex byte;
-(4) `G_VTX`/`B1` layouts differ from F3DEX 1.x; (5) `C0` is file-only, textures are not uploaded by the lists;
-(6) compare texture texels, not raw pool bytes (padding the game never writes); (7) some rooms are skies with their own
-projection; (8) the dataDyne Central overview looks exploded because its rooms really are spread out (tower floors,
-city backdrop boxes).
-(9) coplanar overlapping room triangles (verified by a scan of all 31 BGs, `../impl/pd_zf/scan.ts`):
-- The data has 2,627 triangles that can z-fight when BG is drawn double-sided: 1,276 surfaces modelled from both sides
-  (opposite-facing, usually in two rooms, with `G_CULL_BACK`), 899 same-side overlaps within a room, 309 across rooms, and
-  211 translucent triangles lying on solid ones.
-- The game hides them through back-face culling and draw order (the later draw passes the RDP depth test).
-- Room draw order (verified in frames): the first BG call per room has non-decreasing portal-hop depth from the camera's
-  room in 10 of 12 captured frames. Villa and Skedar Ruins draw script-shown rooms first.
-- For cross-room overlaps, the viewer takes the copy the game would show from where the player sees the surface. It
-  counts votes from playable eyes in front of the surface: a room counts only where the surface point lies in one of the
-  clip boxes of the portals it is reached through (the game scissors each room to those). If both rooms count, the deeper
-  one (drawn later) gets the vote.
-  - Chicago rooms 73/77: from the stairs landing, room 73's copy (vertex colours black at two corners) is drawn later but
-    clipped away, so room 77's lit grate shows. Viewer bug report 0001: ignoring the clipping had made the black copy win.
-- With no clear vote (e.g. a surface nobody sees from play, like Air Base's roof parapet in viewer bug report 0002) the
-  data gives no order: the viewer keeps the lower room number's copy. A copy beaten by k rooms moves k units behind, so
-  three or more copies of one surface don't fight either.
-- The viewer's `coplanar.ts` applies these rules: a 1-unit nudge towards the front, decals for later draws, hidden
-  triangles dropped, and losing cross-room copies moved behind.
-- 25 triangles remain: 6 opposite-facing, 11 same-room, 5 cross-room and 3 translucent.
+#### Objects and props: Placement (verified against RAM: rotations 238/285, positions 257/285; doors 45/46 and 44/46)
 
-## 5. Objects and props
+Mismatches are all expected: chr-held weapons/shields, lifts and hovercars (moved at run time), 4 consoles and 2
+stacked crates (floor raycast finds a different floor).
 
-Research material: `notes/obj.md`, prototype `obj/lib/` (`pads.ts`, `setup.ts`, `tables.ts`, `model.ts`,
-`place.ts`, `stage.ts`), renders in `obj/renders/`. Placement was checked against the 285 placed objects in the
+**Generic objects** (`obj/lib/place.ts placeGeneric`):
+1. `ms = modelState.scale / 4096`. `centre = pad.pos`; if the pad has a bbox: `centre = padCentre(pad)` moved to the
+   bbox bottom (`centre += 0.5·(ymin − ymax)·up`).
+2. Rotation `R` = **columns (normal, up, look)** (local X → up × look, Y → up, Z → look). Pitfall: the game's look-at
+   helper writes these as rows; objects use the transpose (verified: 238 vs 69 matches).
+3. Pad bbox fit (only with a pad bbox): `r = (1,1,1)`; flag 0x20 `r0 = padX/(modelX·ms)`; 0x40 `r1 = padY/(modelY·ms)`
+   (with flag 0x2: `r2 = padZ/(modelY·ms)`); 0x80 `r2 = padZ/(modelZ·ms)` (with 0x2: `r1 = padY/(modelZ·ms)`);
+   `max = max(r)`; unfitted axes with model extent 0 take `max`; `r /= max` (values ≤ 1e−6 become 1).
+4. Columns `*= r`, then all columns `*= ms · max · extraScale/256`.
+5. Stand on floor: flag 0x2: `R = R·rotY(π)·rotX(3π/2)`, `pos = centre − col2·zmin`; flag 0x4: `R = R·rotZ(π)`,
+   `pos = centre − col1·ymax`; flag 0x8: `pos = centre − col1·ymin`; else take the column with the largest |y|,
+   `lo` = that axis' bbox min (max if negative), `pos = centre − col·lo`, then `pos.y = floorY − col.y·lo + 4`
+   (+0 for weapons). The pad height as floorY matches 67 of 70 BASIC objects (the game raycasts the collision).
+6. **Draw the model with its root joint at the object position** (ignore the root POSITION offset): verified for 25/25
+   objects with a non-zero root offset (e.g. `Pdd_windowZ` root (6875, −13833, 10917)).
+
+**Doors** (`placeDoor`): `R = L·rotZ(90°)·rotX(90°)` (local X → up, Y → look, Z → normal); column scales `padY/modelX`,
+`padZ/modelY`, `padX/modelZ` (no model-state scale); `pos = padCentre`; drawn closed.
+
+**Characters:** pad position, yaw = `atan2(look.x, look.z)`, scale `0.1 × body.scale`, body + head at HEADSPOT, root
+lifted by the stand frame's root height (*Animations and standing characters (verified: lib `anim.c` disassembly, all 1,207 table records, joint matrices vs RAM)*).
+
+**Matrices:** PD's Mtxf is column-major (`f[col·4 + row]`), `0x700159FC(a, b)` = `b = a·b`; rotX/Y/Z at
+0x700162E8/0x70016374/0x70016400. World space = BG space (right-handed, +Y up, no mirror).
+
+**Start camera** (verified in one capture): Defection SPAWN pad 467 at (−4, 47, −4) looking +X; the game camera in
+RAM stood at (14.9, 159, −20.8) facing (1.0, 0.0002, −0.003): **eye = spawn pad + ~112 units up** (159 above the
+helipad floor), looking along the pad's look vector.
+
+**Comparison with the game:** `obj/renders/defection_side_by_side.png` (screenshot | BG + all placed objects through
+the frame's matrices): the sculpture, helipad markings, towers and light beams line up; `defection_obj_chr12.png` vs
+`defection_noobj_chr12.png`: the lobby reception desk gains its two monitors and plants exactly on the desk.
+
+### 4.2 Object and model formats
+
+#### Objects and props
+
+Placement was checked against the 285 placed objects in the
 Defection RDRAM capture (`obj/scripts/compare_ram.ts`).
 
-### 5.1 Where things are (verified: disassembly, data, RAM)
+#### Objects and props: Where things are (verified: disassembly, data, RAM)
 
 | Thing | Address / file |
 |---|---|
@@ -906,9 +840,9 @@ Defection RDRAM capture (`obj/scripts/compare_ram.ts`).
 | bodies/heads `g_HeadsAndBodies` | data 0x8007CF04: 151 × 20 bytes `{u16 flags; u16 fileId; f32 scale; f32 animScale; ptr modeldef; u16 handFileId; u16}` |
 | skeletons | data 0x80089990 (NULL-terminated pointers to `{s16 id, …}`) |
 | model loader | 0x7F1A7604(fileId) → 0x7F1A7554: load, skeleton fix-up, relocate from 0x05000000 (0x70022A24), texture rewrite (0x7F175480) |
-| animations | ROM 0x1A15C0..0x7CD1A0 + table 0x7CD1A0..0x7D0A40 (§5.6) |
+| animations | ROM 0x1A15C0..0x7CD1A0 + table 0x7CD1A0..0x7D0A40 (*Animations and standing characters (verified: lib `anim.c` disassembly, all 1,207 table records, joint matrices vs RAM)*) |
 
-### 5.2 Pads file `bgdata/bg_<code>_padsZ` (verified: `padUnpack` 0x7F115A30 disassembly field by field; all 37 populated pads files parse)
+#### Objects and props: Pads file `bgdata/bg_<code>_padsZ` (verified: `padUnpack` 0x7F115A30 disassembly field by field; all 37 populated pads files parse)
 
 ```
 +0x00 s32 numPads   +0x04 s32 numCovers   +0x08 s32 waypointsOffset   +0x0C s32 waygroupsOffset   +0x10 s32 coversOffset
@@ -925,7 +859,7 @@ waypoint (hypothesis layout): {s32 padnum; s32 neighboursOffset; s32 groupnum; s
 ```
 Pad positions are world coordinates (verified by RAM object positions).
 
-### 5.3 Setup files `Usetup<code>Z`, `Ump_setup<code>Z` (verified)
+#### Objects and props: Setup files `Usetup<code>Z`, `Ump_setup<code>Z` (verified)
 
 ```
 +0x00..+0x08  0 (waypoints/waygroups/covers, filled from the pads file)
@@ -935,7 +869,7 @@ Pad positions are world coordinates (verified by RAM object positions).
   32-bit words per type from `setupGetCmdLength` (every populated setup's list ends exactly at its intro offset).
 - **Links** between commands are relative command indices (`target = index + value`).
 - Stub setups are 0x40 bytes. Paths `{u32 padsOffset; u8 id; u8 flags; u16 len}` and AI lists `{u32 offset; s32 id}`
-  (layout hypothesis; the AI bytecode was only decoded far enough for the music commands, §10).
+  (layout hypothesis; the AI bytecode was only decoded far enough for the music commands, *Unused and hidden content*).
 
 | Type | Name | Words | Count in all setups | Viewer |
 |---|---|---|---|---|
@@ -947,7 +881,7 @@ Pad positions are world coordinates (verified by RAM object positions).
 | 0x06 | CCTV | 49 | 17 | mesh |
 | 0x07 | AMMOCRATE | 24 | 32 | mesh |
 | 0x08 | WEAPON | 26 | 1,148 | mesh (floor) or skip (held by a chr, flag 0x4000); +0x5C weapon number, 0xF0..0xFF = MP weapon-set slot (marker) |
-| 0x09 | CHR | 11 | 1,002 | marker or posed body + head (§5.6) |
+| 0x09 | CHR | 11 | 1,002 | marker or posed body + head (*Animations and standing characters (verified: lib `anim.c` disassembly, all 1,207 table records, joint matrices vs RAM)*) |
 | 0x0A / 0x0B | SINGLEMONITOR / MULTIMONITOR | 53 / 140 | 158 / 76 | mesh |
 | 0x0C | HANGINGMONITORS | 23 | 0 | – |
 | 0x0D | AUTOGUN | 43 | 31 | mesh |
@@ -1004,84 +938,50 @@ accel, `+0x68` decel, `+0x6C` maxspeed, `+0x70` doorflags, `+0x72` doortype (4/8
 `1 WEAPON`, `2 AMMO`, `5 OUTFIT`, `7 watch time`, `8 credits data`, `9/10/11` MP case/respawn/hill pads, `12 END`
 (lengths verified; names of 1, 2, 5, 9–11 hypothesis).
 
-### 5.4 Model files `P*Z`, `C*Z`, `G*Z` (verified: loader and relocation disassembly; all 686 models parse with 0 unknown opcodes and 0 missing textures)
+#### Mapping onto the viewer: Detection and game object
 
-```
-pointers = 0x05000000 + file offset (the display lists also use segment 5 = file start)
-+0x00 ptr rootNode   +0x04 u32 skeleton id   +0x08 ptr parts (node ptrs, then s16 part numbers)
-+0x0C s16 numParts   +0x0E s16 numMatrices   +0x10 f32 radius-like size   +0x14 s16 rwDataLen (set at load)
-+0x16 s16 numTexConfigs   +0x18 ptr texConfigs (12 bytes: u32 global texture number or 0x05xxxxxx embedded texels; u8 w, h; 6 bytes)
-node (0x18): u16 type (low byte); u16; ptr rodata; ptr parent; ptr next; ptr prev; ptr child
-```
+- `src/rom/index.ts` `openRom()`: add `case 'NPDE'` (after `normalizeByteOrder()`), accepting `rom[0x3F] === 0`
+  (V1.0; addresses in this spec). V1.1 (`rom[0x3F] === 1`), `NPDP` and `NPDJ` need their own address maps (*Revisions (verified: `fs/scripts/revs.py`, `revcode.py`, `fs/revs.txt`)*);
+  reject them at first or derive the tables from the boot code as `fs/extract.py` does.
+- `src/rom/types.ts`: `Game.id` += `'perfectdark'`. `LevelKind` already has `'campaign'`, `'hub'`, `'battle'` and
+  `'other'`; use `campaign` (groups "Mission 1" … "Mission 9", "Special Assignments"), `hub` (Carrington
+  Institute), `battle` (groups "Combat Simulator – Dark", "Combat Simulator – Classic") and `other` (group "Unused": 0x14
+  silo, 0x1B sevb). `LevelInfo.name` = menu name (*Stage list*); `Level.id` = e.g. `ame-30`.
 
-| Node | Name | Rodata (verified layout) |
-|---|---|---|
-| 0x01 | CHRINFO | u16 animPart; s16 mtxIndex (root slot); f32; u16 rwDataIndex |
-| 0x02 | POSITION | f32 pos[3] (relative to parent joint); u16 part; s16 mtxIndex[3]; f32 drawDist (hypothesis) |
-| 0x04 | GUNDL | ptr opaDl; ptr xluDl; base; ptr vertices; s16 numVertices |
-| 0x08 | DISTANCE | f32 near, far; ptr target (LOD: children drawn when near ≤ d < far) |
-| 0x09 | REORDER | two subtrees drawn in camera-dependent order |
-| 0x0A | BBOX | s32 hitPart; f32 xmin, xmax, ymin, ymax, zmin, zmax (**the first BBOX is the model bbox used by placement**) |
-| 0x0C / 0x16 | CHRGUNFIRE / STARGUNFIRE | muzzle flash |
-| 0x12 | TOGGLE | ptr target; u16 rwDataIndex (visibility set by code) |
-| 0x15 | POSITIONHELD | f32 pos[3]; u16 part; s16 mtxIndex |
-| 0x17 | HEADSPOT | where the separate head model attaches |
-| 0x18 | DL | ptr opaDl; ptr xluDl; base; ptr vertices; s16 numVertices; s16; u16 rwDataIndex; u16 numColours; **the colour table follows the vertices** |
-| 0x19 | (unnamed) | s32 n + 12 × f32: 4–6 points (probably collision; lifts, desks) |
+#### Verification evidence: Objects
 
-**Display lists** use the same Rare microcode as BG lists (§4.5) plus: `01020040 03xxxxxx` G_MTX = load modelview
-matrix slot `(w1 & 0xFFFFFF) / 0x40` (segment 3 = the model's matrix array; the following vertices are relative to
-that joint), `G_VTX` from segment 4 (DL node vertices) or 5 (GUNDL, file offset), `07` colours from segment 6 (DL
-node colour table) or 5, `BF` TRI1 (index = byte / 10, 403 uses), and **embedded textures** as ordinary
-`FD SETTIMG 05xxxxxx` + `F3`/`F5`/`F2`/`F0` tile commands (1,341 uses; decodable with the viewer's `texture.ts`) next to
-`C0` global texture references. The xlu list is the translucent pass.
+| Check | Method | Result | Evidence |
+|---|---|---|---|
+| setup command lengths | disassembly + data | every populated props list ends exactly at its intro | `obj/scripts/test_rom.ts` |
+| models | all 686 model files | 0 unknown opcodes, 0 missing textures, 0 errors | `obj/dumps/models_survey.json`, `obj/renders/all_props_sheet.png` |
+| placement | Defection RAM objects vs the *Placement (verified against RAM: rotations 238/285, positions 257/285; doors 45/46 and 44/46)* math | rotations 238/285, positions 257/285; doors 45/46 and 44/46; root offset ignored 25/25 | `obj/scripts/compare_ram.ts` |
+| scaled stages | Villa RAM (334 objects) and Crash Site frame model matrices | 272/334 exact; matrices = 0.5 × gameplay scale | `obj/scripts/scalecheck_ram.ts` |
+| renders with objects | BG + placed objects through the frame's matrices | match (Defection sculpture and lights, lobby desk monitors, Villa wind turbine, CI desk) | `obj/renders/{defection,villa,crashsite,chicago}_side_by_side.png`, `bg/renders/ci_a_objects_side_by_side.png` |
+| start camera | Defection spawn pad vs camera in RAM | eye = pad + 112 up along the pad's look | `obj/renders/defection_spawn.png` |
+| animation decoder | port of lib anim.c/model.c vs `model->matrices` in RAM (runtime dumps; breakpoints at 0x7F0241E0 in Chicago and the Defection intro) | 28/28 joints, 4/4 elbow/knee, 2/2 roots; max element error 5.7e−7 | `anim/scripts/verify_ram.ts`, `verify_hits.ts`, `anim/dumps/verify_*.txt` |
+| standing characters | stand animation frame 0 per body type | natural standing poses; root height = lowest vertex within 1% | `anim/renders/chars_standing.png`, `defection_posed_chr12.png` |
 
-**Rest pose:** slot k = sum of POSITION offsets from the root to the node owning slot k (CHRINFO = origin). Humanoid
-bodies are authored in a **"splits" bind pose** (arms and legs along ±X; `obj/renders/chars_sheet.png`); Skedar
-models look natural in it. Heads are separate models (`Chead*`) attached at the body's HEADSPOT joint; body scale
-`0.1 × body.scale`. Standing poses come from an animation frame (§5.6).
+#### Unused and hidden content: Models and props
 
-### 5.5 Placement (verified against RAM: rotations 238/285, positions 257/285; doors 45/46 and 44/46)
+The object agent's first pass found 105 of the 441 model numbers never placed by any setup (*Objects and props*). Part 3 then split
+them by code references, checked in the ROM through slot cross-references and data tables:
 
-Mismatches are all expected: chr-held weapons/shields, lifts and hovercars (moved at run time), 4 consoles and 2
-stacked crates (floor raycast finds a different floor).
+| Item | Evidence | Confidence | Reachable |
+|---|---|---|---|
+| used by code, not setups: `PnintendologoZ` and `PrarelogoZ` (title screen), 5 MP weapon-table models (knife, N-bomb, timed mine, speed pill, laser), 6 projectile models | slot references 0x7F019464/0x7F019AC8; `g_MpWeapons` 0x80087268; weapon data 0x8006B1E4.. | high | yes |
+| **test and placeholder props:** `PtestobjZ` (a large car-shaped test object, 1908 × 1110 × 5925 units), `PmarkerZ` (a 100-unit cube with a magenta rainbow debug texture), `PflagZ` (a flat 10-triangle sheet), `Pborg_crateZ` (a Borg-cube-textured crate) | no setup, AI or code reference; `unused3/renders/misc_unreferenced.png` | high | no |
+| **`PgoldeneyelogoZ`**: the textured GOLDENEYE logo with the red 007 ring, a GoldenEye leftover outside the model table | file table vs model table; no reference | high | no |
+| `Psk_fighter1Z` (a Skedar fighter craft), `PchrflashbangZ` (a flashbang grenade; PD has no Flashbang weapon), `PbodyarmourZ` (GoldenEye body armour), `PbriefcaseZ` (superseded by `PchrbriefcaseZ`), empty `PexplosionbitZ` | no reference | high | no |
+| 17 doors never placed (Chicago crypt door, three Villa doors, Area 51 lockers, reactor door, weapon-cache door, CI doors, Alaska doors, Air Force One cargo door) | doors are only created by setups | high | no |
+| **a complete Carrington Institute office set** (`Pci_cabinetZ`, `Pci_deskZ`, `Pci_carr_deskZ`, `Pci_f_chairZ`, `Pci_loungerZ`, `Pci_f_sofaZ`, `Pci_tableZ`) plus chair/table/lamp variants for G5, Villa, Pelagic, Investigation and Air Base | no setup or code reference | high | no |
+| four door-lock panels (keypad, thumbprint, retinal, card lock); lab and base equipment (microscope, mainframe, radar console, generator, dumpster, mine sign…); Skedar temple column, consoles, drone gun, ruin bridge | no reference | high | no |
+| unused title-logo variants `Pnlogo3Z`, `PperfectdarkZ`, `PpdoneZ`, `PpdfourZ` (the title uses `Pnlogo`, `Pnlogo2`, `Ppdtwo`, `Ppdthree` per the decompilation) | no slot reference found | medium | no |
+| 12 duplicate model-table entries pointing at one crate file | table data | high | – |
+| **J-only models:** `PjaplogoZ` (katakana title logo パーフェクトダーク™), `PjappdZ` (outlined PERFECT DARK logo) | file tables of all revisions; `unused/revs/J_only_models_front.png` | high | J only |
 
-**Generic objects** (`obj/lib/place.ts placeGeneric`):
-1. `ms = modelState.scale / 4096`. `centre = pad.pos`; if the pad has a bbox: `centre = padCentre(pad)` moved to the
-   bbox bottom (`centre += 0.5·(ymin − ymax)·up`).
-2. Rotation `R` = **columns (normal, up, look)** (local X → up × look, Y → up, Z → look). Pitfall: the game's look-at
-   helper writes these as rows; objects use the transpose (verified: 238 vs 69 matches).
-3. Pad bbox fit (only with a pad bbox): `r = (1,1,1)`; flag 0x20 `r0 = padX/(modelX·ms)`; 0x40 `r1 = padY/(modelY·ms)`
-   (with flag 0x2: `r2 = padZ/(modelY·ms)`); 0x80 `r2 = padZ/(modelZ·ms)` (with 0x2: `r1 = padY/(modelZ·ms)`);
-   `max = max(r)`; unfitted axes with model extent 0 take `max`; `r /= max` (values ≤ 1e−6 become 1).
-4. Columns `*= r`, then all columns `*= ms · max · extraScale/256`.
-5. Stand on floor: flag 0x2: `R = R·rotY(π)·rotX(3π/2)`, `pos = centre − col2·zmin`; flag 0x4: `R = R·rotZ(π)`,
-   `pos = centre − col1·ymax`; flag 0x8: `pos = centre − col1·ymin`; else take the column with the largest |y|,
-   `lo` = that axis' bbox min (max if negative), `pos = centre − col·lo`, then `pos.y = floorY − col.y·lo + 4`
-   (+0 for weapons). The pad height as floorY matches 67 of 70 BASIC objects (the game raycasts the collision).
-6. **Draw the model with its root joint at the object position** (ignore the root POSITION offset): verified for 25/25
-   objects with a non-zero root offset (e.g. `Pdd_windowZ` root (6875, −13833, 10917)).
+### 4.3 Skeletons and animation
 
-**Doors** (`placeDoor`): `R = L·rotZ(90°)·rotX(90°)` (local X → up, Y → look, Z → normal); column scales `padY/modelX`,
-`padZ/modelY`, `padX/modelZ` (no model-state scale); `pos = padCentre`; drawn closed.
-
-**Characters:** pad position, yaw = `atan2(look.x, look.z)`, scale `0.1 × body.scale`, body + head at HEADSPOT, root
-lifted by the stand frame's root height (§5.6).
-
-**Matrices:** PD's Mtxf is column-major (`f[col·4 + row]`), `0x700159FC(a, b)` = `b = a·b`; rotX/Y/Z at
-0x700162E8/0x70016374/0x70016400. World space = BG space (right-handed, +Y up, no mirror).
-
-**Start camera** (verified in one capture): Defection SPAWN pad 467 at (−4, 47, −4) looking +X; the game camera in
-RAM stood at (14.9, 159, −20.8) facing (1.0, 0.0002, −0.003): **eye = spawn pad + ~112 units up** (159 above the
-helipad floor), looking along the pad's look vector.
-
-**Comparison with the game:** `obj/renders/defection_side_by_side.png` (screenshot | BG + all placed objects through
-the frame's matrices): the sculpture, helipad markings, towers and light beams line up; `defection_obj_chr12.png` vs
-`defection_noobj_chr12.png`: the lobby reception desk gains its two monitors and plants exactly on the desk.
-
-### 5.6 Animations and standing characters (verified: lib `anim.c` disassembly, all 1,207 table records, joint matrices vs RAM)
-
-Research material: `notes/anim.md`, `anim/lib/{anim,pose,model_posed,idle}.ts`, renders `anim/renders/`.
+#### Objects and props: Animations and standing characters (verified: lib `anim.c` disassembly, all 1,207 table records, joint matrices vs RAM)
 
 **Table** (ROM 0x7CD1A0, read whole by `animsInit` 0x700233C0): `u32 count = 1207`, then 12-byte records:
 ```
@@ -1153,36 +1053,23 @@ Human headers are 162 bytes: part 0 is root + rotation, parts 1–14 rotation on
 Renders: `anim/renders/chars_standing.png` (the ten characters of `obj/renders/chars_sheet.png`, standing);
 `anim/renders/defection_posed_chr12.png` (two security guards at the Defection lobby desk).
 
-### 5.7 What's practical in the viewer
+### 4.4 Behaviors, triggers, and scripted objects
 
-| Content | Practicality |
-|---|---|
-| static props (BASIC, KEY, crates, DEBRIS, monitors, CCTV, autoguns, shields, fans, escalator steps) | **easy**: one Mesh per model file, one Instance per record (§5.5) |
-| glass, tinted glass | **easy**: blended meshes |
-| doors | **easy** closed; open states need door motion |
-| lifts | **easy** at their start stop |
-| floor weapons | **easy** (`Pchr*` world models); MP weapon-set slots 0xF0..0xFE as markers |
-| characters | **medium**: body + head posed with the body type's stand animation frame 0 (§5.6), placed at the pad with floor snap; or markers labelled with body/head names |
-| hovercars, choppers, hoverbikes, hover props | positioned by AI paths at run time: show at their pad or as markers |
-| pads, spawns, MP case/hill pads, PADEFFECT, waypoints | markers (layer "markers") |
-| objectives, tags, briefings, links | info only |
-| CAMERAPOS | extra camera views |
-| difficulty | filter by `flags2` (a difficulty selector in the UI, default Agent) |
-| first-person guns (G*) | not needed for levels (they contain muzzle-flash geometry toggled by code) |
+Behavioral records are documented only where they affect level extraction or presentation.
 
-**Pitfalls found:** transposed look-at basis; ignore the root joint offset of placed objects; the vertex colour byte is
-a byte offset into the colour table (which follows the vertices); `G_VTX`/TRI4 layouts; INTPOS pads are 8 bytes; the
-bbox fit uses the model-state scale before extraScale and normalises by the maximum; floor snap +4 (not weapons);
-setups in RAM are live objects (parse the ROM files); links are relative indices; flag 0x4000 objects use the pad
-field as a chr number.
+## 5. Audio
 
-## 6. Music
+### 5.1 Audio storage and banks
 
-### 6.1 Engine (verified: code, RAM, captured audio)
+Audio storage is described with the sequence and bank tables below.
+
+### 5.2 Sequence format and driver
+
+#### Music: Engine (verified: code, RAM, captured audio)
 
 | Item | Value |
 |---|---|
-| library | Nintendo's newer libultra **n_audio**: `n_alSynNew`, the `n_alCSPlayer` compressed-MIDI player, `n_env` envelope mixer. Runs on the `naudio_mp3` RSP microcode; voice clips are MP3 (§2.2) |
+| library | Nintendo's newer libultra **n_audio**: `n_alSynNew`, the `n_alCSPlayer` compressed-MIDI player, `n_env` envelope mixer. Runs on the `naudio_mp3` RSP microcode; voice clips are MP3 (*File table (verified: ROM, RAM, loader disassembly, load trace)*) |
 | output rate | **22018 Hz** (AI dacrate 2210; `N_ALSynth.outputRate` = 0x5602 at 0x800918C0) |
 | synth frame | 184 samples per update |
 | voices | 44 virtual, 30 physical; 2 custom FX (reverb) busses; 16 MIDI channels |
@@ -1191,7 +1078,7 @@ field as a chr number.
 | **voice volume** | **linear**: the envelope mixer volume is the sequence player's voice volume itself, **not squared** as in libultra ABI1 and the viewer's `libultra.ts`. Verified: in RAM, a menu voice's computed volume 16744 equals `em_volume` 16744 (squared would be 8555). Squared renders are 4–16 dB too quiet against captures |
 | reverb | per-voice dry/wet sends from the channel FX mix; the FX parameters are not decoded, and reverb is not rendered |
 
-### 6.2 Data (ROM, outside the file table; referenced only from lib code)
+#### Music: Data (ROM, outside the file table; referenced only from lib code)
 
 | ROM | Contents |
 |---|---|
@@ -1213,7 +1100,7 @@ field as a chr number.
 - **Playback** (lib `seqPlay` 0x7000FC48): copy `compressedLen` bytes from ROM, inflate (0x700074F0),
   `n_alCSeqNew`, `alCSPSetSeq`, set the volume (0x7000FD9C), `alCSPPlay`.
 
-### 6.3 Where music plays (verified: data tables and disassembly; RAM where marked)
+#### Music: Where music plays (verified: data tables and disassembly; RAM where marked)
 
 - **Stage music table** at 0x80084500: 24 × `{s16 stage, s16 primary, s16 ambient, s16 xTrack}`, terminated by stage
   0; −1 = none.
@@ -1247,10 +1134,78 @@ field as a chr number.
   - `UsetupameZ` starts 34 and ambient 11 in its intro list, matching the RAM state during the Defection intro.
   - Of the 51 sequences in no code table, **42 are started by setup AI lists** (intro, outro and cutscene music).
   - Referenced nowhere: 0 (400 s of silence), 21 (an earlier multiplayer death sting), 48 (a first version of the Villa intro), 60 (a 205 s looping theme), 95 (one note), 114 and 118 (alternate Escape outros), and 117 (a short jingle).
-  - Seq 1 is a medium-confidence case: the decompilation says the title screen starts it, but no ROM constant was found. See §10.
+  - Seq 1 is a medium-confidence case: the decompilation says the title screen starts it, but no ROM constant was found. See *Unused and hidden content*.
   - The credits play seq 88.
 
-### 6.4 Song list
+#### Music: Rendering offline (prototype verified against game audio)
+
+1. Read sequence `n` from the table and inflate it; parse it with a per-track loop parser (`src/rom/music/cseq.ts`
+   `parseCompressedSequence`, shared with GoldenEye). **Correction (implementation):** the prototype used Bomberman's
+   `parseCompressedMidi`, which takes the loop of the first track to reach one; in n_audio every track loops on its own,
+   so that rule collapses the layered ambiences 5, 109 and 110 and silences layers of 8, 102 and 106. The per-track
+   rule fixes them (loops in *Song list* updated for 5, 27, 109, 110), with one addition: when the tracks' loops share no
+   common period but all end on the same tick, loop from the earliest start (only seq 27).
+2. Render with `renderSequence` from a copy of `libultra.ts` that adds one option, `squareVolume: false`
+   (`music/naudio.ts`: `v.vol = opts.squareVolume === false ? vol : (vol * vol) >> 15`). Settings:
+   - bank `parseBank(rom, 0xCFBF30, 0xD05F90, 0, null)`;
+   - output rate 22018 Hz, 44 voices;
+   - sequence volume `0x5000 × seqVolTable[n] >> 15`.
+3. **Loop:** sequences with an infinite `FF 2D` loop get `loopStart`/`loopEnd` from the renderer's second pass. The
+   52 one-shots have none.
+4. Apply output gain **1.0** to every song. All 119 render in about 2.5 minutes (`music/render.ts`,
+   `music/wav/NNN_name.wav`). 13 renders clip on up to 220 samples; the game's 16-bit mixer clips the same way.
+
+**Captured game audio vs renders** (audio-dump plugin at 22018 Hz; `music/cap/boot.raw`, `music/cap/mp.raw`;
+`music/tools/cmp2.py`):
+
+| Game state (sequence ids from RAM) | Render | Loudness-envelope NCC | Tempo | Chroma at 0 / ±1 semitone | Game − render level |
+|---|---|---|---|---|---|
+| boot logos, 107 | 107 | 0.846 | 1.000 | 0.939 / 0.87 | +2.7 dB (squared model: +12.5) |
+| attract intro, 34 + 11 | 34 + 11 | 0.511 | 1.000 | 0.894 / 0.35 | +0.5 dB (squared: +16.4) |
+| file select, 89 (+108, SFX) | 89 | 0.57–0.76 | exact, including across the loop jump at 63.13 s → 2.525 s | 0.902 / 0.54 | −2.9 dB (squared: +4.3) |
+| Defection gameplay, 9 + 8 | 9 | 0.850 | 1.000 over 80 s | 0.905 / 0.50 | −1.6 dB |
+| Combat Simulator match (Skedar), 62 | 62 | 0.883 | 1.000 over 80 s | 0.926 / 0.47 | −3.0 dB |
+
+- **Level:** the mean offset is −0.9 dB with a ±3 dB spread, which includes reverb, sound effects and ducking. No
+  per-song gain is justified.
+- **Tempo:** RAM tempos agree with the sequence data (e.g. seq 9 at 117 BPM: 1335 µs per tick).
+- **Not modelled:** reverb (about 1–2 dB and the room sound) and the 184-sample
+  event quantisation.
+
+#### Verification evidence: Music
+
+| Check | Method | Result | Evidence |
+|---|---|---|---|
+| engine parameters | RDRAM (synth struct, players) and AI dacrate | 22018 Hz, 184-sample updates, 3 players, linear voice volume | `music/ram/*.bin`, `music/cap/boot.log` |
+| sequences and bank | all 119 inflate to their size and parse; `parseBank` on the music bank | pass | `music/seqsurvey.ts` |
+| song selection | RDRAM during boot logos, attract, file select, Defection, Combat Simulator | seqs 107; 34 + 11; 89 + 108; 9 + 8; 62 | `music/tools/ramvoices.py` |
+| AI music commands | walk of all 1,610 setup and 46 global AI lists with the game's length table | 0 errors; Defection intro starts 34/11 | `unused3/scripts/aiwalk.py` |
+| rendered audio | 5 captures (audio-dump plugin) vs renders: loudness envelope, onset/loop timing, chroma | tempo exact, pitch correct, level −3.0..+2.7 dB | `music/tools/cmp2.py`, `music/cap/` |
+
+#### Unused and hidden content: Music and sound
+
+| Item | Evidence | Confidence | Reachable |
+|---|---|---|---|
+| **seq 60**: a 205.6 s looping piece (5,778 notes, 16 channels, 113→120 BPM), the longest unused track. The decompilation calls it DEEPSEA_BETA with the file name `crashsite-intro-amb.seq`: probably a cut stage theme. Render: `music/wav/060_Track_60.wav` | no code table and no AI list (all 1,610 setup lists walked) | high | no |
+| seq 48: first version of the Villa intro (the game uses 67/68) | same | high | no |
+| seqs 114 and 118: alternate Escape outros (UFO effects layer; short version) | same | high | no |
+| seq 21: an earlier version of the multiplayer death sting (25) | same | high | no |
+| seq 0 (400 s of silence), seq 95 (one 0.27 s "bloop"), seq 117 (a 1.6 s melody test) | same | high | no |
+| seq 1 (a 10 s title sting): the decompilation starts it on the title screen, but no ROM constant was found | scan | medium (probably used) | ? |
+| **stage-music row for stage 0x1B `sevb`** (CI geometry, no setup): primary/X track 61 "CI Operative" | data | high | no (the track itself is in the Soundtrack menu) |
+| instruments 42 and 57 own the only truly unused music samples: 7 waves, 35,780 bytes | program changes of all 119 sequences vs the bank; wave sharing checked | high | no |
+| 29 other never-selected instruments only reuse shared waves | same | high | – |
+| **voice clips never referenced:** `Am6_l1_aM`, `Acifema08M`, `Acimale11M`, `Acimale13M`, `Acicarr09M` (a Deep Sea/Pelagic line, CI staff remarks, a Carrington line) | AI lists, sound mapping table (0x8005DDE4), quip banks, lib constants: 543/548 referenced | medium (a computed CI quip index could reach them) | ? |
+| sound effects: 715 of 1,545 are referenced by AI lists, the mapping table and quip banks; code constants were not scanned | – | no claim | – |
+| no sound-test menu; the Combat Simulator Soundtrack menu is the only track selection | code/menu scan | high | – |
+
+### 5.3 Instruments and sample encoding
+
+Instrument banks, envelopes, loops, and sample encoding are described above.
+
+### 5.4 Music catalog and loop points
+
+#### Music: Song list
 
 Names: Combat Simulator Soundtrack names where they exist; otherwise the proposed name in the "use" column. Loop
 start–end are in seconds of song time. "one-shot" means there is no infinite loop. The WAV loop points in samples are
@@ -1258,8 +1213,8 @@ in `music/wav/index.json`.
 
 | # | ROM | BPM | loop (s) | length (s) | name | use |
 |---|---|---|---|---|---|---|
-| 0 | 0xE823BC | 120 | 0.000–399.974 | 399.974 | – | **unreferenced** (decomp MUSIC_NONE; "no music" placeholder, §10) |
-| 1 | 0xE823EA | 120 | one-shot | 10.002 | – | title sting? The decompilation (MUSIC_TITLE2) starts it on the NTSC title screen, but no ROM constant was found (medium, §10.9) |
+| 0 | 0xE823BC | 120 | 0.000–399.974 | 399.974 | – | **unreferenced** (decomp MUSIC_NONE; "no music" placeholder, *Unused and hidden content*) |
+| 1 | 0xE823EA | 120 | one-shot | 10.002 | – | title sting? The decompilation (MUSIC_TITLE2) starts it on the NTSC title screen, but no ROM constant was found (medium, *Music and sound*) |
 | 2 | 0xE826BA | 180 | 5.333–135.991 | 135.991 | dD Extraction | primary dataDyne Central - Extraction (0x22); Soundtrack #11 (120 s) |
 | 3 | 0xE83BB0 | 125 | 0.000–46.080 | 46.080 | – | menu track (0x7F0FC9D4 fallback) |
 | 4 | 0xE8415C | 152 | 9.465–170.367 | 170.367 | Institute Defense | primary Carrington Institute - Defense (0x2D); Soundtrack #35 (120 s) |
@@ -1279,7 +1234,7 @@ in `music/wav/index.json`.
 | 18 | 0xE9091E | 125 | 23.040–207.360 | 207.360 | dD Research | primary dataDyne Research - Investigation (0x33); Soundtrack #9 (120 s) |
 | 19 | 0xE9120A | 190 | 5.050–65.655 | 65.655 | dD Research X | X dataDyne Research - Investigation (0x33); Soundtrack #10 (120 s) |
 | 20 | 0xE91C28 | 120 | 2.000–137.991 | 137.991 | A51 Infiltration | primary Area 51 - Infiltration (0x2F); Soundtrack #19 (120 s) |
-| 21 | 0xE92502 | 120 | one-shot | 4.002 | – | **unreferenced** (decomp MUSIC_DEATH_BETA; cut ("beta"), §10) |
+| 21 | 0xE92502 | 120 | one-shot | 4.002 | – | **unreferenced** (decomp MUSIC_DEATH_BETA; cut ("beta"), *Unused and hidden content*) |
 | 22 | 0xE927B0 | 105 | 36.569–292.553 | 292.553 | A51 Rescue | primary Area 51 - Rescue (0x35); Soundtrack #21 (120 s) |
 | 23 | 0xE932DE | 90 | 2.666–205.320 | 205.320 | Air Base | primary Air Base - Espionage (0x27); Soundtrack #25 (120 s) |
 | 24 | 0xE940FE | 140 | 5.143–176.560 | 176.560 | Air Force One | primary Air Force One - Antiterrorism (0x31); Soundtrack #27 (120 s) |
@@ -1306,7 +1261,7 @@ in `music/wav/index.json`.
 | 45 | 0xEA27D6 | 89/91 | one-shot | 22.577 | – | setup AI: ark 0x100D/0xC00 (decomp name EXTRACTION_INTRO) |
 | 46 | 0xEA3172 | 92/88/93 | one-shot | 19.580 | – | setup AI: depo, sev, stat, wax, **old** (UsetupoldZ) (decomp name G5_INTRO) |
 | 47 | 0xEA366A | 78/77 | one-shot | 48.464 | – | setup AI: pete 0x401 (decomp name CHICAGO_INTRO) |
-| 48 | 0xEA42E8 | 93 | one-shot | 44.384 | – | **unreferenced** (decomp MUSIC_VILLA_INTRO1; cut alternate cutscene score, §10) |
+| 48 | 0xEA42E8 | 93 | one-shot | 44.384 | – | **unreferenced** (decomp MUSIC_VILLA_INTRO1; cut alternate cutscene score, *Unused and hidden content*) |
 | 49 | 0xEA53EC | 73 | one-shot | 77.853 | – | setup AI: lue 0x410 (decomp name INFILTRATION_INTRO) |
 | 50 | 0xEA5906 | 190 | 5.050–60.604 | 60.604 | A51 Rescue X | X Area 51 - Rescue (0x35); Soundtrack #22 (120 s) |
 | 51 | 0xEA61C0 | 215 | 0.004–62.448 | 62.448 | A51 Escape X | X Area 51 - Escape (0x19); Soundtrack #24 (120 s) |
@@ -1318,7 +1273,7 @@ in `music/wav/index.json`.
 | 57 | 0xEAA2EE | 66 | one-shot | 24.670 | – | setup AI: cave 0x401 (decomp name AIRBASE_OUTRO_LONG) |
 | 58 | 0xEAA846 | 170 | 0.006–148.216 | 148.216 | Dark Combat | primary Mr. Blonde's Revenge (special) (0x37); Soundtrack #0 (160 s) |
 | 59 | 0xEAB55C | 70 | 0.013–164.561 | 164.561 | Skedar Mystery | Soundtrack #1 (170 s) |
-| 60 | 0xEAC12A | 113/120 | 0.000–205.584 | 205.584 | – | **unreferenced** (decomp MUSIC_DEEPSEA_BETA; **a cut stage theme** (hypothesis), §10) |
+| 60 | 0xEAC12A | 113/120 | 0.000–205.584 | 205.584 | – | **unreferenced** (decomp MUSIC_DEEPSEA_BETA; **a cut stage theme** (hypothesis), *Unused and hidden content*) |
 | 61 | 0xEADCD8 | 96 | 2.499–167.438 | 167.438 | CI Operative | primary sevb: unused CI-geometry stage without setup (0x1B); Soundtrack #2 (170 s) |
 | 62 | 0xEAFEEC | 87 | 0.011–183.085 | 183.085 | dataDyne Action | Soundtrack #3 (180 s) |
 | 63 | 0xEB14DA | 80 | 0.012–197.987 | 197.987 | Maian Tears | primary Maian SOS (special) (0x09); Soundtrack #4 (200 s) |
@@ -1353,7 +1308,7 @@ in `music/wav/index.json`.
 | 92 | 0xEC93C6 | 68 | one-shot | 32.941 | – | setup AI: dam (decomp name PELAGIC_OUTRO) |
 | 93 | 0xEC9C3E | 80 | one-shot | 40.131 | – | setup AI: rit (decomp name AIRFORCEONE_OUTRO) |
 | 94 | 0xECB7DA | 54/52 | one-shot | 84.096 | – | setup AI: sho (decomp name SKEDARRUINS_INTRO) |
-| 95 | 0xECC7E0 | 60 | one-shot | 0.273 | – | **unreferenced** (decomp MUSIC_BETA_NOTE; test, §10) |
+| 95 | 0xECC7E0 | 60 | one-shot | 0.273 | – | **unreferenced** (decomp MUSIC_BETA_NOTE; test, *Unused and hidden content*) |
 | 96 | 0xECC802 | 75 | one-shot | 26.166 | – | setup AI: cave (decomp name AIRBASE_OUTRO) |
 | 97 | 0xECD2DC | 103/102 | one-shot | 25.723 | – | setup AI: imp (decomp name DEFENSE_OUTRO) |
 | 98 | 0xECEB40 | 58/59/56/57 | one-shot | 96.393 | – | setup AI: sho (decomp name SKEDARRUINS_OUTRO) |
@@ -1372,70 +1327,314 @@ in `music/wav/index.json`.
 | 111 | 0xED700E | 100 | 0.006–19.194 | 19.194 | – | ambient Air Force One - Antiterrorism (0x31) |
 | 112 | 0xED7066 | 120 | 2.000–4.000 | 4.000 | – | ambient Attack Ship - Covert Assault (0x34) |
 | 113 | 0xED70B2 | 120 | 0.007–43.997 | 43.997 | – | ambient Skedar Ruins - Battle Shrine (0x2A); ambient WAR! (special) (0x16) |
-| 114 | 0xED7244 | 116 | one-shot | 10.900 | – | **unreferenced** (decomp MUSIC_ESCAPE_OUTRO_SFX; cut alternate outro layer (the game uses 85 ESCAPE_OUTRO_LONG), §10) |
+| 114 | 0xED7244 | 116 | one-shot | 10.900 | – | **unreferenced** (decomp MUSIC_ESCAPE_OUTRO_SFX; cut alternate outro layer (the game uses 85 ESCAPE_OUTRO_LONG), *Unused and hidden content*) |
 | 115 | 0xED772C | 110 | 0.007–167.946 | 167.946 | – | ambient Area 51 - Rescue (0x35) |
 | 116 | 0xED77FE | 110 | 0.007–167.946 | 167.946 | – | ambient Area 51 - Escape (0x19); ambient Maian SOS (special) (0x09) |
-| 117 | 0xED78D2 | 120 | one-shot | 1.627 | – | **unreferenced** (decomp MUSIC_BETA_MELODY; test, §10) |
-| 118 | 0xED793C | 116 | one-shot | 8.014 | – | **unreferenced** (decomp MUSIC_ESCAPE_OUTRO_SHORT; cut alternate, §10) |
+| 117 | 0xED78D2 | 120 | one-shot | 1.627 | – | **unreferenced** (decomp MUSIC_BETA_MELODY; test, *Unused and hidden content*) |
+| 118 | 0xED793C | 116 | one-shot | 8.014 | – | **unreferenced** (decomp MUSIC_ESCAPE_OUTRO_SHORT; cut alternate, *Unused and hidden content*) |
 
-### 6.5 Rendering offline (prototype verified against game audio)
+## 6. Unused and hidden content
 
-1. Read sequence `n` from the table and inflate it; parse it with a per-track loop parser (`src/rom/music/cseq.ts`
-   `parseCompressedSequence`, shared with GoldenEye). **Correction (implementation):** the prototype used Bomberman's
-   `parseCompressedMidi`, which takes the loop of the first track to reach one; in n_audio every track loops on its own,
-   so that rule collapses the layered ambiences 5, 109 and 110 and silences layers of 8, 102 and 106. The per-track
-   rule fixes them (loops in §6.4 updated for 5, 27, 109, 110), with one addition: when the tracks' loops share no
-   common period but all end on the same tick, loop from the earliest start (only seq 27).
-2. Render with `renderSequence` from a copy of `libultra.ts` that adds one option, `squareVolume: false`
-   (`music/naudio.ts`: `v.vol = opts.squareVolume === false ? vol : (vol * vol) >> 15`). Settings:
-   - bank `parseBank(rom, 0xCFBF30, 0xD05F90, 0, null)`;
-   - output rate 22018 Hz, 44 voices;
-   - sequence volume `0x5000 × seqVolTable[n] >> 15`.
-3. **Loop:** sequences with an infinite `FF 2D` loop get `loopStart`/`loopEnd` from the renderer's second pass. The
-   52 one-shots have none.
-4. Apply output gain **1.0** to every song. All 119 render in about 2.5 minutes (`music/render.ts`,
-   `music/wav/NNN_name.wav`). 13 renders clip on up to 220 samples; the game's 16-bit mixer clips the same way.
+### 6.1 Unreferenced assets
 
-**Captured game audio vs renders** (audio-dump plugin at 22018 Hz; `music/cap/boot.raw`, `music/cap/mp.raw`;
-`music/tools/cmp2.py`):
+#### Verification evidence: Unused content
 
-| Game state (sequence ids from RAM) | Render | Loudness-envelope NCC | Tempo | Chroma at 0 / ±1 semitone | Game − render level |
+| Check | Method | Evidence |
+|---|---|---|
+| crash screen | patched fault thread + forced TLB fault in Defection | `unused/shots/crash_screen_textgrid.txt` |
+| boot arguments | `-level_48` injected at the argument parser | `unused/shots/level_arg_48_boot_direct_defection_intro.png` |
+| cut stages | pending-stage write (control: 0x26 loads) for 0x1B (twice), 0x14, 0x2E, 0x36, 0x4E, 0x5C | 0x1B and 0x14 crash, 0x2E/0x36/0x4E hang, 0x5C shows the credits: `unused2/shots/warp_*` |
+| reference scans | code immediates, lui/addiu pairs, data words, setup bytes, AI lists, BG and model texture references | `unused/strings_code.txt`, `unused2/dumps/textrefs_*.tsv`, `unused3/dumps/*.json` |
+
+#### Unused and hidden content
+
+Each item has its location, the evidence behind it, a confidence rating (high, medium or low) for the claim that it is
+unused or hidden, and whether retail play can reach it. The sources are four catalogues: `notes/unused_debug.md` (part 1),
+`notes/unused_text_stages.md` (part 2), `notes/unused_assets.md` (part 3) and `notes/music.md` *Music*. "Unreferenced" is
+always relative to a reference scan, and the limits of each scan are noted with it. The public decompilation was used
+only to find tables and names; anything that rests on it alone is marked "decomp only".
+
+#### Unused and hidden content: Cut, test and unfinished stages
+
+Stage-table entries with no menu entry (verified: stage table, file table, md5 grouping of stub files; the table and all
+these files are byte-identical in U, E and J):
+
+| Stage | Code | Files | Content | Loads? | Confidence |
 |---|---|---|---|---|---|
-| boot logos, 107 | 107 | 0.846 | 1.000 | 0.939 / 0.87 | +2.7 dB (squared model: +12.5) |
-| attract intro, 34 + 11 | 34 + 11 | 0.511 | 1.000 | 0.894 / 0.35 | +0.5 dB (squared: +16.4) |
-| file select, 89 (+108, SFX) | 89 | 0.57–0.76 | exact, including across the loop jump at 63.13 s → 2.525 s | 0.902 / 0.54 | −2.9 dB (squared: +4.3) |
-| Defection gameplay, 9 + 8 | 9 | 0.850 | 1.000 over 80 s | 0.905 / 0.50 | −1.6 dB |
-| Combat Simulator match (Skedar), 62 | 62 | 0.883 | 1.000 over 80 s | 0.926 / 0.47 | −3.0 dB |
+| **0x1B** | sevb | **Carrington Institute BG and tiles** (`bg_dish`), stub pads (0 pads), stub setups; text bank `Lsevb`; stage-music row track 61 | **The cut special assignment "Retaking the Institute".** `Lsevb` (the bank `stageToBank(0x1B)` loads) holds "Retaking the Institute.\nLead the team and clean out the building.", "Kill All Enemy Agents", and the placeholder objectives "Do Something Else" / "And Something Else". The menu name 0x56A9 is translated in all languages (G "Die Übernahme", F "Sauver l'Institut", S "Retomando el Instituto", I "Il riscatto dell'istituto", J 協会の奪回) but referenced nowhere in U, E or J. An early mission list in the U "J" text slot reads "Mr. Blonde's Revenge, Maian SOS, Retaking the Institute, WAR!, The Duel" | **no**: hangs (from Defection) or crashes to the exception vector 0x80000184 (from CI) in two emulator runs (`unused2/shots/warp_1b_sevb_*`) | high |
+| 0x14 | silo | the Skedar arena's BG, tiles and pads (`bg_oat`); stub setups | GoldenEye "Silo" slot pointing at Skedar geometry, no objects. Render: `bg/renders/oat_overview.png` | **no**: crash to the exception vector (PC 0x80000180, stage 0x14, table index 1) (`unused2/shots/warp_14_silo/`) | high |
+| 0x2E | ash | `bg_ash.seg` (0x660): a one-room placeholder like the 0x200 stubs, plus 0xAC0 bytes of 16-bit colour-like words in its primary block (meaning low) | placeholder | **no**: hang, no frame for 5 min (PC 0x7003B1C0 in lib) (`unused2/shots/warp_2e_ash/`) | high (structure) |
+| 0x36 | len | stub BG; `UsetuplenZ`/`Ump_setuplenZ` 0x50 (intro only) | unique stage-table scale fields (+0x14 0.1004, +0x1C 6.684) and entries in both memory-argument tables: purpose unknown | **no**: hang, no frame for 6 min (PC 0x7003B054) (`unused2/shots/warp_36_len/`) | high (files) |
+| 0x4E | old | stub BG; `UsetupoldZ` 0x330: three tagged Area 51 crates with no pad and one shared AI list | a minimal test setup (hypothesis, medium) | **no**: hang, no frame for 6 min (PC 0x70027B54) (`unused2/shots/warp_4e_old/`) | high |
+| 0x18, 0x1A, 0x23, 0x24, 0x28, 0x2B, 0x4D, 0x50, and the MP slots mp2, mp6–8, mp14, mp16–20 | arch, dest, run, sevx, cat, sevxb, uff, lam | stubs only (GoldenEye stage slots Archives, Frigate, Runway, Surface; 0x28 even selects the Pelagic text bank) | nothing to show | not tested | high |
 
-- **Level:** the mean offset is −0.9 dB with a ±3 dB spread, which includes reverb, sound effects and ducking. No
-  per-song gain is justified.
-- **Tempo:** RAM tempos agree with the sequence data (e.g. seq 9 at 117 BPM: 1335 µs per tick).
-- **Not modelled:** reverb (about 1–2 dB and the room sound) and the 184-sample
-  event quantisation.
+- **Environment records for cut stages:** fog records exist for 0x24 and 0x2B (`sevx`/`sevxb`), and a no-fog record
+  for 0x1A has water on (*Environment table (verified: disassembly 0x7F165D40/0x7F16574C/0x7F165A0C, ROM data, RAM live struct = record in every capture)*). They are leftovers of stages whose BGs are stubs. High.
+- **Code-only stages 0x5B, 0x5C, 0x5D are reachable:**
+  - 0x5B, the Controller Pak menu: `li a0,91` in 6 places.
+  - 0x5C, the credits: `li 92` at 0x7F017170 and 0x7F10DAE8.
+  - 0x5D, the no-Expansion-Pak menu: `li a0,93` in 4 places.
+  - Emulator: a forced load of 0x5C shows the end credits (staff names over a starfield, `unused2/shots/warp_5c_credits/`); 0x5B and 0x5D were not load-tested. None of the cut stages loads with a RAM warp, so their files can only be shown statically (e.g. the silo and sevb BGs in the viewer).
+- **"Rooftop" (0x5081), a Combat Simulator arena name:** translated in all languages (G "Dächer", F "Toit", S "Tejado",
+  I "Tetto", J 屋上) but with no arena record, file name, text bank or reference in U, E or J. Which stage it was is
+  unknown. High for the orphan string.
+- **Unused stage files:**
+  - `bg_wax_padsZ` equals `bg_ame_padsZ` apart from one garbage u16 per cover record. It is an export from another tool
+    session; Mr. Blonde's Revenge uses the ame pads.
+  - `UsetupsevxbZ` is a byte-identical stub.
+  - 12 stub BG/tiles/pads files are referenced by no stage record.
+  - All high.
 
-## 7. Mapping onto the viewer
+#### Unused and hidden content: Debug features left in the retail code
 
-### 7.1 Detection and game object
-- `src/rom/index.ts` `openRom()`: add `case 'NPDE'` (after `normalizeByteOrder()`), accepting `rom[0x3F] === 0`
-  (V1.0; addresses in this spec). V1.1 (`rom[0x3F] === 1`), `NPDP` and `NPDJ` need their own address maps (§1.2);
-  reject them at first or derive the tables from the boot code as `fs/extract.py` does.
-- `src/rom/types.ts`: `Game.id` += `'perfectdark'`. `LevelKind` already has `'campaign'`, `'hub'`, `'battle'` and
-  `'other'`; use `campaign` (groups "Mission 1" … "Mission 9", "Special Assignments"), `hub` (Carrington
-  Institute), `battle` (groups "Combat Simulator – Dark", "Combat Simulator – Classic") and `other` (group "Unused": 0x14
-  silo, 0x1B sevb). `LevelInfo.name` = menu name (§3.3); `Level.id` = e.g. `ame-30`.
+| Item | Where | Evidence | Confidence | Reachable |
+|---|---|---|---|---|
+| **Crash screen "Another Perfect Crash (tm)"**: FPU and CPU registers, TID/EPC/cause, the IRIX host command `dshex -a …`, a stack trace | printer 0x7000C548; text grid 71 × 30 at `[0x8005D994]`; renderer 0x7000CF54 | the printer has no caller, the fault thread only records the thread, the grid is never allocated and the glyph bitmaps are gone. **Emulator:** after patching the fault thread to call the printer and forcing a TLB fault in Defection, the complete report was written to the grid (`unused/shots/crash_screen_textgrid.txt`; offline render with a PD font: `unused/shots/crash_screen_textgrid_offline_render.png`). The framebuffer shows only the blank text box, confirming the missing font | high | no |
+| **Developer boot arguments**: `-level_NN`, `-hard N`, `-play N`, `-coop`, `-anti`, `-mpbots`, `-nomp3`, `-d`, `-s`, `-j` (Japanese text slot), `-nochr/-noprop/-noobj`, `-mpwpnset`, `-forceversion`, `-scrub`, memory args | read from ROM 0x1FFFF00 only if stub 0x7002FA08 returns 0; it always returns 1 | disassembly. **Emulator:** injecting `-level_48` boots straight into the Defection intro, skipping title and menus (`unused/shots/level_arg_48_boot_direct_defection_intro.png`) | high | no |
+| 124 named debug variables (`debugdoors`, `wallhit`, radar/HUD, rain/snow, PD-controller gains, menu colours…) | registered through the empty stub 0x7000DB30; list `unused/debugvars.tsv` | disassembly; no editor exists. The Controller Pak actions `pakdump`, `wipeeeprom`, `corruptme`, `dumpeeprom` are still polled (effects from function names, not tested) | high | debugger only |
+| ROM "RAM patch" table: 8 × `{dest, len}` records with blobs, copied into RAM | ROM 0x1D65740, loader 0x7F082D74 | the code runs; the table is zero in all four revisions | high (purpose low) | runs, loads nothing |
+| about 600 compiled-out debug printf strings (`AISOUND: …`, `BriGun: …`, `vtxstore: GROSS! CorspeCount > MAX_CORPSES`, `MUSIC(Play) : SERIOUS -> Out of MIDI channels`) | lib/game rodata | string scan with code/data cross-references | high | no |
+| anti-tamper checksum in the cheat-menu handler (corrupts boot code if modified) | 0x7F107970 | disassembly (not tested) | medium-high | yes, silently |
+| searched for and **not** found: a GoldenEye-style debug menu, level select, free camera, collision/portal overlay, profiler | full string dump and joypad-mask scan | – | high (strings), medium (computed button masks) | – |
 
-### 7.2 Reusable modules
+#### Unused and hidden content: Cheats
+
+- **Cheat table:** 0x80073A90, 42 × `{u16 nameText; u16 time; u8 soloIndex; u8 difficulty; u8 flags}`. All 42
+  entries are named and unlockable. Unlock conditions for each are in `unused/cheats_table.md`: target times,
+  mission completion, firing-range golds for the classic guns, or Game Boy Perfect Dark in a Transfer Pak (Hurricane
+  Fists, Cloaking Device, All Guns in Solo, R-Tracker). Verified, high.
+- **Dead "auto-apply" path:** stage start forces the active bit for cheats with flag 0x01, but no entry has that
+  flag (0x7F1075B8). High; not reachable.
+- **GoldenEye cheat names and messages in `LmiscE` 0x5800–0x5843:** "Super x2 Health", "Phase", "Tiny", "Silver PP7",
+  "Gold PP7", "Paintball Mode On", "Happy?", "Line Mode", "Turbo Mode" and others, plus GoldenEye messages ("OBJECTIVES
+  FAILED - abort mission.", "Guard Greeting", "What's that gun?"). No code immediate or table references them. High;
+  not reachable.
+
+#### Unused and hidden content: Characters and heads
+
+| Item | Evidence | Confidence | Reachable |
+|---|---|---|---|
+| **`CtestchrZ`**: a man in a red suit, standing in a natural pose (not the splits bind pose) and at about 1/60 of the other bodies' units, i.e. an early test character | body table entry 0x70; no setup, AI, code-table or decompilation reference; `unused3/renders/chars_unreferenced.png` | high | no |
+| **`CheadgreyZ`**: a greyscale photo-textured face | entry 0x15, no reference | high | no |
+| `Cpresident_cloneZ` (headless President-clone body; setups use `Cpresident_clone2Z`) | entry 0x84, no reference | high | no |
+| **older character versions outside the body table:** `Ca51guardZ` (brown/white Area 51 guard), `CelvisZ` (a naked grey Maian body with blue hands), `Cdd_shockZ` (dark blue shock trooper, replaced by `CddshockZ`) | file table vs body table; no reference | high | no |
+| `CheadthekingZ` (Elvis-style head), used only by a code head swap | decomp only | medium | code |
+| every developer ("Perfect Head" staff) head is used in the 75-entry MP head table; the Bond bodies (Connery, Dalton, Moore, Brosnan tuxedos) are MP bodies | code tables located by byte match | high | yes |
+
+#### Unused and hidden content: Weapons and items (weapon table 0x8006FF18)
+
+| Item | Evidence | Confidence | Reachable |
+|---|---|---|---|
+| **"Tester" (weapon 0x33, `GtestgunZ`)**: a developer test weapon with a name and a grenade-like model (black knurled cylinder, silver blade) | no setup, intro, AI or MP-table reference | high (code not excluded) | no |
+| **"Suicide Pill" (weapon 0x5D)**: a name and a weapon slot, but no model | no reference | high | no |
+| **`GjoypadZ`**: a model of an N64 controller (838 triangles) in no weapon definition | no reference | high | no |
+| weapons 0x59 and 0x5A with empty names (decompilation names CHOPPERGUN and WATCHLASER) | no reference | medium | no |
+| the classic guns CC13 … RC-P45 (GoldenEye gun models) appear in no setup, AI list or MP table; they are reachable only through the Classic Guns cheats | usage scan; the code path is decomp only | medium | yes (cheats) |
+
+#### Unused and hidden content: Setup data
+
+- **19 object types never used in any of the 121 setups**, though the setup loop still handles them: ALARM, HANGINGMONITORS,
+  HAT, GRENADEPROB, OBJECTIVE_DESTROYOBJ, OBJECTIVE_THROWOBJ, OBJECTIVE_ENTERROOM, OBJECTIVE_THROWINROOM, GASBOTTLE,
+  PADLOCKEDDOOR, TRUCK, HELI, SAFE, SAFEITEM, TANK, and the unnamed 0x10/0x1F/0x22/0x29. TANK has a length but no placement
+  branch. Most are GoldenEye setup types kept in the format (hypothesis). High.
+- **GoldenEye briefing text inside PD multiplayer setups:**
+  - `Ump_setupdamZ` holds GoldenEye's Dam briefing ("B Y E L O M O R Y E  D A M", "mi6 has confirmed the existence of a
+    secret chemical warfare facility at the arkhangelsk dam…").
+  - `Ump_setuppeteZ` holds GoldenEye Streets text ("use the stolen tank to chase the car containing natalya…").
+  - Verified from ROM bytes (`unused3/dumps/Ump_setupdamZ_tail.txt`). High; not reachable.
+- **V1.1 change:** `UsetupaztZ` (Crash Site) gains one short AI command in list 0x0C01. Verified byte diff; the meaning is
+  open.
+- **No object is excluded on all four difficulties.** Eight objects sit on pads outside every room's bounding box
+  (e.g. an Area 51 crate shared by three stages). Low–medium that they are hidden.
+- **Solo setup on an MP stage:** `Usetupmp10Z` (Sewers) holds 3 object records. **Test setup:** `UsetupoldZ` (stage 0x4E)
+  places three crates with no pad. High.
+- **AI debug labels inside setups:** 322 strings in 20 solo setups, e.g. "DR CHANGELIST", "TELEPORT FAIL", "BUG C1".."C4",
+  "PLLACED WRONG", "COOP PLLACED WRONG", "EPROMFLAG NOTSET", "BACK TO ELVIS", "LIMO READY TO GO", "shot 1..8"
+  (`unused2/dumps/setup_strings.txt`). High that they are strings; their effect in retail was not traced.
+- **Pre-text-bank format:** `Ump_setuppeteZ` stores its GoldenEye briefing and objective texts as file-relative string
+  pointers instead of text ids. The tank sentence appears nowhere in GoldenEye (U) (all 706 decompressed GE files
+  searched), and the Dam text is an earlier draft than GoldenEye's retail text ("arkhangelsk dam", "destroyed without
+  prejudice", a different bungee paragraph). High.
+
+#### Unused and hidden content: Text and strings
+
+Text files (all three ROMs dumped: `unused2/text/{U,E,J}/`; reference scan `unused2/scripts/textrefs.py` over code
+immediates, data u16/u32 and every byte offset of every setup. A string is "NONE" when no id reference was found: 303
+of 3,573 English strings in U. NONE is strong for stage banks; the global banks also compute ids, so NONE there is only a
+candidate):
+
+| Item | Where | Evidence | Confidence | Reachable |
+|---|---|---|---|---|
+| **The U ROM's "J" text slot is an older English draft**, not Japanese; 2,388 of 3,644 strings differ from the E slot. `LwaxJ` "You are Mr Blonde. Stop mincing around and capture cassandra.", the GoldenEye Moneypenny line "Underground in Siberia, James? Some of us don't get further than the Northern Line.", "Assasinate Datadyne Head Of Security"; `LstatJ` "Mopping Up The Skedar Homeworld", "Elvii Leader Has Been Killed."; `LsevJ` "Destroy Captured Maian Saucer", "Sabotage Enemy Medical Experiment"; `LateJ` "Joanna's Graduation Test - The Duel"; CamSpy called "Eye Spy"; "Pelagic 2" | slot comparison `unused2/dumps/diff_U_E_vs_U_J.txt` | high | no (NTSC code reads slot +1 only when `[0x80084120] != 0`, i.e. the `-j` boot argument) |
+| dropped licence credits and slogan: "RAD Game Tools, Inc. MPEG Layer-3 audio compression technology", "licensed by Fraunhofer IIS and THOMSON multimedia", **"rare designs on the future <<<"** | `Loptions` #90–92; present only in the draft J slot of U and E, empty in every shipped slot | high | no |
+| the U "P" slot is a PAL-English edit ("Night Sight", "PAL version 8.7 final") that the E ROM did not ship | slot comparison | medium–high | no |
+| **GoldenEye cheat list** `LmiscE` 0x5800–0x5843 (61 strings; *Cheats*) is removed in E and J, which shifts all later `Lmisc` ids; E/J also move 198 CI strings from `Lmisc` to `Ldish` | revision diff | high | no |
+| GoldenEye item names in `LpropobjE`: "explosive pen", "explosive case", "flare", "piton", "stick(s) of dynamite", **"GoldenEye key"** | NONE | high | no |
+| GoldenEye gun real names ("PP7", "TT33", "Skorpion", "AK47", "Uzi 9mm", "MP5K", "M-16", "FNP90") in `LdishE` | referenced by `UsetupdishZ` AI lists (probably firing-range lines); display not verified | high (strings) | ? |
+| cut or renamed weapon and gadget names in `LgunE`: "MagSec SMG", "MaianGrenade", "FlashBang" (cf. the unused `PchrflashbangZ` model), "Alien Medpack", "Big King Rocket", "JonesCorp", "Data Uplink", and attachments "Silencer", "Telescopic Sight", "Magazine Extension" | NONE | medium | no |
+| cut mission lines (NONE in stage banks): Area 51 Rescue autopsy scene ("What the hell do you think you're doing? This is supposed to be a sealed room!…", "Director Easton will hear about this, young lady."), Escape ("That specimen is government property and should not leave the base.", "Inner hangar door is closing."), Air Force One "Unable to detach UFO.", Chicago "Greetings, citizen.", G5 "CamSpy has been destroyed - abort mission.", CI "Switch Code 1..4 has been obtained.", Pelagic "Cripple the engines and the ship will drift... Perfect!", Deep Sea "Antibody masking has been obtained." | stage-bank scan | medium | no |
+| sound-direction notes written as subtitles: "Machinery scream sound Fx." (`LearE`), "Gasps, chokes, and wheezes." (`LtraE`); placeholders "NULL3".."NULL7" (`LameE`) | NONE / coincidental hits | high | no |
+| build page strings "NTSC version 8.7 final" (U), "PAL version 8.7 final" (E), "Japanese version 8.7 final" (J), with "NUS-NPDE-USA", "Rare Ltd. (twycross)" | referenced by a menu record at data 0x80062658 (used) | high (used) | yes |
+| **Japanese encoding (J ROM):** bytes < 0x80 are ASCII; otherwise the code is `c = (lead & 0x7F) << 7 \| (trail & 0x7F)`, a 16×12 4bpp glyph at J ROM `0x178C40 + (c + 24) × 0x60`. Japanese names render correctly: データダイン本社, ミスター・ブロンド, 協会の奪回, 屋上 (`unused2/font/j_stage_names.png`) | J disassembly 0x7F154C3C, 0x7F16E7C8 + renders | high | J |
+| **an older, smaller Japanese glyph set in the U and E ROMs** (U ROM 0x194440 small 16×12, 0x19FB40 large 16×16), still addressed by U code (0x7F16E1BC) but never used, because U text is 7-bit ASCII; J has neither | U disassembly + renders `unused2/font/u_small_try_16x12.png` | high | no |
+
+Code and data segment strings (`unused/strings_code.txt`, 1,992 runs):
+- **Build dates:** `Apr  6 2000 15:05:01` in V1.0 and, identically, in V1.1. E is `Apr 28 2000`, J `Jul 19 2000`. High.
+- **GoldenEye source names and leftovers:** `bondwalk.c`, `bondmove.c`, `bondgrab.c`, `bondeyespy.c`, `bondbike.c`;
+  `ai_ifbondintank: tank code has been removed.`; `set shot list(void) doesn't work for …truck!/heli!`; `BOND IN ROOM`. High.
+- **Developer tags (initials only):** `RWI : Door Stuck Mate -> Sort it out`, `DGD WARNING: portalAVInit no portals!`,
+  `(BNC:Menu) findItem Warning`, `RUSSES SOUND GUARD STRING`. High.
+- **Humour:** `PakDamage_UjiWipedMyAss`, `Cam -> Save Failed - Cant get it small enough - oo-er`,
+  `OI! DUPLICATE FILE NAME! NO!`, `Hand : Look ma no hands!`. High.
+- **PerfectHead (Game Boy Camera face mapping):**
+  - About 110 menu strings ("PerfectHead Editor", "Take A Picture Now", "Shape Head", "Your Mission heads will now
+    appear in any of the missions you play.") have no reference.
+  - The camera and face-compression code remains (`camdraw.c`, `Pak_StartCapture`, `Cam_DctUnCompressSlot`, `GBCHead`).
+  - The removed menus are high confidence; whether the code is still reachable is medium; no retail route.
+- **Cut multiplayer scenario "Touch That Box" / "Boxes":** a 7th scenario name with "Boxes Options" and "Boxes on
+  Radar" strings, but no entry in the 6-entry scenario table at 0x80087148. High that it is unreferenced, medium that
+  it was a scenario.
+- **"Test" and "4mb Test"** strings with no reference. Medium: text ids can be computed.
+
+### 6.2 Cut or inaccessible levels
+
+Candidate levels are distinguished from alternate, debug, and intentionally hidden retail content above.
+
+### 6.3 Debug features
+
+Shipped debug strings and executable features are listed only when supported by a code or data reference.
+
+### 6.4 Prototype or revision-specific content
+
+Source-archive and prototype material is explicitly distinguished from shipped retail data.
+
+## 7. nviewer implementation
+
+### 7.1 Module mapping
+
+#### Levels: Proposed viewer level list
+
+- **Groups:**
+  - "Mission 1" … "Mission 9", then "Special Assignments": 21 levels, each with its own pads and setup even when the
+    BG is shared.
+  - "Carrington Institute": 1.
+  - "Combat Simulator – Dark" and "Combat Simulator – Classic": 13 + 3 levels.
+  - "Unused": 0x14 silo and 0x1B sevb (real geometry, no setup).
+- **Names:** the menu names above. `Level.id` = the stage code plus the stage id (e.g. `ame-30`).
+- **Hidden:** entries with stub BGs.
+- **Setup:** the solo setup for missions, the hub and special assignments; the multiplayer setup for arenas.
+- **Counts:** 41 table entries over 31 distinct BG files have real geometry. 38 of them are reachable from menus.
+
+#### Level geometry: Building viewer meshes
+
+- One `Mesh` per room (room-local positions, opaque and translucent blocks in the same mesh, batches carry `blend`),
+  one `Instance` per room with `matrix = translate(room.pos)` and `info = {room, fileOffset}`. Mesh radius and
+  `Level.bounds` from the section-3 boxes.
+- Sky rooms (*How the game draws a frame, environment, fog and sky (verified: 13 RDRAM captures with frame display lists, disassembly)*) go to `Level.skies`.
+- Environment-mapped surfaces: normals from the colour entries with the room lights, or draw them with their vertex
+  colour treated as white (the prototype's approximation, visibly wrong on chrome).
+- Textures: one viewer `Texture` per (texture number, wrap mode).
+- Start camera: the first SPAWN pad + 112 units up (the eye ends 159 units above the floor), looking along the pad's look
+  vector (*Placement (verified against RAM: rotations 238/285, positions 257/285; doors 45/46 and 44/46)*).
+- Per-stage numbers (all verified):
+
+| Code | Stage(s) | Rooms | Portals | Lights | Leaf lists | Triangles | Textures |
+|---|---|---|---|---|---|---|---|
+| ame | dataDyne Central (Defection, Extraction, Mr. Blonde's Revenge) | 167 | 295 | 327 | 298 | 19,780 | 118 |
+| ear | dataDyne Research | 110 | 133 | 135 | 132 | 14,276 | 88 |
+| eld | Carrington Villa | 149 | 304 | 58 | 205 | 17,211 | 114 |
+| pete | Chicago | 106 | 128 | 63 | 191 | 8,205 | 98 |
+| depo | G5 Building | 98 | 149 | 76 | 226 | 6,734 | 81 |
+| lue | Area 51 (Infiltration, Rescue, Escape, Maian SOS) | 270 | 345 | 416 | 527 | 36,350 | 112 |
+| cave | Air Base | 146 | 199 | 61 | 192 | 13,380 | 67 |
+| rit | Air Force One | 103 | 123 | 116 | 172 | 21,577 | 72 |
+| azt | Crash Site | 101 | 163 | 9 | 109 | 12,511 | 73 |
+| dam | Pelagic II | 129 | 156 | 202 | 280 | 26,961 | 123 |
+| pam | Deep Sea | 195 | 207 | 107 | 260 | 27,967 | 138 |
+| dish | Carrington Institute (+ Defense, The Duel) | 140 | 178 | 161 | 188 | 11,519 | 78 |
+| lee | Attack Ship | 113 | 127 | 265 | 152 | 30,245 | 89 |
+| sho | Skedar Ruins (+ WAR!) | 137 | 191 | 82 | 238 | 15,395 | 70 |
+| oat | MP Skedar (+ stage 0x14) | 66 | 81 | 0 | 68 | 2,246 | 15 |
+| crad | MP Pipes | 76 | 106 | 0 | 104 | 2,141 | 13 |
+| arec | MP Ravine | 41 | 51 | 0 | 47 | 804 | 24 |
+| cryp | MP G5 Building | 35 | 53 | 0 | 55 | 2,298 | 22 |
+| mp10 | MP Sewers | 85 | 104 | 0 | 99 | 2,535 | 24 |
+| mp4 | MP Warehouse | 48 | 63 | 0 | 75 | 2,583 | 30 |
+| mp15 | MP Grid | 32 | 44 | 0 | 35 | 1,562 | 18 |
+| mp9 | MP Ruins | 103 | 121 | 15 | 113 | 2,149 | 31 |
+| mp3 | MP Area 52 | 41 | 59 | 0 | 42 | 2,326 | 19 |
+| mp1 | MP Base | 52 | 63 | 0 | 65 | 2,391 | 25 |
+| mp12 | MP Fortress | 118 | 137 | 0 | 150 | 5,962 | 28 |
+| mp13 | MP Villa | 70 | 79 | 0 | 70 | 2,882 | 25 |
+| mp5 | MP Car Park | 40 | 53 | 0 | 115 | 1,912 | 15 |
+| jun | MP Temple | 25 | 37 | 0 | 31 | 1,272 | 12 |
+| ref | MP Complex | 44 | 60 | 0 | 74 | 2,559 | 17 |
+| mp11 | MP Felicity | 39 | 53 | 0 | 53 | 4,954 | 37 |
+| ash | unused stage 0x2E | 1 | 0 | 0 | 1 | 40 | 2 |
+
+(Rooms exclude room 0.)
+
+**Pitfalls found:** (1) don't inflate a BG file as one stream; locate room streams through room pointers; (2) room 0
+is unused and the last room entry is an end marker; (3) vertex colours are indexed through `G_COL` + the vertex byte;
+(4) `G_VTX`/`B1` layouts differ from F3DEX 1.x; (5) `C0` is file-only, textures are not uploaded by the lists;
+(6) compare texture texels, not raw pool bytes (padding the game never writes); (7) some rooms are skies with their own
+projection; (8) the dataDyne Central overview looks exploded because its rooms really are spread out (tower floors,
+city backdrop boxes).
+(9) coplanar overlapping room triangles (verified by a scan of all 31 BGs, `../impl/pd_zf/scan.ts`):
+- The data has 2,627 triangles that can z-fight when BG is drawn double-sided: 1,276 surfaces modelled from both sides
+  (opposite-facing, usually in two rooms, with `G_CULL_BACK`), 899 same-side overlaps within a room, 309 across rooms, and
+  211 translucent triangles lying on solid ones.
+- The game hides them through back-face culling and draw order (the later draw passes the RDP depth test).
+- Room draw order (verified in frames): the first BG call per room has non-decreasing portal-hop depth from the camera's
+  room in 10 of 12 captured frames. Villa and Skedar Ruins draw script-shown rooms first.
+- For cross-room overlaps, the viewer takes the copy the game would show from where the player sees the surface. It
+  counts votes from playable eyes in front of the surface: a room counts only where the surface point lies in one of the
+  clip boxes of the portals it is reached through (the game scissors each room to those). If both rooms count, the deeper
+  one (drawn later) gets the vote.
+  - Chicago rooms 73/77: from the stairs landing, room 73's copy (vertex colours black at two corners) is drawn later but
+    clipped away, so room 77's lit grate shows. Viewer bug report 0001: ignoring the clipping had made the black copy win.
+- With no clear vote (e.g. a surface nobody sees from play, like Air Base's roof parapet in viewer bug report 0002) the
+  data gives no order: the viewer keeps the lower room number's copy. A copy beaten by k rooms moves k units behind, so
+  three or more copies of one surface don't fight either.
+- The viewer's `coplanar.ts` applies these rules: a 1-unit nudge towards the front, decals for later draws, hidden
+  triangles dropped, and losing cross-room copies moved behind.
+- 25 triangles remain: 6 opposite-facing, 11 same-room, 5 cross-room and 3 translucent.
+
+#### Objects and props: What's practical in the viewer
+
+| Content | Practicality |
+|---|---|
+| static props (BASIC, KEY, crates, DEBRIS, monitors, CCTV, autoguns, shields, fans, escalator steps) | **easy**: one Mesh per model file, one Instance per record (*Placement (verified against RAM: rotations 238/285, positions 257/285; doors 45/46 and 44/46)*) |
+| glass, tinted glass | **easy**: blended meshes |
+| doors | **easy** closed; open states need door motion |
+| lifts | **easy** at their start stop |
+| floor weapons | **easy** (`Pchr*` world models); MP weapon-set slots 0xF0..0xFE as markers |
+| characters | **medium**: body + head posed with the body type's stand animation frame 0 (*Animations and standing characters (verified: lib `anim.c` disassembly, all 1,207 table records, joint matrices vs RAM)*), placed at the pad with floor snap; or markers labelled with body/head names |
+| hovercars, choppers, hoverbikes, hover props | positioned by AI paths at run time: show at their pad or as markers |
+| pads, spawns, MP case/hill pads, PADEFFECT, waypoints | markers (layer "markers") |
+| objectives, tags, briefings, links | info only |
+| CAMERAPOS | extra camera views |
+| difficulty | filter by `flags2` (a difficulty selector in the UI, default Agent) |
+| first-person guns (G*) | not needed for levels (they contain muzzle-flash geometry toggled by code) |
+
+**Pitfalls found:** transposed look-at basis; ignore the root joint offset of placed objects; the vertex colour byte is
+a byte offset into the colour table (which follows the vertices); `G_VTX`/TRI4 layouts; INTPOS pads are 8 bytes; the
+bbox fit uses the model-state scale before extraScale and normalises by the maximum; floor snap +4 (not weapons);
+setups in RAM are live objects (parse the ROM files); links are relative indices; flag 0x4000 objects use the pad
+field as a chr number.
+
+#### Mapping onto the viewer: Reusable modules
 
 | Existing module | Reuse for PD | Changes |
 |---|---|---|
-| `inflate.ts` `inflateRaw` | every rarezip stream (`off + 5`, size from the header) | none (verified on all 1,405 streams, §2.1) |
-| `displaylist.ts` | only the combiner fold (`evalCombine`) and render-mode → Batch rules | PD's microcode differs (§4.5): write a PD interpreter instead of a third ucode |
-| `texture.ts` | the swizzle rule, formats and embedded model tiles (§5.4) | global textures need `TMEM` > 4 KiB or the PD decoder (`bg/lib/pdtex.ts`) producing RGBA directly |
-| `src/rom/music/libultra.ts` `parseBank`, `renderSequence` | music bank and sequences (§6) | add a `squareVolume?: boolean` render option (PD passes `false`) |
-| `src/rom/music/cseq.ts` `parseCompressedSequence` (per-track loops) | all 119 sequences | none; Bomberman's `parseCompressedMidi` loop rule is wrong for Perfect Dark (§6.5) |
+| `inflate.ts` `inflateRaw` | every rarezip stream (`off + 5`, size from the header) | none (verified on all 1,405 streams, *Compression: rarezip "1173" (verified bit-exact against the game)*) |
+| `displaylist.ts` | only the combiner fold (`evalCombine`) and render-mode → Batch rules | PD's microcode differs (*Display lists (verified: opcode histogram of all 4,367 leaf lists; decoded identically by the frame-DL walker; renders)*): write a PD interpreter instead of a third ucode |
+| `texture.ts` | the swizzle rule, formats and embedded model tiles (*Model files `P*Z`, `C*Z`, `G*Z` (verified: loader and relocation disassembly; all 686 models parse with 0 unknown opcodes and 0 missing textures)*) | global textures need `TMEM` > 4 KiB or the PD decoder (`bg/lib/pdtex.ts`) producing RGBA directly |
+| `src/rom/music/libultra.ts` `parseBank`, `renderSequence` | music bank and sequences (*Music*) | add a `squareVolume?: boolean` render option (PD passes `false`) |
+| `src/rom/music/cseq.ts` `parseCompressedSequence` (per-track loops) | all 119 sequences | none; Bomberman's `parseCompressedMidi` loop rule is wrong for Perfect Dark (*Rendering offline (prototype verified against game audio)*) |
 | `util.ts` `pruneUnused`, `emptyBounds` | level assembly | none |
 
-### 7.3 New modules (suggested)
+#### Mapping onto the viewer: New modules (suggested)
 
 | File | Contents | Source prototype | Size |
 |---|---|---|---|
@@ -1445,29 +1644,20 @@ in `music/wav/index.json`.
 | `src/rom/perfectdark/bg.ts` | BG container, rooms, sky rooms, section 3 bounds → room meshes and instances | `bg/lib/pdbg.ts` | ~250 lines |
 | `src/rom/perfectdark/setup.ts` | pads, setup props list, intro spawns, placement math, difficulty filter | `obj/lib/pads.ts`, `setup.ts`, `place.ts`, `stage.ts` | ~500 lines |
 | `src/rom/perfectdark/model.ts` | model files (nodes, LOD, rest pose / animation pose, head attachment) → meshes | `obj/lib/model.ts` (+ `anim/`) | ~400 lines |
-| `src/rom/perfectdark/perfectdark.ts` | `Game`: level list (§3.5), `loadLevel` (BG + setup + env), music list | – | ~250 lines |
-| `src/rom/perfectdark/music.ts` | sequence table, song names (§6.4), `decodeMusic` | `music/render.ts` | ~120 lines |
+| `src/rom/perfectdark/perfectdark.ts` | `Game`: level list (*Proposed viewer level list*), `loadLevel` (BG + setup + env), music list | – | ~250 lines |
+| `src/rom/perfectdark/music.ts` | sequence table, song names (*Song list*), `decodeMusic` | `music/render.ts` | ~120 lines |
 
-### 7.4 Level assembly (`loadLevel`)
-1. Stage record (§3.1) → BG, pads, setup (solo +0x0E or MP +0x10) file ids.
-2. BG (§4): one `Mesh` per room (room-local positions), `Instance` = `translate(room.pos)`; sky rooms → `Level.skies`;
-   textures from the global store (one viewer texture per number × wrap mode).
-3. Setup (§5): one `Mesh` per model file (lowest LOD distance band, opaque + xlu batches), one `Instance` per placed
-   object with the §5.5 matrix (column-major, already in world units); layers "props", "doors", "glass", "weapons",
-   "characters", "vehicles" and "markers" (spawn pads, MP pads, chr pads when characters are markers).
-4. Environment (§4.9): `Level.fog`, `Level.clearColor`, sky.
-5. `Level.camera`: first SPAWN pad + 112 up, target = eye + look (§5.5).
-6. Optional: tiles as a hidden `collision` layer (§4.8); difficulty filter default Agent.
+#### Mapping onto the viewer: Additions to `types.ts` (proposals)
 
-### 7.5 Additions to `types.ts` (proposals)
 - None required for a first version (Mesh/Instance/Sky/Fog/LevelLayer/Marker/CameraView cover it).
 - Optional: `Level.cameras?: CameraView[]` for CAMERAPOS cutscene cameras and MP spawn pads; a per-level
   `difficulty` filter would need `Instance.info.flags2` plus a UI selector.
 - `Batch` needs no new fields: environment-mapped surfaces can be approximated by treating their colour entries as
   white, or supported with a `textureGen` normal channel later.
 
-### 7.6 Environment and sky in the viewer
-- `Level.clearColor` = environment sky colour (§4.9.1): fog record if the stage has one, else no-fog record, else the
+#### Mapping onto the viewer: Environment and sky in the viewer
+
+- `Level.clearColor` = environment sky colour (*Environment table (verified: disassembly 0x7F165D40/0x7F16574C/0x7F165A0C, ROM data, RAM live struct = record in every capture)*): fog record if the stage has one, else no-fog record, else the
   default record −1.
 - `Level.fog` for fog-table stages:
   - `color` = sky colour;
@@ -1475,15 +1665,15 @@ in `music/wav/index.json`.
   - `near`/`far` from the record. For the three 0.5-scale stages, divide by the world scale when rendering in BG units
     (hypothesis).
 - `Level.skies`:
-  - sky rooms (§4.9.3, §4.11);
-  - when `cloudsOn`, a generated cloud disc (§4.9.3), and a water disc when `waterOn`.
+  - sky rooms (*Sky*, *Building viewer meshes*);
+  - when `cloudsOn`, a generated cloud disc (*Sky*), and a water disc when `waterOn`.
   - `Sky` needs a "follow camera in x/z only" flag and world-space UVs; alternatively bake a large disc around the level
     centre (the 300000 clamp makes the difference small).
-- `Level.camera`: the first SPAWN pad + 112 units up, looking along the pad's look vector (§5.5).
+- `Level.camera`: the first SPAWN pad + 112 units up, looking along the pad's look vector (*Placement (verified against RAM: rotations 238/285, positions 257/285; doors 45/46 and 44/46)*).
 - The player struct's camera at `[0x8009A244] + 0x1BB0` gives world-space eye positions when capturing new reference
   views.
 
-### 7.7 Difficulty
+#### Mapping onto the viewer: Difficulty
 
 | Part | Difficulty | Notes |
 |---|---|---|
@@ -1491,12 +1681,12 @@ in `music/wav/index.json`.
 | global textures | medium | two decoders with many methods; prototype matches RAM texels |
 | BG geometry | medium | PD-specific GBI interpreter; prototype renders match the game camera |
 | props, doors, glass, weapons | medium | placement math is intricate but verified against 285 RAM objects |
-| characters | medium | animation decoder (verified port exists) + stand animation per body type (§5.6) |
-| environment (fog, sky, clear colour) | low–medium | tables fully decoded; the cloud/water sky needs a generated camera-following disc with the colour formula (§4.9.3) |
+| characters | medium | animation decoder (verified port exists) + stand animation per body type (*Animations and standing characters (verified: lib `anim.c` disassembly, all 1,207 table records, joint matrices vs RAM)*) |
+| environment (fog, sky, clear colour) | low–medium | tables fully decoded; the cloud/water sky needs a generated camera-following disc with the colour formula (*Sky*) |
 | music | low | existing libultra renderer + one volume option; verified against game audio |
-| animated textures, env-mapped chrome, portals, dynamic lights | not planned | cosmetic; see §9 |
+| animated textures, env-mapped chrome, portals, dynamic lights | not planned | cosmetic; see *Open questions* |
 
-### 7.8 Corrections found during implementation
+#### Mapping onto the viewer: Corrections found during implementation
 
 0. **Envelopes:** n_audio ramps voice volume linearly (`n_env.c` `_getRate`), starting a note's attack at volume 1;
    the viewer renders with `linearRamps` (verified: capture correlation improves on the pause menu, seq 3, and the
@@ -1517,26 +1707,58 @@ Found while implementing objects and characters (checked against the research RA
 5. **Toggle nodes** are switched by code; the first sibling matches 5 of 6 toggle models seen in frames.
 6. Multiplayer ammo crates after a no-ammo slot are not created; object records with pad < 0 are AI-moved cutscene
    props.
-7. **Music loops:** see §6.5 (tracks loop independently).
+7. **Music loops:** see *Rendering offline (prototype verified against game audio)* (tracks loop independently).
 
-## 8. Verification evidence
+### 7.2 Supported features
 
-The headless mupen64plus from `/home/n64/nviewer/EMULATOR.md` (debugger build, 8 MiB) was used for every check on the
-running game. Every agent used its own run directory under `/home/n64/.ai-tmp/r49/pd/<topic>/`.
+The Technical summary states the supported releases and principal decoded features.
 
-### 8.1 ROM, boot, codec, files
+### 7.3 Approximations and omissions
 
-| Check | Method | Result | Evidence |
-|---|---|---|---|
-| CIC-6105 | header CRCs recomputed with the 6105 algorithm; IPL3 crc32; RAM word 0x800002E8 | all four dumps match; `98BC2C86`; `C86E2000` | `fs/scripts/cic.py`, `fs/ram/title1.bin` |
-| code images | RDRAM at the title screen vs decompressed boot, lib, data, game (8 MiB); demand-paged game code (4 MiB) | boot, lib and game identical; data differs only in 1,292 bytes of globals; 129/129 pages identical | `fs/scripts/cmp_ram.py`, `fs/ram/boot4mb.bin` |
-| rarezip vs the game | breakpoints at the decompressor entry and return during a Defection load; output buffers dumped | 498/498 identical to zlib (text, setup, pads, tiles, 66 models, 409 textures, 10 BG sections, 3 sequences) | `fs/trace/defection.tsv`, `fs/trace/z/` |
-| viewer `inflate.ts` | tsx over all compressed files + lib + data | 1,405 streams identical to zlib | `fs/scripts/inflate_check.ts` |
-| voice clips | MPEG frame parser | 548/548 MPEG-2 Layer III 24 kbit/s 22,050 Hz mono | `fs/scripts/afiles.py` |
-| ROM map | contiguity and fill checks | 41 regions cover the ROM | `fs/rommap.tsv` |
-| revisions | structural extraction of U V1.0/V1.1, E, J; decompressed file comparison by name | §1.2 | `fs/revs.txt`, `unused/revs/fundiff_U10_U11.txt` |
+Viewer approximations are distinguished from facts about the game formats.
 
-### 8.2 Stages and text
+## 8. Verification and remaining work
+
+### 8.1 Verification evidence
+
+#### Objects and props: Model files `P*Z`, `C*Z`, `G*Z` (verified: loader and relocation disassembly; all 686 models parse with 0 unknown opcodes and 0 missing textures)
+
+```
+pointers = 0x05000000 + file offset (the display lists also use segment 5 = file start)
++0x00 ptr rootNode   +0x04 u32 skeleton id   +0x08 ptr parts (node ptrs, then s16 part numbers)
++0x0C s16 numParts   +0x0E s16 numMatrices   +0x10 f32 radius-like size   +0x14 s16 rwDataLen (set at load)
++0x16 s16 numTexConfigs   +0x18 ptr texConfigs (12 bytes: u32 global texture number or 0x05xxxxxx embedded texels; u8 w, h; 6 bytes)
+node (0x18): u16 type (low byte); u16; ptr rodata; ptr parent; ptr next; ptr prev; ptr child
+```
+
+| Node | Name | Rodata (verified layout) |
+|---|---|---|
+| 0x01 | CHRINFO | u16 animPart; s16 mtxIndex (root slot); f32; u16 rwDataIndex |
+| 0x02 | POSITION | f32 pos[3] (relative to parent joint); u16 part; s16 mtxIndex[3]; f32 drawDist (hypothesis) |
+| 0x04 | GUNDL | ptr opaDl; ptr xluDl; base; ptr vertices; s16 numVertices |
+| 0x08 | DISTANCE | f32 near, far; ptr target (LOD: children drawn when near ≤ d < far) |
+| 0x09 | REORDER | two subtrees drawn in camera-dependent order |
+| 0x0A | BBOX | s32 hitPart; f32 xmin, xmax, ymin, ymax, zmin, zmax (**the first BBOX is the model bbox used by placement**) |
+| 0x0C / 0x16 | CHRGUNFIRE / STARGUNFIRE | muzzle flash |
+| 0x12 | TOGGLE | ptr target; u16 rwDataIndex (visibility set by code) |
+| 0x15 | POSITIONHELD | f32 pos[3]; u16 part; s16 mtxIndex |
+| 0x17 | HEADSPOT | where the separate head model attaches |
+| 0x18 | DL | ptr opaDl; ptr xluDl; base; ptr vertices; s16 numVertices; s16; u16 rwDataIndex; u16 numColours; **the colour table follows the vertices** |
+| 0x19 | (unnamed) | s32 n + 12 × f32: 4–6 points (probably collision; lifts, desks) |
+
+**Display lists** use the same Rare microcode as BG lists (*Display lists (verified: opcode histogram of all 4,367 leaf lists; decoded identically by the frame-DL walker; renders)*) plus: `01020040 03xxxxxx` G_MTX = load modelview
+matrix slot `(w1 & 0xFFFFFF) / 0x40` (segment 3 = the model's matrix array; the following vertices are relative to
+that joint), `G_VTX` from segment 4 (DL node vertices) or 5 (GUNDL, file offset), `07` colours from segment 6 (DL
+node colour table) or 5, `BF` TRI1 (index = byte / 10, 403 uses), and **embedded textures** as ordinary
+`FD SETTIMG 05xxxxxx` + `F3`/`F5`/`F2`/`F0` tile commands (1,341 uses; decodable with the viewer's `texture.ts`) next to
+`C0` global texture references. The xlu list is the translucent pass.
+
+**Rest pose:** slot k = sum of POSITION offsets from the root to the node owning slot k (CHRINFO = origin). Humanoid
+bodies are authored in a **"splits" bind pose** (arms and legs along ±X; `obj/renders/chars_sheet.png`); Skedar
+models look natural in it. Heads are separate models (`Chead*`) attached at the body's HEADSPOT joint; body scale
+`0.1 × body.scale`. Standing poses come from an animation frame (*Animations and standing characters (verified: lib `anim.c` disassembly, all 1,207 table records, joint matrices vs RAM)*).
+
+#### Verification evidence: Stages and text
 
 | Check | Method | Result | Evidence |
 |---|---|---|---|
@@ -1545,65 +1767,7 @@ running game. Every agent used its own run directory under `/home/n64/.ai-tmp/r4
 | text container and ids | disassembly of `langGet`; all 476 files of U, E and J parse | – | `unused2/text/{U,E,J}/` |
 | Japanese glyphs | J disassembly + renders | stage names render correctly | `unused2/font/j_stage_names.png` |
 
-### 8.3 Level geometry, textures and environment
-
-| Check | Method | Result | Evidence |
-|---|---|---|---|
-| BG container, rooms, portals, lights, bboxes | parse of all 31 non-stub BGs with cross-checks (vertices inside boxes, light counts, texture lists, colour offsets, no unknown opcodes) | 0 problems | `bg/renders/overview_all.log`, `bg/renders/<code>_overview.png` |
-| BG relocation in RAM | Defection RDRAM: primary data at segment 15, room 2 header and leaf pointers, vertex bytes | match | `runtime/captures/defection_a/ram.bin` |
-| microcode | glide64 ucode checksum; 13 frames walked with no unknown opcodes; BG vertices found byte-exact in the frame (98 runs in Defection) | ucode 7 "Perfect Dark" | `runtime/tools/pdwalk.py`, `runtime/captures/*/dl_*.txt` |
-| textures | 3,502/3,503 decode; 116 Defection pool textures vs RDRAM | LOD 0 + palette identical 115/116 (1 false hit); all levels 106 (9 hit a game bug) | `bg/scripts/texram.ts`, `bg/dumps/texram_defection_a.json` |
-| **game-camera renders** | BG rendered with each frame's own projection, view, world scale and draw offset, next to the screenshot of the same moment | layout, handedness, textures and vertex colours match in all 11 gameplay/cutscene captures (§4.9 table); sky polygons, particles and HUD are not drawn | `bg/renders/{defection_a,chicago_a,ci_a,crashsite_a,villa_a,pelagic_a,pelagic_intro_cutscene,airbase_a,airbase_b,attackship_a,skedarruins_a,skedarruins_b,mp_skedar_a}_side_by_side.png` |
-| culling | same camera, opposite cull rule | the helipad floor disappears | `bg/renders/defection_a_gamecam_cullfront.png` |
-| sky rooms | frame modelview of ame room 1, sho room 2, lee room 0x71 = room position with a translation-free projection | exact | frame DLs |
-| world scale | room modelviews in Crash Site, Villa, Air Base | 0.5 on the diagonal, constant offset | `bg/scripts/scalecheck.ts` |
-| fog replacement | room lists in RAM vs file | Crash Site 9/9, Villa 17/17, Pelagic 8/8 and 10/10: PASS → FOG_SHADE_A; none on non-fog stages | `bg/scripts/fogmodes.py` |
-| fog values | frame movewords vs environment table | equal in Crash Site, Villa, Pelagic II | `runtime/captures/*/manifest.json` |
-| clear colour, near/far | FILLRECT colour and view struct vs environment record | 6 stages (colour), 13 captures (near/far) | same |
-| run-time lighting | RAM colour arrays vs BG file | identical in Defection/CI/Villa; 0.8–0.97 dimming of some entries elsewhere | `runtime/tools/colordiff.py` |
-| sky planes and colours | CPU-rasterised RDP triangles decoded from 5 frames vs the model from `skyRender` | W·depth constant per plane; vertex colours within ~2/255; horizon = sky colour | `runtime/tools/rdptri.py`, `skymodel.py`, `runtime/captures/*/sky_compare.png` |
-| world-space camera | player struct `+0x1BB0` vs frame eye in 10 stages | `campos − eye/scale` = the constant draw offset per stage, equal to the offsets solved from BG calls | `notes/runtime.md` §3.2, `obj/dumps/capture_offsets.json` |
-
-### 8.4 Objects
-
-| Check | Method | Result | Evidence |
-|---|---|---|---|
-| setup command lengths | disassembly + data | every populated props list ends exactly at its intro | `obj/scripts/test_rom.ts` |
-| models | all 686 model files | 0 unknown opcodes, 0 missing textures, 0 errors | `obj/dumps/models_survey.json`, `obj/renders/all_props_sheet.png` |
-| placement | Defection RAM objects vs the §5.5 math | rotations 238/285, positions 257/285; doors 45/46 and 44/46; root offset ignored 25/25 | `obj/scripts/compare_ram.ts` |
-| scaled stages | Villa RAM (334 objects) and Crash Site frame model matrices | 272/334 exact; matrices = 0.5 × gameplay scale | `obj/scripts/scalecheck_ram.ts` |
-| renders with objects | BG + placed objects through the frame's matrices | match (Defection sculpture and lights, lobby desk monitors, Villa wind turbine, CI desk) | `obj/renders/{defection,villa,crashsite,chicago}_side_by_side.png`, `bg/renders/ci_a_objects_side_by_side.png` |
-| start camera | Defection spawn pad vs camera in RAM | eye = pad + 112 up along the pad's look | `obj/renders/defection_spawn.png` |
-| animation decoder | port of lib anim.c/model.c vs `model->matrices` in RAM (runtime dumps; breakpoints at 0x7F0241E0 in Chicago and the Defection intro) | 28/28 joints, 4/4 elbow/knee, 2/2 roots; max element error 5.7e−7 | `anim/scripts/verify_ram.ts`, `verify_hits.ts`, `anim/dumps/verify_*.txt` |
-| standing characters | stand animation frame 0 per body type | natural standing poses; root height = lowest vertex within 1% | `anim/renders/chars_standing.png`, `defection_posed_chr12.png` |
-
-### 8.5 Music
-
-| Check | Method | Result | Evidence |
-|---|---|---|---|
-| engine parameters | RDRAM (synth struct, players) and AI dacrate | 22018 Hz, 184-sample updates, 3 players, linear voice volume | `music/ram/*.bin`, `music/cap/boot.log` |
-| sequences and bank | all 119 inflate to their size and parse; `parseBank` on the music bank | pass | `music/seqsurvey.ts` |
-| song selection | RDRAM during boot logos, attract, file select, Defection, Combat Simulator | seqs 107; 34 + 11; 89 + 108; 9 + 8; 62 | `music/tools/ramvoices.py` |
-| AI music commands | walk of all 1,610 setup and 46 global AI lists with the game's length table | 0 errors; Defection intro starts 34/11 | `unused3/scripts/aiwalk.py` |
-| rendered audio | 5 captures (audio-dump plugin) vs renders: loudness envelope, onset/loop timing, chroma | tempo exact, pitch correct, level −3.0..+2.7 dB | `music/tools/cmp2.py`, `music/cap/` |
-
-### 8.6 Unused content
-
-| Check | Method | Evidence |
-|---|---|---|
-| crash screen | patched fault thread + forced TLB fault in Defection | `unused/shots/crash_screen_textgrid.txt` |
-| boot arguments | `-level_48` injected at the argument parser | `unused/shots/level_arg_48_boot_direct_defection_intro.png` |
-| cut stages | pending-stage write (control: 0x26 loads) for 0x1B (twice), 0x14, 0x2E, 0x36, 0x4E, 0x5C | 0x1B and 0x14 crash, 0x2E/0x36/0x4E hang, 0x5C shows the credits: `unused2/shots/warp_*` |
-| reference scans | code immediates, lui/addiu pairs, data words, setup bytes, AI lists, BG and model texture references | `unused/strings_code.txt`, `unused2/dumps/textrefs_*.tsv`, `unused3/dumps/*.json` |
-
-### 8.7 Emulator hygiene
-
-Every agent used its own run directories (`fs/run`, `fs/run4`, `stages/run`, `runtime/run{,2,3}`, `music/run1`,
-`unused/run1`, `unused2/run{,2,3}`, `anim/run`), stopped its emulators with `pkill -x -F <rundir>/pid` or
-`headless-debug.sh quit`, and confirmed with `pgrep`/`ps` that none was left. The lead's final check is in the
-completion report. Nothing in `/home/n64/nviewer` was modified.
-
-## 9. Open questions
+#### Open questions
 
 Everything here is unverified.
 
@@ -1645,215 +1809,10 @@ Everything here is unverified.
 - Whether any PerfectHead code path is reachable.
 - The effects of the `-d`/`-s` boot arguments and of the Controller Pak debug actions.
 
-## 10. Unused and hidden content
+### 8.2 Known unknowns
 
-Each item has its location, the evidence behind it, a confidence rating (high, medium or low) for the claim that it is
-unused or hidden, and whether retail play can reach it. The sources are four catalogues: `notes/unused_debug.md` (part 1),
-`notes/unused_text_stages.md` (part 2), `notes/unused_assets.md` (part 3) and `notes/music.md` §6. "Unreferenced" is
-always relative to a reference scan, and the limits of each scan are noted with it. The public decompilation was used
-only to find tables and names; anything that rests on it alone is marked "decomp only".
+Unresolved semantics are labelled **Hypothesis** or **Open question** where they occur.
 
-### 10.1 Cut, test and unfinished stages
-Stage-table entries with no menu entry (verified: stage table, file table, md5 grouping of stub files; the table and all
-these files are byte-identical in U, E and J):
+### 8.3 References
 
-| Stage | Code | Files | Content | Loads? | Confidence |
-|---|---|---|---|---|---|
-| **0x1B** | sevb | **Carrington Institute BG and tiles** (`bg_dish`), stub pads (0 pads), stub setups; text bank `Lsevb`; stage-music row track 61 | **The cut special assignment "Retaking the Institute".** `Lsevb` (the bank `stageToBank(0x1B)` loads) holds "Retaking the Institute.\nLead the team and clean out the building.", "Kill All Enemy Agents", and the placeholder objectives "Do Something Else" / "And Something Else". The menu name 0x56A9 is translated in all languages (G "Die Übernahme", F "Sauver l'Institut", S "Retomando el Instituto", I "Il riscatto dell'istituto", J 協会の奪回) but referenced nowhere in U, E or J. An early mission list in the U "J" text slot reads "Mr. Blonde's Revenge, Maian SOS, Retaking the Institute, WAR!, The Duel" | **no**: hangs (from Defection) or crashes to the exception vector 0x80000184 (from CI) in two emulator runs (`unused2/shots/warp_1b_sevb_*`) | high |
-| 0x14 | silo | the Skedar arena's BG, tiles and pads (`bg_oat`); stub setups | GoldenEye "Silo" slot pointing at Skedar geometry, no objects. Render: `bg/renders/oat_overview.png` | **no**: crash to the exception vector (PC 0x80000180, stage 0x14, table index 1) (`unused2/shots/warp_14_silo/`) | high |
-| 0x2E | ash | `bg_ash.seg` (0x660): a one-room placeholder like the 0x200 stubs, plus 0xAC0 bytes of 16-bit colour-like words in its primary block (meaning low) | placeholder | **no**: hang, no frame for 5 min (PC 0x7003B1C0 in lib) (`unused2/shots/warp_2e_ash/`) | high (structure) |
-| 0x36 | len | stub BG; `UsetuplenZ`/`Ump_setuplenZ` 0x50 (intro only) | unique stage-table scale fields (+0x14 0.1004, +0x1C 6.684) and entries in both memory-argument tables: purpose unknown | **no**: hang, no frame for 6 min (PC 0x7003B054) (`unused2/shots/warp_36_len/`) | high (files) |
-| 0x4E | old | stub BG; `UsetupoldZ` 0x330: three tagged Area 51 crates with no pad and one shared AI list | a minimal test setup (hypothesis, medium) | **no**: hang, no frame for 6 min (PC 0x70027B54) (`unused2/shots/warp_4e_old/`) | high |
-| 0x18, 0x1A, 0x23, 0x24, 0x28, 0x2B, 0x4D, 0x50, and the MP slots mp2, mp6–8, mp14, mp16–20 | arch, dest, run, sevx, cat, sevxb, uff, lam | stubs only (GoldenEye stage slots Archives, Frigate, Runway, Surface; 0x28 even selects the Pelagic text bank) | nothing to show | not tested | high |
-
-- **Environment records for cut stages:** fog records exist for 0x24 and 0x2B (`sevx`/`sevxb`), and a no-fog record
-  for 0x1A has water on (§4.9.1). They are leftovers of stages whose BGs are stubs. High.
-- **Code-only stages 0x5B, 0x5C, 0x5D are reachable:**
-  - 0x5B, the Controller Pak menu: `li a0,91` in 6 places.
-  - 0x5C, the credits: `li 92` at 0x7F017170 and 0x7F10DAE8.
-  - 0x5D, the no-Expansion-Pak menu: `li a0,93` in 4 places.
-  - Emulator: a forced load of 0x5C shows the end credits (staff names over a starfield, `unused2/shots/warp_5c_credits/`); 0x5B and 0x5D were not load-tested. None of the cut stages loads with a RAM warp, so their files can only be shown statically (e.g. the silo and sevb BGs in the viewer).
-- **"Rooftop" (0x5081), a Combat Simulator arena name:** translated in all languages (G "Dächer", F "Toit", S "Tejado",
-  I "Tetto", J 屋上) but with no arena record, file name, text bank or reference in U, E or J. Which stage it was is
-  unknown. High for the orphan string.
-- **Unused stage files:**
-  - `bg_wax_padsZ` equals `bg_ame_padsZ` apart from one garbage u16 per cover record. It is an export from another tool
-    session; Mr. Blonde's Revenge uses the ame pads.
-  - `UsetupsevxbZ` is a byte-identical stub.
-  - 12 stub BG/tiles/pads files are referenced by no stage record.
-  - All high.
-
-### 10.2 Debug features left in the retail code
-
-| Item | Where | Evidence | Confidence | Reachable |
-|---|---|---|---|---|
-| **Crash screen "Another Perfect Crash (tm)"**: FPU and CPU registers, TID/EPC/cause, the IRIX host command `dshex -a …`, a stack trace | printer 0x7000C548; text grid 71 × 30 at `[0x8005D994]`; renderer 0x7000CF54 | the printer has no caller, the fault thread only records the thread, the grid is never allocated and the glyph bitmaps are gone. **Emulator:** after patching the fault thread to call the printer and forcing a TLB fault in Defection, the complete report was written to the grid (`unused/shots/crash_screen_textgrid.txt`; offline render with a PD font: `unused/shots/crash_screen_textgrid_offline_render.png`). The framebuffer shows only the blank text box, confirming the missing font | high | no |
-| **Developer boot arguments**: `-level_NN`, `-hard N`, `-play N`, `-coop`, `-anti`, `-mpbots`, `-nomp3`, `-d`, `-s`, `-j` (Japanese text slot), `-nochr/-noprop/-noobj`, `-mpwpnset`, `-forceversion`, `-scrub`, memory args | read from ROM 0x1FFFF00 only if stub 0x7002FA08 returns 0; it always returns 1 | disassembly. **Emulator:** injecting `-level_48` boots straight into the Defection intro, skipping title and menus (`unused/shots/level_arg_48_boot_direct_defection_intro.png`) | high | no |
-| 124 named debug variables (`debugdoors`, `wallhit`, radar/HUD, rain/snow, PD-controller gains, menu colours…) | registered through the empty stub 0x7000DB30; list `unused/debugvars.tsv` | disassembly; no editor exists. The Controller Pak actions `pakdump`, `wipeeeprom`, `corruptme`, `dumpeeprom` are still polled (effects from function names, not tested) | high | debugger only |
-| ROM "RAM patch" table: 8 × `{dest, len}` records with blobs, copied into RAM | ROM 0x1D65740, loader 0x7F082D74 | the code runs; the table is zero in all four revisions | high (purpose low) | runs, loads nothing |
-| about 600 compiled-out debug printf strings (`AISOUND: …`, `BriGun: …`, `vtxstore: GROSS! CorspeCount > MAX_CORPSES`, `MUSIC(Play) : SERIOUS -> Out of MIDI channels`) | lib/game rodata | string scan with code/data cross-references | high | no |
-| anti-tamper checksum in the cheat-menu handler (corrupts boot code if modified) | 0x7F107970 | disassembly (not tested) | medium-high | yes, silently |
-| searched for and **not** found: a GoldenEye-style debug menu, level select, free camera, collision/portal overlay, profiler | full string dump and joypad-mask scan | – | high (strings), medium (computed button masks) | – |
-
-### 10.3 Cheats
-
-- **Cheat table:** 0x80073A90, 42 × `{u16 nameText; u16 time; u8 soloIndex; u8 difficulty; u8 flags}`. All 42
-  entries are named and unlockable. Unlock conditions for each are in `unused/cheats_table.md`: target times,
-  mission completion, firing-range golds for the classic guns, or Game Boy Perfect Dark in a Transfer Pak (Hurricane
-  Fists, Cloaking Device, All Guns in Solo, R-Tracker). Verified, high.
-- **Dead "auto-apply" path:** stage start forces the active bit for cheats with flag 0x01, but no entry has that
-  flag (0x7F1075B8). High; not reachable.
-- **GoldenEye cheat names and messages in `LmiscE` 0x5800–0x5843:** "Super x2 Health", "Phase", "Tiny", "Silver PP7",
-  "Gold PP7", "Paintball Mode On", "Happy?", "Line Mode", "Turbo Mode" and others, plus GoldenEye messages ("OBJECTIVES
-  FAILED - abort mission.", "Guard Greeting", "What's that gun?"). No code immediate or table references them. High;
-  not reachable.
-
-### 10.4 Models and props
-
-The object agent's first pass found 105 of the 441 model numbers never placed by any setup (§5). Part 3 then split
-them by code references, checked in the ROM through slot cross-references and data tables:
-
-| Item | Evidence | Confidence | Reachable |
-|---|---|---|---|
-| used by code, not setups: `PnintendologoZ` and `PrarelogoZ` (title screen), 5 MP weapon-table models (knife, N-bomb, timed mine, speed pill, laser), 6 projectile models | slot references 0x7F019464/0x7F019AC8; `g_MpWeapons` 0x80087268; weapon data 0x8006B1E4.. | high | yes |
-| **test and placeholder props:** `PtestobjZ` (a large car-shaped test object, 1908 × 1110 × 5925 units), `PmarkerZ` (a 100-unit cube with a magenta rainbow debug texture), `PflagZ` (a flat 10-triangle sheet), `Pborg_crateZ` (a Borg-cube-textured crate) | no setup, AI or code reference; `unused3/renders/misc_unreferenced.png` | high | no |
-| **`PgoldeneyelogoZ`**: the textured GOLDENEYE logo with the red 007 ring, a GoldenEye leftover outside the model table | file table vs model table; no reference | high | no |
-| `Psk_fighter1Z` (a Skedar fighter craft), `PchrflashbangZ` (a flashbang grenade; PD has no Flashbang weapon), `PbodyarmourZ` (GoldenEye body armour), `PbriefcaseZ` (superseded by `PchrbriefcaseZ`), empty `PexplosionbitZ` | no reference | high | no |
-| 17 doors never placed (Chicago crypt door, three Villa doors, Area 51 lockers, reactor door, weapon-cache door, CI doors, Alaska doors, Air Force One cargo door) | doors are only created by setups | high | no |
-| **a complete Carrington Institute office set** (`Pci_cabinetZ`, `Pci_deskZ`, `Pci_carr_deskZ`, `Pci_f_chairZ`, `Pci_loungerZ`, `Pci_f_sofaZ`, `Pci_tableZ`) plus chair/table/lamp variants for G5, Villa, Pelagic, Investigation and Air Base | no setup or code reference | high | no |
-| four door-lock panels (keypad, thumbprint, retinal, card lock); lab and base equipment (microscope, mainframe, radar console, generator, dumpster, mine sign…); Skedar temple column, consoles, drone gun, ruin bridge | no reference | high | no |
-| unused title-logo variants `Pnlogo3Z`, `PperfectdarkZ`, `PpdoneZ`, `PpdfourZ` (the title uses `Pnlogo`, `Pnlogo2`, `Ppdtwo`, `Ppdthree` per the decompilation) | no slot reference found | medium | no |
-| 12 duplicate model-table entries pointing at one crate file | table data | high | – |
-| **J-only models:** `PjaplogoZ` (katakana title logo パーフェクトダーク™), `PjappdZ` (outlined PERFECT DARK logo) | file tables of all revisions; `unused/revs/J_only_models_front.png` | high | J only |
-
-### 10.5 Characters and heads
-
-| Item | Evidence | Confidence | Reachable |
-|---|---|---|---|
-| **`CtestchrZ`**: a man in a red suit, standing in a natural pose (not the splits bind pose) and at about 1/60 of the other bodies' units, i.e. an early test character | body table entry 0x70; no setup, AI, code-table or decompilation reference; `unused3/renders/chars_unreferenced.png` | high | no |
-| **`CheadgreyZ`**: a greyscale photo-textured face | entry 0x15, no reference | high | no |
-| `Cpresident_cloneZ` (headless President-clone body; setups use `Cpresident_clone2Z`) | entry 0x84, no reference | high | no |
-| **older character versions outside the body table:** `Ca51guardZ` (brown/white Area 51 guard), `CelvisZ` (a naked grey Maian body with blue hands), `Cdd_shockZ` (dark blue shock trooper, replaced by `CddshockZ`) | file table vs body table; no reference | high | no |
-| `CheadthekingZ` (Elvis-style head), used only by a code head swap | decomp only | medium | code |
-| every developer ("Perfect Head" staff) head is used in the 75-entry MP head table; the Bond bodies (Connery, Dalton, Moore, Brosnan tuxedos) are MP bodies | code tables located by byte match | high | yes |
-
-### 10.6 Weapons and items (weapon table 0x8006FF18)
-
-| Item | Evidence | Confidence | Reachable |
-|---|---|---|---|
-| **"Tester" (weapon 0x33, `GtestgunZ`)**: a developer test weapon with a name and a grenade-like model (black knurled cylinder, silver blade) | no setup, intro, AI or MP-table reference | high (code not excluded) | no |
-| **"Suicide Pill" (weapon 0x5D)**: a name and a weapon slot, but no model | no reference | high | no |
-| **`GjoypadZ`**: a model of an N64 controller (838 triangles) in no weapon definition | no reference | high | no |
-| weapons 0x59 and 0x5A with empty names (decompilation names CHOPPERGUN and WATCHLASER) | no reference | medium | no |
-| the classic guns CC13 … RC-P45 (GoldenEye gun models) appear in no setup, AI list or MP table; they are reachable only through the Classic Guns cheats | usage scan; the code path is decomp only | medium | yes (cheats) |
-
-### 10.7 Setup data
-
-- **19 object types never used in any of the 121 setups**, though the setup loop still handles them: ALARM, HANGINGMONITORS,
-  HAT, GRENADEPROB, OBJECTIVE_DESTROYOBJ, OBJECTIVE_THROWOBJ, OBJECTIVE_ENTERROOM, OBJECTIVE_THROWINROOM, GASBOTTLE,
-  PADLOCKEDDOOR, TRUCK, HELI, SAFE, SAFEITEM, TANK, and the unnamed 0x10/0x1F/0x22/0x29. TANK has a length but no placement
-  branch. Most are GoldenEye setup types kept in the format (hypothesis). High.
-- **GoldenEye briefing text inside PD multiplayer setups:**
-  - `Ump_setupdamZ` holds GoldenEye's Dam briefing ("B Y E L O M O R Y E  D A M", "mi6 has confirmed the existence of a
-    secret chemical warfare facility at the arkhangelsk dam…").
-  - `Ump_setuppeteZ` holds GoldenEye Streets text ("use the stolen tank to chase the car containing natalya…").
-  - Verified from ROM bytes (`unused3/dumps/Ump_setupdamZ_tail.txt`). High; not reachable.
-- **V1.1 change:** `UsetupaztZ` (Crash Site) gains one short AI command in list 0x0C01. Verified byte diff; the meaning is
-  open.
-- **No object is excluded on all four difficulties.** Eight objects sit on pads outside every room's bounding box
-  (e.g. an Area 51 crate shared by three stages). Low–medium that they are hidden.
-- **Solo setup on an MP stage:** `Usetupmp10Z` (Sewers) holds 3 object records. **Test setup:** `UsetupoldZ` (stage 0x4E)
-  places three crates with no pad. High.
-- **AI debug labels inside setups:** 322 strings in 20 solo setups, e.g. "DR CHANGELIST", "TELEPORT FAIL", "BUG C1".."C4",
-  "PLLACED WRONG", "COOP PLLACED WRONG", "EPROMFLAG NOTSET", "BACK TO ELVIS", "LIMO READY TO GO", "shot 1..8"
-  (`unused2/dumps/setup_strings.txt`). High that they are strings; their effect in retail was not traced.
-- **Pre-text-bank format:** `Ump_setuppeteZ` stores its GoldenEye briefing and objective texts as file-relative string
-  pointers instead of text ids. The tank sentence appears nowhere in GoldenEye (U) (all 706 decompressed GE files
-  searched), and the Dam text is an earlier draft than GoldenEye's retail text ("arkhangelsk dam", "destroyed without
-  prejudice", a different bungee paragraph). High.
-
-### 10.8 Textures
-
-- **Coverage:** 3,188 of the 3,503 global textures are referenced by BG and model files. Code tables in the global
-  display-list block and code constants add most of the rest.
-- **Unreferenced: 100**, plus 2 referenced only in the decompilation. Sheet: `unused3/renders/textures_unreferenced.png`;
-  exact numbers are in its `.txt`. Scan limit: textures chosen by computed numbers would also appear here.
-
-| Textures | Content | Confidence |
-|---|---|---|
-| 0x1D0, 0x1D1 | handwritten, mirrored white scrawl | high (meaning low) |
-| 0x581, 0x582, 0xD2F | photographs of real faces (chin, mouth, ear), not used by any head | high |
-| 0x713, 0x71A, 0x71C, 0x873 | warning signs ("no guns", biohazard, worker hazard), a ring gauge | high |
-| 0x720–0x722 | three blurry painted portraits | high |
-| **0xBA0–0xBC5** (~30) | a jungle/temple set: foliage walls, green marble tiles, red/gold column, stone door panels, palm and fern leaves (hypothesis: a cut stage or GoldenEye Jungle/Temple re-exports; not compared) | high (unused) |
-| 0xC17–0xC30 | brick-wall explosion chunks, foliage clumps, pebbles, skin/leather tones | high |
-| 0xD02–0xD0E | 13 dark reflection/environment panels | high |
-| 0x058 and others | a dotted test grid, noise, bars, a faded face | high |
-
-### 10.9 Music and sound
-
-| Item | Evidence | Confidence | Reachable |
-|---|---|---|---|
-| **seq 60**: a 205.6 s looping piece (5,778 notes, 16 channels, 113→120 BPM), the longest unused track. The decompilation calls it DEEPSEA_BETA with the file name `crashsite-intro-amb.seq`: probably a cut stage theme. Render: `music/wav/060_Track_60.wav` | no code table and no AI list (all 1,610 setup lists walked) | high | no |
-| seq 48: first version of the Villa intro (the game uses 67/68) | same | high | no |
-| seqs 114 and 118: alternate Escape outros (UFO effects layer; short version) | same | high | no |
-| seq 21: an earlier version of the multiplayer death sting (25) | same | high | no |
-| seq 0 (400 s of silence), seq 95 (one 0.27 s "bloop"), seq 117 (a 1.6 s melody test) | same | high | no |
-| seq 1 (a 10 s title sting): the decompilation starts it on the title screen, but no ROM constant was found | scan | medium (probably used) | ? |
-| **stage-music row for stage 0x1B `sevb`** (CI geometry, no setup): primary/X track 61 "CI Operative" | data | high | no (the track itself is in the Soundtrack menu) |
-| instruments 42 and 57 own the only truly unused music samples: 7 waves, 35,780 bytes | program changes of all 119 sequences vs the bank; wave sharing checked | high | no |
-| 29 other never-selected instruments only reuse shared waves | same | high | – |
-| **voice clips never referenced:** `Am6_l1_aM`, `Acifema08M`, `Acimale11M`, `Acimale13M`, `Acicarr09M` (a Deep Sea/Pelagic line, CI staff remarks, a Carrington line) | AI lists, sound mapping table (0x8005DDE4), quip banks, lib constants: 543/548 referenced | medium (a computed CI quip index could reach them) | ? |
-| sound effects: 715 of 1,545 are referenced by AI lists, the mapping table and quip banks; code constants were not scanned | – | no claim | – |
-| no sound-test menu; the Combat Simulator Soundtrack menu is the only track selection | code/menu scan | high | – |
-
-### 10.10 Text and strings
-Text files (all three ROMs dumped: `unused2/text/{U,E,J}/`; reference scan `unused2/scripts/textrefs.py` over code
-immediates, data u16/u32 and every byte offset of every setup. A string is "NONE" when no id reference was found: 303
-of 3,573 English strings in U. NONE is strong for stage banks; the global banks also compute ids, so NONE there is only a
-candidate):
-
-| Item | Where | Evidence | Confidence | Reachable |
-|---|---|---|---|---|
-| **The U ROM's "J" text slot is an older English draft**, not Japanese; 2,388 of 3,644 strings differ from the E slot. `LwaxJ` "You are Mr Blonde. Stop mincing around and capture cassandra.", the GoldenEye Moneypenny line "Underground in Siberia, James? Some of us don't get further than the Northern Line.", "Assasinate Datadyne Head Of Security"; `LstatJ` "Mopping Up The Skedar Homeworld", "Elvii Leader Has Been Killed."; `LsevJ` "Destroy Captured Maian Saucer", "Sabotage Enemy Medical Experiment"; `LateJ` "Joanna's Graduation Test - The Duel"; CamSpy called "Eye Spy"; "Pelagic 2" | slot comparison `unused2/dumps/diff_U_E_vs_U_J.txt` | high | no (NTSC code reads slot +1 only when `[0x80084120] != 0`, i.e. the `-j` boot argument) |
-| dropped licence credits and slogan: "RAD Game Tools, Inc. MPEG Layer-3 audio compression technology", "licensed by Fraunhofer IIS and THOMSON multimedia", **"rare designs on the future <<<"** | `Loptions` #90–92; present only in the draft J slot of U and E, empty in every shipped slot | high | no |
-| the U "P" slot is a PAL-English edit ("Night Sight", "PAL version 8.7 final") that the E ROM did not ship | slot comparison | medium–high | no |
-| **GoldenEye cheat list** `LmiscE` 0x5800–0x5843 (61 strings; §10.3) is removed in E and J, which shifts all later `Lmisc` ids; E/J also move 198 CI strings from `Lmisc` to `Ldish` | revision diff | high | no |
-| GoldenEye item names in `LpropobjE`: "explosive pen", "explosive case", "flare", "piton", "stick(s) of dynamite", **"GoldenEye key"** | NONE | high | no |
-| GoldenEye gun real names ("PP7", "TT33", "Skorpion", "AK47", "Uzi 9mm", "MP5K", "M-16", "FNP90") in `LdishE` | referenced by `UsetupdishZ` AI lists (probably firing-range lines); display not verified | high (strings) | ? |
-| cut or renamed weapon and gadget names in `LgunE`: "MagSec SMG", "MaianGrenade", "FlashBang" (cf. the unused `PchrflashbangZ` model), "Alien Medpack", "Big King Rocket", "JonesCorp", "Data Uplink", and attachments "Silencer", "Telescopic Sight", "Magazine Extension" | NONE | medium | no |
-| cut mission lines (NONE in stage banks): Area 51 Rescue autopsy scene ("What the hell do you think you're doing? This is supposed to be a sealed room!…", "Director Easton will hear about this, young lady."), Escape ("That specimen is government property and should not leave the base.", "Inner hangar door is closing."), Air Force One "Unable to detach UFO.", Chicago "Greetings, citizen.", G5 "CamSpy has been destroyed - abort mission.", CI "Switch Code 1..4 has been obtained.", Pelagic "Cripple the engines and the ship will drift... Perfect!", Deep Sea "Antibody masking has been obtained." | stage-bank scan | medium | no |
-| sound-direction notes written as subtitles: "Machinery scream sound Fx." (`LearE`), "Gasps, chokes, and wheezes." (`LtraE`); placeholders "NULL3".."NULL7" (`LameE`) | NONE / coincidental hits | high | no |
-| build page strings "NTSC version 8.7 final" (U), "PAL version 8.7 final" (E), "Japanese version 8.7 final" (J), with "NUS-NPDE-USA", "Rare Ltd. (twycross)" | referenced by a menu record at data 0x80062658 (used) | high (used) | yes |
-| **Japanese encoding (J ROM):** bytes < 0x80 are ASCII; otherwise the code is `c = (lead & 0x7F) << 7 \| (trail & 0x7F)`, a 16×12 4bpp glyph at J ROM `0x178C40 + (c + 24) × 0x60`. Japanese names render correctly: データダイン本社, ミスター・ブロンド, 協会の奪回, 屋上 (`unused2/font/j_stage_names.png`) | J disassembly 0x7F154C3C, 0x7F16E7C8 + renders | high | J |
-| **an older, smaller Japanese glyph set in the U and E ROMs** (U ROM 0x194440 small 16×12, 0x19FB40 large 16×16), still addressed by U code (0x7F16E1BC) but never used, because U text is 7-bit ASCII; J has neither | U disassembly + renders `unused2/font/u_small_try_16x12.png` | high | no |
-
-Code and data segment strings (`unused/strings_code.txt`, 1,992 runs):
-- **Build dates:** `Apr  6 2000 15:05:01` in V1.0 and, identically, in V1.1. E is `Apr 28 2000`, J `Jul 19 2000`. High.
-- **GoldenEye source names and leftovers:** `bondwalk.c`, `bondmove.c`, `bondgrab.c`, `bondeyespy.c`, `bondbike.c`;
-  `ai_ifbondintank: tank code has been removed.`; `set shot list(void) doesn't work for …truck!/heli!`; `BOND IN ROOM`. High.
-- **Developer tags (initials only):** `RWI : Door Stuck Mate -> Sort it out`, `DGD WARNING: portalAVInit no portals!`,
-  `(BNC:Menu) findItem Warning`, `RUSSES SOUND GUARD STRING`. High.
-- **Humour:** `PakDamage_UjiWipedMyAss`, `Cam -> Save Failed - Cant get it small enough - oo-er`,
-  `OI! DUPLICATE FILE NAME! NO!`, `Hand : Look ma no hands!`. High.
-- **PerfectHead (Game Boy Camera face mapping):**
-  - About 110 menu strings ("PerfectHead Editor", "Take A Picture Now", "Shape Head", "Your Mission heads will now
-    appear in any of the missions you play.") have no reference.
-  - The camera and face-compression code remains (`camdraw.c`, `Pak_StartCapture`, `Cam_DctUnCompressSlot`, `GBCHead`).
-  - The removed menus are high confidence; whether the code is still reachable is medium; no retail route.
-- **Cut multiplayer scenario "Touch That Box" / "Boxes":** a 7th scenario name with "Boxes Options" and "Boxes on
-  Radar" strings, but no entry in the 6-entry scenario table at 0x80087148. High that it is unreferenced, medium that
-  it was a scenario.
-- **"Test" and "4mb Test"** strings with no reference. Medium: text ids can be computed.
-
-### 10.11 ROM leftovers and revision-only content
-
-| Item | Evidence | Confidence |
-|---|---|---|
-| **two unused fonts** in the game's font format at ROM 0x7F2390 (a squared "Handel Gothic"-like face with small caps) and 0x803DA0 (a square pixel face). Not referenced in U, V1.1 or E; removed in J; not GoldenEye fonts. Sheet `unused/rom/fonts_all_8_sheets.png`, rows 7–8 | format match, renders, reference scans of all revisions | high |
-| boot screens at 0x1FFEA20/0x1FFF550 (507 × 48 RGBA5551): "Copyright Rare Ltd. 2000 / Published by Rareware." and "Accessing Controller Pak" (hold START at power-on). Used; English even in J. `unused/rom/bootimg_*_x3.png` | disassembly lib 0x7000D740, decoded | high (used) |
-| 0x2EA72–0x39850: a stale byte copy of ROM 0x1050–0xBE2E (build-tool padding); present in every revision | ROM compare | high |
-| 0x156DB4–0x194786: a truncated second copy of the game-code zip block (103 of 442 pages) with a zeroed page table; every revision has one | ROM compare | high (leftover), medium (cause) |
-| 0x7E9D20: Carrington Institute firing-range data (used); 0x7EBDC0: a segment-2 block loaded by title code (content unknown) | disassembly | medium-high / low |
-| V1.1 code: 28 game and 3 lib functions changed. Controller Pak/EEPROM code; BG decompression slack 0x800→0x8000; a Deep Sea-specific check; an audio-library NULL check | relocation-masked function diff `unused/revs/fundiff_U10_U11.txt` | high (what), low–medium (why) |
-| E and J setups add or remove no objects or characters (edits inside AI lists and field values); J changes 15 Joanna models and adds the two logo models | setup and file diffs | high |
+External documentation, decompositions, and source archives are cited inline where used.

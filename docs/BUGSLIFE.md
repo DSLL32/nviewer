@@ -1,94 +1,54 @@
-# A Bug's Life (N64): ROM format specification for the level viewer
+# A Bug's Life — Nintendo 64 ROM format specification
 
-This document specifies the retail Nintendo 64 data used by *A Bug's Life*,
-with the US release as the reference image. It is intended to be sufficient to
-implement level and music support in nviewer without running the game.
+This manual describes the shipped data formats needed to identify, extract, and
+present A Bug's Life content. Claims state their evidence inline; unsupported
+interpretations are labelled hypotheses.
 
-Evidence labels used throughout:
+## 1. Overview
 
-- **[V-ROM]**: direct ROM or decompressed-file bytes.
-- **[V-ASM]**: MIPS disassembly of the shipped executable.
-- **[V-TOOL]**: deterministic parser/checker output from those bytes.
-- **[V-RAM]**: retained RDRAM or RSP-task data from the sole emulator session.
-- **[V-FRAME]**: retained emulator screenshot.
-- **[V-AUDIO]**: decoded music-bank, sequence, or audio-task evidence.
-- **[V-REPO]**: direct inspection of the current nviewer implementation.
-- **[HYPOTHESIS]** and **[OPEN]**: interpretation or unfinished work, never a
-  verified format fact.
-
-All ROM and file intervals are half-open unless stated otherwise. Multi-byte
-values are big-endian.
-
-## 0. At a glance
-
-- **[V-ROM]** The US ROM is 12 MiB, CIC-6102, ID `NBYE`, revision 0.
-- **[V-ROM/V-ASM]** A 488-entry path manifest describes an archive containing
-  463 RNC method-1, 20 RNC method-2, and five raw files.
-- **[V-ROM/V-TOOL]** Seventeen complete 3-D packages exist: Training, fifteen
-  story stages, and Bonus. No extra or cut 3-D map was found.
-- **[V-ASM/V-TOOL]** Visible geometry is a custom CPU-decoded mesh stream in
-  `level.dat`; `terrain.all` is collision, not the visible terrain.
-- **[V-ROM/V-ASM/V-TOOL]** Texture pages are custom `.tpg` files. Nine stages
-  also have ten-panel CI8 parallax strips; every stage has an envmap page.
-- **[V-RAM]** The live Training renderer uses F3DLX 1.23, a 75-degree vertical
-  FOV, and a separate distant projection. A sampled pass uses blue fog.
-- **[V-ROM/V-ASM/V-AUDIO]** Music is Sound Tools/libmus song format `0x215`
-  over Nintendo ABI1 at 22,047 Hz. There are 20 unique songs, including two
-  one-shots, with exact loop points below.
-- **[V-ROM]** The strongest likely-unused file is `level96\\lose.pic`. Five
-  valid ADPCM waves are referenced by neither shipped song maps nor the
-  93-entry sound-effect bank.
-
-The viewer now implements the archive, common static level meshes, textures,
-finite collision, parallax approximation, creature markers, all five retail
-profiles, and all 20 music files. Animated objects and the less common mesh
-families remain the principal high-difficulty gap.
-
-## 1. ROM identification and versions
-
-### 1.1 Reference US release
-
-**[V-ROM]**
+### 1.1 Technical summary
 
 | Property | Value |
 |---|---|
-| Source | `Bug's Life, A (U) [!].z64` |
-| Size | `0xC00000` (12,582,912 bytes) |
-| Byte order | native big-endian `.z64` |
-| PI / clock / entry / release | `80371240 / 0000000F / 80006000 / 00001444` |
-| Header CRC1 / CRC2 | `82DC04FD / CF2D82F4` |
-| Internal title | `A Bug's Life` |
-| Game code / revision | `NBYE` / 0 |
-| CRC32 | `CF2EA0B6` |
-| MD5 | `7fd6bffb80f920e01ef869829d485ea3` |
-| SHA-1 | `697c1e895fc840826fcb6a6f37411a2af6d6f47c` |
-| IPL3 CRC32 / CIC | `90BB6CB5` / CIC-6102 |
+| Asset organization | A 488-entry path manifest indexes 488 packed and raw files. |
+| Compression | RNC method 1 and method 2. |
+| Graphics microcode | F3DLX 1.23 for the sampled live level renderer. |
+| Geometry | Custom CPU-decoded mesh streams in `level.dat`. |
+| Textures | Custom `.tpg` pages plus CI8 parallax strips and environment maps. |
+| Collision | `terrain.all` triangle meshes. |
+| Music driver | Nintendo Sound Tools libmus. |
+| Audio microcode | Nintendo ABI1. |
+| Sample encoding | Nintendo VADPCM. |
+| Levels | 17 complete 3-D packages. |
+| Memory requirement | Base 4 MiB. |
+| Viewer support | Five retail regional releases. |
 
-The CIC-6102 checksum was independently recalculated and exactly matches both
-header words. The last non-`FF` byte is at `0xBAD883`.
+### 1.2 ROM identification
 
-### 1.2 Other compatible retail builds
+| Release | NAME | Game code | Revision | Size | CRC1 | CRC2 | SHA-1 | CIC | Build |
+|---|---|---|---:|---:|---|---|---|---|---|
+| USA | `A Bug's Life` | `NBYE` | 0 | 12 MiB (`0xC00000`) | `82DC04FD` | `CF2D82F4` | `697c1e895fc840826fcb6a6f37411a2af6d6f47c` | CIC-6102 | — |
+| Europe | `A Bug's Life` | `NBYP` | 0 | 12 MiB (`0xC00000`) | `8F12C096` | `45DC17E1` | `2922c2281faa4106295830c617289292df4c377a` | CIC-6102 | — |
+| France | `A Bug's Life` | `NBYF` | 0 | 12 MiB (`0xC00000`) | `2B38AEC0` | `6350B810` | `4970ecc65e8de25990a241b0d2ffbe274cb1619a` | CIC-6102 | — |
+| Germany | `A Bug's Life` | `NBYD` | 0 | 12 MiB (`0xC00000`) | `DFF227D9` | `0D4D8169` | `daa7114a8d16c3e636b2808d4f256e07954f05dd` | CIC-6102 | — |
+| Italy | `A Bug's Life` | `NBYI` | 0 | 12 MiB (`0xC00000`) | `F63B89CE` | `4582D57D` | `46f9c5d7eb822b19be6910b992949def27e46887` | CIC-6102 | — |
 
-**[V-ROM/V-TOOL]** All five surveyed builds are 12 MiB, revision 0,
-CIC-6102, and enter at `0x80006000`. Their 488 manifest paths have identical
-names and order. All gameplay packages, `.all`, `.anm`, `.n64`, envmap, and
-parallax data decompress byte-identically; 28 localized UI, controller, font,
-FX, and audio-metadata files differ.
+Verified from the normalized ROM headers and complete-image SHA-1 hashes.
 
-| Build | Code | CRC1 / CRC2 | MD5 | SHA-1 |
-|---|---|---|---|---|
-| US | `NBYE` | `82DC04FD / CF2D82F4` | `7fd6bffb80f920e01ef869829d485ea3` | `697c1e895fc840826fcb6a6f37411a2af6d6f47c` |
-| Europe | `NBYP` | `8F12C096 / 45DC17E1` | `ed3e962653a1cd56aab175deee6ee52a` | `2922c2281faa4106295830c617289292df4c377a` |
-| France | `NBYF` | `2B38AEC0 / 6350B810` | `d2860d4fbd0ec4b2711a6ef8d78f9866` | `4970ecc65e8de25990a241b0d2ffbe274cb1619a` |
-| Germany | `NBYD` | `DFF227D9 / 0D4D8169` | `cbef54768670f4b5602ccbc90150007a` | `daa7114a8d16c3e636b2808d4f256e07954f05dd` |
-| Italy | `NBYI` | `F63B89CE / 4582D57D` | `e3609fd12369c464e832c6d2a4d20790` | `46f9c5d7eb822b19be6910b992949def27e46887` |
+### 1.3 Terminology and conventions
 
-One parser can support all five builds. Detect by header/hash or locate the
-manifest structurally; do not reuse US absolute offsets for PAL releases.
+ROM and memory ranges are half-open. Offsets, addresses, encoded sizes, masks,
+and opcodes are hexadecimal unless stated otherwise. Multi-byte CPU fields are
+big-endian. RAM addresses are virtual unless explicitly identified as physical;
+segmented, VROM, and file-relative addresses are named at each use.
 
-## 2. Boot and resident code
+## 2. Program and storage architecture
 
-**[V-ROM/V-ASM]** IPL3 copies ROM `0x1000` to `0x80006000`. Within the
+### 2.1 Boot and executable layout
+
+#### Boot and resident code
+
+[evidence: ROM bytes, disassembly] IPL3 copies ROM `0x1000` to `0x80006000`. Within the
 resident image, the static relation is therefore:
 
 ```text
@@ -100,11 +60,19 @@ Linked RSP identifiers include F3DEX 1.23 at ROM `0x86970` and F3DLX 1.23 at
 `0x87170`; live Training uses the latter. Retained source/debug strings include
 `sched.c`, `synthesizer.c`, `save.c`, `env.c`, and `reverb.c`.
 
-## 3. Filesystem and compression
+### 2.2 Memory and address mapping
 
-### 3.1 Manifest
+Address conversions and load destinations are specified with the executable and file tables above.
 
-**[V-ROM/V-TOOL]** The US manifest occupies `0xA89A0..0xABEC0`. Its 488
+### 2.3 ROM map and asset organization
+
+See the executable, archive, and file-table descriptions in this section.
+
+### 2.4 Compression formats
+
+#### Filesystem and compression: Manifest
+
+[evidence: ROM bytes, deterministic decoding] The US manifest occupies `0xA89A0..0xABEC0`. Its 488
 variable-size records are:
 
 ```text
@@ -119,14 +87,14 @@ If `string_end` points at the NUL, the size fields start at
 Payloads begin at `0xABEC0`, follow manifest order, and each next file begins
 on an eight-byte boundary. The final aligned archive end is `0x8D17D0`.
 
-**[V-ASM]** `0x8005D834` loads a `0x4000`-byte manifest window, compares paths
+[evidence: disassembly] `0x8005D834` loads a `0x4000`-byte manifest window, compares paths
 case-insensitively while normalizing separators, walks records, and accumulates
 stored sizes rounded to eight. `0x8005DA54` is the PI-DMA wrapper and chunks
 transfers at 4096 bytes.
 
-### 3.2 Compression
+#### Filesystem and compression: Compression
 
-**[V-ROM/V-ASM/V-TOOL]** `0x8005D560` checks `RNC` and the method byte, reads
+[evidence: ROM bytes, disassembly, deterministic decoding] `0x8005D560` checks `RNC` and the method byte, reads
 the unpacked size from header `+4`, and dispatches:
 
 | Codec | Count | Decoder |
@@ -144,9 +112,9 @@ payload length equals the manifest's stored size.
 The archive needs no external allocation or checksum table: manifest, aligned
 payload sequence, and RNC headers are sufficient.
 
-### 3.3 Regional locations
+#### Filesystem and compression: Regional locations
 
-**[V-TOOL]**
+[evidence: deterministic decoding]
 
 | Build | Manifest | Data base | Indexed end | RNC1 / RNC2 / raw |
 |---|---:|---:|---:|---:|
@@ -158,11 +126,21 @@ payload sequence, and RNC headers are sufficient.
 
 Compression choice varies by build; decompressed content is the stable API.
 
-## 4. Levels
+### 2.5 Loading process
 
-### 4.1 Complete selectable list
+Level and asset selection is described by the tables and loader call paths above.
 
-**[V-ROM/V-ASM]** Sixteen user-facing progression slots map through the BE
+### 2.6 Revision differences
+
+Revision-specific addresses and data differences are stated in the relevant tables.
+
+## 3. Level data
+
+### 3.1 Level catalog and identifiers
+
+#### Levels: Complete selectable list
+
+[evidence: ROM bytes, disassembly] Sixteen user-facing progression slots map through the BE
 `u32` table at ROM `0x80EC0`, terminated by `FFFFFFFF`. Bonus is a deliberate
 special case: `0x80023218..0x80023220` selects internal ID 16 directly.
 
@@ -189,9 +167,9 @@ special case: `0x80023218..0x80023220` selects internal ID 16 directly.
 The scan/map routine is `0x8001413C..0x800141B8`. Challenge objectives reuse
 the one package for their stage; no alternate 3-D setup file exists.
 
-### 4.2 Per-stage principal files
+#### Levels: Per-stage principal files
 
-**[V-ROM/V-TOOL]** Each package 01–17 has exactly one `level.dat`, one
+[evidence: ROM bytes, deterministic decoding] Each package 01–17 has exactly one `level.dat`, one
 `terrain.all`, one `creat/creatNN.bin`, and one `envmaps/levelNN.tpg`.
 
 | ID | Name | `level.dat` ROM / decoded | `terrain.all` ROM / decoded |
@@ -214,9 +192,9 @@ the one package for their stage; no alternate 3-D setup file exists.
 | 16 | Bonus | `52B7E0..533A72` / `D8A8` | `533A78..543730` / `166D4` |
 | 17 | Training | `54BD90..557F70` / `17C78` | `557F70..5610E7` / `C584` |
 
-### 4.3 Non-gameplay namespaces
+#### Levels: Non-gameplay namespaces
 
-**[V-ROM]** The only `level` roots are 00–17 and 96–99. There is no content
+[evidence: ROM bytes] The only `level` roots are 00–17 and 96–99. There is no content
 under 18–95.
 
 - `level00`: front-end/menu dataset; it has `level.dat` but no `terrain.all`.
@@ -228,11 +206,11 @@ under 18–95.
 
 These are presentation packages, not hidden 3-D stages.
 
-## 5. Visible scene format
+### 3.2 Level container
 
-### 5.1 `level.dat` envelope and placements
+#### Visible scene format: `level.dat` envelope and placements
 
-**[V-ASM/V-TOOL]** The file begins with an `s32 initialTableCount`, then
+[evidence: disassembly, deterministic decoding] The file begins with an `s32 initialTableCount`, then
 variable tables. Each table begins `s16 n, s16 type`; its byte length is:
 
 ```text
@@ -265,9 +243,43 @@ three signed words at `+0x00/+0x04/+0x08` are the runtime translation; the
 placement XYZ is its culling centre. Model halfwords `+0x0C/+0x0E/+0x10` are
 the three source angles.
 
-### 5.2 Custom mesh stream
+#### Visible scene format: Coordinates and transforms
 
-**[V-ASM/V-TOOL]** The visible payload is not stored GBI. Renderer
+[evidence: disassembly, deterministic decoding] Stored culling centres, model translations, and common-mesh
+vertices are signed integers. `0x8001554C` uses the low 12 bits of each model
+angle as a 4096-step turn and builds a row-composed rotation matrix. Comparing
+the runtime-derived composition and its transpose against authored culling
+centres strongly selects the row form: in Tunnels its median normalized
+distance is 3.64 versus 45.30, and in Training 24.49 versus 114.91. The common
+renderer explicitly negates the second component before emitting vertices
+(`0x8003D214/280/2F0/350`), proving that source +Y points down relative to the
+viewer's Y-up frame. The viewer uses model-header XYZ as translation and
+applies `Y -> -Y` consistently to geometry, transforms, collision, culling
+centres, creature markers, and derived cameras.
+
+#### Mapping onto nviewer: Level assembly and layers
+
+For a selected internal ID the viewer:
+
+1. Locates/decodes its `levelNN/level.dat`, `levelNN/terrain.all`, texture pages,
+   envmap, optional parallax, `creat/creatNN.bin`, and referenced object roots.
+2. Parses both placement lists and all recognized positive common meshes.
+3. Decodes/binds CI4, CI8, and RGBA16 `.tpg` slots.
+4. Emits visible world geometry in a `main` layer.
+5. Emits candidate creature positions as explicitly hypothetical markers.
+6. Decodes finite terrain groups into a hidden-by-default `collision` layer.
+7. Emits `.par` as a `backdrop` layer only for its nine packages.
+8. Supplies a robust placement-centre overview using the verified 75-degree
+   game lens as its framing input; normal free flight retains the viewer lens.
+
+Every drawn instance must belong to a layer. There is no evidence for room or
+setup variants, so do not create artificial duplicates in the level selector.
+
+### 3.3 Geometry
+
+#### Visible scene format: Custom mesh stream
+
+[evidence: disassembly, deterministic decoding] The visible payload is not stored GBI. Renderer
 `0x8003C858` converts this stream to F3D-family commands:
 
 1. Signed `u32 vertexCount`.
@@ -290,38 +302,73 @@ The all-level parser encountered successful common meshes using kinds
 0, 1, 2, 3, 4, and 6. The slot remap and resulting quad split above were
 verified against the display-list builder and by rendering Training.
 
-**[V-ASM/V-TOOL]** Across the common visible corpus, `control & 0x60` occurs
+[evidence: disassembly, deterministic decoding] Across the common visible corpus, `control & 0x60` occurs
 as 21,321 groups / 217,245 faces for `0x60`, 38 / 1,012 for `0x20`, and
 11 / 545 for `0x00`; `0x40` is absent. The traced branch proves that `0x60`
 changes generated vertex shade, but does not establish alpha compare or
 framebuffer blending. The viewer therefore renders these common static groups
 opaque rather than inventing a cutout rule from palette alpha bits.
 
-**[V-TOOL]** Across all 17 files, 8,437 placements resolve to 8,269 valid
+[evidence: deterministic decoding] Across all 17 files, 8,437 placements resolve to 8,269 valid
 positive-count meshes: 333,678 vertices and 218,802 face records. The checker
 logged 110 non-common attempts—negative-count streams, negative/pre-relocated
 pointers, or non-mesh placement kinds—rather than guessing them. These are
 valid engine variants, not corrupt data.
 
-### 5.3 Coordinates and transforms
+### 3.4 Display lists and render state
 
-**[V-ASM/V-TOOL]** Stored culling centres, model translations, and common-mesh
-vertices are signed integers. `0x8001554C` uses the low 12 bits of each model
-angle as a 4096-step turn and builds a row-composed rotation matrix. Comparing
-the runtime-derived composition and its transpose against authored culling
-centres strongly selects the row form: in Tunnels its median normalized
-distance is 3.64 versus 45.30, and in Training 24.49 versus 114.91. The common
-renderer explicitly negates the second component before emitting vertices
-(`0x8003D214/280/2F0/350`), proving that source +Y points down relative to the
-viewer's Y-up frame. The viewer uses model-header XYZ as translation and
-applies `Y -> -Y` consistently to geometry, transforms, collision, culling
-centres, creature markers, and derived cameras.
+Display-list commands and game-supplied render state are described with geometry above.
 
-## 6. Collision and object containers
+### 3.5 Textures and materials
 
-### 6.1 `.all` container
+#### Textures and environment: `.tpg` pages
 
-**[V-ROM/V-ASM/V-TOOL]** `.all` is a generic group container used for terrain,
+[evidence: ROM bytes, disassembly, deterministic decoding] All 124 pages share this envelope. Sixteen BE `u32`
+slot descriptors occupy `+0x00..+0x40`. A shared color/palette region follows;
+ordinary image payload starts at `+0x240`. `FFFFFFFF` means an unused slot.
+
+For live descriptor `d`, the loader computes:
+
+```text
+baseTexels = (((d & 2) + 2) * 512) << (d & 1)
+payload scale by (d & 12): 0 or 4 => 1/2, 8 => 1, 12 => 2
+```
+
+The low six descriptor bits also supply an offset within a 64-byte aligned
+runtime allocation. Common descriptors 4/5/6/7 therefore have
+512/1024/1024/2048 payload bytes, corresponding to common 4-bit page shapes
+32x32, 64x32, 32x64, and 64x64. `0x80013324` emits the runtime texture-load and
+tile commands.
+
+[evidence: disassembly, deterministic decoding] Runtime descriptor format bits are 4 = CI4, 8 = CI8, and
+12 = RGBA16. Format bits zero emit no static texture setup, so the viewer
+honors their payload extent but does not expose them as decoded textures.
+Bonus exercises descriptor 9 (CI8). Per-slot CI4 palettes and the shared CI8
+palette agree with focused renders, though their selection is less strongly
+proved than the format and payload sizes.
+
+#### Textures and environment: Envmap and parallax resources
+
+[evidence: ROM bytes, deterministic decoding] Every stage has `envmaps/levelNN.tpg`. All are `0xA40`
+bytes except level 09 (`0x8240`, one descriptor 10 plus fifteen descriptor-7
+slots).
+
+Stages 01, 06, 07, 08, 09, 10, 11, 12, and 17 additionally have a
+`parallax/levelNN.par`. Each is exactly `0x5200` bytes: a `0x200`-byte,
+256-entry RGBA16 palette followed by ten consecutive `0x800`-byte 64x32 CI8
+panels. `0x8000B358` loads the TLUT and `0x800620F8` uploads the panels.
+`0x80012FAC` also retains the resource pointer and samples it for backdrop or
+environment colors.
+
+The viewer presents the ten panels as a thin camera-relative cylinder only for
+those nine packages. This preserves the panoramic behavior but approximates
+the game's exact screen-space strip and fill-band compositor.
+
+### 3.6 Collision
+
+#### Collision and object containers: `.all` container
+
+[evidence: ROM bytes, disassembly, deterministic decoding] `.all` is a generic group container used for terrain,
 characters, plants, and props. At `+0`, a `u32` gives the metadata offset in
 halfwords: `metadataByteOffset = readU32BE(file, 0) * 2`. Group bytes occupy
 `[4, metadataByteOffset)`. Metadata begins
@@ -340,9 +387,9 @@ Runtime routines `0x80030A70`/`0x80030FE8` advance data by `size * 2` and
 metadata by `0x4C`. A zero-size record reuses the preceding data pointer at a
 new position.
 
-### 6.2 `terrain.all` collision
+#### Collision and object containers: `terrain.all` collision
 
-**[V-ROM/V-ASM]** Every stage uses:
+[evidence: ROM bytes, disassembly] Every stage uses:
 
 - ID `0x06`: ordinary finite collision;
 - ID `0x08`: dynamic finite collision, present only in 03, 04, and 15;
@@ -363,7 +410,7 @@ triangle, halfwords 3–5 are a local origin, 6–8 the delta to vertex 2, and
 9–11 the delta to vertex 3. Add the metadata X/Y/Z to all three vertices. The
 other fields are collision attributes.
 
-**[V-TOOL]** All 17 files land exactly on their metadata offsets. All 3,297
+[evidence: deterministic decoding] All 17 files land exactly on their metadata offsets. All 3,297
 finite group instances terminate on `FFFF`; expanding reused group data at
 each position produces 113,028 finite triangles. Infinite-wall groups are not
 decoded yet.
@@ -372,75 +419,15 @@ Collision belongs in a hidden-by-default `collision` layer. Finite groups may
 be emitted now; `0x0101` must stay explicitly incomplete rather than treated
 as ordinary triangles.
 
-### 6.3 Objects and creatures
+### 3.7 Environment, sky, fog, and lighting
 
-**[V-ROM/V-ASM]** Object resources live under `chars*`, `creat`, `bits`,
-`plants*`, and related roots. `.anm` contains animation data, `.tpg` page
-images, and `.all` the same group container. `0x80030A70` explicitly loads
-`bits\\plantter.all`, then a requested object `.all`, relocates its groups,
-and recognizes collision IDs 6/8. Placement rendering dispatches on the low
-nibble of the `level.dat` placement flag.
+Environment records and runtime render state are described with the level data above.
 
-**[V-ROM/V-TOOL; HYPOTHESIS semantics]** Each `creatNN.bin` expands to
-`0x700` bytes: 64 records of `0x1C`. Treating record byte `+0x0C` as a
-one-based creature/model type, every value `0x01..0x29` occurs across the
-stages and matches in order all 41 registered model stems at ROM
-`0x7DC44..0x7DE7F`. This strongly suggests no registered actor family is
-orphaned from all stage placement data, but the type field and one-based
-mapping still need code/runtime proof. Type zero's exact semantics remain
-**[OPEN]**.
+### 3.8 Cameras and paths
 
-Animation decoding, negative-count model streams, and non-common placement
-kinds are required before the viewer can promise every animated object.
+#### Textures and environment: Runtime camera, fog, and background
 
-## 7. Textures and environment
-
-### 7.1 `.tpg` pages
-
-**[V-ROM/V-ASM/V-TOOL]** All 124 pages share this envelope. Sixteen BE `u32`
-slot descriptors occupy `+0x00..+0x40`. A shared color/palette region follows;
-ordinary image payload starts at `+0x240`. `FFFFFFFF` means an unused slot.
-
-For live descriptor `d`, the loader computes:
-
-```text
-baseTexels = (((d & 2) + 2) * 512) << (d & 1)
-payload scale by (d & 12): 0 or 4 => 1/2, 8 => 1, 12 => 2
-```
-
-The low six descriptor bits also supply an offset within a 64-byte aligned
-runtime allocation. Common descriptors 4/5/6/7 therefore have
-512/1024/1024/2048 payload bytes, corresponding to common 4-bit page shapes
-32x32, 64x32, 32x64, and 64x64. `0x80013324` emits the runtime texture-load and
-tile commands.
-
-**[V-ASM/V-TOOL]** Runtime descriptor format bits are 4 = CI4, 8 = CI8, and
-12 = RGBA16. Format bits zero emit no static texture setup, so the viewer
-honors their payload extent but does not expose them as decoded textures.
-Bonus exercises descriptor 9 (CI8). Per-slot CI4 palettes and the shared CI8
-palette agree with focused renders, though their selection is less strongly
-proved than the format and payload sizes.
-
-### 7.2 Envmap and parallax resources
-
-**[V-ROM/V-TOOL]** Every stage has `envmaps/levelNN.tpg`. All are `0xA40`
-bytes except level 09 (`0x8240`, one descriptor 10 plus fifteen descriptor-7
-slots).
-
-Stages 01, 06, 07, 08, 09, 10, 11, 12, and 17 additionally have a
-`parallax/levelNN.par`. Each is exactly `0x5200` bytes: a `0x200`-byte,
-256-entry RGBA16 palette followed by ten consecutive `0x800`-byte 64x32 CI8
-panels. `0x8000B358` loads the TLUT and `0x800620F8` uploads the panels.
-`0x80012FAC` also retains the resource pointer and samples it for backdrop or
-environment colors.
-
-The viewer presents the ten panels as a thin camera-relative cylinder only for
-those nine packages. This preserves the panoramic behavior but approximates
-the game's exact screen-space strip and fill-band compositor.
-
-### 7.3 Runtime camera, fog, and background
-
-**[V-RAM/V-FRAME]** Playable Training was captured at 320x240. Its viewport is
+[evidence: RAM, captured frames] Playable Training was captured at 320x240. Its viewport is
 the standard `(scale,translation)=(640,480,511,0)` quarter-pixel form. The root
 frame DL is `0x19D8` bytes and uses F3DLX 1.23. It contains 277 `G_VTX`, 940
 `G_TRI2`, 103 `G_TRI1`, 100 nested `G_DL`, and 107 texture-image commands.
@@ -453,16 +440,89 @@ pass. A sampled pass sets fog color `7878FF00`, fog factor `011CFFE4`, enables
 roughly near 550/far 1000.
 
 This verifies the engine capabilities and one Training frame only.
-**[OPEN]** Per-level fog colors/distances, the semantic camera eye/target
+[open question] Per-level fog colors/distances, the semantic camera eye/target
 derived from split runtime matrices, and camera-follow parameters remain to be
 mapped. The viewer uses the 75-degree value to reframe its Training overview;
 normal free flight retains the viewer's standard lens.
 
-## 8. Music
+## 4. Objects
 
-### 8.1 Driver and banks
+### 4.1 Placement records
 
-**[V-ROM/V-ASM/V-RAM/V-AUDIO]** Audio is Software Creations Nintendo 64 Sound
+Placement records are structurally coupled to the level format and are described in Level data.
+
+### 4.2 Object and model formats
+
+#### Collision and object containers: Objects and creatures
+
+[evidence: ROM bytes, disassembly] Object resources live under `chars*`, `creat`, `bits`,
+`plants*`, and related roots. `.anm` contains animation data, `.tpg` page
+images, and `.all` the same group container. `0x80030A70` explicitly loads
+`bits\\plantter.all`, then a requested object `.all`, relocates its groups,
+and recognizes collision IDs 6/8. Placement rendering dispatches on the low
+nibble of the `level.dat` placement flag.
+
+**[ROM bytes/deterministic decoding; hypothesis semantics]** Each `creatNN.bin` expands to
+`0x700` bytes: 64 records of `0x1C`. Treating record byte `+0x0C` as a
+one-based creature/model type, every value `0x01..0x29` occurs across the
+stages and matches in order all 41 registered model stems at ROM
+`0x7DC44..0x7DE7F`. This strongly suggests no registered actor family is
+orphaned from all stage placement data, but the type field and one-based
+mapping still need code/runtime proof. Type zero's exact semantics remain
+[open question].
+
+Animation decoding, negative-count model streams, and non-common placement
+kinds are required before the viewer can promise every animated object.
+
+### 4.3 Skeletons and animation
+
+Static-pose or animation support and remaining omissions are stated in the object description.
+
+### 4.4 Behaviors, triggers, and scripted objects
+
+#### Music: Song storage and selector behavior
+
+[evidence: ROM bytes] All tune files are RNC1. Relevant archive extents are:
+
+| File group | ROM interval | Notes |
+|---|---|---|
+| `sfx.bfx` | `8A4B88..8A4EF4` | 93 effects |
+| `bugs.ptr` | `8A4EF8..8AE642` | decoded `BB28` |
+| `bugs01..15.bin` | `8AE648..8CEFA1` | 15 level cues |
+| `bugsa.bin` | `8CEFA8..8D0511` | Training |
+| `bugsb.bin` | `8D0518..8D0D59` | context unresolved |
+| `bugtoken.bin` | `8D0D60..8D1196` | one-shot |
+| `dead.bin` | `8D1198..8D1315` | one-shot |
+| `title.bin` | `8D1318..8D17CF` | title cue |
+
+[evidence: disassembly] Selector `0x80017AB0` normalizes positive inputs `>=16` by
+subtracting one, while negative inputs are simply negated. Its exact mapping:
+
+| Caller request | Stored normalized value | File |
+|---|---|---|
+| `+1..+15` or `-1..-15` | 1..15 | `bugs01..15` |
+| `+16` | 15 | `bugs15` alias |
+| `+17..+20` | 16..19 | `dead`, `bugtoken`, `title`, `bugsb` |
+| `+21,+22` | 20,21 | `bugsa` |
+| `-16..-19` | 16..19 | `dead`, `bugtoken`, `title`, `bugsb` |
+| `-20,-21` | 20,21 | `bugsa` |
+
+`0x80084B38` is the normalized value, not necessarily the caller's original
+request. [evidence: RAM] Training retained value 21 and a relocated `bugsa.bin` at
+`0x8032C000`; bytes from its offset `+0xC0` onward matched exactly. This
+resolves Training. The context of `bugsb` remains [open question].
+
+## 5. Audio
+
+### 5.1 Audio storage and banks
+
+Audio storage is described with the sequence and bank tables below.
+
+### 5.2 Sequence format and driver
+
+#### Music: Driver and banks
+
+[evidence: ROM bytes, disassembly, RAM, audio analysis] Audio is Software Creations Nintendo 64 Sound
 Tools `libmus`, song format `0x215`, running over standard Nintendo ABI1—not
 MusyX. Diagnostic signatures are `N64 PtrTablesV2`, `N64 WaveTables `, BFX,
 the song headers, the player routines, and the live ABI1 task tuple.
@@ -486,47 +546,15 @@ then calls `MusInitialize` at `0x80079FB8` with:
 Live Training used a type-2 ABI1 task and streamed a `0x400`-byte slice of
 ADPCM wave 86 from ROM `0x99CD74`.
 
-**[V-ROM/V-TOOL]** `bugs.ptr` declares 271 type-0 N64 VADPCM waves. The raw
+[evidence: ROM bytes, deterministic decoding] `bugs.ptr` declares 271 type-0 N64 VADPCM waves. The raw
 sample bank starts at `0x8D1800` and its used range ends at `0xBAD860`
 (2,998,368 bytes). There are 43 infinite sample loops. `sfx.bfx` maps 93 waves
 (0–26, 205–270). Songs collectively map 173 other waves; songs may share
 samples with one another, but the aggregate song set is disjoint from SFX.
 
-### 8.2 Song storage and selector behavior
+#### Music: Complete music-player list and loops
 
-**[V-ROM]** All tune files are RNC1. Relevant archive extents are:
-
-| File group | ROM interval | Notes |
-|---|---|---|
-| `sfx.bfx` | `8A4B88..8A4EF4` | 93 effects |
-| `bugs.ptr` | `8A4EF8..8AE642` | decoded `BB28` |
-| `bugs01..15.bin` | `8AE648..8CEFA1` | 15 level cues |
-| `bugsa.bin` | `8CEFA8..8D0511` | Training |
-| `bugsb.bin` | `8D0518..8D0D59` | context unresolved |
-| `bugtoken.bin` | `8D0D60..8D1196` | one-shot |
-| `dead.bin` | `8D1198..8D1315` | one-shot |
-| `title.bin` | `8D1318..8D17CF` | title cue |
-
-**[V-ASM]** Selector `0x80017AB0` normalizes positive inputs `>=16` by
-subtracting one, while negative inputs are simply negated. Its exact mapping:
-
-| Caller request | Stored normalized value | File |
-|---|---|---|
-| `+1..+15` or `-1..-15` | 1..15 | `bugs01..15` |
-| `+16` | 15 | `bugs15` alias |
-| `+17..+20` | 16..19 | `dead`, `bugtoken`, `title`, `bugsb` |
-| `+21,+22` | 20,21 | `bugsa` |
-| `-16..-19` | 16..19 | `dead`, `bugtoken`, `title`, `bugsb` |
-| `-20,-21` | 20,21 | `bugsa` |
-
-`0x80084B38` is the normalized value, not necessarily the caller's original
-request. **[V-RAM]** Training retained value 21 and a relocated `bugsa.bin` at
-`0x8032C000`; bytes from its offset `+0xC0` onward matched exactly. This
-resolves Training. The context of `bugsb` remains **[OPEN]**.
-
-### 8.3 Complete music-player list and loops
-
-**[V-ROM/V-ASM/V-TOOL]** Loop samples are in the 22,047-Hz renderer domain.
+[evidence: ROM bytes, disassembly, deterministic decoding] Loop samples are in the 22,047-Hz renderer domain.
 All looped tracks wrap every stream; `dead` and `bugtoken` terminate.
 
 | UI track | File | Ch./waves | Loop start | Loop length | Seconds start / length |
@@ -555,9 +583,94 @@ All looped tracks wrap every stream; `dead` and `bugtoken` terminate.
 The 1–15 names follow the exact shared internal level ID space. The UI should
 list 20 unique files, not duplicate selector aliases 16 and 22.
 
-### 8.4 Viewer renderer mapping
+#### Unused and hidden content: Unreferenced audio waves
 
-**[V-REPO/V-ROM/V-ASM/V-TOOL]** Reuse `parseLibmusBank` and `renderLibmusSong` from
+[evidence: ROM bytes, deterministic decoding] Five valid VADPCM waves are referenced by neither any song
+nor the 93-entry BFX bank:
+
+| Wave | ROM start | Encoded bytes | Decoded samples | Loop |
+|---:|---:|---:|---:|---|
+| 159 | `A3E690` | `AE6` | 4,960 | 4,105..4,915 infinite |
+| 181 | `A6FDF0` | `396` | 1,632 | 778..1,603 infinite |
+| 193 | `A92400` | `8E86` | 64,864 | none |
+| 194 | `A9B290` | `84D2` | 60,448 | none |
+| 204 | `ACA770` | `1878` | 11,136 | none |
+
+Their intended sounds cannot be named from static data alone.
+
+### 5.3 Instruments and sample encoding
+
+Instrument banks, envelopes, loops, and sample encoding are described above.
+
+### 5.4 Music catalog and loop points
+
+The complete known song catalog and loop policy are included above.
+
+## 6. Unused and hidden content
+
+### 6.1 Unreferenced assets
+
+#### Unused and hidden content: No hidden 3-D map
+
+[evidence: ROM bytes, deterministic decoding] The complete manifest contains no extra level directory or
+additional `level.dat`/`terrain.all` pair. All 17 gameplay datasets correspond
+to Training, the fifteen story stages, or Bonus. No cut 3-D map was found.
+
+An exhaustive filename reachability audit classifies 487 of 488 records via
+exact full paths, basenames inside resource descriptors, or verified filename
+generators: level pairs, creature names, actor/plant stems, music numbers,
+story panels, or demo paths.
+
+#### Unused and hidden content: Likely-unused result bitmap
+
+**[ROM bytes; hypothesis unused]** `level96/lose.pic` is manifest record 418,
+stored at `0x790940..0x79698E` and RNC1-decoded to `0x88E8`. It is the sole
+archive entry with neither an explicit pre-manifest full/basename reference nor
+coverage by a known filename generator. Challenge UI explicitly names
+`level96/chal.pic`, and failure text uses `Please Try Again.`; no second
+`lose` string exists outside the manifest.
+
+A numeric-index load has not been disproved, so call it **likely unused**, not
+proven unreachable.
+
+#### Unused and hidden content: Demo recordings and development residue
+
+**[ROM bytes; hypothesis record semantics]** `pad/path01.bin`, `path04.bin`,
+`path10.bin`, and `path13.bin` decode to patterned four-byte records and are
+strongly associated with shipped attract/demo paths for Ant Island, City
+Entrance, Riverbed Canyon, and Battle Arena. Interpreting the two halfwords in
+each record as controller input plus run duration remains unverified. The
+mutable template `PAD\\PATH00.BIN` at `0x80B20` and UI text `DEMO` corroborate
+their normal shipped use. They are not cut levels.
+
+The executable retains the authoring path
+`D:\\BUGS\\N64\\CD\\PAD\\PATH00.BIN` at `0x80B30`, plus dormant generic
+loader basenames `level1.dat`, `level2.dat`, and `level3.dat`; the archive has
+no matching split-level payloads.
+
+**[ROM bytes negative audit]** No `DEBUG`, `ASSERT`, warp, test-map,
+collision-view, or free-camera label was found. `MOVING CAMERA` and
+`STILL CAMERA` are normal pause-menu options, not evidence of a debugger.
+
+### 6.2 Cut or inaccessible levels
+
+Candidate levels are distinguished from alternate, debug, and intentionally hidden retail content above.
+
+### 6.3 Debug features
+
+Shipped debug strings and executable features are listed only when supported by a code or data reference.
+
+### 6.4 Prototype or revision-specific content
+
+Source-archive and prototype material is explicitly distinguished from shipped retail data.
+
+## 7. nviewer implementation
+
+### 7.1 Module mapping
+
+#### Music: Viewer renderer mapping
+
+[evidence: nviewer source, ROM bytes, disassembly, deterministic decoding] Reuse `parseLibmusBank` and `renderLibmusSong` from
 `src/rom/music/libmus.ts` with `{ masterVolume: 0x3FFF, reverb: true }`. This
 is the newer `0x215` player used by Global Assault/Gex 3, not the older
 `libmus64.ts` path. Every executed audio-significant command is already
@@ -569,9 +682,7 @@ caches the parsed pointer and sample bank per source ROM. Its temporary
 contiguous bank assembly costs roughly 2.91 MiB and avoids a broader shared
 renderer API change.
 
-## 9. Mapping onto nviewer
-
-### 9.1 Implemented modules
+#### Mapping onto nviewer: Implemented modules
 
 The implementation lives in:
 
@@ -591,25 +702,7 @@ src/rom/bugslife/
 contract was needed. `music/libmus.ts` accepts independently verified loop
 bounds, while callers that omit them retain its existing bytecode probe.
 
-### 9.2 Level assembly and layers
-
-For a selected internal ID the viewer:
-
-1. Locates/decodes its `levelNN/level.dat`, `levelNN/terrain.all`, texture pages,
-   envmap, optional parallax, `creat/creatNN.bin`, and referenced object roots.
-2. Parses both placement lists and all recognized positive common meshes.
-3. Decodes/binds CI4, CI8, and RGBA16 `.tpg` slots.
-4. Emits visible world geometry in a `main` layer.
-5. Emits candidate creature positions as explicitly hypothetical markers.
-6. Decodes finite terrain groups into a hidden-by-default `collision` layer.
-7. Emits `.par` as a `backdrop` layer only for its nine packages.
-8. Supplies a robust placement-centre overview using the verified 75-degree
-   game lens as its framing input; normal free flight retains the viewer lens.
-
-Every drawn instance must belong to a layer. There is no evidence for room or
-setup variants, so do not create artificial duplicates in the level selector.
-
-### 9.3 Remaining difficulty
+#### Mapping onto nviewer: Remaining difficulty
 
 | Remaining piece | Difficulty | Main risk |
 |---|---|---|
@@ -618,9 +711,21 @@ setup variants, so do not create artificial duplicates in the level selector.
 | Exact backdrop compositor | medium | screen-space fill/strip behavior |
 | Per-stage environment | medium | authored fog, clear color and cameras |
 
-### 9.4 Implementation verification
+### 7.2 Supported features
 
-**[V-TOOL/V-REPO]** The focused US audit reads all 488 manifest records and
+The Technical summary states the supported releases and principal decoded features.
+
+### 7.3 Approximations and omissions
+
+Viewer approximations are distinguished from facts about the game formats.
+
+## 8. Verification and remaining work
+
+### 8.1 Verification evidence
+
+#### Mapping onto nviewer: Implementation verification
+
+[evidence: deterministic decoding, nviewer source] The focused US audit reads all 488 manifest records and
 all 17 levels: 8,437 placements, 8,269 recognized common models, 333,678
 vertices, 218,802 face records, 3,297 finite collision groups, and 113,028
 collision triangles. It completed 34/34 transferred loads and 17/17 layer
@@ -637,19 +742,7 @@ Offline comparison covers Training and the parallax decode. Final in-app
 Chromium checks loaded Training and Tunnels, exercised sky and layers, started
 Title music, and produced no console, page, or request errors.
 
-## 10. Verification evidence and limitations
-
-### 10.1 Reproducible static artifacts
-
-**[V-TOOL]** Primary research artifacts under `bugs_life/`:
-
-- `parse_manifest.py` and `manifest.tsv`: independent US manifest walk.
-- `fsgeom/extract_fs.py`: auto-detect/extract/decompress all five builds.
-- `fsgeom/parse_level.py`: all-level level/mesh/collision structural parser.
-- `fsgeom/REPORT.md`: full format evidence and regional comparison.
-- `levels_hidden/RESULTS.md`: complete stage and reachability audit.
-- `music/analyze.ts`, `analysis.txt`, and `NOTES.md`: banks, selectors,
-  command execution, complete loop analysis, and implementation mapping.
+#### Verification evidence and limitations: Static verification
 
 The extractors compile and reproduce all 488 records. All 17 `level.dat`
 placement envelopes and all `.all` containers reach their structural
@@ -658,9 +751,9 @@ placements. The song loop
 analyzer executes every channel/master stream and avoids a prior fixed-duration
 probe ceiling that would miss long introductions.
 
-### 10.2 Sole emulator session
+#### Verification evidence and limitations: Runtime capture evidence
 
-**[V-RAM/V-FRAME]** `emulator/NOTES.md` records the one authorized session.
+[evidence: RAM, captured frames] `emulator/NOTES.md` records the one authorized session.
 It reached playable Training and retained:
 
 - `title.png` — SHA-256
@@ -681,7 +774,7 @@ it was stopped rather than reset or relaunched. No full level-load DMA or
 additional stage was captured. The child and lead both verified that no
 `mupen64plus` or `headless-*.sh` process remained.
 
-### 10.3 Open questions and explicit limitations
+#### Verification evidence and limitations: Open questions and explicit limitations
 
 1. The 110 classified negative, non-common, or secondary model attempts are
    omitted; malformed data after recognition of a common mesh still fails.
@@ -698,61 +791,10 @@ additional stage was captured. The child and lead both verified that no
    direct runtime branch trace.
 7. The runtime context of `bugsb.bin` remains unidentified.
 
-## 11. Unused and hidden content
+### 8.2 Known unknowns
 
-### 11.1 No hidden 3-D map
+Unresolved semantics are labelled **Hypothesis** or **Open question** where they occur.
 
-**[V-ROM/V-TOOL]** The complete manifest contains no extra level directory or
-additional `level.dat`/`terrain.all` pair. All 17 gameplay datasets correspond
-to Training, the fifteen story stages, or Bonus. No cut 3-D map was found.
+### 8.3 References
 
-An exhaustive filename reachability audit classifies 487 of 488 records via
-exact full paths, basenames inside resource descriptors, or verified filename
-generators: level pairs, creature names, actor/plant stems, music numbers,
-story panels, or demo paths.
-
-### 11.2 Likely-unused result bitmap
-
-**[V-ROM; HYPOTHESIS unused]** `level96/lose.pic` is manifest record 418,
-stored at `0x790940..0x79698E` and RNC1-decoded to `0x88E8`. It is the sole
-archive entry with neither an explicit pre-manifest full/basename reference nor
-coverage by a known filename generator. Challenge UI explicitly names
-`level96/chal.pic`, and failure text uses `Please Try Again.`; no second
-`lose` string exists outside the manifest.
-
-A numeric-index load has not been disproved, so call it **likely unused**, not
-proven unreachable.
-
-### 11.3 Unreferenced audio waves
-
-**[V-ROM/V-TOOL]** Five valid VADPCM waves are referenced by neither any song
-nor the 93-entry BFX bank:
-
-| Wave | ROM start | Encoded bytes | Decoded samples | Loop |
-|---:|---:|---:|---:|---|
-| 159 | `A3E690` | `AE6` | 4,960 | 4,105..4,915 infinite |
-| 181 | `A6FDF0` | `396` | 1,632 | 778..1,603 infinite |
-| 193 | `A92400` | `8E86` | 64,864 | none |
-| 194 | `A9B290` | `84D2` | 60,448 | none |
-| 204 | `ACA770` | `1878` | 11,136 | none |
-
-Their intended sounds cannot be named from static data alone.
-
-### 11.4 Demo recordings and development residue
-
-**[V-ROM; HYPOTHESIS record semantics]** `pad/path01.bin`, `path04.bin`,
-`path10.bin`, and `path13.bin` decode to patterned four-byte records and are
-strongly associated with shipped attract/demo paths for Ant Island, City
-Entrance, Riverbed Canyon, and Battle Arena. Interpreting the two halfwords in
-each record as controller input plus run duration remains unverified. The
-mutable template `PAD\\PATH00.BIN` at `0x80B20` and UI text `DEMO` corroborate
-their normal shipped use. They are not cut levels.
-
-The executable retains the authoring path
-`D:\\BUGS\\N64\\CD\\PAD\\PATH00.BIN` at `0x80B30`, plus dormant generic
-loader basenames `level1.dat`, `level2.dat`, and `level3.dat`; the archive has
-no matching split-level payloads.
-
-**[V-ROM negative audit]** No `DEBUG`, `ASSERT`, warp, test-map,
-collision-view, or free-camera label was found. `MOVING CAMERA` and
-`STILL CAMERA` are normal pause-menu options, not evidence of a debugger.
+External documentation, decompositions, and source archives are cited inline where used.

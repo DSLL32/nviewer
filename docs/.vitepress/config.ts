@@ -8,9 +8,8 @@ export default defineConfig({
   description: 'Nintendo 64 ROM format specifications for nviewer',
   base: `${pagesBase}/wiki/`,
   outDir: '../dist/wiki',
-  // These are plain technical Markdown documents. Angle-bracket placeholders
-  // such as <rom> must remain text rather than being parsed as Vue components.
-  markdown: { html: false },
+  // Binary-layout diagrams use colspan, which Markdown tables cannot express.
+  markdown: { html: true },
   themeConfig: {
     nav: [
       { text: 'Specifications', link: '/' },
@@ -22,21 +21,33 @@ export default defineConfig({
         items: [
           { text: 'Air Boarder 64', link: '/AIRBOARDER64' },
           { text: 'BattleTanx', link: '/BATTLETANX' },
-          { text: 'Bomberman', link: '/BOMBERMAN' },
+          { text: 'BattleTanx: Global Assault', link: '/BATTLETANX_GLOBAL_ASSAULT' },
+          { text: 'Bomberman 64', link: '/BOMBERMAN64' },
+          { text: 'Bomberman 64: The Second Attack!', link: '/BOMBERMAN64_SECOND_ATTACK' },
+          { text: 'Bomberman Hero', link: '/BOMBERMAN_HERO' },
           { text: "A Bug's Life", link: '/BUGSLIFE' },
-          { text: 'Gex', link: '/GEX' },
+          { text: 'Gex 3: Deep Cover Gecko', link: '/GEX3' },
+          { text: 'Gex 64: Enter the Gecko', link: '/GEX64' },
           { text: 'GoldenEye 007', link: '/GOLDENEYE' },
           { text: 'Mario Kart 64', link: '/MARIOKART64' },
           { text: 'Off Road Challenge', link: '/OFFROADCHALLENGE' },
           { text: 'Perfect Dark', link: '/PERFECTDARK' },
           { text: 'Pilotwings 64', link: '/PILOTWINGS64' },
           { text: 'Pokémon Snap', link: '/POKEMONSNAP' },
+          { text: 'San Francisco Rush: Extreme Racing', link: '/SAN_FRANCISCO_RUSH' },
+          { text: 'San Francisco Rush 2049', link: '/SAN_FRANCISCO_RUSH_2049' },
           { text: 'Spider-Man', link: '/SPIDERMAN' },
           { text: 'Star Fox 64', link: '/STARFOX' },
           { text: 'Stunt Racer 64', link: '/STUNTRACER64' },
           { text: "Yoshi's Story", link: '/YOSHISTORY' },
-          { text: 'The Legend of Zelda', link: '/ZELDA64' },
+          { text: "The Legend of Zelda: Majora's Mask", link: '/MAJORAS_MASK' },
+          { text: 'The Legend of Zelda: Ocarina of Time', link: '/OCARINA_OF_TIME' },
+          { text: 'Ocarina of Time — 1997 prototype', link: '/OCARINA_OF_TIME_1997_PROTOTYPE' },
         ],
+      },
+      {
+        text: 'Documentation',
+        items: [{ text: 'Specification style guide', link: '/SPECIFICATION_STYLE' }],
       },
     ],
     search: { provider: 'local' },

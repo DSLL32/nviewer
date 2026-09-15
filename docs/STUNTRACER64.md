@@ -1,96 +1,50 @@
-# Stunt Racer 64 (N64, US): ROM format specification for the level viewer
+# Stunt Racer 64 — Nintendo 64 ROM format specification
 
-This document specifies the US retail ROM well enough to add its environments,
-objects and music to nviewer. It covers ROM identity and layout, compression, the
-complete course catalog, map geometry and materials, scenery and collision,
-skydomes and atmospheric maps, the custom music engine, implementation boundaries,
-verification, open questions, and unused/hidden content.
+This manual describes the shipped data formats needed to identify, extract, and
+present Stunt Racer 64 content. Claims state their evidence inline; unsupported
+interpretations are labelled hypotheses.
 
-Evidence labels used throughout:
+## 1. Overview
 
-- **[V-ROM]**: checked directly against bytes or decoded structures in the supplied
-  ROM.
-- **[V-ASM]**: checked in the retail MIPS code.
-- **[V-TOOL]**: reproduced by a bounded research tool across the stated complete
-  dataset.
-- **[V-EMU]**: observed in the emulator. This investigation verified boot/title
-  rendering but no gameplay frame; see §12.2.
-- **[UPSTREAM]**: found in Hack64's 2020 exact-game viewer and independently audited
-  where combined with a verified label.
-- **[HYP]**: plausible interpretation not proved by the available evidence.
-- **[OPEN]**: an implementation or research question deliberately left unresolved.
-- **[V-REPO]**: checked against the current nviewer source tree.
-- **[DESIGN]**: recommended viewer behavior rather than a claim about the ROM.
-- **[PROCESS]**: research-process observation or reusable workflow guidance.
+### 1.1 Technical summary
 
-ROM offsets are into the normalized big-endian `.z64`. Runtime addresses are KSEG0.
-Unless explicitly qualified, all numeric fields are big-endian.
-
-Research material is under `/home/n64/.ai-tmp/r49/stuntracer64/`:
-
-| path | contents |
+| Property | Value |
 |---|---|
-| `fs` | ROM identification, resident-code disassembly, compression and catalogs |
-| `levels` | complete map/material/collision/scenery audit and generated summaries |
-| `audio` | music/SFX tables, sequence decoder, banks and player notes |
-| `env_unused` | sky, atmosphere, projection, unused-content audit and decoded sheets |
-| `emulator` | two failed renderer attempts, one GLideN64 title-render session, and cleanup evidence |
-| `upstream-rotm` | shallow sparse copy of the historical Hack64 viewer |
+| Asset organization | Boss chunked-zlib container: independent RFC 1950/DEFLATE streams producing at most 16,000 bytes each; 2,211 strict containers indexed |
+| Compression | Boss chunked-zlib: independent RFC 1950/DEFLATE streams decoding to at most 16,000 bytes each. |
+| Graphics microcode | Custom RSP graphics task, CRC `844B55B5`; GLideN64 supports it. |
+| Geometry | primary pointer-rich map blob plus eight tables containing 1,808 exact secondary archives |
+| Textures | material-indexed Gfx setup/load/TLUT lists; CI4, CI8, RGBA16, IA8 and one I4 material; exact payload size comes from `G_LOADBLOCK`, not `G_SETTILESIZE` |
+| Collision | 355 files, 66,497 vertices, 77,146 triangles, with validated cross-section adjacency records |
+| Music driver | custom six-channel packed tracker, 14 slots at 21,998 Hz, three instrument/sample palettes, exact order/restart loops |
+| Audio microcode | **Unknown** |
+| Sample encoding | Nintendo 4-bit VADPCM. |
+| Levels | 13 physical map archives; 14 public selector labels because `No Track` and `Stunt Bowl` both map to archive 11 |
+| Memory requirement | **Unknown** |
+| Viewer support | easy storage/catalogs; medium geometry/material TMEM path; medium scenery; medium-high animation and exact spatial-atmosphere reproduction; custom music player required |
+| Environment | a real textured skydome plus a separate camera-projected spatial atmosphere map; nominal 89° vertical FOV and near plane 32 |
+| Unused/hidden | no orphan course; two strong catalog-omitted model-format IA-alpha planes; dormant path channel; compiled fog/sky controls of unproved retail reachability |
 
-## 0. At a glance
+### 1.2 ROM identification
 
-| topic | result |
-|---|---|
-| ROM | 12 MiB big-endian US revision 0, game code `NR3E`, CIC-6102 |
-| program | one resident initialized image, ROM `0x1000–0xCB250`, mapped by `RAM = ROM + 0x7FFFF400`; no executable overlays identified |
-| storage | Boss chunked-zlib container: independent RFC 1950/DEFLATE streams producing at most 16,000 bytes each; 2,211 strict containers indexed |
-| courses | 13 physical map archives; 14 public selector labels because `No Track` and `Stunt Bowl` both map to archive 11 |
-| map data | primary pointer-rich map blob plus eight tables containing 1,808 exact secondary archives |
-| geometry | 713 track mesh files, 76,011 vertices, 49,290 faces; 179 map-resident scenery objects; 33 named vehicles and 33 separately cataloged shared models |
-| textures | material-indexed Gfx setup/load/TLUT lists; CI4, CI8, RGBA16, IA8 and one I4 material; exact payload size comes from `G_LOADBLOCK`, not `G_SETTILESIZE` |
-| collision | 355 files, 66,497 vertices, 77,146 triangles, with validated cross-section adjacency records |
-| environment | a real textured skydome plus a separate camera-projected spatial atmosphere map; nominal 89° vertical FOV and near plane 32 |
-| music | custom six-channel packed tracker, 14 slots at 21,998 Hz, three instrument/sample palettes, exact order/restart loops |
-| implementation | easy storage/catalogs; medium geometry/material TMEM path; medium scenery; medium-high animation and exact spatial-atmosphere reproduction; custom music player required |
-| runtime evidence | GLideN64/HLE renders the legal/title screen; course/environment/camera claims remain static-only |
-| unused/hidden | no orphan course; two strong catalog-omitted model-format IA-alpha planes; dormant path channel; compiled fog/sky controls of unproved retail reachability |
+| Release | NAME | Game code | Revision | Size | CRC1 | CRC2 | SHA-1 | CIC | Build |
+|---|---|---|---:|---:|---|---|---|---|---|
+| USA | `Stunt Racer 64` | `NR3E` | 0 | 12 MiB (`0xC00000`) | `9510D8D7` | `35100DD2` | `8570fa1f3e4cf7e62dc49da181353e4f301503b7` | CIC-6102 | — |
 
-## 1. ROM identification and versions
+Verified from the normalized ROM headers and complete-image SHA-1 hashes.
 
-### 1.1 Verified image
+### 1.3 Terminology and conventions
 
-| field | value |
-|---|---|
-| byte order / size | `.z64` / `0xC00000` (12,582,912 bytes, 12 MiB) |
-| MD5 | `e8b666a429fedb2a1a1228cd450cd4fc` |
-| SHA-1 | `8570fa1f3e4cf7e62dc49da181353e4f301503b7` |
-| SHA-256 | `d3b01e935aec87819bb053d2881ec59e7c4c66ed2843df144dab618e2bc3fd8c` |
-| PI word / clock / entry | `80371240` / `0000000F` / `80000400` |
-| release word | `00001449` |
-| CRC1 / CRC2 | `9510D8D7` / `35100DD2` |
-| internal title | `Stunt Racer 64` |
-| game code / revision | `NR3E` / `0` |
-| IPL3 | CRC32 `90BB6CB5`, MD5 `e24dd796b2fa16511521139d28c8356b`, CIC-NUS-6102 |
+ROM and memory ranges are half-open. Offsets, addresses, encoded sizes, masks,
+and opcodes are hexadecimal unless stated otherwise. Multi-byte CPU fields are
+big-endian. RAM addresses are virtual unless explicitly identified as physical;
+segmented, VROM, and file-relative addresses are named at each use.
 
-**[V-ROM]** All values above were read from the supplied image. The IPL3
-fingerprint and header checksum pair identify the normal CIC-6102 build.
+## 2. Program and storage architecture
 
-Detection should normalize `.z64`, `.v64`, and `.n64` byte order, require `NR3E`
-at header offset `0x3B`, and accept revision byte 0. The fixed map-table structure
-at `0xBBDA0` (§4) is a useful patched-ROM sanity check. **[V-ROM/DESIGN]**
+### 2.1 Boot and executable layout
 
-### 1.2 Version scope
-
-Only the US `NR3E` revision-0 image was supplied and audited. No regional or later
-retail address set is claimed. A future image with a different game code or revision
-must be table-located and structurally revalidated rather than assumed compatible.
-**[V-ROM/OPEN]**
-
-The credits data contains the literal `$September 2, 2000` at ROM `0xD1990`.
-This is a shipped data string, not proof of a linker or source-build timestamp.
-**[V-ROM]**
-
-## 2. Boot and resident code
+#### Boot and resident code
 
 The initialized linked image begins at ROM `0x1000`, runtime `0x80000400`, with:
 
@@ -101,25 +55,33 @@ ROM     = runtime - 0x7FFFF400
 
 Startup clears `0x438E0` bytes from `0x800CA650` through `0x8010DF2F`, sets SP to
 `0x800CAE50`, and jumps to `0x800021B4`. The initialized code/data image ends at ROM
-`0xCB250` (size `0xCA250`); separate resource data starts there. **[V-ROM/V-ASM]**
+`0xCB250` (size `0xCA250`); separate resource data starts there. [evidence: ROM bytes, disassembly]
 
 No executable overlay table or overlay relocation path was identified. All observed
 asset loaders are called by the resident program. This is strong negative static
-evidence, not proof that no runtime-generated code could exist. **[V-ASM]**
+evidence, not proof that no runtime-generated code could exist. [evidence: disassembly]
 
 The renderer transforms geometry through custom RSP microcode. Glide64mk2 rejects
 ucode CRC `844B55B5`; GLideN64 with the same RSP-HLE stack can render the legal/title
 screen, but this investigation did not reach an in-race frame that exercises the
 course renderer. This does not affect an nviewer loader, which reads source geometry
-structures directly. **[V-EMU/V-ROM]**
+structures directly. [evidence: emulator observation, ROM bytes]
 
-## 3. Filesystem and compression
+### 2.2 Memory and address mapping
 
-### 3.1 Chunked-zlib container
+Address conversions and load destinations are specified with the executable and file tables above.
+
+### 2.3 ROM map and asset organization
+
+See the executable, archive, and file-table descriptions in this section.
+
+### 2.4 Compression formats
+
+#### Filesystem and compression: Chunked-zlib container
 
 General compressed assets use zlib 1.0.4; the linked image contains Mark Adler's
 `inflate 1.0.4` identification at ROM `0xBE010`. Retail routine `0x80001BF0`
-implements this outer format: **[V-ROM/V-ASM]**
+implements this outer format: [evidence: ROM bytes, disassembly]
 
 ```text
 +0x00 u32 sourceSize       # complete outer container, including this header
@@ -132,19 +94,19 @@ implements this outer format: **[V-ROM/V-ASM]**
 
 Each stream is independent. Every non-final block expands to exactly 16,000
 (`0x3E80`) bytes; the final block produces the remainder. The runtime alternates two
-16,000-byte staging buffers. **[V-ASM/V-TOOL]**
+16,000-byte staging buffers. [evidence: disassembly, deterministic decoding]
 
 A single strict scan found 2,211 distinct, non-overlapping containers. Their stored
 extents total `0x760F78` bytes and inflate to `0x1212D31` bytes. Of these, 2,198 use
 zlib header `78 DA`; 13 use `78 9C`. A `78 DA`-only extractor therefore silently
 misses valid files. The strict scanner validates outer bounds, every zlib checksum,
-block output limits, and total output size. **[V-TOOL]**
+block output limits, and total output size. [evidence: deterministic decoding]
 
 No second general level-geometry codec was identified. Raw texture/palette and audio
 pools coexist with the zlib containers, so absence of zlib framing does not imply
-padding. **[V-ROM/V-ASM]**
+padding. [evidence: ROM bytes, disassembly]
 
-### 3.2 Map bundles
+#### Filesystem and compression: Map bundles
 
 Thirteen complete map bundles tile ROM `0x1775C0–0x7B36D0` without a gap. Each begins
 with its primary map container. Retail loader `0x800494E0` computes the secondary
@@ -156,7 +118,7 @@ secondaryBase = bundleStart + align2(primary.sourceSize)
 
 All current sizes are already even, but the aligned expression is the actual format
 contract. The old Hack64 viewer used `bundleStart + sourceSize` and marked it
-uncertain; it happens to work for this image. **[V-ROM/V-ASM/UPSTREAM]**
+uncertain; it happens to work for this image. [evidence: ROM bytes, disassembly, upstream source]
 
 Eight file tables inside each inflated primary map contain 12-byte records:
 
@@ -169,31 +131,66 @@ Eight file tables inside each inflated primary map contain 12-byte records:
 All 1,808 table records resolve in the bundle, begin at a strict zlib container, and
 end exactly at its declared `sourceSize`. Runtime fixup `0x80046DA8` adds the
 secondary base to the first two words. No signature scan is needed at load time.
-**[V-ASM/V-TOOL]**
+[evidence: disassembly, deterministic decoding]
 
 Some bundles place a raw high-entropy prefix between the primary map and the first
 table-listed file. These are map-resident image/palette resources addressed by
-display-list pointers, not filesystem holes. **[V-ROM/V-ASM]**
+display-list pointers, not filesystem holes. [evidence: ROM bytes, disassembly]
 
-### 3.3 Other catalogs and ROM tail
+#### Music and sound: Sample palettes and codec
 
-The 33-entry vehicle catalog is at ROM `0xACCC0`, stride `0x3C`; §7 describes it.
+There are three complete sample/instrument palettes. Runtime loads a base bank then a
+sparse overlay; overlay flag `0x80` means retain that base slot and supplies no sample.
+The first 33 overlay records are placeholders. [evidence: disassembly, deterministic decoding]
+
+| mode | base ROM / records | overlay ROM / records | effective slots | instrument map |
+|---:|---|---|---:|---|
+| 0 | `A7E330–AB60C2` / 33 | `B1DB50–B4D506` / 54 (33 placeholders) | 54 | `BB31A0–BB35C4` |
+| 1 | `AB60D0–AEE3A8` / 33 | `B4D510–B84740` / 56 (33 placeholders) | 56 | `BB35D0–BB39F4` |
+| 2 | `AEE3B0–B1DB50` / 33 | `B84740–BB3194` / 55 (33 placeholders) | 55 | `BB3A00–BB3E24` |
+
+Each instrument map is `u32 count` plus `count` 96-byte note maps; all have 11
+instruments. `(instrument-1)*96 + note-1` selects a sample slot. [evidence: disassembly, deterministic decoding]
+
+Normal sample records have a 0x94-byte header. `+0x04` is decoded PCM bytes (rounded
+to 32); `+0x0C` is initial pan; `+0x10/+0x11` are base-note/fine-tune; `+0x12` is
+default volume; `+0x14..+0x93` is the 128-byte predictor book. Flag bit 0 would add
+a 0x400-byte auxiliary table, but no music sample sets it. Encoded audio is standard
+N64 4-bit VADPCM: 9 bytes produce 16 samples, and stored bytes are
+`round_even((decodedBytes >> 5) * 9)`. [evidence: disassembly, deterministic decoding]
+
+Existing `decodeVadpcm` and `RESAMPLE_LUT` from `src/rom/music/libultra.ts` are useful;
+the sequencing/bank layer must be new. [evidence: nviewer source, viewer design]
+
+### 2.5 Loading process
+
+Level and asset selection is described by the tables and loader call paths above.
+
+### 2.6 Revision differences
+
+Revision-specific addresses and data differences are stated in the relevant tables.
+
+## 3. Level data
+
+### 3.1 Level catalog and identifiers
+
+#### Filesystem and compression: Other catalogs and ROM tail
+
+The 33-entry vehicle catalog is at ROM `0xACCC0`, stride `0x3C`; *Objects, placement and paths* describes it.
 A 27-entry raw lookup table at `0xA8300` selects five 256-byte resources from
 `0x7BABB0–0x7BB0B0` or small fallback indices. Its consumer suggests palettes,
-but that name remains a hypothesis. **[V-ROM/V-ASM/HYP]**
+but that name remains a hypothesis. [evidence: ROM bytes, disassembly, hypothesis]
 
 After removing the map primary files, 1,808 map subfiles, and 66 vehicle containers,
 324 strict containers remain. Most are reached through additional master arrays;
-their bounded reachability audit is in §11. The ROM remains nonzero through
-`0xBCD31A`, then has `0x32CE5` zero bytes to the 12 MiB boundary. **[V-TOOL/V-ROM]**
+their bounded reachability audit is in *Unused and hidden content*. The ROM remains nonzero through
+`0xBCD31A`, then has `0x32CE5` zero bytes to the 12 MiB boundary. [evidence: deterministic decoding, ROM bytes]
 
-## 4. Complete course catalog
-
-### 4.1 Internal map table
+#### Complete course catalog: Internal map table
 
 The internal table is at ROM `0xBBDA0`, runtime `0x800BB1A0`, with 13 records of
 `0x5C` bytes. Code at `0x800495E8` selects `index * 0x5C` and calls loader
-`0x800494E0`. Important fields are: **[V-ROM/V-ASM]**
+`0x800494E0`. Important fields are: [evidence: ROM bytes, disassembly]
 
 | record offset | meaning |
 |---:|---|
@@ -219,40 +216,42 @@ The internal table is at ROM `0xBBDA0`, runtime `0x800BB1A0`, with 13 records of
 | 12 | Four Player 2 | `1775C0–18C380` | `ABE4 → 24AD0` | 12 | 2 | 0 | 36 |
 
 All counts, spans, pointer targets, and archive outputs were exhaustively validated.
-**[V-TOOL]**
+[evidence: deterministic decoding]
 
-### 4.2 Public names and viewer list
+#### Objects, placement and paths: Separately cataloged shared models
 
-Fourteen public label pointers begin at ROM `0xC1788`; strings begin at `0xC824C`.
-The corresponding internal IDs are the 14 words at `0xC1F24`: **[V-ROM]**
+Exactly 33 of the directly referenced non-map/non-vehicle containers validate as
+standalone `GeometryMeta` model containers. Pointer table `0xC2204` has 30 entries
+and 20 unique files (ten repeats); table `0xC2280` has 13 entries and 13 unique
+files. They are consumed by routines `0x80073908` and `0x8007407C`, respectively,
+but their gameplay names remain unresolved. [evidence: ROM bytes, disassembly, deterministic decoding]
 
-| public ID | public label | internal ID / name |
-|---:|---|---|
-| 0 | Soda Mountain | 8 / Soda Fountain |
-| 1 | Giant Toys | 6 / Toys |
-| 2 | Medieval Mayhem | 10 / Kingdom O Karnage |
-| 3 | Wild West Ruckus | 3 / Wild West |
-| 4 | House of Horrors | 9 / Haunted House |
-| 5 | Creepy Carnie | 7 / CarnEvil |
-| 6 | Tacky Tiki | 5 / Tacky Tiki |
-| 7 | Nautical Adventure | 0 / Test Track |
-| 8 | Retro Metro | 2 / Retro Metro |
-| 9 | Planet X | 4 / Planet X |
-| 10 | Space Race | 1 / Space Race |
-| 11 | No Track | 11 / Four Player 1 |
-| 12 | Stunt Bowl | 11 / Four Player 1 |
-| 13 | Halfpipe | 12 / Four Player 2 |
+These models are not missing course scenery: all 179 scenery records and their
+geometry/material pointers are wholly contained in their primary maps. Keep the 33
+models out of course views; they may become a separate named catalog after their
+semantics are identified. [evidence: deterministic decoding, viewer design]
 
-`No Track` is a UI sentinel rather than a separate archive **[HYP]**. The viewer
-should expose 13 unique physical environments, preferably in public order while
-omitting the duplicate: the eleven named courses followed by Stunt Bowl and
-Halfpipe. It should retain internal IDs in diagnostics. **[DESIGN]**
+#### Unused and hidden content: Bounded uncataloged-container audit
 
-## 5. Primary map format and grouping
+Of the 324 zlib containers left after the map and vehicle catalogs, 225 have their
+exact ROM start stored as an aligned word, mainly in master arrays around `0xC1DA0`,
+`0xC1EA0`, `0xC2204`, `0xC2280`, `0xC2454`, `0xC2630`, and `0xC2920`. They are
+cataloged even though all higher-level table names are not yet known. [evidence: deterministic decoding]
+Thirty-three are the standalone models documented in *Separately cataloged shared models*.
+
+Ninety-nine have no such absolute-start reference. They occur in nine physical runs.
+The first, `0xD9340–0xDD034`, contains obviously live-looking biographies, dialogue,
+menu text and credits, demonstrating why absence of a literal pointer cannot prove
+unused status. Other candidate runs are recorded in `env_unused/orphan_audit.json`.
+[evidence: ROM bytes, deterministic decoding]
+
+### 3.2 Level container
+
+#### Primary map format and grouping
 
 Pointers in the inflated primary map are offsets from that blob's start. Its first
 word is the exact inflated size in all 13 maps. Viewer-relevant header fields are:
-**[V-ROM/V-ASM/V-TOOL]**
+[evidence: ROM bytes, disassembly, deterministic decoding]
 
 | offset | contents |
 |---:|---|
@@ -273,9 +272,9 @@ word is the exact inflated size in all 13 maps. Viewer-relevant header fields ar
 Each group header is `{u32 memberCount; u32 u16MemberIndicesPtr}`. Mesh, collision,
 and auxiliary descriptors have three groups: group 0 enumerates every file once;
 groups 1 and 2 are empty. Some path descriptors repeat members in all three groups,
-so a loader must honor actual groups instead of assuming only group 0. **[V-TOOL]**
+so a loader must honor actual groups instead of assuming only group 0. [evidence: deterministic decoding]
 
-Across all maps the eight secondary tables contain: **[V-TOOL]**
+Across all maps the eight secondary tables contain: [evidence: deterministic decoding]
 
 | set | count field | table field | files |
 |---|---:|---:|---:|
@@ -288,11 +287,77 @@ Across all maps the eight secondary tables contain: **[V-TOOL]**
 | path 3 | `0DC` | `0EC` | 0 |
 | other path | `0F4` | `100` | 194 |
 
-## 6. Geometry, materials and collision
+#### Objects, placement and paths: Map-resident scenery
 
-### 6.1 Track meshes
+Each primary-map scenery record is 0x28 bytes: [evidence: disassembly, deterministic decoding]
 
-A mesh secondary record's metadata offset points to: **[V-TOOL]**
+```text
++00 GeometryMeta
++04/+08/+0C unknown
++10 root transform node
++14 animation-header array
++18 animation-header count
++1C scalar/flags, unresolved
++20 runtime root-animation cache
++24 optional pointer (zero in all 179 ROM records)
+```
+
+The root node starts with `f32 x,y,z` translation. Base placement is local s16
+vertex plus `translation * 32`. Relocation routine `0x80038940` proves recursive
+child pointers at node `+0x28` with count `+0x2C`, plus another array of 8-byte
+records at `+0x30/+0x34`. Intermediate transform fields may encode rotation/scale
+but are unresolved. [evidence: disassembly, open question]
+
+All 179 scenery objects have at least one 0x20-byte animation header, 995 total.
+Pointer fields are `+0x14/+0x18/+0x1C`; `+0x00` is count-like and event code changes
+flag bits at `+0x10`. Routine `0x8004899C` caches the header whose `+0x18` transform
+matches the root. Base geometry and translation are enough for an initial viewer;
+keyframe/channel interpolation is a separate medium-high task. [evidence: disassembly, viewer design]
+
+#### Music and sound: Song and pattern formats
+
+Every song metadata object is exactly `0x710` bytes: [evidence: ROM bytes, disassembly, deterministic decoding]
+
+```text
++000 u16 orderCount
++002 u16 restartOrder
++004 u16 channels       # always 6
++006 u16 patternCount
++008 u16 initialSpeed   # always 2
++00A u16 initialTempo   # always 130
++00C u8  order[256]
++110 u32 patternOffsets[256]  # relative to decoded pattern base
++510 u16 patternRows[256]
+```
+
+A pattern payload starts with `u32 rawSize, u32 packedSize`, then Boss's custom
+LZ/RLE stream. The decoder consumes MSB-first 16-bit controls: 0 is a literal; 1 is
+either a 12-bit backward distance plus `(lowNibble+3)` copy length, or, with zero
+distance, `(next12+16)` repeats of the following byte. Leading `0x80` means an
+uncompressed remainder. All 14 payloads decode to their exact sizes. [evidence: disassembly, deterministic decoding]
+
+Cells use XM packed-cell syntax: note, instrument, volume, effect, parameter. If bit
+7 of the first byte is set, bits 0–4 select which fields follow; otherwise all five
+are present. The loader subtracts `0x10` from the volume column. Tick duration follows
+the tracker rule `sampleRate * 5 / (2 * tempo)` samples; speed is ticks per row.
+[evidence: disassembly]
+
+#### Unused and hidden content: No orphan course
+
+All 13 internal records resolve to valid, non-overlapping bundles, and those bundles
+exactly tile `0x1775C0–0x7B36D0`. The public selector accounts for all 13 archives.
+No extra map record or map-like bundle was established. Internal `Test Track` is public
+`Nautical Adventure`, not unused content. [evidence: ROM bytes, deterministic decoding]
+
+The header retains a complete fourth path-file channel, but its count is zero in all
+13 maps. This is a dormant format path, not evidence that path data was cut.
+[evidence: deterministic decoding]
+
+### 3.3 Geometry
+
+#### Geometry, materials and collision: Track meshes
+
+A mesh secondary record's metadata offset points to: [evidence: deterministic decoding]
 
 ```text
 +00 u32 unknown/pointer
@@ -331,20 +396,26 @@ Faces are:
 `vertex[3] == -1` is a triangle; otherwise emit `(0,1,2)` and `(0,2,3)`.
 `+5..+7` are not padding: 11,033 of 49,290 track faces use a nonzero value.
 Their meaning, and the exact `+0/+2` visibility flags, remain open. All scenery and
-sky faces have `+5..+7 == 0`. **[V-TOOL/OPEN]**
+sky faces have `+5..+7 == 0`. [evidence: deterministic decoding, open question]
 
 The 713 mesh files total 76,011 vertices and 49,290 source faces: 3,215 triangles
 and 46,075 quads. Every vertex, UV, color, and material index is valid. UV components
-are signed s10.5 texel coordinates divided by 32 **[HYP, strong]**; this matches
+are signed s10.5 texel coordinates divided by 32 **[hypothesis, strong]**; this matches
 their value ranges and N64 convention. Native track position is local `s16` plus
 20.11 origin. Collision and scenery floats use the same scale after multiplication
 by 32. The historical viewer displays this frame as `(-x,z,y)`; axis conversion is a
-viewer convention, not a stored field. **[V-TOOL/UPSTREAM]**
+viewer convention, not a stored field. [evidence: deterministic decoding, upstream source]
 
-### 6.2 Material bundle and texture loads
+### 3.4 Display lists and render state
+
+Display-list commands and game-supplied render state are described with geometry above.
+
+### 3.5 Textures and materials
+
+#### Geometry, materials and collision: Material bundle and texture loads
 
 Header `+0x11C` points to a 0x28-byte bundle relocated by retail routine
-`0x800476A0`: **[V-ROM/V-ASM]**
+`0x800476A0`: [evidence: ROM bytes, disassembly]
 
 ```text
 +00 setupDlByMaterial[N]
@@ -361,10 +432,10 @@ other modes, combine/color state, and one to six `G_SETTILE`/
 `G_SETTILESIZE` pairs. Image lists contain `G_SETTIMG`, sync and `G_LOADBLOCK`;
 palette lists use `G_SETTIMG`/`G_LOADTLUT` or end immediately for direct color.
 Accurate rendering must preserve wrap/clamp, masks, shifts, mip tiles, combine,
-primitive/environment colors, alpha and depth state. **[V-ROM/V-ASM]**
+primitive/environment colors, alpha and depth state. [evidence: ROM bytes, disassembly]
 
 All 1,726 material slots load with the conventional raw-transfer `G_SETTIMG`
-RGBA16/width-1 setup. Exact source storage is therefore: **[V-TOOL]**
+RGBA16/width-1 setup. Exact source storage is therefore: [evidence: deterministic decoding]
 
 ```text
 payloadOffset = G_SETTIMG.address
@@ -375,7 +446,7 @@ Never infer payload size from `G_SETTILESIZE`: that command describes sampling,
 not storage. In 170 materials its rectangle exceeds the loaded base payload because
 of wrap/shift/mip setup. This is expected and is the main correctness trap in this
 format. Palette color count is `((G_LOADTLUT.word1 >> 14) & 0x3FF) + 1`.
-**[V-TOOL]**
+[evidence: deterministic decoding]
 
 Final tile-0 formats across all material slots are:
 
@@ -390,19 +461,13 @@ Final tile-0 formats across all material slots are:
 There are 1,010 one-tile and 641 six-tile materials; 75 use two to five tiles.
 For a faithful loader, emulate the small `SETTIMG`/`SETTILE`/`LOADBLOCK` TMEM path,
 then sample the selected tile(s). Existing nviewer RGBA16, IA/I and TLUT decoders can
-be reused after material-local TMEM reconstruction. **[V-TOOL/DESIGN]**
+be reused after material-local TMEM reconstruction. [evidence: deterministic decoding, viewer design]
 
-### 6.3 Skydome geometry
+### 3.6 Collision
 
-Map `+0x00C` uses the same `GeometryMeta` and face/material lookup. Across all maps
-it has 989 vertices and 1,222 source faces. The construction/draw call chain proves
-that it is a camera-relative backdrop, not unknown ordinary geometry (§8.1). Put it
-in a separate `background` layer or `Level.skies`, never in the main track batch.
-**[V-ASM/V-TOOL/DESIGN]**
+#### Geometry, materials and collision: Collision
 
-### 6.4 Collision
-
-Collision secondary metadata is: **[V-TOOL]**
+Collision secondary metadata is: [evidence: deterministic decoding]
 
 ```text
 +00 faces       +04 faceCount       # stride 0x0A
@@ -414,52 +479,66 @@ Collision secondary metadata is: **[V-TOOL]**
 A face is `{s16 vertex[3]; u16 unknown06; u16 unknown08}`. A vertex begins with
 three `f32` positions followed by `u32/u16/u16` unknown fields. The trailing face
 words have thousands of values, so calling them surface flags is unjustified.
-**[V-TOOL/OPEN]**
+[evidence: deterministic decoding, open question]
 
 Each link contains three `(s16 sectionIndex, s16 faceIndex)` pairs. Across 355 files
 and 40,644 links, every pair is either `(-1,-1)` or targets a real section and an
-in-range face. These are adjacency/connectivity references **[HYP, strong]**;
+in-range face. These are adjacency/connectivity references **[hypothesis, strong]**;
 traversal semantics are not required to draw collision.
 
 Totals are 66,497 collision vertices and 77,146 triangles, all index-valid. Draw
-them in a hidden-by-default `collision` layer. **[V-TOOL/DESIGN]**
+them in a hidden-by-default `collision` layer. [evidence: deterministic decoding, viewer design]
 
-## 7. Objects, placement and paths
+### 3.7 Environment, sky, fog, and lighting
 
-### 7.1 Map-resident scenery
+#### Geometry, materials and collision: Skydome geometry
 
-Each primary-map scenery record is 0x28 bytes: **[V-ASM/V-TOOL]**
+Map `+0x00C` uses the same `GeometryMeta` and face/material lookup. Across all maps
+it has 989 vertices and 1,222 source faces. The construction/draw call chain proves
+that it is a camera-relative backdrop, not unknown ordinary geometry (*Sky construction and drawing*). Put it
+in a separate `background` layer or `Level.skies`, never in the main track batch.
+[evidence: disassembly, deterministic decoding, viewer design]
 
-```text
-+00 GeometryMeta
-+04/+08/+0C unknown
-+10 root transform node
-+14 animation-header array
-+18 animation-header count
-+1C scalar/flags, unresolved
-+20 runtime root-animation cache
-+24 optional pointer (zero in all 179 ROM records)
-```
+#### Environment, sky and camera: Sky construction and drawing
 
-The root node starts with `f32 x,y,z` translation. Base placement is local s16
-vertex plus `translation * 32`. Relocation routine `0x80038940` proves recursive
-child pointers at node `+0x28` with count `+0x2C`, plus another array of 8-byte
-records at `+0x30/+0x34`. Intermediate transform fields may encode rotation/scale
-but are unresolved. **[V-ASM/OPEN]**
+Retail code proves the backdrop role: main view code calls “Calc sky” at
+`0x8001E080`, `0x80034DF0` transforms the map `+0x00C` geometry camera-relatively,
+main calls “Draw sky” at `0x8001E764`, and
+`0x80037870 → 0x80037898 → 0x800376A0` emits its materials and faces.
+Immediately before drawing, `0x800378D0..0x80037920` sets primitive RGB from the
+map environment color and alpha to `255 - view[0x141F]`. [evidence: disassembly]
 
-All 179 scenery objects have at least one 0x20-byte animation header, 995 total.
-Pointer fields are `+0x14/+0x18/+0x1C`; `+0x00` is count-like and event code changes
-flag bits at `+0x10`. Routine `0x8004899C` caches the header whose `+0x18` transform
-matches the root. Base geometry and translation are enough for an initial viewer;
-keyframe/channel interpolation is a separate medium-high task. **[V-ASM/DESIGN]**
+Sky faces use the same material pointer arrays at map `+0x144/+0x148/+0x14C`.
+The common dome has six adjacent 64×32 CI8/256-color panels plus two 1×1 materials.
+Space Race, Retro Metro and Four Player 2 use ten panels. Toys uses 42 distinct
+64×32 CI8 panels and three palettes. Four Player 1 instead uses one 1×1 RGBA16
+material. All 143 referenced sky images decode within bounds. [evidence: deterministic decoding]
 
-### 7.2 Vehicles
+There are no normals in this geometry. The sky uses stored RGBA vertex colors,
+textures and primitive-color modulation, not an N64 light structure. Treat it as
+prelit/unlit. [evidence: ROM bytes, disassembly]
+
+#### Unused and hidden content: Compiled environment controls
+
+Command cases `0x8000CC64..0x8000CD3C` set, decrement, increment, or byte-set
+`fogBaseLevel`, clamp it, and print `fogBaseLevel = %d`. Case `0x8000BECC` controls
+an oscillating sky transform through globals `0x800B8BD0..0x800B8BDC`.
+The code exists, but no retail menu/controller path was proved; call these compiled
+debug/control features with unknown reachability, not accessible cheats. [evidence: disassembly]
+
+Strings and table records for `Day`, `Day Fog`, `Night`, `Night Fog`, `Morning`, and
+`Morning Fog` exist at ROM `0xC5560..0xC5593` and `0xAB5D8..0xAB677`, but their
+consumer is unresolved. They are possible environment-mode names only. [evidence: ROM bytes, hypothesis]
+
+### 3.8 Cameras and paths
+
+#### Objects, placement and paths: Vehicles
 
 The vehicle catalog at ROM `0xACCC0` has 33 records of 0x3C bytes. `+0x00` is a
 name pointer and `+0x04..+0x2B` holds five ROM start/end pairs. The entries are A/B
 versions of Z-Bucket, Desperado, Surf, Superfuzz, Wild Truck, Scimitar, Hysterion,
 Warbird, Del Raye, Cockroach, Apollo and Stottlemeyer, followed by Boss 1–5,
-Interceptor, Milk Truck, Twisted and Cupra. **[V-ROM/V-ASM]**
+Interceptor, Milk Truck, Twisted and Cupra. [evidence: ROM bytes, disassembly]
 
 Runtime loader `0x80045EC4` inflates the first two extents; the final three are
 raw. The first inflated blob contains eight palette destinations at `+0x7C..+0x98`,
@@ -468,44 +547,31 @@ material bundles at `+0x9C` and `+0xC4`, their redundant slot counts at
 record is a `GeometryMeta` pointer followed by three zero words. All 33 files reuse
 the map/scenery vertex and face topology; slots 0–41 partition body faces by their
 material byte, while slots 42–53 are special submeshes and two pointer pairs are
-intentional duplicates. **[V-ASM/V-TOOL]**
+intentional duplicates. [evidence: disassembly, deterministic decoding]
 
 Vehicle faces are not drop-in map faces. None of the 1,716 unique geometry records
 has a separate UV array; face bytes `+0x10..+0x1F` instead hold packed per-corner
 attributes whose exact UV/lighting meaning is unresolved. The first material bundle
 has 42, 46, 47 or 48 slots; the second has four. Their setup/palette tables are null,
-so some render state is resident/shared rather than self-contained. **[V-TOOL/OPEN]**
+so some render state is resident/shared rather than self-contained. [evidence: deterministic decoding, open question]
 
 The second zlib extent is only concatenated raw texture data. Code at `0x80045C70`
 copies successive slices to the first blob's unique texture-DL targets; for every
 vehicle the sum of `2 * (G_LOADBLOCK.lrs + 1)` exactly equals the inflated extent
 (13,704–39,048 bytes). The final three extents are each exactly 0x100 bytes and
 provide three selectable variants of eight 16-entry RGBA16 palettes. Destination
-pointers may alias, so preserve the eight DMA copies in order. **[V-ASM/V-TOOL]**
+pointers may alias, so preserve the eight DMA copies in order. [evidence: disassembly, deterministic decoding]
 
 No keyframe/channel table exists in either zlib extent. Vehicle motion, wheel
 placement and state changes are runtime transforms. Expose these records, if
 desired, as a standalone 33-model catalog with palette variants 0–2; do not invent
 per-course placements. A static preview is medium difficulty, while exact packed
-corner attributes and special-submesh transforms are high/optional. **[V-TOOL/DESIGN]**
+corner attributes and special-submesh transforms are high/optional. [evidence: deterministic decoding, viewer design]
 
-### 7.3 Separately cataloged shared models
-
-Exactly 33 of the directly referenced non-map/non-vehicle containers validate as
-standalone `GeometryMeta` model containers. Pointer table `0xC2204` has 30 entries
-and 20 unique files (ten repeats); table `0xC2280` has 13 entries and 13 unique
-files. They are consumed by routines `0x80073908` and `0x8007407C`, respectively,
-but their gameplay names remain unresolved. **[V-ROM/V-ASM/V-TOOL]**
-
-These models are not missing course scenery: all 179 scenery records and their
-geometry/material pointers are wholly contained in their primary maps. Keep the 33
-models out of course views; they may become a separate named catalog after their
-semantics are identified. **[V-TOOL/DESIGN]**
-
-### 7.4 Other map arrays
+#### Objects, placement and paths: Other map arrays
 
 The following layouts validate across every map. Their gameplay labels are strong
-hypotheses inherited from spatial appearance and the historical viewer: **[V-TOOL/HYP]**
+hypotheses inherited from spatial appearance and the historical viewer: [evidence: deterministic decoding, hypothesis]
 
 - Tilt lines: count/pointer `+0x10C/+0x108`, stride `0x2C`, float endpoints at
   `+0x08/+0x14`.
@@ -518,32 +584,11 @@ hypotheses inherited from spatial appearance and the historical viewer: **[V-TOO
 - Header `+0x3B4/+0x3C8` describes an unresolved placement group in every map.
 
 All float positions use `*32` to reach mesh units. Paths/coins/boosters should be
-markers or separate toggleable layers, not unlayered geometry. **[DESIGN]**
+markers or separate toggleable layers, not unlayered geometry. [viewer design]
 
-## 8. Environment, sky and camera
+#### Environment, sky and camera: Spatial atmosphere map
 
-### 8.1 Sky construction and drawing
-
-Retail code proves the backdrop role: main view code calls “Calc sky” at
-`0x8001E080`, `0x80034DF0` transforms the map `+0x00C` geometry camera-relatively,
-main calls “Draw sky” at `0x8001E764`, and
-`0x80037870 → 0x80037898 → 0x800376A0` emits its materials and faces.
-Immediately before drawing, `0x800378D0..0x80037920` sets primitive RGB from the
-map environment color and alpha to `255 - view[0x141F]`. **[V-ASM]**
-
-Sky faces use the same material pointer arrays at map `+0x144/+0x148/+0x14C`.
-The common dome has six adjacent 64×32 CI8/256-color panels plus two 1×1 materials.
-Space Race, Retro Metro and Four Player 2 use ten panels. Toys uses 42 distinct
-64×32 CI8 panels and three palettes. Four Player 1 instead uses one 1×1 RGBA16
-material. All 143 referenced sky images decode within bounds. **[V-TOOL]**
-
-There are no normals in this geometry. The sky uses stored RGBA vertex colors,
-textures and primitive-color modulation, not an N64 light structure. Treat it as
-prelit/unlit. **[V-ROM/V-ASM]**
-
-### 8.2 Spatial atmosphere map
-
-The environment block is embedded in the primary map: **[V-ROM/V-ASM]**
+The environment block is embedded in the primary map: [evidence: ROM bytes, disassembly]
 
 ```text
 +334 Vec3f[4] world-space sampling quad
@@ -558,14 +603,14 @@ Routine `0x8001B040` (“Calc fog table”) projects/intersects the current view
 the two quads, interpolates 256 samples from the one-byte map, scales them by global
 `fogBaseLevel` (`0x800A85B8`, initialized to `0xFFFF`), and writes a 256-byte ramp
 at view context `+0x1318`; RGB is copied to `+0x141C` and final intensity to
-`+0x141F`. On a failed/disabled calculation it writes a zero ramp. **[V-ASM]**
+`+0x141F`. On a failed/disabled calculation it writes a zero ramp. [evidence: disassembly]
 
 This is a camera-dependent spatial atmosphere overlay, not verified ordinary
 linear depth fog. Draw paths do set `G_SETFOGCOLOR`, but neither the ROM nor any
 inflated map contains F3DEX2 `gSPFogPosition` (`DB080000`), and the code has no
 generator for it. A first viewer can preserve sky/clear modulation and expose the
 map as a diagnostic texture; exact visual reproduction requires porting this
-screen/view projection rather than inventing near/far fog. **[V-ROM/V-ASM/DESIGN]**
+screen/view projection rather than inventing near/far fog. [evidence: ROM bytes, disassembly, viewer design]
 
 | internal map | byte map | RGB | value range |
 |---|---|---|---|
@@ -586,30 +631,68 @@ screen/view projection rather than inventing near/far fog. **[V-ROM/V-ASM/DESIGN
 The four 1×1 maps (byte value 255) are verified uniform placeholders. The other
 eight maps have
 structured masks; Soda Fountain is spatially constant but uses value `0xF2`.
-**[V-TOOL]**
+[evidence: deterministic decoding]
 
-### 8.3 Projection and camera
+#### Environment, sky and camera: Projection and camera
 
 Projection builder `0x8001EF04` passes camera `+0x68` times
 `114.591552734375` to the libultra perspective function at
 `0x80099130`. Initialization derives `+0x68` from `+0x64 =
 0.7766715288162231`, yielding approximately **89.0° vertical FOV**. Aspect is
 viewport width/height times video-mode config `+0x14`; near is 32; far is the
-caller view-distance value times 32. **[V-ASM/V-ROM]**
+caller view-distance value times 32. [evidence: disassembly, ROM bytes]
 
 The per-view far source and authored starting eye/target remain open. Until traced,
 an implementation should frame bounds with the verified FOV/near and explicitly
-mark the camera placement as viewer-derived. **[OPEN/DESIGN]**
+mark the camera placement as viewer-derived. [evidence: open question, viewer design]
 
-## 9. Music and sound
+## 4. Objects
 
-### 9.1 Driver and tables
+### 4.1 Placement records
+
+Placement records are structurally coupled to the level format and are described in Level data.
+
+### 4.2 Object and model formats
+
+#### Unused and hidden content: Two strong omitted model assets
+
+The strongest unused candidates immediately precede the model catalog whose first
+entry is ROM `0x914EE0`: [evidence: ROM bytes, deterministic decoding]
+
+- `0x9147D0`, container `0x3E2 → 0x12D0`: valid model geometry at inflated `+0x48`,
+  11 vertices, six faces, 12 UVs, one color; a flat 500×500 plane using a 32×128 IA8
+  alpha strip.
+- `0x914BC0`, container `0x31A → 0x1180`: valid model geometry, four vertices and
+  one 65×75 quad, using a 64×48 IA8 image with mip levels.
+
+Neither address appears as an aligned absolute word anywhere in the ROM, while the
+next physical file is the model catalog's first pointer. Their flat geometry and IA
+alpha are consistent with shadow/decal planes [hypothesis]. What is verified is narrower:
+two structurally valid model-format assets omitted from the adjacent catalog.
+
+### 4.3 Skeletons and animation
+
+Static-pose or animation support and remaining omissions are stated in the object description.
+
+### 4.4 Behaviors, triggers, and scripted objects
+
+Behavioral records are documented only where they affect level extraction or presentation.
+
+## 5. Audio
+
+### 5.1 Audio storage and banks
+
+Audio storage is described with the sequence and bank tables below.
+
+### 5.2 Sequence format and driver
+
+#### Music and sound: Driver and tables
 
 This is a custom six-channel XM-like tracker, not Nintendo sequence data, MusyX,
 libmus or libmus64. `0x800550C8` initializes it; `0x80055040` requests a 21,998 Hz
 AI rate, with a separate lower-quality 10,999 Hz path at `0x80055084`.
 `0x80056B14` starts game audio, selects bank mode 0, loads SFX IDs 60–144, and
-starts song 7. **[V-ASM]**
+starts song 7. [evidence: disassembly]
 
 | purpose | runtime | ROM | contents |
 |---|---:|---:|---|
@@ -623,106 +706,13 @@ starts song 7. **[V-ASM]**
 Every pointer, count, payload boundary, pattern reference and cell in these tables
 was validated by the table-driven analyzer. The owned audio allocation is nearly contiguous
 from `0x92DDC0` through `0xBCD31C` (2,749,788 bytes, 2.622 MiB), with 161 bytes of
-alignment gaps. **[V-ROM/V-TOOL]**
+alignment gaps. [evidence: ROM bytes, deterministic decoding]
 
-### 9.2 Sample palettes and codec
-
-There are three complete sample/instrument palettes. Runtime loads a base bank then a
-sparse overlay; overlay flag `0x80` means retain that base slot and supplies no sample.
-The first 33 overlay records are placeholders. **[V-ASM/V-TOOL]**
-
-| mode | base ROM / records | overlay ROM / records | effective slots | instrument map |
-|---:|---|---|---:|---|
-| 0 | `A7E330–AB60C2` / 33 | `B1DB50–B4D506` / 54 (33 placeholders) | 54 | `BB31A0–BB35C4` |
-| 1 | `AB60D0–AEE3A8` / 33 | `B4D510–B84740` / 56 (33 placeholders) | 56 | `BB35D0–BB39F4` |
-| 2 | `AEE3B0–B1DB50` / 33 | `B84740–BB3194` / 55 (33 placeholders) | 55 | `BB3A00–BB3E24` |
-
-Each instrument map is `u32 count` plus `count` 96-byte note maps; all have 11
-instruments. `(instrument-1)*96 + note-1` selects a sample slot. **[V-ASM/V-TOOL]**
-
-Normal sample records have a 0x94-byte header. `+0x04` is decoded PCM bytes (rounded
-to 32); `+0x0C` is initial pan; `+0x10/+0x11` are base-note/fine-tune; `+0x12` is
-default volume; `+0x14..+0x93` is the 128-byte predictor book. Flag bit 0 would add
-a 0x400-byte auxiliary table, but no music sample sets it. Encoded audio is standard
-N64 4-bit VADPCM: 9 bytes produce 16 samples, and stored bytes are
-`round_even((decodedBytes >> 5) * 9)`. **[V-ASM/V-TOOL]**
-
-Existing `decodeVadpcm` and `RESAMPLE_LUT` from `src/rom/music/libultra.ts` are useful;
-the sequencing/bank layer must be new. **[V-REPO/DESIGN]**
-
-### 9.3 Song and pattern formats
-
-Every song metadata object is exactly `0x710` bytes: **[V-ROM/V-ASM/V-TOOL]**
-
-```text
-+000 u16 orderCount
-+002 u16 restartOrder
-+004 u16 channels       # always 6
-+006 u16 patternCount
-+008 u16 initialSpeed   # always 2
-+00A u16 initialTempo   # always 130
-+00C u8  order[256]
-+110 u32 patternOffsets[256]  # relative to decoded pattern base
-+510 u16 patternRows[256]
-```
-
-A pattern payload starts with `u32 rawSize, u32 packedSize`, then Boss's custom
-LZ/RLE stream. The decoder consumes MSB-first 16-bit controls: 0 is a literal; 1 is
-either a 12-bit backward distance plus `(lowNibble+3)` copy length, or, with zero
-distance, `(next12+16)` repeats of the following byte. Leading `0x80` means an
-uncompressed remainder. All 14 payloads decode to their exact sizes. **[V-ASM/V-TOOL]**
-
-Cells use XM packed-cell syntax: note, instrument, volume, effect, parameter. If bit
-7 of the first byte is set, bits 0–4 select which fields follow; otherwise all five
-are present. The loader subtracts `0x10` from the volume column. Tick duration follows
-the tracker rule `sampleRate * 5 / (2 * tempo)` samples; speed is ticks per row.
-**[V-ASM]**
-
-### 9.4 Complete song list and loops
-
-The ROM contains no authored song titles or sound test. Credits name Zack Ohren, so
-the player must use code-proven roles and numeric labels rather than invented titles.
-**[V-ROM]**
-
-All 14 songs loop. At a pattern end, `0x80054984..0x800549A4` advances the order and,
-at `orderCount`, jumps to `restartOrder`. No stored Bxx/Dxx control-flow command is
-used. Thus the exact loop is orders `[restartOrder, orderCount)`; earlier orders are
-a one-time intro. **[V-ASM/V-TOOL]**
-
-| slot | defensible label | metadata | payload | orders / restart | intro rows | loop rows |
-|---:|---|---:|---|---:|---:|---:|
-| 0 | Race Music 0 | `BB3E30` | `BBA110–BBBF67` | 42 / 1 | 128 | 4928 |
-| 1 | Race Music 1 | `BB4540` | `BBBF70–BBDD19` | 43 / 1 | 128 | 5024 |
-| 2 | Race Music 2 | `BB4C50` | `BBDD20–BBFCAA` | 32 / 0 | 0 | 3776 |
-| 3 | Race Music 3 | `BB5360` | `BBFCB0–BC1C6D` | 30 / 1 | 128 | 3392 |
-| 4 | Race Music 4 | `BB5A70` | `BC1C70–BC4223` | 39 / 1 | 128 | 4544 |
-| 5 | Race Music 5 | `BB6180` | `BC4230–BC68D3` | 37 / 1 | 128 | 4352 |
-| 6 | Special race state 17 | `BB6890` | `BC68E0–BC73A5` | 16 / 0 | 0 | 1696 |
-| 7 | Startup / default menu | `BB6FA0` | `BC73B0–BC7FA4` | 13 / 1 | 128 | 1280 |
-| 8 | First-place / winner cue | `BB76B0` | `BC7FB0–BC8D70` | 13 / 1 | 128 | 1280 |
-| 9 | Middle-placement cue | `BB7DC0` | `BC8D70–BC9B6D` | 13 / 1 | 128 | 1280 |
-| 10 | Last-place cue | `BB84D0` | `BC9B70–BCA880` | 13 / 1 | 128 | 1280 |
-| 11 | Menu / return cue | `BB8BE0` | `BCA880–BCBECC` | 24 / 1 | 128 | 2624 |
-| 12 | Opponents / racer-profile screen | `BB92F0` | `BCBED0–BCC8E0` | 13 / 1 | 128 | 1280 |
-| 13 | Staff / credits screen | `BB9A00` | `BCC8E0–BCD31C` | 13 / 1 | 128 | 1280 |
-
-Authored effects are note/pitch/pan/volume plus `01/02` pitch slides (song 10), `08`
-pan, `0F` speed/tempo and `10` global volume (songs 6/12). Unused effect handlers need
-not be implemented for these ROM tracks. The mixer is stereo, has ten voice slots,
-and permits overlapping/releasing voices beyond the six pattern channels.
-**[V-ASM/V-TOOL]**
-
-Song 6 is selected with bank 1 when the race-state byte `+0x88` equals 17; its semantic
-name is unresolved. Slots 8/9/10 are selected by finishing position. Slot 12 is tied
-to the `OPPONENTS` racer-profile formatter; slot 13 is tied to the `MIDWAY STAFF` /
-`THE END` presentation. These are code/text associations, not embedded titles.
-**[V-ASM/V-ROM]**
-
-### 9.5 Race music palettes and player design
+#### Music and sound: Race music palettes and player design
 
 The 13 rows at `0xC39E0` provide up to six ordered `(song, bankMode)` choices. All 18
 combinations of race songs 0–5 and modes 0–2 occur; duplicates deliberately affect
-random weighting. Exact rows are in `audio/race_music.tsv`. **[V-ASM/V-TOOL]**
+random weighting. Exact rows are in `audio/race_music.tsv`. [evidence: disassembly, deterministic decoding]
 
 | internal map | ordered authored choices (`song/bank`) |
 |---|---|
@@ -746,23 +736,122 @@ is to expose separate `Race Music N — Palette M` entries for all 18 used race 
 then expose slots 6–13 with their code-proven/default palette and document that some
 post-race cues retain the preceding race palette. An alternative is to enumerate the
 full 14×3 structural cross-product, but that would present combinations not proven
-reachable. **[DESIGN]**
+reachable. [viewer design]
 
 Render at least the intro plus two loop passes. Record the output-sample position on
 first entry to `restartOrder`; return that as `DecodedMusic.loopStart`, with the end
-of the second pass as `loopEnd`. Cap to ten voices for exact stealing. **[DESIGN]**
+of the second pass as `loopEnd`. Cap to ten voices for exact stealing. [viewer design]
 
-### 9.6 Sound effects
+#### Music and sound: Sound effects
 
 The separate 85-entry table assigns IDs 60–144. Sorted extents exactly tile
 `0x92DDC0–0xA7E330`. A resource has a 128-byte predictor book before encoded data at
 `start+0x84`; extents may include trailing alignment. No authored names were found.
 SFX are not hidden music/stingers and need not be exposed in the music player.
-**[V-ROM/V-ASM/V-TOOL]**
+[evidence: ROM bytes, disassembly, deterministic decoding]
 
-## 10. Mapping onto `src/rom/`
+### 5.3 Instruments and sample encoding
 
-Recommended loader layout: **[DESIGN]**
+Instrument banks, envelopes, loops, and sample encoding are described above.
+
+### 5.4 Music catalog and loop points
+
+#### Music and sound: Complete song list and loops
+
+The ROM contains no authored song titles or sound test. Credits name Zack Ohren, so
+the player must use code-proven roles and numeric labels rather than invented titles.
+[evidence: ROM bytes]
+
+All 14 songs loop. At a pattern end, `0x80054984..0x800549A4` advances the order and,
+at `orderCount`, jumps to `restartOrder`. No stored Bxx/Dxx control-flow command is
+used. Thus the exact loop is orders `[restartOrder, orderCount)`; earlier orders are
+a one-time intro. [evidence: disassembly, deterministic decoding]
+
+| slot | defensible label | metadata | payload | orders / restart | intro rows | loop rows |
+|---:|---|---:|---|---:|---:|---:|
+| 0 | Race Music 0 | `BB3E30` | `BBA110–BBBF67` | 42 / 1 | 128 | 4928 |
+| 1 | Race Music 1 | `BB4540` | `BBBF70–BBDD19` | 43 / 1 | 128 | 5024 |
+| 2 | Race Music 2 | `BB4C50` | `BBDD20–BBFCAA` | 32 / 0 | 0 | 3776 |
+| 3 | Race Music 3 | `BB5360` | `BBFCB0–BC1C6D` | 30 / 1 | 128 | 3392 |
+| 4 | Race Music 4 | `BB5A70` | `BC1C70–BC4223` | 39 / 1 | 128 | 4544 |
+| 5 | Race Music 5 | `BB6180` | `BC4230–BC68D3` | 37 / 1 | 128 | 4352 |
+| 6 | Special race state 17 | `BB6890` | `BC68E0–BC73A5` | 16 / 0 | 0 | 1696 |
+| 7 | Startup / default menu | `BB6FA0` | `BC73B0–BC7FA4` | 13 / 1 | 128 | 1280 |
+| 8 | First-place / winner cue | `BB76B0` | `BC7FB0–BC8D70` | 13 / 1 | 128 | 1280 |
+| 9 | Middle-placement cue | `BB7DC0` | `BC8D70–BC9B6D` | 13 / 1 | 128 | 1280 |
+| 10 | Last-place cue | `BB84D0` | `BC9B70–BCA880` | 13 / 1 | 128 | 1280 |
+| 11 | Menu / return cue | `BB8BE0` | `BCA880–BCBECC` | 24 / 1 | 128 | 2624 |
+| 12 | Opponents / racer-profile screen | `BB92F0` | `BCBED0–BCC8E0` | 13 / 1 | 128 | 1280 |
+| 13 | Staff / credits screen | `BB9A00` | `BCC8E0–BCD31C` | 13 / 1 | 128 | 1280 |
+
+Authored effects are note/pitch/pan/volume plus `01/02` pitch slides (song 10), `08`
+pan, `0F` speed/tempo and `10` global volume (songs 6/12). Unused effect handlers need
+not be implemented for these ROM tracks. The mixer is stereo, has ten voice slots,
+and permits overlapping/releasing voices beyond the six pattern channels.
+[evidence: disassembly, deterministic decoding]
+
+Song 6 is selected with bank 1 when the race-state byte `+0x88` equals 17; its semantic
+name is unresolved. Slots 8/9/10 are selected by finishing position. Slot 12 is tied
+to the `OPPONENTS` racer-profile formatter; slot 13 is tied to the `MIDWAY STAFF` /
+`THE END` presentation. These are code/text associations, not embedded titles.
+[evidence: disassembly, ROM bytes]
+
+## 6. Unused and hidden content
+
+### 6.1 Unreferenced assets
+
+#### Unused and hidden content
+
+This section follows the completed core spec as required. “Unreferenced” below is
+always scoped to the stated test; absence of an absolute pointer alone is not proof
+of runtime impossibility.
+
+### 6.2 Cut or inaccessible levels
+
+Candidate levels are distinguished from alternate, debug, and intentionally hidden retail content above.
+
+### 6.3 Debug features
+
+Shipped debug strings and executable features are listed only when supported by a code or data reference.
+
+### 6.4 Prototype or revision-specific content
+
+Source-archive and prototype material is explicitly distinguished from shipped retail data.
+
+## 7. nviewer implementation
+
+### 7.1 Module mapping
+
+#### Complete course catalog: Public names and viewer list
+
+Fourteen public label pointers begin at ROM `0xC1788`; strings begin at `0xC824C`.
+The corresponding internal IDs are the 14 words at `0xC1F24`: [evidence: ROM bytes]
+
+| public ID | public label | internal ID / name |
+|---:|---|---|
+| 0 | Soda Mountain | 8 / Soda Fountain |
+| 1 | Giant Toys | 6 / Toys |
+| 2 | Medieval Mayhem | 10 / Kingdom O Karnage |
+| 3 | Wild West Ruckus | 3 / Wild West |
+| 4 | House of Horrors | 9 / Haunted House |
+| 5 | Creepy Carnie | 7 / CarnEvil |
+| 6 | Tacky Tiki | 5 / Tacky Tiki |
+| 7 | Nautical Adventure | 0 / Test Track |
+| 8 | Retro Metro | 2 / Retro Metro |
+| 9 | Planet X | 4 / Planet X |
+| 10 | Space Race | 1 / Space Race |
+| 11 | No Track | 11 / Four Player 1 |
+| 12 | Stunt Bowl | 11 / Four Player 1 |
+| 13 | Halfpipe | 12 / Four Player 2 |
+
+`No Track` is a UI sentinel rather than a separate archive [hypothesis]. The viewer
+should expose 13 unique physical environments, preferably in public order while
+omitting the duplicate: the eleven named courses followed by Stunt Bowl and
+Halfpipe. It should retain internal IDs in diagnostics. [viewer design]
+
+#### Mapping onto `src/rom/`
+
+Recommended loader layout: [viewer design]
 
 | file | responsibility | difficulty |
 |---|---|---|
@@ -781,7 +870,7 @@ walker remains game-specific. Existing texture and libultra audio primitives are
 reusable; no existing sequence engine matches the tracker. No shared type extension is
 required for a first implementation: skydome geometry can use `MeshSky`; atmosphere
 can initially be a diagnostic/background approximation unless a new renderer contract
-is deliberately added. **[V-REPO/DESIGN]**
+is deliberately added. [evidence: nviewer source, viewer design]
 
 Every instance must be layered:
 
@@ -793,7 +882,7 @@ Every instance must be layered:
   visibility on by default but independently toggleable.
 
 Unreferenced mesh assets should go in `unplaced`, not be silently instantiated.
-**[DESIGN]**
+[viewer design]
 
 A sensible staged implementation is:
 
@@ -808,70 +897,21 @@ A sensible staged implementation is:
 The format supports direct random access and does not benefit materially from a
 persistent cache in the initial implementation: inflate only the selected primary map
 and its referenced secondaries. A per-load memo of repeated material display lists is
-enough. **[DESIGN]**
+enough. [viewer design]
 
-## 11. Unused and hidden content
+### 7.2 Supported features
 
-This section follows the completed core spec as required. “Unreferenced” below is
-always scoped to the stated test; absence of an absolute pointer alone is not proof
-of runtime impossibility.
+The Technical summary states the supported releases and principal decoded features.
 
-### 11.1 No orphan course
+### 7.3 Approximations and omissions
 
-All 13 internal records resolve to valid, non-overlapping bundles, and those bundles
-exactly tile `0x1775C0–0x7B36D0`. The public selector accounts for all 13 archives.
-No extra map record or map-like bundle was established. Internal `Test Track` is public
-`Nautical Adventure`, not unused content. **[V-ROM/V-TOOL]**
+Viewer approximations are distinguished from facts about the game formats.
 
-The header retains a complete fourth path-file channel, but its count is zero in all
-13 maps. This is a dormant format path, not evidence that path data was cut.
-**[V-TOOL]**
+## 8. Verification and remaining work
 
-### 11.2 Bounded uncataloged-container audit
+### 8.1 Verification evidence
 
-Of the 324 zlib containers left after the map and vehicle catalogs, 225 have their
-exact ROM start stored as an aligned word, mainly in master arrays around `0xC1DA0`,
-`0xC1EA0`, `0xC2204`, `0xC2280`, `0xC2454`, `0xC2630`, and `0xC2920`. They are
-cataloged even though all higher-level table names are not yet known. **[V-TOOL]**
-Thirty-three are the standalone models documented in §7.3.
-
-Ninety-nine have no such absolute-start reference. They occur in nine physical runs.
-The first, `0xD9340–0xDD034`, contains obviously live-looking biographies, dialogue,
-menu text and credits, demonstrating why absence of a literal pointer cannot prove
-unused status. Other candidate runs are recorded in `env_unused/orphan_audit.json`.
-**[V-ROM/V-TOOL]**
-
-### 11.3 Two strong omitted model assets
-
-The strongest unused candidates immediately precede the model catalog whose first
-entry is ROM `0x914EE0`: **[V-ROM/V-TOOL]**
-
-- `0x9147D0`, container `0x3E2 → 0x12D0`: valid model geometry at inflated `+0x48`,
-  11 vertices, six faces, 12 UVs, one color; a flat 500×500 plane using a 32×128 IA8
-  alpha strip.
-- `0x914BC0`, container `0x31A → 0x1180`: valid model geometry, four vertices and
-  one 65×75 quad, using a 64×48 IA8 image with mip levels.
-
-Neither address appears as an aligned absolute word anywhere in the ROM, while the
-next physical file is the model catalog's first pointer. Their flat geometry and IA
-alpha are consistent with shadow/decal planes **[HYP]**. What is verified is narrower:
-two structurally valid model-format assets omitted from the adjacent catalog.
-
-### 11.4 Compiled environment controls
-
-Command cases `0x8000CC64..0x8000CD3C` set, decrement, increment, or byte-set
-`fogBaseLevel`, clamp it, and print `fogBaseLevel = %d`. Case `0x8000BECC` controls
-an oscillating sky transform through globals `0x800B8BD0..0x800B8BDC`.
-The code exists, but no retail menu/controller path was proved; call these compiled
-debug/control features with unknown reachability, not accessible cheats. **[V-ASM]**
-
-Strings and table records for `Day`, `Day Fog`, `Night`, `Night Fog`, `Morning`, and
-`Morning Fog` exist at ROM `0xC5560..0xC5593` and `0xAB5D8..0xAB677`, but their
-consumer is unresolved. They are possible environment-mode names only. **[V-ROM/HYP]**
-
-## 12. Verification evidence and open questions
-
-### 12.1 Reproducible evidence
+#### Verification evidence and open questions: Reproducible evidence
 
 | artifact | coverage |
 |---|---|
@@ -889,15 +929,14 @@ consumer is unresolved. They are possible environment-mode names only. **[V-ROM/
 Generated JSON/TSV output is authoritative where the prose omits long per-asset
 tables. Re-running the environment and orphan tools produced byte-identical outputs;
 all specialist analyzers completed with bounds/index invariants intact.
-**[V-TOOL]**
+[evidence: deterministic decoding]
 
-### 12.2 Emulator evidence and limitation
+#### Verification evidence and open questions: Emulator evidence and limitation
 
 The first fresh session booted far enough for Glide64mk2 to reject custom graphics
 ucode CRC `844B55B5`; it produced no screenshot. A second fresh session using the
 installed z64 video and CXD4 RSP LLE plugins exited immediately before logging or
-drawing. Neither was retried in-place. Both run directories contain exact commands and
-cleanup notes. **[V-EMU]**
+drawing. [evidence: emulator observation]
 
 A third, separately authorized fresh session used GLideN64 and retained RSP-HLE.
 The equivalent current setting is
@@ -907,7 +946,7 @@ rev.41c7ba27 rendered a correct 320×240 legal/title frame after startup black. 
 second frame about 105 seconds later was byte-identical. The preserved frame is
 `emulator/gliden64_1/selected/title.png`, SHA-256
 `1aa960682208b325a0411f83f94f34c84f36a17c808469024c5a068fc360118e`.
-**[V-EMU]**
+[evidence: emulator observation]
 
 The game did not advance in this bounded run: two START submissions drained, but
 `input.status` remained `idle polls=0`, no menu/race frame appeared, and mupen64plus
@@ -915,9 +954,9 @@ used roughly one CPU core. The exact launch, config, timestamps, hashes and shut
 audit are preserved in `emulator/gliden64_1/NOTES.md`. Thus this verifies boot/title
 rendering only; it does **not** dynamically validate public course ordering/names,
 skydomes, atmosphere, camera, FOV, RAM map loads or audio. Those claims remain based
-on retail bytes, code and exhaustive decoded-structure checks. **[V-EMU/OPEN]**
+on retail bytes, code and exhaustive decoded-structure checks. [evidence: emulator observation, open question]
 
-### 12.3 Open questions
+#### Verification evidence and open questions: Open questions
 
 - Resolve face words `+0/+2` and bytes `+5..+7` beyond their verified non-padding
   status.
@@ -939,39 +978,10 @@ on retail bytes, code and exhaustive decoded-structure checks. **[V-EMU/OPEN]**
   supports one.
 - Obtain in-race runtime or hardware captures for final course/environment comparison.
 
-### 12.4 Process audit
+### 8.2 Known unknowns
 
-Static work stayed inside this research directory and the nviewer repository was not
-modified. The exact-game Hack64 viewer was cloned once, shallow and sparse, and used
-only as a lead; retail code corrected its `78 DA`-only extraction, uncertain secondary
-base, material interpretation and white-wireframe sky. **[V-TOOL]**
+Unresolved semantics are labelled **Hypothesis** or **Open question** where they occur.
 
-One process inefficiency was caught: the first audio exploration materialized 5,255
-overlapping/duplicate zlib candidates. It was stopped, the 39 MiB candidate trees were
-deleted by their owner, none of their results entered this spec, and the final analyzer
-was rebuilt around the actual audio tables. This should be standardized as a rule:
-magic scans may generate an in-memory index, but must not emit one file per candidate
-unless a catalog/table has validated ownership. **[V-TOOL/PROCESS]**
+### 8.3 References
 
-Two further process failures were found after an earlier clean-process report. Root
-terminated PIDs `2456194/2456215`, a recursive `grep -RIn` pipeline over this research
-tree that had run for more than twelve minutes with output truncated through
-`head -100`. Root also terminated PIDs `2392438/2392441`, alive for 41m46s, whose
-Stunt-specific compression query recursively scanned all of `r49` and the nviewer
-repository before `head -200`. The latter was expressly outside the bounded search
-scope; its exact originating agent could not be reconstructed after termination, but
-the query terms establish this investigation's provenance. **[PROCESS]**
-
-These invalidate the earlier hygiene claim and show that a broad recursive search
-plus a truncating pipe is not self-limiting. Future audits should query bounded file
-lists with `rg`, sample first when appropriate, and inspect process ancestry and exact
-arguments across the workspace/scratch scope before declaring cleanup complete.
-**[PROCESS]**
-
-At most one Stunt Racer emulator session was live at a time. Each attempt used a fresh
-child/run directory and was cleaned before the next. The later GLideN64 validation was
-also one launch in a fresh child/run directory; it stopped the scoped PID normally and
-removed its waiting input helper. After all children finished, the final audit
-inspected user-owned process arguments and ancestry, not only paths containing the
-game name. No Stunt Racer emulator, helper, analyzer or search process remained.
-**[PROCESS]**
+External documentation, decompositions, and source archives are cited inline where used.

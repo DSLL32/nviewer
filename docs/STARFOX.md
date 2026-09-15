@@ -1,78 +1,54 @@
-# Star Fox 64 (N64, US V1.0 and V1.1): ROM format specification for the level viewer
+# Star Fox 64 — Nintendo 64 ROM format specification
 
-This document specifies everything needed to add *Star Fox 64* to the viewer:
-- ROM identification, boot, and the file table with its MIO0 codec;
-- the level list and how levels are loaded;
-- the full level format: placement, display lists, render presets, terrain, grounds, event actors and skeletons;
-- skies, fog and lighting;
-- the music driver, with an offline renderer spec and loop points;
-- the differences between V1.0 and V1.1;
-- the mapping onto `src/rom/`;
-- verification evidence, open questions, and unused or hidden content.
+This manual describes the shipped data formats needed to identify, extract, and
+present Star Fox 64 content. Claims state their evidence inline; unsupported
+interpretations are labelled hypotheses.
 
-**Evidence labels:**
-- **Verified:** checked against the ROM bytes (decoded data, disassembly) or the running game (emulator RAM, breakpoints, screenshots, audio captures).
-- **Decomp:** read from the sf64 decompilation, which builds a byte-identical V1.1 ROM; strong, but not independently re-checked where so labelled.
-- **Leak-supported:** rests only on the partial source leak (`~/bbgames/sf64`); file, object and symbol names are cited.
-- **Hypothesis:** inference.
+## 1. Overview
 
-**Research material** is under `/home/n64/.ai-tmp/r49/sf/`:
+### 1.1 Technical summary
 
-| path | contents |
+| Property | Value |
 |---|---|
-| `files/` | extracted files |
-| `fs/` | filesystem and version diff |
-| `lv/` | levels, with the prototype decoder and renders |
-| `rt/` | runtime environment |
-| `mus/` | music, with the prototype renderer and WAVs |
-| `shots/` | reference screenshots of the real game |
-| `notes/*.md` | detailed notes per topic |
+| Asset organization | DMA table of 64 entries `{vromStart, romStart, romEnd, compressed}` at ROM 0xDE480 (V1.1) / 0xD9A90 (V1.0), found by pattern; 51 files MIO0, 13 raw |
+| Compression | MIO0 (header, control bits, back-reference and literal streams); trivial, and the viewer needs a new ~40-line decoder |
+| Graphics microcode | F3DEX 1.x. |
+| Geometry | 0x14-byte placement records `{f32 z, s16 z2, x, y, rx, ry, rz, id}`; 400-entry object-info table (ids 0-399; id → display list / draw recipe); 108-entry event-actor model table; 0x44-byte environment record (fog, light, ambient, BGM); F3DEX 1.x display lists with **no render state** (the game prepends one of 88 presets); camera-attached ground planes; procedural Titania terrain; skeleton models |
+| Textures | RGBA16, CI4/CI8 with RGBA16 TLUTs, IA8/IA16, and I textures. |
+| Collision | Object hitboxes and level-specific collision routines; no single general-purpose level collision mesh. |
+| Music driver | Nintendo EAD sequence driver (not libultra): sequence, soundfont and sample tables, 3-level bytecode, NEAD "SF" RSP ucode, 32 kHz, 180 updates/s, 48 ticks per beat. 44 distinct music sequences. A ported renderer matches the game: waveform correlation 1.000 on Game Over, identical sequence state on Corneria |
+| Audio microcode | Nintendo EAD sequence driver (not libultra): sequence, soundfont and sample tables, 3-level bytecode, NEAD "SF" RSP ucode, 32 kHz, 180 updates/s, 48 ticks per beat. 44 distinct music sequences. A ported renderer matches the game: waveform correlation 1.000 on Game Over, identical sequence state on Corneria |
+| Sample encoding | Nintendo VADPCM. |
+| Levels | 21 level ids (19 real levels, an unused playable stub (4) and an empty slot (15)) plus all-range, warp and escape sub-lists, plus 3 Versus stages. A *scene* table maps each level to an overlay and up to 15 RSP segment files. Asset files are position-independent per segment |
+| Memory requirement | Base 4 MiB. |
+| Viewer support | Filesystem: easy. Scenery, placement and presets: easy-medium, since `displaylist.ts` already handles every command used. Space levels (event actors), skeletons, Titania terrain, lighting and backdrops: medium. Music: medium-high (a new ~1300-line engine port; VADPCM and resampler reusable) |
+| Coordinates | 1 vertex unit = 1 world unit, right-handed Y-up, no mirroring; on-rails world z = −zPos1 − 3000 + zPos2 |
+| Sky, fog, light | environment record + backdrop display lists + starfield (*Skies, backdrops, starfields*, *Fog, lights, clear colour, camera*) |
+| Versions | viewer data is identical except the Venom 1 placement list (23 entries) and three event-script edits; code has 4 engine fixes + 3 overlay tweaks + a debug libultra. **V1.1 primary; one loader for both**, with per-version table addresses (*Addresses that differ per version*) |
+| Unused and hidden (*Unused and hidden content*) | unused level 4 (loads and plays) and empty slot 15; an unused 1978-entry Venom 1 layout; 208 unreferenced assets (Japanese menu text, an older HUD, a versus effects set, a Corneria sky quad); 52 unused radio lines (an early control tutorial); a crash-debugger button code; 154 dead functions; about 186 KB of unreferenced music samples; leak-only content (a "BS" stage, an older Titania boss and Sector X boss, a Japanese config screen, test photos, songs not in the ROM) |
+| Leak | a V1.0-lineage English build tree with iQue localisation; level and audio data byte-identical to the ROM (Venom 1 list = V1.0) |
 
-Unless marked, addresses are V1.1. RAM addresses are KSEG0 (0x80...), ROM offsets are into the big-endian `.z64`, and "file + 0x..." is an offset into a decompressed DMA file.
+### 1.2 ROM identification
 
-## 0. At a glance
+| Release | NAME | Game code | Revision | Size | CRC1 | CRC2 | SHA-1 | CIC | Build |
+|---|---|---|---:|---:|---|---|---|---|---|
+| USA V1.0 | `STARFOX64` | `NFXE` | 0 | 12 MiB (`0xC00000`) | `A7D015F8` | `2289AA43` | `d8b1088520f7c5f81433292a9258c1184afa1457` | CIC-6101 | — |
+| USA V1.1 | `STARFOX64` | `NFXE` | 1 | 12 MiB (`0xC00000`) | `BA780BA0` | `0F21DB34` | `09f0d105f476b00efa5303a3ebc42e60a7753b7a` | CIC-6101 | — |
 
-| topic | summary |
-|---|---|
-| ROM | 12 MB, game code `NFXE`, CIC-6101; version byte 0x3F: 0 = V1.0, 1 = V1.1 |
-| code | main is uncompressed at 0x80000450; 9 MIO0-compressed overlays (per-level code, menu, ending) loaded at 0x80187520 (V1.1) / 0x8017D390 (V1.0) |
-| filesystem | DMA table of 64 entries `{vromStart, romStart, romEnd, compressed}` at ROM 0xDE480 (V1.1) / 0xD9A90 (V1.0), found by pattern; 51 files MIO0, 13 raw |
-| codec | MIO0 (header, control bits, back-reference and literal streams); trivial, and the viewer needs a new ~40-line decoder |
-| levels | 21 level ids (19 real levels, an unused playable stub (4) and an empty slot (15)) plus all-range, warp and escape sub-lists, plus 3 Versus stages. A *scene* table maps each level to an overlay and up to 15 RSP segment files. Asset files are position-independent per segment |
-| level format | 0x14-byte placement records `{f32 z, s16 z2, x, y, rx, ry, rz, id}`; 400-entry object-info table (ids 0-399; id → display list / draw recipe); 108-entry event-actor model table; 0x44-byte environment record (fog, light, ambient, BGM); F3DEX 1.x display lists with **no render state** (the game prepends one of 88 presets); camera-attached ground planes; procedural Titania terrain; skeleton models |
-| coordinates | 1 vertex unit = 1 world unit, right-handed Y-up, no mirroring; on-rails world z = −zPos1 − 3000 + zPos2 |
-| sky, fog, light | environment record + backdrop display lists + starfield (§5.5, §5.6) |
-| music | Nintendo EAD sequence driver (not libultra): sequence, soundfont and sample tables, 3-level bytecode, NEAD "SF" RSP ucode, 32 kHz, 180 updates/s, 48 ticks per beat. 44 distinct music sequences. A ported renderer matches the game: waveform correlation 1.000 on Game Over, identical sequence state on Corneria |
-| versions | viewer data is identical except the Venom 1 placement list (23 entries) and three event-script edits; code has 4 engine fixes + 3 overlay tweaks + a debug libultra. **V1.1 primary; one loader for both**, with per-version table addresses (§7.5) |
-| difficulty | Filesystem: easy. Scenery, placement and presets: easy-medium, since `displaylist.ts` already handles every command used. Space levels (event actors), skeletons, Titania terrain, lighting and backdrops: medium. Music: medium-high (a new ~1300-line engine port; VADPCM and resampler reusable) |
-| unused and hidden (§11) | unused level 4 (loads and plays) and empty slot 15; an unused 1978-entry Venom 1 layout; 208 unreferenced assets (Japanese menu text, an older HUD, a versus effects set, a Corneria sky quad); 52 unused radio lines (an early control tutorial); a crash-debugger button code; 154 dead functions; about 186 KB of unreferenced music samples; leak-only content (a "BS" stage, an older Titania boss and Sector X boss, a Japanese config screen, test photos, songs not in the ROM) |
-| leak | a V1.0-lineage English build tree with iQue localisation; level and audio data byte-identical to the ROM (Venom 1 list = V1.0) |
+Verified from the normalized ROM headers and complete-image SHA-1 hashes.
 
-## 1. ROM identification
+### 1.3 Terminology and conventions
 
-Both US releases are 12 MB big-endian ROMs with game code `NFXE`. Byte-swapped `.v64` and little-endian `.n64` dumps are normalised first (`normalizeByteOrder`).
+ROM and memory ranges are half-open. Offsets, addresses, encoded sizes, masks,
+and opcodes are hexadecimal unless stated otherwise. Multi-byte CPU fields are
+big-endian. RAM addresses are virtual unless explicitly identified as physical;
+segmented, VROM, and file-relative addresses are named at each use.
 
-| field (offset) | V1.0 | V1.1 |
-|---|---|---|
-| md5 (whole ROM) | caf9a78db13ee00002ff63a3c0c5eabb | 741a94eee093c4c8684e66b89f8685e8 |
-| 0x00 PI word / 0x04 clock / 0x08 entry | 80371240 / 03A07F5F / 80000400 | same |
-| 0x0C release | 00001448 | 00001448 |
-| 0x10 CRC1 / 0x14 CRC2 | A7D015F8 / 2289AA43 | BA780BA0 / 0F21DB34 |
-| 0x20 name | `STARFOX64` + 11 spaces | same |
-| 0x3B game code | `NFXE` | `NFXE` |
-| 0x3F version byte | 0x00 | 0x01 |
-| IPL3 0x40-0xFFF | CIC-NUS-6101 (CRC32 6170A4A1) | identical bytes |
-| DMA file table | ROM 0xD9A90 | ROM 0xDE480 |
+## 2. Program and storage architecture
 
-**Verified** (`fs/romid.py`): CRC1/CRC2 recompute with the 6101/6102 checksum over ROM 0x1000-0x100FFF, and the IPL3 is the known 6101 one.
+### 2.1 Boot and executable layout
 
-Detection: accept `NFXE` at 0x3B, then take the version from byte 0x3F (0 or 1). Confirm it by locating the DMA table with the content pattern in §3.1: it must sit at 0xD9A90 for V1.0 or 0xDE480 for V1.1. If the byte and the table disagree, trust the table: a patched header should not select the wrong address set.
-
-Not in scope, for reference: the Japanese ROM (`NFXJ`, version 0, CRC FFCAA7C1/68858537, release 0x1446) has its table at 0xE93C0 with 63 entries. Verified by pattern search only.
-
-## 2. Boot and code
-
-### 2.1 makerom and main
+#### Boot and code: makerom and main
 
 - **ROM 0x0000-0x0FFF:** the header and the 6101 IPL3.
 - **ROM 0x1000-0x104F:** entry stub at vram 0x80000400. It zeroes bss (8 bytes per step), sets `sp`, and jumps to `bootproc` 0x80004DA8. **Verified** by disassembly.
@@ -100,92 +76,26 @@ The decomp's rev0 yaml gives a V1.0 overlay vram of 0x80187520. That is **wrong*
 - **verified** from every V1.0 overlay's internal addresses;
 - **verified** in V1.0 RDRAM (ovl_menu found at 0x8017D390).
 
-### 2.2 Overlays and scenes
+### 2.2 Memory and address mapping
 
-Game code outside main lives in 9 overlays: `ovl_i1`..`ovl_i6` (level code), `ovl_menu` (title, option, map, game over), `ovl_ending` and `ovl_unused`. Each overlay is linked at the load base. At most one overlay is in RAM at a time.
+#### Level format: Addressing and units
 
-What is loaded is described by **Scene** structs in main. Each is 0x98 bytes:
-```
-+0x00 u32 ovl.rom.start, ovl.rom.end     vrom range of the overlay file (0 = none)
-+0x08 u32 ovl.bss.start, ovl.bss.end     RAM
-+0x10 u32 ovl.text.start, ovl.text.end
-+0x18 u32 ovl.data.start, ovl.rodata.end
-+0x20 15 x { u32 vromStart, u32 vromEnd } asset slot i = RSP segment i+1 (0 = empty)
-```
-**Verified:** all 44 structs decode in both versions (`fs/scenes.py`, `lv/proto/dump.txt`).
+- **Segmented addresses.** A pointer `0xSSOOOOOO` with SS in 1..15 resolves to `file(segment SS)[OOOOOO]` for the scene in *How a level is loaded*.
+- **Pointers into main.** A few pointers point into main (0x80000450..): render presets and some engine display lists. They resolve to `main[addr - 0x80000450]` for the matching version.
+- **Pointers into overlays.** Overlay addresses (0x8017xxxx-0x801Cxxxx) occur only in code-built lists and function pointers, and a static loader does not follow them.
+- **Units and axes.**
+  - One vertex unit is one world unit; there is no scaling.
+  - The frame is right-handed, Y up, with the player flying towards −Z.
+  - No X mirroring (**verified**: the "GOOD LUCK!" sign on a Corneria building reads correctly, and renders from the RAM camera match the game).
+- **Matrices** are row-vector (v' = v·M). Game call order `T · RY · RX · RZ` means the vertex is rotated about Z, then X, then Y, then translated.
+- **Rotation conventions** (decomp `sys_matrix.c`):
+  - RY: x' = x cos + z sin, z' = −x sin + z cos;
+  - RX: y' = y cos − z sin, z' = y sin + z cos;
+  - RZ: x' = x cos − y sin, y' = x sin + y cos.
 
-Tables of Scene structs start at V1.0 0x800C59C4 and V1.1 0x800CA3B4 (`sNoOvl_Logo`). Table order is: logo, ending (6 setups), title, option, map, game over, then the level scenes.
+### 2.3 ROM map and asset organization
 
-Two ids select a scene:
-- **SceneId:** the `Load_SceneSetup` switch. Its jump table is at V1.0 0x800D15C4 and V1.1 0x800D5FB4, covering cases 0..24, plus 50 (Versus) and 99 (logo).
-- **setup:** an index into that scene's array, `gSceneSetup`.
-
-Which file sits in which segment is **identical in both versions** (**verified**). Only overlay RAM addresses and vrom values differ.
-
-Load algorithm. **Verified** by disassembly of both versions against decomp `fox_load.c`, and in RAM.
-1. `Load_InitDmaAndMsg` (V1.0 80055028, V1.1 80059498):
-   - reads the DMA table from a hard-coded ROM offset (0xD9A90 / 0xDE480) into gDmaTable;
-   - loads ast_radio into RAM right after it.
-2. `Load_RomFile(vrom, dst, size)` (V1.0 80054710, V1.1 80058B80) finds the entry whose vromStart equals `vrom`.
-   - Raw file: `Lib_DmaRead` (0x800033E0 in both) copies it.
-   - Compressed file: the stream is copied to gFrameBuffers (0x8038F800), then `Mio0_Decompress(src, dst)` runs (0x8001EE70; the routine is byte-identical in both versions).
-3. `Load_SceneFiles(scene)` (V1.0 800547D8, V1.1 80058C48) packs everything from the load base.
-   - The overlay is loaded, then its bss is cleared.
-   - Then, for each non-empty slot n = 1..15:
-     - set `gSegments[n] = K0_TO_PHYS(ramPtr)`;
-     - emit `gSPSegment(n, ...)`;
-     - load the file;
-     - advance by the file's decompressed size.
-   - Empty slots keep stale `gSegments` values.
-   - gSegments is at V1.0 0x800DD5E0 and V1.1 0x800E1FD0 (**verified** in RAM).
-
-All asset files are **position-independent within their segment**. A pointer `0xSSOOOOOO` inside any asset is `file(slot SS)[OOOOOO]`. A static loader therefore needs only the scene's segment-to-file map. It never needs RAM addresses, except for the few pointers into main listed in §5.1.
-
-## 3. Filesystem and compression
-
-### 3.1 DMA file table
-
-The table is 0x5A0 bytes: 90 slots of 16 bytes, of which 64 are used and the rest are zero. All values are big-endian.
-```
-+0x00 u32 vromStart   address of the file in the uncompressed linked image; the game's file id
-+0x04 u32 romStart    ROM offset of the stored bytes
-+0x08 u32 romEnd      end of the stored bytes (0 terminates the table)
-+0x0C u32 compressed  1 = MIO0 stream, 0 = raw
-```
-- **Location:** ROM 0xD9A90 (V1.0) or 0xDE480 (V1.1). The table is itself DMA file 2.
-- **Pattern search (verified unique in both ROMs):** entry 0 = {0, 0, 0x1050, 0}, entry 1 = {0x1050, 0x1050, T, 0}, and entry 2's vromStart = T, where T is the table's own ROM offset. Scan 4-byte-aligned offsets from 0x1000 to 0x200000.
-- **Reading:** read entries until romEnd == 0. The decompressed size is the next entry's vromStart minus this one's. For the last entry, use the MIO0 header size.
-- **Invariants (verified):**
-  - files are contiguous on ROM (`romEnd[i] == romStart[i+1]`);
-  - all bounds are multiples of 16;
-  - files 0-5 have vrom == rom;
-  - after the last file, the ROM is 0xFF up to 12 MB.
-- **Compression:** 51 files are MIO0. 13 are raw: makerom, main, dma_table, the three audio files, ast_great_fox, ast_star_wolf, ast_7_ti_2, ast_8_ti, ast_9_ti, ast_A_ti and ast_logo.
-- **Leak cross-check:** the leak's `Source/fox_press` compresses exactly this set, and its `linux_tools/romaddress.c` writes the table after linking with the same vrom/rom semantics (leak-supported; the raw/compressed set is **verified** against the ROM flags).
-
-### 3.2 MIO0
-
-**Verified** against the game routine `Mio0_Decompress` (0x8001EE70) and all 102 compressed files of both ROMs. The leak's `slidec/slid12.o` `slidstart` is byte-identical to the ROM routine.
-```
-+0x00 "MIO0"
-+0x04 u32 decompressedSize
-+0x08 u32 backrefOffset   (from header start)
-+0x0C u32 literalOffset   (from header start)
-+0x10 control stream: u32 BE words, bits consumed MSB first
-```
-Decoding loop, until `decompressedSize` bytes have been written:
-- **control bit 1:** copy one byte from the literal stream.
-- **control bit 0:** read `u16 v` (BE) from the back-reference stream. Copy `(v >> 12) + 3` bytes (3..18), one at a time, from `out[pos - ((v & 0xFFF) + 1)]` (distance 1..4096). Overlapping copies act as runs.
-
-Stream layout is contiguous in every file: control bits end at backrefOffset, back-references end at literalOffset, and literals end 0-14 zero bytes before romEnd.
-
-Both versions produce byte-identical streams for identical content: 39 of 51 streams match, and the other 12 are exactly the files whose content changed.
-
-Reference implementations:
-- `/home/n64/.ai-tmp/r49/sf/tools/extract.py` (Python);
-- `/home/n64/.ai-tmp/r49/sf/fs/proto/sf64fs.ts` (TypeScript, no dependencies). `npx tsx test.ts` decompresses every file of both ROMs and checks sizes and md5s: ALL OK, about 0.2 s per ROM.
-
-### 3.3 ROM map
+#### Filesystem and compression: ROM map
 
 vrom = decompressed image address; rom = stored range; C = MIO0. V1.1 ROM ranges shift by +0x49F0 for entries 2-54 (entry 1 only in romEnd; ast_radio's romEnd +0x4A20), and by +0x4A20 to +0x4CD0 from entry 55 on (**verified**; the complete V1.0 map is in `notes/lead_filecompare.txt`). "Same" means the decompressed bytes are identical in both versions.
 
@@ -258,19 +168,211 @@ vrom = decompressed image address; rom = stored range; C = MIO0. V1.1 ROM ranges
 
 The names in the second column come from the decomp's `src/dmatable.c`. The names in parentheses come from the leak's `Source/spec` segment order, which maps 1:1 onto the 64 entries (leak-supported; the raw/compressed pattern is **verified** to match).
 
-### 3.4 Extracting every file
+### 2.4 Compression formats
+
+#### Filesystem and compression: DMA file table
+
+The table is 0x5A0 bytes: 90 slots of 16 bytes, of which 64 are used and the rest are zero. All values are big-endian.
+```
++0x00 u32 vromStart   address of the file in the uncompressed linked image; the game's file id
++0x04 u32 romStart    ROM offset of the stored bytes
++0x08 u32 romEnd      end of the stored bytes (0 terminates the table)
++0x0C u32 compressed  1 = MIO0 stream, 0 = raw
+```
+- **Location:** ROM 0xD9A90 (V1.0) or 0xDE480 (V1.1). The table is itself DMA file 2.
+- **Pattern search (verified unique in both ROMs):** entry 0 = {0, 0, 0x1050, 0}, entry 1 = {0x1050, 0x1050, T, 0}, and entry 2's vromStart = T, where T is the table's own ROM offset. Scan 4-byte-aligned offsets from 0x1000 to 0x200000.
+- **Reading:** read entries until romEnd == 0. The decompressed size is the next entry's vromStart minus this one's. For the last entry, use the MIO0 header size.
+- **Invariants (verified):**
+  - files are contiguous on ROM (`romEnd[i] == romStart[i+1]`);
+  - all bounds are multiples of 16;
+  - files 0-5 have vrom == rom;
+  - after the last file, the ROM is 0xFF up to 12 MB.
+- **Compression:** 51 files are MIO0. 13 are raw: makerom, main, dma_table, the three audio files, ast_great_fox, ast_star_wolf, ast_7_ti_2, ast_8_ti, ast_9_ti, ast_A_ti and ast_logo.
+- **Leak cross-check:** the leak's `Source/fox_press` compresses exactly this set, and its `linux_tools/romaddress.c` writes the table after linking with the same vrom/rom semantics (leak-supported; the raw/compressed set is **verified** against the ROM flags).
+
+#### Filesystem and compression: MIO0
+
+**Verified** against the game routine `Mio0_Decompress` (0x8001EE70) and all 102 compressed files of both ROMs. The leak's `slidec/slid12.o` `slidstart` is byte-identical to the ROM routine.
+```
++0x00 "MIO0"
++0x04 u32 decompressedSize
++0x08 u32 backrefOffset   (from header start)
++0x0C u32 literalOffset   (from header start)
++0x10 control stream: u32 BE words, bits consumed MSB first
+```
+Decoding loop, until `decompressedSize` bytes have been written:
+- **control bit 1:** copy one byte from the literal stream.
+- **control bit 0:** read `u16 v` (BE) from the back-reference stream. Copy `(v >> 12) + 3` bytes (3..18), one at a time, from `out[pos - ((v & 0xFFF) + 1)]` (distance 1..4096). Overlapping copies act as runs.
+
+Stream layout is contiguous in every file: control bits end at backrefOffset, back-references end at literalOffset, and literals end 0-14 zero bytes before romEnd.
+
+Both versions produce byte-identical streams for identical content: 39 of 51 streams match, and the other 12 are exactly the files whose content changed.
+
+Reference implementations:
+- `sf/tools/extract.py` (Python);
+- `sf/fs/proto/sf64fs.ts` (TypeScript, no dependencies). `npx tsx test.ts` decompresses every file of both ROMs and checks sizes and md5s: ALL OK, about 0.2 s per ROM.
+
+#### Filesystem and compression: Extracting every file
 
 ```
-T = findDmaTable(rom)                       // §3.1 pattern
+T = findDmaTable(rom)                       // *DMA file table* pattern
 for i in 0..: {v, rs, re, c} = u32x4(rom, T + 16*i); if re == 0: break
   data = c ? mio0(rom, rs) : rom[rs:re]
   assert len(data) == next.vromStart - v    (last: MIO0 header size)
 ```
-Both scripts produce identical md5s for all 64 files of both ROMs (**verified**). The extracted files are in `/home/n64/.ai-tmp/r49/sf/files/v10/` and `/home/n64/.ai-tmp/r49/sf/files/v11/`, each with an `index.txt`.
+Both scripts produce identical md5s for all 64 files of both ROMs (**verified**). The extracted files are in `sf/files/v10/` and `sf/files/v11/`, each with an `index.txt`.
 
-## 4. Levels
+#### Verification evidence: ROM, filesystem, codec, loader
 
-### 4.1 Level list
+| claim | evidence |
+|---|---|
+| Header, CRCs, CIC-6101, JP table | `fs/romid.py` (recomputes CRC1/2 over 0x1000-0x100FFF) |
+| DMA table layout, pattern, 64 entries, contiguity, 0xFF tail | `tools/extract.py`, `fs/mio0check.py`, `fs/proto/test.ts` (ALL OK on both ROMs) |
+| MIO0 format; 102 streams decompress to exact size; contiguous streams; 39/51 identical across versions | `fs/mio0check.py` → `fs/tmp/mio0check.out`; game routine disassembly (`fs/dis.sh`); leak `slidec/slid12.o` byte-identical |
+| Loader functions, scene structs, segment map | disassembly `fs/tmp/foxload10.txt`, `foxload11.txt`; `fs/scenes.py` → `fs/tmp/scenes.out` |
+| Segments in RAM = decompressed files | V1.1 Corneria RDRAM `fs/rdram_co11.bin` + `fs/ramcheck.py` (byte-identical except runtime-animated textures); V1.0 title RDRAM `fs/rdram_menu10.bin` + `fs/ramcheck10.py` |
+| V1.0 overlay base 0x8017D390 | V1.0 `Load_SceneFiles` immediates; overlay internal addresses; ovl_menu found at 0x8017D390 in V1.0 RAM |
+| Per-file V1.0/V1.1 identity | `notes/lead_filecompare.txt` (md5 of decompressed files) |
+
+### 2.5 Loading process
+
+Level and asset selection is described by the tables and loader call paths above.
+
+### 2.6 Revision differences
+
+#### Version differences (V1.0 vs V1.1)
+
+**Summary.** The versions differ in **both code and data**. For the viewer, the difference is almost nothing:
+- all geometry, textures, display lists, render presets, environment records, audio files and scene compositions are byte-identical;
+- the data changes are limited to event scripts in Corneria and Titania, the Venom 1 placement list and scripts, and pointer relocation in the radio messages;
+- the code changes are four engine fixes, three overlay tweaks, and a libultra build that adds Nintendo's remote debugger.
+
+**V1.1 is the primary version**: the decomp symbols target it. **One loader serves both versions**: it finds the table by pattern and picks the per-version address set in *Addresses that differ per version*.
+
+Method (**verified**, `fs/align_main.py`, `classify_main.py`, `ovl_diff.py`, `ovl_pos.py`):
+- Both main images and every overlay were aligned instruction by instruction, with relocatable fields masked (jal targets, lui, addiu/ori, load/store immediates).
+- Every remaining differing word was checked against the text, data and bss address maps and the overlay base shift (+0xA190). That covers 23441 code relocation pairs and 4287 differing data words in main, and 44351 relocation words in the overlays.
+- Decompressed asset files were byte-compared, and the differing ranges decoded.
+
+#### Version differences (V1.0 vs V1.1): main (+0x49F0 bytes: text +0x4480, data +0x570; bss +0x57A0)
+
+| # | subsystem | V1.0 → V1.1 address | function (decomp / leak name) | change | status |
+|---|---|---|---|---|---|
+| 1-9 | libultra | 800227A0.. → 800227A0..8002E3E0 | osCreatePiManager (+ramromMain thread), osInitialize, `__osException` (+`__ptException`, calls kdebugserver), __osTimerInterrupt, `__osRdbSend`, kdebugserver, osReadHost, osInitRdb, the whole rmon (`__rmon*`), plus rmon data/rodata and bss | V1.1 links a libultra build with the remote debugger: +4380 instructions (text +0x4470), data +0x570, bss +0x57A0 (ramrom thread and stack, rmon buffers). rmonMain and osInitRdb are unreferenced. Strings `Set temp BP at %08x`, ` and %08x` are V1.1-only | verified |
+| 10 | HUD | 800538E0/EC → 80057D50/5C | Display_Update / `game_display` | hit counter clamp 999 → **511** (`slti at,t0,1000; li t1,999` → `slti at,t0,512; li t1,511`; lead re-checked the bytes) | verified |
+| 11 | player effects | 800A0230.. → 800A46A0.. | Player_DamageEffects / `player_kem_set_life` | `&& !gVersusMode` added to both broken-wing electric-arc spawns (+6 instructions) | verified |
+| 12 | screen fade | 800A2108.. → 800A6590.. | Play_UpdateFillScreen / `fade_cont` | flash frame sets `gFillScreenAlpha = 254` (V1.0 left it 255) | verified |
+| 13 | Landmaster | 800AEB84.. → 800B3010.. | Player_TankBoostBrake / `tank_dush_360` | boost/brake SFX condition: V1.0 on button press; V1.1 when `boostMeter == 0.0f` | verified |
+| 14 | padding | 800B4944 → 800B8DCC | end of fox_play text | 3 zero words → 1 | verified |
+
+Every other game-engine function (fox_*, sys_*, audio) is identical up to relocation (**verified**). Relocation side effects of the asset change:
+- main's 20 references to ast_venom_1 segment-6 addresses after the insertion point move by +0xC (2 in code, 18 in object-info tables);
+- main's references into ovl_i1 after the Golemech function move by a further +0x44.
+
+Interpretation (hypotheses, strongest first):
+- **#10** fixes a save bug. The save stores per-planet hits in 9 bits (`hitCount:8` + `hitCountOver256:1`, decomp `sf64save.h`), so 512-999 could not be stored.
+- **#12** avoids a premature transition. Several level-complete sequences wait for `gFillScreenAlpha == 255`, which a V1.0 flash frame could satisfy.
+- **#13** stops the sound retriggering on every press.
+- **#11** is a Versus effects or performance fix.
+- **#1-9** most likely come from linking the debug libultra by accident. It is inert on retail hardware and unrelated to PAL or Rumble; the motor code is unchanged.
+
+#### Version differences (V1.0 vs V1.1): Overlays
+
+| overlay | V1.0 → V1.1 size | real change | status |
+|---|---|---|---|
+| ovl_i1 | 0x14160 → 0x141A0 | **Venom1_Ve1Golemech_Update** (leak `fox_bm1.o` `BM_Boss_move`). V1.1 adds `if (pos.z > gPlayer[0].trueZpos - 200) Math_SmoothStepToF(&pos.z, target, 0.5, 35, 0.01) else (the V1.0 call with 0.4, 10, 0.01)`: +17 instructions, and one new rodata float 0.01f in place of padding. The Golemech boss closes in faster when the player is within 200 units | verified (code); intent hypothesis |
+| ovl_i6 | 0x20A10 | **Venom2_LevelComplete**: `player->csTimer = 180` → `250` (V1.0 8018CE48 `li t8,180`, V1.1 80196FD8 `li t8,250`, file offset 0xFAB8 in both; lead re-checked the bytes). Applies (per decomp) when the player is within 4000 units of the boss at cutscene start | verified (code); condition per decomp |
+| ovl_menu | 0x30680 | **Map_801A2674**: a map animation factor `*= 1.04f` → `1.03f` (rodata V1.0 801AD528, V1.1 801B76B8) | verified |
+| ovl_i2, i3, i4, i5, ending | same | relocation only | verified |
+| ovl_unused | 0xA0 | byte-identical | verified |
+
+Internal overlay addresses: V1.0 = V1.1 - 0xA190. For ovl_i1 text past V1.1 0x80198310, subtract a further 0x44; for its rodata and data, a further 0x40.
+
+#### Version differences (V1.0 vs V1.1): Asset files
+
+| file | range | change | status |
+|---|---|---|---|
+| ast_corneria | 0x3BC74, 12 bytes | Event script. After `SET_TRIGGER(11, EVC_NONE)`, V1.0 `INIT_ACTOR(30,0); LOCAL_ROTATION; SET_SPEED(0,10)` → V1.1 `LOCAL_ROTATION; SET_SPEED(0,10); INIT_ACTOR(30,0)` | verified |
+| ast_titania | 0x5BC7, 1 byte | Event script `STOP_SCRIPT; SET_SPEED(0, 200 → 150); STOP_BGM`: the music stops 50 frames sooner | verified (bytes); meaning hypothesis |
+| ast_venom_1 | list 0xD726-0xDAD3; scripts 0x1AE88-0x1B95E | `aVe1LevelObjects`: 23 of 1664 entries reordered or moved (ids 1023/1097-1099 event actors, two OBJ_ACTOR_VE1_MONKEY_STATUE). The three wingman scripts (EVC_PEPPY/FALCO/SLIPPY_ACTIVE) gain `SET_WAIT(40)`. The +0xC is absorbed by end padding, so the file size is unchanged, but later segment-6 pointers move +0xC | verified |
+| ast_radio | 0xCCB0-0xE50C | 779 absolute RAM pointers in the message table move by +0xA190 (the file loads at a different address). No text change | verified |
+
+For a static viewer the only visible effect is in Venom 1: a few event-actor and statue positions differ. The placement code is the same.
+
+#### Version differences (V1.0 vs V1.1): makerom and dma_table
+
+- **makerom:** CRC1/CRC2, the version byte, and the entry-stub bss start/size and `sp` immediates.
+- **dma_table:** entries 1-54 shift +0x49F0 (ast_radio's romEnd +0x4A20); later entries shift +0x4A20 to +0x4CD0 on ROM and +0x4A30 on vrom. The compression flags are identical.
+
+Both **verified**.
+
+#### Version differences (V1.0 vs V1.1): Addresses that differ per version
+
+| item | V1.0 | V1.1 |
+|---|---|---|
+| DMA table ROM offset | 0xD9A90 | 0xDE480 |
+| main data ROM range | 0xBFA60-0xD9A90 | 0xC3EE0-0xDE480 |
+| scene tables (sNoOvl_Logo) | 0x800C59C4 | 0x800CA3B4 |
+| sLevelSceneIds[21] | 0x800CDEC4 | 0x800D28B4 |
+| gLevelObjectInits[21] (placement lists) | 0x800CB3B0 | 0x800CFDA0 |
+| environment table [21] | 0x800CE5A8 | 0x800D2F98 |
+| gObjectInfo[400] | 0x800C7734 | 0x800CC124 |
+| gRcpSetupDLs[88] (render presets) | 0x800CE7C0 | 0x800D31B0 |
+| sEventActorInfo[108] | 0x800CB64C | 0x800D003C |
+| Venom 1 event-script table | ast_venom_1+0x1B1D8 | ast_venom_1+0x1B1E4 |
+| Load_SceneSetup jump table | 0x800D15C4 | 0x800D5FB4 |
+| audio tables, ROM (sample banks, sequences, fonts, seq→font, gAudioSpecs, sSoundTestTracks) | 0xBFD90, 0xBFDE0, 0xC0210, 0xC0430, 0xC3E38, 0xC2664 | 0xC4210, 0xC4260, 0xC4690, 0xC48B0, 0xC82B8, 0xC6AE4 |
+| note_data tables, ROM | 0xD8920 | 0xDD310 |
+| overlay/asset load base | 0x8017D390 | 0x80187520 |
+| gSegments (RAM) | 0x800DD5E0 | 0x800E1FD0 |
+
+The level tables listed here shift by exactly −0x49F0 from V1.1 to V1.0. The audio tables at the start of main's data shift by −0x4480 (note_data by −0x49F0, with relocated RAM pointers in its first 0x18 bytes). Their contents are identical, apart from the relocated segment-6 pointers noted in *main (+0x49F0 bytes: text +0x4480, data +0x570; bss +0x57A0)* (**verified**: `lv/proto/dump.txt`, `presets_v10.txt` = `presets_v11.txt`).
+
+#### Version differences (V1.0 vs V1.1): The leak and the versions
+
+Relocation-masked matching of every leak `.o` function against both ROMs (`fs/leakver.py`): 1155 match both, 2 match only V1.0 (`game_display`, `fade_cont`), 0 match only V1.1, and 290 match neither (codegen differences). Every function V1.1 changed has its V1.0 behaviour in the leak.
+
+The leak's English objects are therefore a **V1.0-lineage build that is not byte-identical to either US ROM** (leak-supported conclusion; the individual matches are **verified**). The tree also carries the iQue (Chinese) localisation (leak-supported; lead check), with details in *Leak-only content (absent from the ROM)*:
+- `#if LOCALE==CHINA` blocks in `Source/spec` select `audio/zh/*`. The file is EUC-JP, so plain `grep` treats it as binary; `grep -a` finds them.
+- `Source/fox_locale.h` has `#define CHINA 1`.
+- The `audio/zh/` and `i10n/` directories.
+- A Chinese ISBN in `Source/metadata/isbn.txt`. hypothesis: this is the iQue-era tree, restored from the V1.0 sources.
+
+All level data in the leak (`Source/XX_data.o`: environment records and placement lists) is byte-identical to the ROM data in both versions (**verified**, `lv/proto/leakcheck.txt`), with one exception: the only list that differs between the versions. The leak's `BM_data.o` Venom 1 list is byte-identical to **V1.0**'s `aVe1LevelObjects`, and differs from V1.1 in exactly the changed range, 145 bytes in 0xD726-0xDAD3 (**verified** by the lead, comparing `.data` of `BM_data.o` against both extracted `ast_venom_1` files). This is independent data-side confirmation that the leak follows V1.0.
+
+#### Verification evidence: Version differences
+
+| claim | evidence |
+|---|---|
+| main alignment and classification (23441 relocation pairs, 4287 data words) | `fs/align_main.py`, `fs/datamap.py`, `fs/classify_main.py` → `fs/tmp/classify_main.out`, `fs/tmp/blocks_main.txt` |
+| Function-level diffs | `fs/funcdump.py`, `fs/fdiff.sh` → `fs/tmp/f10_*`, `f11_*`, `o10_ve1.txt`, `o11_ve1.txt` |
+| Overlay diffs | `fs/ovl_diff.py`, `ovl_funcs.py`, `ovl_pos.py` → `fs/tmp/ovl_pos.out` |
+| Asset diffs (event scripts, Venom 1 list) | `fs/evdecode.py`, `fs/astyaml.py`, `lv/proto/vercmp.py` → `vercmp.txt` |
+| Lead re-checks | hit cap `slti 1000 / li 999` at V1.0 0x800538E0 vs `slti 512 / li 511` at V1.1 0x80057D50; Venom 2 `li t8,180` vs `li t8,250` at ovl_i6 file offset 0xFAB8 (objdump of ROM/extracted bytes) |
+| Leak version | `fs/leakver.py` → `fs/tmp/leakver.out`; lead: leak `BM_data.o` .data = V1.0 Venom 1 list, V1.1 differs in 145 bytes (0xD726-0xDAD3); `lv/proto/leakcheck2.py` → `leakcheck2.txt` |
+
+#### Open questions and hypotheses: Filesystem and versions
+
+- The intent of each behavioural V1.1 change is inferred and was not tested in the emulator. The 9-bit save field reason for the hit cap is the best supported.
+- Whether V1.1's remote-debugger libultra is libultra_d linked by mistake or a newer library (no libultra archive in the leak).
+- The exact semantics of the osInitialize / __osTimerInterrupt changes were not decoded instruction by instruction.
+- The JP ROM's 63rd missing table entry was not identified. EU (Lylat Wars) was not examined.
+- The leak's build identity: V1.0-lineage but not byte-identical; 290 functions match neither ROM.
+
+#### Unused and hidden content: Version-diff leftovers
+
+The V1.0/V1.1 comparison (*Version differences (V1.0 vs V1.1)*) exposes little hidden content, but three things stand out:
+- **V1.1's debug libultra.** V1.1 was linked against a libultra with Nintendo's remote debugger. It adds 4380 instructions: rmon, kdebugserver, osReadHost, osInitRdb and a "ramrom" thread. rmonMain and osInitRdb are never called, and the strings `Set temp BP at %08x` / ` and %08x` exist only in V1.1. This is dormant debug code shipped by accident or for a dev-kit build (7.1 #1-9).
+- **Venom 1 placement edits.** V1.1 re-sorts 23 entries of the Venom 1 list: three event actors (1097-1099) move and pairs swap x. Its three wingman scripts gain `SET_WAIT(40)`. The +0xC growth is absorbed by V1.0's end padding (7.3).
+- **Script tweaks.** V1.1 reorders one Corneria script (INIT_ACTOR after SET_SPEED) and changes one Titania BGM-stop delay from 200 to 150 frames (7.3).
+
+The data side also confirms the leak's lineage: the leak's `BM_data.o` equals V1.0's Venom 1 list.
+
+## 3. Level data
+
+### 3.1 Level catalog and identifiers
+
+#### Levels: Level list
 
 `gCurrentLevel` (RAM V1.1 0x80178234) indexes every per-level table. The names come from each level's title-card texture: IA8 images at the start of each level file, decoded to `lv/titlecards/*.png` (**verified** by viewing them). The two-letter leak prefixes are the original internal names. Leak `Source/fox_play.o` .data relocations list the stage table in the same order as the ROM table (leak-supported, and consistent with the ROM).
 
@@ -280,7 +382,7 @@ Both scripts produce identical md5s for all 64 files of both ROMs (**verified**)
 | 1 | METEO | AS | Meteo / Asteroid Field | on-rails space; warp list | ast_meteo | ovl_i2 |
 | 2 | SECTOR_X | SX | Sector X Combat Zone | on-rails space; warp list | ast_sector_x | ovl_i2 |
 | 3 | AREA_6 | CL | Area 6 / Defense Station | on-rails space | ast_area_6 | ovl_i3 |
-| 4 | UNK_4 | SB | (none) | stub, unused (§11) | ast_area_6 | ovl_i3 |
+| 4 | UNK_4 | SB | (none) | stub, unused (*Unused and hidden content*) | ast_area_6 | ovl_i3 |
 | 5 | SECTOR_Y | SW | Sector Y Combat Zone | on-rails space; all-range Shogun arena | ast_sector_y | ovl_i6 |
 | 6 | VENOM_1 | BM | Venom / Andross' Homeworld | on-rails planet (Venom 1 route) | ast_venom_1 (+9 ast_ve1_boss) | ovl_i1 |
 | 7 | SOLAR | SN | Solar | on-rails planet (lava) | ast_solar | ovl_i3 |
@@ -312,15 +414,83 @@ Suggested viewer list. `LevelInfo.name` is the title-card text; `group` is the s
 | Warp zones | Meteo warp zone, Sector X warp zone |
 | Other | Training (on-rails), Andross escape paths 1-3 |
 | Versus | Corneria, Katina, Sector Z, Sector Z (time match list) |
-| Unused | UNK_4 stub, Venom 1 beta layout (§11) |
+| Unused | UNK_4 stub, Venom 1 beta layout (*Unused and hidden content*) |
 
 Title, map and ending scenes are driven by overlay code, not by placement lists. They are optional and not specified here.
 
-### 4.2 How a level is loaded
+#### Verification evidence: Levels
 
-All tables are **verified** by decoding both mains (`lv/proto/dump.txt`); addresses for V1.0 are in §7.5.
+| claim | evidence |
+|---|---|
+| Level tables (scene ids, list pointers, environment, object info, presets), both versions | `lv/proto/dump.ts` → `lv/proto/dump.txt`; `lv/proto/presets.py` → `presets_v10.txt` = `presets_v11.txt` |
+| Placement record and on-rails world position | Corneria RDRAM `lv/ram_co1.bin` + `lv/proto/ramcheck.py`: 15 live scenery objects equal decoded positions and rotations; gLevelObjects = seg 6 + 0x371A4 |
+| Camera and layout agreement | `lv/renders/corneria_emucam.png` (camera read from RAM) vs `lv/emu_co1.png` |
+| All-range z sign | disassembly `lv/disasm/*.txt` + `lv/proto/zsign.py` (quoted instructions in *Object placement*) |
+| Path items only translate | disassembly of ItemPathChange_Update (V1.1 0x80068C88); RAM log `lv/emu_fly2.log` (xPath = 0 on the main route) |
+| Corneria surface switch | `lv/proto/events.ts`; RAM gGroundSurface 2 → 0 between progress 38960 and 43240 (`lv/emu_fly2.log`, `lv/ram_fly_*.bin`) |
+| Opcode set of scenery lists | `lv/proto/dlscan.ts` |
+| Event actors, skeletons, Titania terrain | `lv/proto/events.ts`, `extras.ts`, `titerrain.ts`; renders `lv/renders/{meteo,sectorx,area6,sectory,titania,aquas,macbeth}.png` |
+| Leak level data = ROM | `lv/proto/leakcheck.py`, `leakcheck2.py` |
+| Title cards | `lv/titlecards/*.png` |
+| Reference comparison | runtime screenshots `shots/*.png` vs `lv/renders/*.png`. Lead comparison (qualitative): Corneria (RAM camera), Fortuna (towers, mountains, base) and Titania (ruins on terrain) show the same features |
+
+#### Open questions and hypotheses: Levels
+
+- Whether the Corneria all-range Granga arena list (136 objects) is used in normal play. It was not reached in the emulator.
+- Titania terrain: implemented from the algorithm and deterministic, but not compared with the game. The z phase is uncertain to ±220 units, and the game's normal averaging is not reproduced exactly.
+- Event actors: the static/moving classification ignores trigger branches. 12 Corneria and 11 Area 6 scripts resolve to no model. SY_ROBOT_1-3 drawing is not reproduced. Warp-zone prim colours are set by code.
+- Ground UV anchoring is inferred from `gDPSetupTile` shift 5; the exact texel-to-world ratio is a hypothesis.
+- The Corneria lake route and its surface switches were not observed in the emulator (the unattended Arwing died first).
+- Moving event actors are placed at their spawn pose, which is not necessarily where the player sees them.
+
+### 3.2 Level container
+
+#### Boot and code: Overlays and scenes
+
+Game code outside main lives in 9 overlays: `ovl_i1`..`ovl_i6` (level code), `ovl_menu` (title, option, map, game over), `ovl_ending` and `ovl_unused`. Each overlay is linked at the load base. At most one overlay is in RAM at a time.
+
+What is loaded is described by **Scene** structs in main. Each is 0x98 bytes:
+```
++0x00 u32 ovl.rom.start, ovl.rom.end     vrom range of the overlay file (0 = none)
++0x08 u32 ovl.bss.start, ovl.bss.end     RAM
++0x10 u32 ovl.text.start, ovl.text.end
++0x18 u32 ovl.data.start, ovl.rodata.end
++0x20 15 x { u32 vromStart, u32 vromEnd } asset slot i = RSP segment i+1 (0 = empty)
+```
+**Verified:** all 44 structs decode in both versions (`fs/scenes.py`, `lv/proto/dump.txt`).
+
+Tables of Scene structs start at V1.0 0x800C59C4 and V1.1 0x800CA3B4 (`sNoOvl_Logo`). Table order is: logo, ending (6 setups), title, option, map, game over, then the level scenes.
+
+Two ids select a scene:
+- **SceneId:** the `Load_SceneSetup` switch. Its jump table is at V1.0 0x800D15C4 and V1.1 0x800D5FB4, covering cases 0..24, plus 50 (Versus) and 99 (logo).
+- **setup:** an index into that scene's array, `gSceneSetup`.
+
+Which file sits in which segment is **identical in both versions** (**verified**). Only overlay RAM addresses and vrom values differ.
+
+Load algorithm. **Verified** by disassembly of both versions against decomp `fox_load.c`, and in RAM.
+1. `Load_InitDmaAndMsg` (V1.0 80055028, V1.1 80059498):
+   - reads the DMA table from a hard-coded ROM offset (0xD9A90 / 0xDE480) into gDmaTable;
+   - loads ast_radio into RAM right after it.
+2. `Load_RomFile(vrom, dst, size)` (V1.0 80054710, V1.1 80058B80) finds the entry whose vromStart equals `vrom`.
+   - Raw file: `Lib_DmaRead` (0x800033E0 in both) copies it.
+   - Compressed file: the stream is copied to gFrameBuffers (0x8038F800), then `Mio0_Decompress(src, dst)` runs (0x8001EE70; the routine is byte-identical in both versions).
+3. `Load_SceneFiles(scene)` (V1.0 800547D8, V1.1 80058C48) packs everything from the load base.
+   - The overlay is loaded, then its bss is cleared.
+   - Then, for each non-empty slot n = 1..15:
+     - set `gSegments[n] = K0_TO_PHYS(ramPtr)`;
+     - emit `gSPSegment(n, ...)`;
+     - load the file;
+     - advance by the file's decompressed size.
+   - Empty slots keep stale `gSegments` values.
+   - gSegments is at V1.0 0x800DD5E0 and V1.1 0x800E1FD0 (**verified** in RAM).
+
+All asset files are **position-independent within their segment**. A pointer `0xSSOOOOOO` inside any asset is `file(slot SS)[OOOOOO]`. A static loader therefore needs only the scene's segment-to-file map. It never needs RAM addresses, except for the few pointers into main listed in *Addressing and units*.
+
+#### Levels: How a level is loaded
+
+All tables are **verified** by decoding both mains (`lv/proto/dump.txt`); addresses for V1.0 are in *Addresses that differ per version*.
 1. `sLevelSceneIds[level]` (V1.1 0x800D28B4, s32 x 21) gives the SceneId: 5, 6, 8, 10, 12, 13, 18, 14, 15, 16, 17, 21, 7, 9, 11, 0, 19, 22, 23, 24, 50.
-2. `Load_SceneSetup(sceneId, gSceneSetup)` loads `scene[gSceneSetup]` (§2.2). Setup 0 is used at level start. Code changes it (triggers per decomp) for:
+2. `Load_SceneSetup(sceneId, gSceneSetup)` loads `scene[gSceneSetup]` (*Overlays and scenes*). Setup 0 is used at level start. Code changes it (triggers per decomp) for:
    - Titania boss phases, setups 1-5, which swap files in segments 7-A;
    - level-complete cutscenes (setup 1; compositions **verified** from the scene tables): Sector X adds E great_fox; Fortuna and Venom 2 replace F star_wolf with E great_fox; Macbeth replaces D allies with E great_fox; Meteo's setup 1 equals setup 0;
    - Versus setup 1 (Sector Z stage), which uses bg_space and enmy_space.
@@ -346,244 +516,11 @@ All tables are **verified** by decoding both mains (`lv/proto/dump.txt`); addres
 
 4. Per-level data pointers, all segmented, indexed by level id, with [15] = NULL:
    - `gLevelObjectInits[21]` (V1.1 0x800CFDA0): placement list;
-   - environment table (V1.1 0x800D2F98): environment record (§5.6).
+   - environment table (V1.1 0x800D2F98): environment record (*Fog, lights, clear colour, camera*).
 
-   Alternative lists (all-range arenas, warp zones, escape paths, Versus stages, the Venom 1 beta list) are selected by level code. Their locations are in §5.3.
+   Alternative lists (all-range arenas, warp zones, escape paths, Versus stages, the Venom 1 beta list) are selected by level code. Their locations are in *Object placement*.
 
-## 5. Level format
-
-### 5.1 Addressing and units
-
-- **Segmented addresses.** A pointer `0xSSOOOOOO` with SS in 1..15 resolves to `file(segment SS)[OOOOOO]` for the scene in §4.2.
-- **Pointers into main.** A few pointers point into main (0x80000450..): render presets and some engine display lists. They resolve to `main[addr - 0x80000450]` for the matching version.
-- **Pointers into overlays.** Overlay addresses (0x8017xxxx-0x801Cxxxx) occur only in code-built lists and function pointers, and a static loader does not follow them.
-- **Units and axes.**
-  - One vertex unit is one world unit; there is no scaling.
-  - The frame is right-handed, Y up, with the player flying towards −Z.
-  - No X mirroring (**verified**: the "GOOD LUCK!" sign on a Corneria building reads correctly, and renders from the RAM camera match the game).
-- **Matrices** are row-vector (v' = v·M). Game call order `T · RY · RX · RZ` means the vertex is rotated about Z, then X, then Y, then translated.
-- **Rotation conventions** (decomp `sys_matrix.c`):
-  - RY: x' = x cos + z sin, z' = −x sin + z cos;
-  - RX: y' = y cos − z sin, z' = y sin + z cos;
-  - RZ: x' = x cos − y sin, y' = x sin + y cos.
-
-### 5.2 Display lists, vertices, textures
-
-- **Microcode:** F3DEX 1.x, "F3DEX.NoN 1.22". **Verified**: the ID string is in main; opcodes decode consistently (G_VTX 0x04, G_TRI1 0xBF, G_TRI2 0xB1, G_ENDDL 0xB8). The leak's spec links `gspF3DEX.NoN.fifo.o`.
-- **Vertices:** standard 16-byte `Vtx {s16 x,y,z; u16 flag; s16 s,t; u8 r,g,b|nx,ny,nz; u8 a}`.
-- **What object lists contain.** Opcode histogram over all placed scenery lists of 13 levels (`lv/proto/dlscan.ts`, **verified**): `04 B1 BF B8 BA E6 E7 E8 F0 F2 F3 F5 FD` only.
-  - Present: geometry, `gDPLoadTextureBlock`-style uploads (SETTIMG/SETTILE/LOADBLOCK/SETTILESIZE), `G_LOADTLUT` and TLUT-mode changes.
-  - Absent: G_DL calls, matrices, geometry-mode, combiner or render-mode commands, BRANCH_Z.
-  - **All render state comes from a preset the game calls first** (§5.7).
-- **Texture formats:** RGBA16 in most lists, CI4 and CI8 with RGBA16 TLUTs, IA8, IA16 and I (effects, title cards).
-- **Filtering and wrap:** bilinear by default (the presets set G_TF_BILERP). Some lists and recipes switch to G_TF_POINT, e.g. the Fortuna base and warp props. Wrap comes from each list's SETTILE.
-- **Code-built textures:** ground planes are textured by game code with `gDPLoadTileTexture` + `gDPSetupTile`, and a loader must synthesise those commands (§5.4).
-- **Viewer support:** everything in these lists is already handled by `displaylist.ts`. **Verified**: the prototype runs all lists through the unmodified `runDisplayList` with no unknown commands, and CI4/CI8 textures decode correctly.
-
-### 5.3 Object placement
-
-**ObjectInit record**, 0x14 bytes. **Verified**: all 37 lists parsed; live RAM objects match field for field. The leak names it `enemy_set_data`.
-```
-+0x00 f32 zPos1   on-rails: path distance (>= 0, list sorted ascending); all-range: z
-+0x04 s16 zPos2   on-rails extra z offset
-+0x06 s16 xPos    world x
-+0x08 s16 yPos    world y
-+0x0A s16 rot.x, rot.y, rot.z   degrees
-+0x10 s16 id      ObjectId; <= -1 ends the list; >= 1000 = event actor, script index id - 1000
-```
-**World position.**
-- On-rails: `(xPos, yPos, −zPos1 − 3000 + zPos2)`.
-  - **Verified**: all 15 live scenery objects in a Corneria RAM dump match exactly, e.g. id 55 at (−1046, 0, −40707.1) from zPos1 31707.1, zPos2 −6000.
-  - `Scenery_Load` negates zPos1 (`neg.s` at V1.1 0x800614E4).
-- All-range: the z sign depends on the loader. **Verified** by disassembly of V1.1:
-  - `+zPos1`: Fortuna (ovl_i4 0x8018BB1C), Play_Setup360_CO (0x800A5424), Play_Setup360_SY (0x800A568C), Play_InitVsStage;
-  - `−zPos1` (`neg.s`): Bolse (ovl_i4 0x80191FF4), Sector Z (0x8019EB90), Venom 2 (ovl_i6 0x80196A78), Andross (0x80193820), Training_Setup360 (ovl_i1 0x80198D3C).
-  - Training_Setup360 also sets `y = yPos − RAND_FLOAT_SEEDED(300)` after `Rand_SetSeed(1, 29000, 9876)`.
-  - All-range scenery uses only rot.y: `T(pos)·RY`.
-- Versus: entries with id 147 (OBJ_SCENERY_LEVEL_OBJECTS) are bookkeeping and are not drawn.
-
-**Path turns and route branches.** The target computation is **verified** by disassembly of `ItemPathChange_Update` (V1.1 0x80068C88). Path smoothing and camera banking follow decomp `Player_UpdatePath`. No turn was observed in RAM: xPath stayed 0 on the Corneria main route.
-- Path items (`OBJ_ITEM_PATH_*`) only **translate** the path: `xPathTarget = xPath ± rot.z·100`, likewise for y. The yaw change is camera banking; the world never rotates.
-- Static placement is therefore correct on every route, and alternative routes sit at other x or y ranges.
-
-  | level | path items |
-  |---|---|
-  | Corneria | TURN_RIGHT at zPos1 168296, width 7000; the lake route is at x ≈ 7000 |
-  | Sector X | SPLIT_X 117073 (4000); turns at 191038 and 192038 |
-  | Sector Y | SPLIT_Y 108430 (3500); TURN_DOWN/UP 163628: vertical routes |
-  | Venom 1 | 17 junction items |
-
-**Object id classes** (`sf64object.h`, consistent with list contents):
-
-| ids | class |
-|---|---|
-| 0-160 | scenery |
-| 161-175 | sprites (trees, poles, cacti) |
-| 176-291 | actors |
-| 292-321 | bosses |
-| 322-338 | items |
-| 339-399 | effects |
-| 400-405 | environment markers |
-| 1000+ | event actors |
-
-Level geometry is scenery, sprites, static actors and static event actors (§5.3.2).
-
-**Object info table** `gObjectInfo[400]` (ids 0-399; `OBJ_ID_MAX` is 406 but ids 400-405 have no entry; the table is followed by the `$Id: fox_edisplay.c` string), 0x24 each, at V1.1 0x800CC124. **Verified** layout by decode:
-```
-+0x00 u32 dList (drawType 0) or draw function (drawType 1/2)
-+0x04 u8  drawType   0: plain segmented list; 1: C function; 2: function building its own matrices (skeletons)
-+0x08 fn  action; +0x0C f32* hitbox; +0x10 f32 cullDistance; +0x14 s16, s16; +0x18 u8 damage, u8;
-+0x1C f32 targetOffset; +0x20 u8 bonus
-```
-
-**Instance matrix** (decomp `Object_SetMatrix`, `Scenery_Draw`, `Sprite_Draw`; positions and angles **verified** in RAM, composition order per decomp and consistent with renders):
-- On-rails scenery, sprites and actors: `T(pos)·RY(rot.y)·RX(rot.x)·RZ(rot.z)`.
-- Objects with non-default drawing, **keyed by object id** (full table in `notes/levels.md` §3.2). Ids 8, 9, 19, 50 and 55 are drawType-0 lists whose preset and culling `Scenery_Draw` overrides by id, so a loader must dispatch these recipes on the id, not on drawType:
-  - **Preset 57 + cull off:** CO_HIGHWAY_4, CO_TOWER, VE1_WALL_3, CO_ROCKWALL.
-  - **Preset 60:** CO_HIGHWAY_3.
-  - **Fixed transforms:**
-    - CO_BUILDING_9: extra T(0,0,−95);
-    - VE1_WALL_1/2: preset 57, RY(180);
-    - AQ_BUMP_2: Scale(0.5);
-    - TI_RIB_0..8: Scale {1, 0.95, 0.9, 0.85, 0.8, 0.75, 0.7, 0.65, 0.6} + D_TI1_700BB10.
-  - **Preset 57 lists:** Macbeth tracks, signs and switches (D_MA_* lists), MA_TOWER (two lists, no cull).
-  - **Skeletons (§5.3.3):** CO_DOORS (aCoDoorsSkel / aCoDoorsAnim), MA_TRAIN_STOP_BLOCK, MA_SWITCH_TRACK (aMaSwitchTrackSkel + D_MA_601C170 at RY(−10)·T(0,0,−1800)), AND_PASSAGE (gate skeleton, limb 13 only) / AND_DOOR (gate skeleton without limb 13), Venom 2 base (aVe2BaseSkel / aVe2BaseAnim).
-  - **Other recipes:** CO_BUILDING_ON_FIRE no cull + D_CO_60199D0; TI_SKULL D_TI1_7007350; TI_PILLAR D_TI1_7002270; MA_PROXIMITY_LIGHT aMaProximityLightSidesDL, then preset 29 aMaProximityLightTopDL; Macbeth tracks, ids 92-105, preset 57 + the D_MA_* lists of `notes/levels.md` §3.2 (105: preset 29 D_MA_602D380); Corneria all-range CO_BUMP_1 uses D_CO_6020760 instead of its info list.
-  - **Shadow decals:** 164 OBJ_SPRITE_FOG_SHADOW (drawType 1): preset 47 + aCoShadow1DL scaled per scenery type.
-  - **No geometry:** 147, 155 (NULL list), 156 (SY_SHOGUN_SHIP, draw unimplemented in the game), 167/168, 170-175.
-- Fixed bases created by code at (0,0,0), not by lists:
-  - Fortuna OBJ_BOSS_FO_BASE: preset 29 aFoBaseDL2, then preset 34 + cull + point filter + prim colour, aFoBaseDL1;
-  - Katina FL base: T(0,20,0) aKaFLBaseDL; saucerer at (−15000, 3240, 15000);
-  - Bolse base: D_BO_6002020, plus translucent shield aBoBaseShieldDL (preset 41);
-  - Venom 2 base: skeleton aVe2BaseSkel;
-  - Sector Z: Great Fox (aGreatFoxIntactDL).
-
-#### 5.3.1 Placement lists
-
-Offsets are into the level file. **Verified** entry counts; all lists are byte-identical in V1.0 and V1.1 except Venom 1 (§7.3).
-
-| list | file + offset | entries | notable content |
-|---|---|---|---|
-| Corneria on-rails [0] | ast_corneria+0x371A4 | 803 | 380 scenery, 213 sprites, 171 event actors |
-| Corneria all-range (Granga arena) | ast_corneria+0x3B074 | 136 | 67 scenery, 69 CO_TREE |
-| Meteo [1] | ast_meteo+0x26CC4 | 876 | 2 ME_TUNNEL, 756 event actors |
-| Meteo warp | ast_meteo+0x2B148 | 323 | event actors |
-| Sector X [2] | ast_sector_x+0x2A164 | 1025 | 1008 event actors (the base) |
-| Sector X warp | ast_sector_x+0x2F18C | 166 | event actors |
-| Area 6 [3] | ast_area_6+0x23F64 | 443 | event actors |
-| UNK_4 [4] | ast_area_6+0x287A4 | 1 | one event actor |
-| Sector Y on-rails [5] | ast_sector_y+0x2E4F4 | 487 | 6 scenery, event actors |
-| Sector Y all-range | ast_sector_y+0x30B14 | 1 | Shogun ship |
-| Venom 1 [6] | ast_venom_1+0x7E74 | 1664 | 565 scenery, 162 actors |
-| Venom 1 beta (unused) | ast_venom_1+0x10088 | 1978 | §11 |
-| Solar [7] | ast_solar+0x1F234 | 179 | actors |
-| Zoness [8] | ast_zoness+0x26714 | 500 | 143 scenery |
-| Andross tunnel [9] | ast_andross+0x35154 | 67 | 29 AND_PASSAGE |
-| Andross boss | ast_andross+0x356A4 | 1 | |
-| Andross base (all-range) | ast_andross+0x356CC | 156 | 123 scenery |
-| Andross escape 1/2/3 | ast_andross+0x36310 / 0x36B6C / 0x3733C | 106 / 99 / 100 | |
-| Training on-rails [10] | ast_training+0x6AA4 | 464 | 220 TR_BUILDING |
-| Training all-range | ast_training+0x8EF8 | 76 | |
-| Macbeth [11] | ast_macbeth+0x31000 | 901 | 585 scenery |
-| Macbeth trains | ast_macbeth+0x35678 / 0x357CC / 0x35920 | 16 / 16 / 6 | train cars |
-| Titania [12] | ast_titania+0x6C60 | 605 | 110 scenery, 81 cacti, 165 terrain records |
-| Aquas [13] | ast_aquas+0x2E5C8 | 322 | 103 scenery, seabed props |
-| Fortuna [14] | ast_fortuna+0xEAD4 | 79 | 45 scenery, 26 FO_POLE |
-| Katina [16] | ast_katina+0x11044 | 0 | base is created by code |
-| Bolse [17] | ast_bolse+0xFF74 | 29 | 11 scenery |
-| Sector Z [18] | ast_sector_z+0x6EB4 | 74 | 62 space-junk scenery |
-| Venom 2 [19] | ast_venom_2+0x14D94 | 29 | towers, mountains |
-| Versus Corneria [20] / Katina / Sector Z / Sector Z match | ast_versus+0x2DE3C / 0x2E0E4 / 0x2E170 / 0x2E378 | 33 / 6 / 25 / 24 | |
-
-#### 5.3.2 Event actors (ids ≥ 1000)
-
-Almost everything visible in Meteo, Sector X, Area 6, Sector Y and the warp zones is an event actor. Many props elsewhere are too. **Verified** by decoding the scripts and tables (`lv/proto/events.ts`); semantics per decomp `fox_enmy2.c`.
-
-- **Script tables** (u16* arrays; index = id − 1000):
-
-  | level | table offset | level | table offset |
-  |---|---|---|---|
-  | Corneria | ast_corneria+0x3D9E8 | Solar | +0x20DD0 |
-  | Meteo | +0x2F3AC | Zoness | +0x2AAC0 |
-  | Sector X | +0x320D0 | Andross | ast_andross+0x37E3C |
-  | Area 6 | +0x27F50 | Training | +0x9B34 |
-  | UNK_4 | +0x289FC | Macbeth | +0x381D8 |
-  | Sector Y | +0x32E18 | Titania | +0x631C |
-  | Venom 1 | +0x1B1E4 (V1.0: +0x1B1D8) | Aquas | +0x308B8 |
-
-  Warp lists use their level's table.
-- **Script encoding.** A command is a pair of u16 words:
-  - word 0: `opcode = (w >> 9) & 0x7F`, `arg1 = w & 0x1FF`;
-  - word 1: arg2.
-
-  Opcodes that matter:
-
-  | opcode | command | arguments |
-  |---|---|---|
-  | 104 | INIT_ACTOR | arg2 = eventType, arg1 = health |
-  | 0 | SET_SPEED | |
-  | 1 | SET_ACCEL | |
-  | 9-12, 16-21 | turn, pitch, yaw, roll | |
-  | 40-47 | pursue, flee | |
-  | 48 | SET_WAIT | |
-  | 96 | SET_TRIGGER | arg1 < 200: command index; ≥ 200: switch to script arg1 − 200 |
-  | 119 | SET_SURFACE | |
-  | 126 | LOOP | |
-  | 127 | STOP | |
-- **Walker details** (`notes/levels.md` §3.6):
-  - speed commands encode speed `w & 0x7F` and z mode `(w >> 7) & 3` in word 0; this matters for the static/moving test;
-  - LOOP (126): arg1 < 200 goes to command arg1 after arg2 repetitions; arg1 ≥ 200 switches to script arg1 − 200;
-  - `aiIndex` counts u16 words, so command k is at byte 4k;
-  - levels without their own table fall back to the Corneria table;
-  - eventType ≥ 200 (EVENT_HANDLER, ME_MORA) has no model.
-- **Model.** `sEventActorInfo[eventType]` (108 entries of 0x20 at V1.1 0x800D003C, V1.0 0x800CB64C): `{Gfx* dList; f32* hitbox; f32 scale; f32 cull; ...}`.
-  - To find a static model, walk the script from command 0, following LOOP and script changes, to the first INIT_ACTOR. If there is none, follow trigger branches breadth-first.
-  - Unresolved (trigger-only handlers): Corneria 12 scripts, Area 6 11 scripts.
-  - Per-type draw extras for the main types:
-
-    | type | extra |
-    |---|---|
-    | WZ_* | preset 34, point filter, prim colour |
-    | SX_SPACE_MINE, SY_ROBOT_SPRITE_* | preset 60 |
-    | MA_LASER_TURRET, MA_RAILROAD_CART | preset 57 |
-    | A6_UMBRA_STATION | RX(90) |
-    | ME_ROCK_GULL | orientation rotations |
-    | VE1_PILLAR | Scale 0.6 |
-    | CRUISER_GUN | RY(180), Scale 1.5, skeleton |
-    | SX_WARP_GATE | skeleton (limb 5 with preset 34) |
-    | TRIPOD | T(0,−30,0), skeleton |
-    | ME_FLIP_BOT | aMeFlipBot1DL, then preset 53 aMeFlipBot2DL |
-    | A6_NINJIN_MISSILE, A6_ROCKET | no cull |
-
-  - Not reproduced: SY_ROBOT_1-3 (SectorY_SyRobot_Draw).
-- **Matrix.** `T(pos)·RZ(orient.z)·RY(rot.y)·RX(rot.x)·RZ(obj.rot.z)`, with `pos = (xPos, yPos, −zPos1 − 3000 + zPos2)`. At load, `obj.rot = (rx, ry, 0)` and `orient.z = rz`. At INIT_ACTOR with `info.unk16 == 0`, `obj.rot.z = rz` and `orient.z = 0` (A6_UMBRA_STATION keeps orient.z). VENOM_TANK (`info.unk19 ≠ 0`) and A6_UMBRA_STATION use `T·RY·RX·RZ` instead. Preset 29 unless the type overrides it.
-- **Static vs moving.** Static means the main script path never sets a speed, turn or pursuit before STOP.
-
-  | level | static props / total with a model |
-  |---|---|
-  | Meteo | 231 (asteroid field) |
-  | Sector X | 664 (the whole space base) |
-  | Area 6 | 101 (cruisers, guns, Umbra stations) |
-  | Sector Y | 61 ship props |
-
-  Moving event actors can be listed as `animated` instances at their spawn pose.
-
-#### 5.3.3 Skeleton models (frame 0)
-
-**Verified** by decoding aCoDoorsSkel, aVe2BaseSkel and aMaTrainStopBlockSkel; semantics per decomp `fox_std_lib.c`.
-
-- **Limb** (0x20): `+0 Gfx* dList (may be NULL); +4 f32 trans x,y,z; +0x10 s16 rot x,y,z (unused); +0x18 Limb* sibling; +0x1C Limb* child`.
-- **Skeleton:** a NULL-terminated array of Limb*. Element 0 is the root; a limb's index is its array position + 1.
-- **Animation** (0x0C): `s16 frameCount; s16 limbCount; u16* frameData; JointKey* jointKey`.
-- **JointKey** (0x0C): `u16 xLen, x, yLen, y, zLen, z`. Channel value for frame f is `frameData[idx + (f < len ? f : 0)]`.
-  - Key 0: root translation (s16).
-  - Keys 1..limbCount: that limb's rotation, `value·360/65536` degrees.
-- **Drawing:**
-  - Root: `M = object · T(t) · RZ · RY · RX(key 1)`, with t = root limb trans (mode & 1) or key 0.
-  - Each limb: `M_limb = M_parent · T(limb.trans) · RZ · RY · RX(key[index])`.
-  - Children inherit M_limb; siblings inherit M_parent.
-
-### 5.4 Terrain and ground planes
+#### Level format: Terrain and ground planes
 
 The game draws the ground **attached to the camera** and scrolls only its texture (decomp `fox_bg.c` `Background_DrawGround`; extents **verified** from vertex data). A static viewer must build a world-anchored strip or plane.
 
@@ -594,7 +531,7 @@ The game draws the ground **attached to the camera** and scrolls only its textur
 | Venom 1, Macbeth | D_VE1_60066D0 / D_MA_60306D0 (8000×12000) | as Corneria | 29 |
 | Training | aTrGroundDL | on-rails: `T(xPath,−3,0)` (groundType 11, no −4000 offset), copies at z ∓3000 + gPathTexScroll with Scale(1,1,0.5); all-range 4 copies, x scale 1.5 | 29 |
 | Aquas | floor D_AQ_600AB10 + water surface D_AQ_602AC40 (Scale(2,1,0.5)) | as Corneria | 20 / 37 |
-| Solar / Zoness | D_SO_60005B0 / D_ZO_6008830 (1600×1600 grid, 512 tris; alternates each frame with D_SO_6002E60 / D_ZO_600B0E0) | `T(xPath,−3,0)·T(0,0,−2000 / −1500)·S(3,2,3)`; the game moves edge vertices to ±1400 at init, giving ≈8400×8400 (§5.5.4) | 29 |
+| Solar / Zoness | D_SO_60005B0 / D_ZO_6008830 (1600×1600 grid, 512 tris; alternates each frame with D_SO_6002E60 / D_ZO_600B0E0) | `T(xPath,−3,0)·T(0,0,−2000 / −1500)·S(3,2,3)`; the game moves edge vertices to ±1400 at init, giving ≈8400×8400 (*Ground rendering details*) | 29 |
 | Titania | procedural (below) | – | 29 |
 | Meteo, Sector X/Y/Z, Area 6 | none | – | – |
 
@@ -634,7 +571,7 @@ Ground textures are 32×32 RGBA16 tiles loaded by code with `gDPLoadTileTexture`
   - preset 29, texture shift 5.
 
   The per-type deformer formulas are in decomp `ovl_i5/fox_ground.c` `Ground_801B4AA8` and in `lv/proto/extras.ts`.
-- **World z:** the row built at progress P is at z = −P − 5520 (HYPOTHESIS ±220).
+- **World z:** the row built at progress P is at z = −P − 5520 (hypothesis ±220).
 - **Mesh:** triangles (2i, 2i+1, 2i+3), (2i, 2i+3, 2i+2); s = (j % 2)·0x400; t = 0 far / 0x400 near.
 - **Material:** texture D_TI_6001BA8, 32×32 RGBA16, mirror wrap. Flat-plane ranges: progress 47740-55660 and 82720-92000.
 - **Not compared against the game:** Titania was not reached in the emulator.
@@ -645,7 +582,7 @@ Ground textures are 32×32 RGBA16 tiles loaded by code with `gDPLoadTileTexture`
 - AQ_STONE_COLUMN: D_AQ_6014520 with preset 55 when rot.y ≠ 0, otherwise a skeleton.
 - AQ_OYSTER: Scale 3, preset 56, prim (255,143,143).
 
-### 5.5 Skies, backdrops, starfields
+#### Level format: Skies, backdrops, starfields
 
 Source: `notes/runtime.md`.
 - Frame state, matrices and counts are **verified** in the emulator from 25 captured frame display lists (`rt/dl/*.txt`, `rt/dlwalk.py`, `rt/dlcalls.py`).
@@ -662,9 +599,9 @@ Source: `notes/runtime.md`.
 7. Player, objects, effects.
 8. Lens flare, HUD.
 
-**Clear colour** is `gBgColor`, RGBA5551: `r = ((c>>11)&31)·8, g = ((c>>6)&31)·8, b = ((c>>1)&31)·8`. It is black on space levels and the environment record's value on planet levels, apart from the code overrides in §5.6.
+**Clear colour** is `gBgColor`, RGBA5551: `r = ((c>>11)&31)·8, g = ((c>>6)&31)·8, b = ((c>>1)&31)·8`. It is black on space levels and the environment record's value on planet levels, apart from the code overrides in *Fog, lights, clear colour, camera*.
 
-#### 5.5.1 Planet backdrop (camera-space quad)
+##### Planet backdrop (camera-space quad)
 
 - **Geometry:** one quad, x ±3640, y 0..8680, z 0 (TRI2), with a 64×32 RGBA16 texture (SETTILESIZE 63×31), except BM03_BG02 (D_VE2_60038E0) and Versus Corneria (D_versus_302D4D0), which use 32×32 tiles. The quad shape is identical on every planet backdrop (**verified**, 14 lists).
 - **State:** preset 17 (no Z, no fog, no lighting; render mode AA_OPA_SURF, decal combiner). **Verified** in the emulator: geometry mode 0, rmL 0x00552048.
@@ -708,12 +645,12 @@ Source: `notes/runtime.md`.
   - Corneria (eye y 578, pitch −0.07 rad): texel rows 12.2 at the top of the screen to 73.9 at the bottom, i.e. v ≈ 0.38..2.31 with t clamped. Ground covers the lower part.
   - Katina (eye y 485): v ≈ −0.62..1.31.
   - Visible width at z 6000 with fovy 45 and 4:3: 6627 units, so u1 = 0.91.
-  - These windows are computed, not pixel-matched (HYPOTHESIS).
+  - These windows are computed, not pixel-matched (hypothesis).
 
-#### 5.5.2 Space backdrops (sprites)
+##### Space backdrops (sprites)
 
 - **Visibility:** drawn only while the camera yaw is within ±45° and pitch within ±40° of straight ahead.
-- **Matrix:** `RotZ(starfieldRoll) · T(bgX − 120, −(bgY − 120), −290) · S(k)`, preset 36 unless listed. `bgX`/`bgY` are the starfield scroll values (0..480, 0..360; §5.5.3) plus per-level offsets.
+- **Matrix:** `RotZ(starfieldRoll) · T(bgX − 120, −(bgY − 120), −290) · S(k)`, preset 36 unless listed. `bgX`/`bgY` are the starfield scroll values (0..480, 0..360; *Starfield*) plus per-level offsets.
 - **Scale:** at z −290 with fovy 45 the half-height is 120.1, so **1 unit ≈ 1 pixel** of the 320×240 screen.
 
 | level | DL | scale | preset / prim alpha | notes |
@@ -728,7 +665,7 @@ Source: `notes/runtime.md`.
 | Fortuna (space ending) | D_FO_600B4B0 | 1.5 / 0.75 | 36 | |
 | Warp zone | D_WZ_7001540 (ast_warp_zone) | 1.7, wobbling | 62 / gWarpZoneBgAlpha | |
 
-#### 5.5.3 Starfield
+##### Starfield
 
 Decomp `Background_DrawStarfield`, `Play_GenerateStarfield`; counts **verified** in RAM.
 - **Stars:** `gStarCount` 1×1 FILLRECTs.
@@ -737,9 +674,9 @@ Decomp `Background_DrawStarfield`, `Play_GenerateStarfield`; counts **verified**
 - **Motion:** scrolled by camera yaw and pitch (`x = fmod(yawRad·(−8/3)·RTOD·2 + 3000, 480)`), rotated by camera roll.
 - **Counts:** 600 by default; Area 6 300, Bolse 300, Fortuna 500 (space ending), Training 800, UNK_15 400, planet levels and Versus 0.
 
-#### 5.5.4 Ground rendering details
+##### Ground rendering details
 
-These complement §5.4. **Verified** in the emulator for Corneria and Katina; the rest is decomp.
+These complement *Terrain and ground planes*. **Verified** in the emulator for Corneria and Katina; the rest is decomp.
 - **Visibility:** the ground is skipped when the eye is above y 4000 (except Venom 2) or `gDrawGround` = 0.
 - **Height:** it is drawn at **y ≈ −3**.
 - **On-rails quad pair:**
@@ -755,7 +692,240 @@ These complement §5.4. **Verified** in the emulator for Corneria and Katina; th
   - Draw lists: Solar D_SO_60005B0 (alternating with D_SO_6002E60), Zoness D_ZO_6008830 (alternating with D_ZO_600B0E0). Textures: Solar 0x06005710; Zoness 0x0600D990, animated by HUD_Texture_Wave from D_ZO_602C2CC. Apply the edge move before rendering.
 - **Aquas water surface:** D_AQ_602AC40 at y = 1600 (D_bg_8015F970 at init), Scale(2,1,0.5), preset 37 with prim alpha 128, translucent and fogged.
 
-### 5.6 Fog, lights, clear colour, camera
+#### Music: File formats
+
+**Locations.** The three audio files are byte-identical in V1.0 and V1.1; the leak's built `audio/fox64_{music,banks,table}.o` .data is md5-identical to them (**verified**).
+
+| data | V1.1 ROM | V1.0 ROM | size |
+|---|---|---|---|
+| audio_seq (DMA 3) | 0xDEA20 | 0xDA030 | 0x3ACF0 |
+| audio_bank (DMA 4) | 0x119710 | 0x114D20 | 0x1E020 |
+| audio_table (DMA 5) | 0x137730 | 0x132D40 | 0x73C580 |
+| sample-bank table (main) | 0xC4210 | 0xBFD90 | 0x50 |
+| sequence table | 0xC4260 | 0xBFDE0 | 0x430 |
+| soundfont table | 0xC4690 | 0xC0210 | 0x220 |
+| sequence → font map | 0xC48B0 | 0xC0430 | 283 |
+| gAudioSpecs | 0xC82B8 | 0xC3E38 | 29 × 0x30 |
+| note_data tables | 0xDD310 | 0xD8920 | |
+| sSoundTestTracks | 0xC6AE4 | 0xC2664 | 45 × 6 |
+
+A loader can find the tables by structure: the sample-bank table header has n = 4 and contiguous entries, and the sequence and font tables follow it. That works for both versions (`mus/proto/sf64audio.ts findTables`).
+
+**AudioTable** (sequences, fonts, sample banks). **Verified**; the lead re-checked the sequence table: 66 entries, 20 aliases, extents tile audio_seq exactly.
+```
++0x00 s16 numEntries; s16 unk; u32 romAddr (0; add the file's ROM start); 8 pad
++0x10 numEntries x { u32 offset; u32 size; s8 medium (2 = cart); s8 cachePolicy; s16 shortData1..3 }
+```
+- **Sequences:** 66 entries. `size == 0` marks an alias: `offset` is then another sequence id.
+
+  | alias ids | target |
+  |---|---|
+  | 11 | 9 |
+  | 15 | 10 |
+  | 16 | 4 |
+  | 21, 22, 26 | 18 |
+  | 20, 23, 24, 27, 30, 32, 48 | 19 |
+  | 29, 31 | 28 |
+  | 41 | 34 |
+  | 52, 53 | 37 |
+  | 57 | 56 |
+  | 59 | 43 |
+
+  That leaves 46 distinct sequences: SFX, voice, and 44 music.
+- **Fonts:** 33 entries. `shortData1 = sampleBank1<<8 | sampleBank2` (0xFF = none); `shortData2 = numInstruments<<8 | numDrums`.
+- **Sample banks:** 4 entries.
+
+  | bank | contents | offset | size |
+  |---|---|---|---|
+  | 0 | SFX | 0x000000 | 0x0E1E30 |
+  | 1 | map | 0x0E1E30 | 0x0FF9D0 |
+  | 2 | voice | 0x1E1800 | 0x497480 |
+  | 3 | music instruments | 0x678C80 | 0x0C3900 |
+
+**Sequence → font map.** `u16 offset[66]`, then at each offset `u8 count, u8 fontId[count]`. Every music sequence has exactly one font. The player's default font is the last one listed.
+
+| font | sequences |
+|---|---|
+| 21 | 34, 35, 37-40, 44, 45, 49-51, 54-56, 60, 64 |
+| 22 | 36 |
+| 23 | 42 |
+| 24 | 2, 10 |
+| 25 | 4, 7, 8, 13, 43, 47, 61-63 |
+| 26 | 5 |
+| 27 | 58 |
+| 28 | 6, 12, 17, 18 |
+| 29 | 3, 9, 46 |
+| 30 | 14 |
+| 31 | 19, 25, 28, 65 |
+| 32 | 33 |
+
+Aliases inherit their target's font.
+
+**Soundfont** (offsets relative to the font start in audio_bank). **Verified**: 33 fonts, 941 instruments, 479 drums and 1732 sample references all land in bounds, and font and bank extents tile their files.
+```
+Font:        u32 drumListOffset (0 = none); u32 instrumentOffset[numInstruments] (0 = empty)
+Drum list:   u32 drumOffset[numDrums]
+Instrument (0x20): u8 isRelocated; u8 normalRangeLo; u8 normalRangeHi; u8 releaseRate(adsrDecayIndex);
+                   u32 envelopeOffset; {u32 sampleOffset; f32 tuning} x 3 (low, normal, high)
+                   notes < lo use low (if lo != 0); notes > hi use high (if hi != 127)
+Drum (0x10):       u8 releaseRate; u8 pan; u8 isRelocated; pad; u32 sampleOffset; f32 tuning; u32 envelopeOffset
+Sample (0x10):     u32 bits: codec 31..28 (0 = VADPCM), medium 27..26 (0: font's sampleBank1), bit 25, reloc 24, size 23..0
+                   u32 offset in sample bank; u32 loopOffset; u32 bookOffset
+AdpcmLoop:         u32 start, end, count (0 = none, else forever), pad; if count != 0: s16 predictorState[16]
+AdpcmBook:         s32 order (2); s32 numPredictors (2 or 4); s16 book[8·order·numPredictors]
+Envelope:          s16 pairs {delay, arg}: delay > 0 ramp to arg (0..32767); 0 end; -1 hang; -2 goto arg; -3 restart
+```
+- **Pitch:** `freq = gPitchFrequencies[note] · tuning`. gPitchFrequencies[39] = 1.0 = C4, i.e. 2^((n−39)/12).
+- **VADPCM:** 9-byte frames make 16 samples, decoded exactly as the RSP does (the viewer's `decodeVadpcm`).
+- **Loops:** play [0, end), then jump to start with the decoder history loaded from `predictorState`. predictorState equals the decoded samples of the frame containing `loop.start` (**verified** 56/56 looped samples, both versions). That is the convention libultra.ts `prepareWave` already implements.
+- **Code tables** in note_data, used by the renderer (offsets from the note_data base):
+
+  | offset | table |
+  |---|---|
+  | 0x000 | wave pointers (vibrato uses the sine) |
+  | 0x020 | bendOctave f32[256] |
+  | 0x420 | bend ±2 semitones |
+  | 0x820 | gPitchFrequencies f32[128] |
+  | 0xA40 | default envelope {(4,32000), (1000,32000), (−1,0)} |
+  | 0xB70 / 0xD70 / 0xF70 | pan volume tables (default: cos-like, [0] = 1.0, [64] = 0.70272, [127] = 0) |
+
+### 3.3 Geometry
+
+Geometry representation is described with the level container above.
+
+### 3.4 Display lists and render state
+
+#### Level format: Render state set by game code
+
+Each object is drawn after `RCP_SetupDL(preset)` from `gRcpSetupDLs[88]` (V1.1 0x800D31B0; 72 bytes per entry; decoded from the ROM; **identical in both versions**). Every preset is:
+```
+PipeSync; clear all geometry modes; gSPTexture(on/off); SetCombine; SetGeometryMode; alpha compare none; render mode; othermode H; EndDL
+```
+`RCP_SetupDL_29(r,g,b,a,near,far)` and the other variants add `gDPSetFogColor` + `gSPFogPosition` (decomp).
+
+| preset | geometry mode | combiner (w0 w1) | render mode | used for |
+|---|---|---|---|---|
+| 20 | SHADE SMOOTH CULL_BACK FOG LIGHTING (no Z) | FC127FFF FFFFF238 (MODULATEIDECALA) | C8112048 (FOG_SHADE_A / AA_OPA_SURF2) | ground planes (drawn first) |
+| 29 | ZBUFFER SHADE SMOOTH CULL_BACK FOG LIGHTING | FC127FFF FFFFF238 | C8112078 (AA_ZB_OPA_SURF2) | default: scenery, actors, bosses, Titania ground |
+| 34 | ZBUFFER SHADE SMOOTH CULL_BACK FOG | FC11FFFF FFFFF638 (MODULATEI_PRIM) | C8112078 | Fortuna base part, warp props |
+| 37 | SHADE SMOOTH FOG | FC1197FF FFFFFE38 (MODULATEIA_PRIM) | C81041C8 (AA_XLU_SURF2) | Aquas water surface |
+| 45 | ZBUFFER … CULL_BACK FOG LIGHTING | FC127E03 FF0FF3FF | C81049D8 (AA_ZB_XLU_SURF2) | Corneria water ground |
+| 47 | ZBUFFER SHADE SMOOTH FOG | FC1197FF FFFFFE38 | C81049D8 | shadows, Aquas |
+| 57 | ZBUFFER … CULL_BACK FOG LIGHTING | FC127FFF FFFFF238 | C8113078 (AA_ZB_TEX_EDGE2) | cut-out scenery |
+| 60 | ZBUFFER SHADE SMOOTH FOG (unlit, no cull) | FCFFFFFF FFFCF238 (DECALRGBA) | C8113078 | sprites (trees, poles, cacti) |
+
+- **Othermode H:** 2CYCLE, PERSP, BILERP (`00182C00` for 29/34/57/60).
+- **Lighting:** presets 20/29/45/57 enable G_LIGHTING, so scenery vertex colours are **normals**. The colour is ambient + light·max(0, N·L) with the environment record's light and ambient.
+- **Light direction:** `Camera_SetupLights` rotates the record's light angles by the camera's yaw, pitch and roll every frame (runtime detail in *Fog, lights, clear colour, camera*). Bosses add a second light.
+- **Full dump** of all 88 presets: `lv/proto/presets_v11.txt`.
+
+#### Mapping onto the viewer: Display lists
+
+- **`runDisplayList` options:**
+  - `ucode: 'f3dex'`, `vertexScale: 1`, `mirrorX: false`;
+  - `geometryMode: 0`, because the preset sets it;
+  - `combiner: true`, `decals: true`;
+  - `lighting` from the environment record;
+  - `resolve` = segment resolver.
+- **State:** SF64 object lists carry no render state (*Display lists, vertices, textures*). Build a small wrapper list for each drawn object in a scratch area appended to the buffer, and let `resolve` map it:
+  1. `G_DL(push) → gRcpSetupDLs[preset]` (a main address);
+  2. any recipe commands: `G_CLEARGEOMETRYMODE(G_CULL_BACK)`, `G_SETPRIMCOLOR`, point filter;
+  3. `G_DL(push) → object list`;
+  4. `G_ENDDL`.
+
+  The prototype does exactly this with the unmodified `displaylist.ts` (**verified**).
+- **Ground textures:** synthesise `G_SETTIMG`, `G_SETTILE`, `G_LOADBLOCK`, `G_SETTILESIZE` for the 32×32 tile (`gDPLoadTileTexture` + `gDPSetupTile` encoders in `lv/proto/decode.ts`, **verified** to decode correctly).
+- **Changes needed in `displaylist.ts`:** none for geometry and textures. Optional:
+  - (a) texture filter mode from `G_SETOTHERMODE_H` (G_TF_POINT on the Fortuna base and warp props). This needs a new `Batch.pointFilter?` (or `Texture.filter`) field: `types.ts` has none, and the renderer's filter is global;
+  - (b) translucent presets 37/41/45/47 (Aquas water, Corneria water, Bolse shield) need nothing beyond emitting `G_SETPRIMCOLOR` in the wrapper. With `combiner: true` the fold already applies prim alpha (alpha = TEXEL0 × PRIM for presets 37 and 45), and render modes C81049D8 and C81041C8 are detected as `'blend'`. Preset 41: Z, combiner FC119623 FF2FFFFF, render mode 0x005049D8.
+- **Lighting.** The game uses one directional light plus ambient on lit presets (*Render state set by game code*). Two options:
+  - **Bake:** run per instance with `matrix` and `lighting` in world space. This is correct shading without instancing; the prototype does it.
+  - **Normals:** extend `displaylist.ts` to emit per-vertex normals for `G_LIGHTING` batches and light them in the renderer. This is faster for big levels, but needs a new `Batch.normals?: Int8Array` field.
+
+  Either way the colours are unlit normals unless lighting is applied: presets 20/29/45/57 have G_LIGHTING, so vertex colour bytes are normals. The light-direction convention is in *Fog, lights, clear colour, camera*.
+
+### 3.5 Textures and materials
+
+#### Level format: Display lists, vertices, textures
+
+- **Microcode:** F3DEX 1.x, "F3DEX.NoN 1.22". **Verified**: the ID string is in main; opcodes decode consistently (G_VTX 0x04, G_TRI1 0xBF, G_TRI2 0xB1, G_ENDDL 0xB8). The leak's spec links `gspF3DEX.NoN.fifo.o`.
+- **Vertices:** standard 16-byte `Vtx {s16 x,y,z; u16 flag; s16 s,t; u8 r,g,b|nx,ny,nz; u8 a}`.
+- **What object lists contain.** Opcode histogram over all placed scenery lists of 13 levels (`lv/proto/dlscan.ts`, **verified**): `04 B1 BF B8 BA E6 E7 E8 F0 F2 F3 F5 FD` only.
+  - Present: geometry, `gDPLoadTextureBlock`-style uploads (SETTIMG/SETTILE/LOADBLOCK/SETTILESIZE), `G_LOADTLUT` and TLUT-mode changes.
+  - Absent: G_DL calls, matrices, geometry-mode, combiner or render-mode commands, BRANCH_Z.
+  - **All render state comes from a preset the game calls first** (*Render state set by game code*).
+- **Texture formats:** RGBA16 in most lists, CI4 and CI8 with RGBA16 TLUTs, IA8, IA16 and I (effects, title cards).
+- **Filtering and wrap:** bilinear by default (the presets set G_TF_BILERP). Some lists and recipes switch to G_TF_POINT, e.g. the Fortuna base and warp props. Wrap comes from each list's SETTILE.
+- **Code-built textures:** ground planes are textured by game code with `gDPLoadTileTexture` + `gDPSetupTile`, and a loader must synthesise those commands (*Terrain and ground planes*).
+- **Viewer support:** everything in these lists is already handled by `displaylist.ts`. **Verified**: the prototype runs all lists through the unmodified `runDisplayList` with no unknown commands, and CI4/CI8 textures decode correctly.
+
+### 3.6 Collision
+
+Collision storage and interpretation are described with the corresponding level records above.
+
+### 3.7 Environment, sky, fog, and lighting
+
+#### Mapping onto the viewer: Environment
+
+| game | `types.ts` | how |
+|---|---|---|
+| clear colour | `clearColor` | RGBA5551 → RGB from the effective colour in *Fog, lights, clear colour, camera*: Corneria (8,8,16), Zoness (64,32,24), space (0,0,0) |
+| fog | `Fog` | `{color: record RGB (warp zone override), multiplier: trunc(128000/(far−near)), offset: trunc((500−near)·256/(far−near)), near: 10, far: 12800 (30000 Katina, Sector Z)}`. World units match the geometry (1 vertex unit = 1 world unit; captured modelviews have scale 1.00) |
+| planet backdrop | `Backdrop` | texture = the level's backdrop texture (64×32; 32×32 for BM03_BG02 and Versus Corneria), u0 0, u1 0.91 (wrap), v window from *Planet backdrop (camera-space quad)* at the start camera, no tint. Approximate: the game's window follows camera height and pitch, and clamps v |
+| space backdrops | – | skip, or add a screen sprite (below) |
+| starfield | – | skip, or add a point layer (below) |
+| ground | `meshes` + `instances` | generated strip or plane at y −3 (*Terrain and ground planes*, *Ground rendering details*): on-rails x ±4000 around each route's x along the level, UV period 391 × 293 units; all-range 24000 × 24000 tiles around the origin with the tile list's UVs. Corneria texture per z section (*Terrain and ground planes*). Batches with `depthWrite: false`, drawn first, for Corneria, Katina, Fortuna, Venom 2, Versus and the Aquas floor. Corneria's water sections are the exception: preset 45 is z-buffered and translucent, drawn after objects, over a mirrored copy of the objects |
+| Solar / Zoness surface | mesh | the 17×17 grid with edges moved to ±1400, under S(3,2,3), tiled along the path; flat unless `Play_UpdateDynaFloor` is ported for one frame |
+| Aquas water | mesh | translucent quad (alpha 128) at y 1600, Scale(2,1,0.5), `blend` |
+| camera | `camera` | start eye and target from *Fog, lights, clear colour, camera*, fovY 45. For on-rails levels, place the eye at z = eyeZ (path progress 0) |
+| lights | – (baked) | directional light `RotX(rx)·RotY(ry)·RotZ(rz)·(0,0,1)`, colour = record light, ambient = record ambient. Either baked into vertex colours through `runDisplayList`'s `lighting` option (world space, per instance) or a new `Level.light` |
+
+**Proposed minimal `types.ts` extensions** (all optional; the level renders without them):
+1. `Backdrop.clampV?: boolean`, since the game's backdrops wrap in u, clamp in v and use windows outside [0,1]. Better still, a camera-space sky quad `{texture, width 7280, height 8680, viewZ −6000, yOffset, uvs}` drawn ignoring camera rotation, as the game does.
+2. A per-batch or per-mesh "draw first, no depth" flag for grounds, like `Sky` but with fog and camera translation.
+3. `Level.light?: {dir, color, ambient}`, if the renderer should shade lit geometry itself.
+4. `Level.starfield?: {count, seed, colors}` and `ScreenSprite {texture, center, size, alpha}` for space backdrops.
+5. `Batch.normals?: Int8Array` for renderer-side lighting (*Display lists*).
+6. `Batch.pointFilter?: boolean` (or `Texture.filter`) for G_TF_POINT lists (*Display lists*).
+
+#### Verification evidence: Environment and reference screenshots
+
+| claim | evidence |
+|---|---|
+| Environment records = RAM, per level | 25 RDRAM dumps `rt/dumps/*_a.bin` (+ `.task`), `rt/envread.sh`, `rt/env/*.txt`, `rt/table.txt`; static `rt/envdump.py v11\|v10` |
+| Clear, fog, projection, lights, presets, culling in real frames | frame display lists captured at `Graphics_SetTask` (`rt/capture.sh`), walked by `rt/dlwalk.py` / `rt/dlcalls.py` → `rt/dl/*.txt` |
+| Backdrop, ground and water display lists, UVs | `rt/astdl.py` |
+| Render presets = leak | ROM 0xD3DB0 vs leak `Source/fox_std_rcp.o` `fox_gsCPModeSet_Data` (0x18C0 bytes, 0 of 1584 words differ) |
+| Level switching and crash analysis | `rt/goto.sh`, `rt/dumps/crash_sx.bin`, `rt/log.txt` |
+| V1.0 environment | `rt/dumps/v10_corneria.bin` |
+
+**Reference screenshots** (`shots/`, described in `shots/index.md`; 320×240, V1.1 unless marked):
+
+| group | shots |
+|---|---|
+| menus | title, main menu, Lylat map |
+| on-rails | Corneria (intro, 2 in level), Meteo, Sector X, Area 6, Sector Y, Venom 1, Solar, Zoness, Venom Andross, Training, Macbeth, Titania, Aquas |
+| all-range and special | Meteo warp zone, Venom Andross phase 1, Fortuna, Katina, Bolse, Venom 2, Versus Corneria (4-way) |
+| unused | UNK_4 (level 4) |
+| V1.0 | Lylat map, Corneria intro, 2 Corneria in-level |
+
+There is no Sector Z shot; the candidate frames are in `rt/cand/`. Prototype renders for comparison are in `lv/renders/`, and the lead compared Corneria, Fortuna and Titania qualitatively (*Levels*).
+
+#### Open questions and hypotheses: Environment
+
+- The planet backdrop's vertical texture window is computed from the decomp formulas, not pixel-matched against a screenshot.
+- The exact composition order of the world-space light vector. It is consistent with RAM on Corneria only.
+- Which code writes the Aquas light colours at run time: RAM (30,70,90)/(15,22,37) matches neither record.
+- Warp zone: whether the missing colour FILLRECT is the motion-blur path.
+- The V1.0 addresses of the level-poke variables are assumed to be V1.1 − 0xA190, untested. V1.0 was only reached through the menus.
+- Not captured: Versus Sector Z stage, Venom 2 phase 2, the Andross escape overrides.
+- Bolse's dynamic ground (`Bolse_DrawDynamicGround`) is not decoded.
+- Sector Z has no usable reference screenshot (mission card or plain starfield); its environment and display-list data were captured.
+- Whether the unused Corneria sky quad D_CO_602ECB0 is referenced from any data table. Only code was checked.
+
+### 3.8 Cameras and paths
+
+#### Level format: Fog, lights, clear colour, camera
 
 **Environment record**, 0x44 bytes, usually immediately before the level's main placement list (not on Macbeth or Titania); locate it through the pointer table below. The leak calls it `Stage_Data`. **Verified** by decode for all levels (`lv/proto/dump.txt`):
 ```
@@ -854,7 +1024,7 @@ Versus Sector Z comes from the record only; it was not captured.
 ```
 gLight1 = RotZ(camRoll)·RotX(−camPitch)·RotY(camYaw) · RotX(lightRotX)·RotY(lightRotY)·RotZ(lightRotZ) · (0, 0, 100)
 ```
-- The RSP receives the light already rotated by the camera. In world space it is **`RotX(rx)·RotY(ry)·RotZ(rz)·(0,0,1)`**, with colour = record light RGB and ambient = record ambient; the exact composition order is HYPOTHESIS.
+- The RSP receives the light already rotated by the camera. In world space it is **`RotX(rx)·RotY(ry)·RotZ(rz)·(0,0,1)`**, with colour = record light RGB and ambient = record ambient; the exact composition order is hypothesis.
 - `Lights_SetOneLight` puts the light in slots 0-3; slots 4-6 are black.
 - The player uses light 2 with the same values.
 - Water reflections flip light y.
@@ -893,35 +1063,263 @@ gLight1 = RotZ(camRoll)·RotX(−camPitch)·RotY(camYaw) · RotX(lightRotX)·Rot
 
 It works from the main menu or inside a level (`rt/goto.sh`). Frame display lists are captured by breaking on `Graphics_SetTask` (0x80003C50) and reading `gGfxTask` (0x80137E54) (`rt/capture.sh`).
 
-### 5.7 Render state set by game code
+#### Mapping onto the viewer: Instances, bounds, camera
 
-Each object is drawn after `RCP_SetupDL(preset)` from `gRcpSetupDLs[88]` (V1.1 0x800D31B0; 72 bytes per entry; decoded from the ROM; **identical in both versions**). Every preset is:
+- **Matrix:** column-major = transpose of the game's row-vector matrix.
+  - On-rails: `T(x, y, −zPos1 − 3000 + zPos2)·RY·RX·RZ`.
+  - All-range: `T(x, y, ±zPos1)·RY`, sign per loader (*Object placement*).
+  - Event actors: *Event actors (ids ≥ 1000)*. Skeleton limbs: *Skeleton models (frame 0)*.
+- **Meshes:** one `Mesh` per distinct (list, preset, recipe). Instances share meshes when lighting is done in the renderer; they don't share when baked.
+- **Size:** on-rails levels are long. Corneria runs to about z −230000 and Venom 1 to about −635000. That is fine for Float32 at model sizes, but set the far plane from fog. Alternatively offer route sections as separate entries; the Corneria lake route is at x ≈ 7000 after z −171296.
+- **Ground:** tile the *Terrain and ground planes* ground list or a generated strip every 6000 units along the path's z range (12000-unit tiles for all-range), with world-anchored UVs and Corneria's per-section surface texture.
+- **Moving objects:** list moving enemies and event actors as `animated: true` instances at their spawn pose, or omit them. Items, effects and markers are skipped.
+- **`bounds`:** computed from placed instances.
+- **`camera`:** eye 3000 units behind the first scenery at y 300, looking −Z, for on-rails; above the origin for all-range. Runtime start-camera values are in *Fog, lights, clear colour, camera*.
+
+## 4. Objects
+
+### 4.1 Placement records
+
+#### Level format: Object placement
+
+**ObjectInit record**, 0x14 bytes. **Verified**: all 37 lists parsed; live RAM objects match field for field. The leak names it `enemy_set_data`.
 ```
-PipeSync; clear all geometry modes; gSPTexture(on/off); SetCombine; SetGeometryMode; alpha compare none; render mode; othermode H; EndDL
++0x00 f32 zPos1   on-rails: path distance (>= 0, list sorted ascending); all-range: z
++0x04 s16 zPos2   on-rails extra z offset
++0x06 s16 xPos    world x
++0x08 s16 yPos    world y
++0x0A s16 rot.x, rot.y, rot.z   degrees
++0x10 s16 id      ObjectId; <= -1 ends the list; >= 1000 = event actor, script index id - 1000
 ```
-`RCP_SetupDL_29(r,g,b,a,near,far)` and the other variants add `gDPSetFogColor` + `gSPFogPosition` (decomp).
+**World position.**
+- On-rails: `(xPos, yPos, −zPos1 − 3000 + zPos2)`.
+  - **Verified**: all 15 live scenery objects in a Corneria RAM dump match exactly, e.g. id 55 at (−1046, 0, −40707.1) from zPos1 31707.1, zPos2 −6000.
+  - `Scenery_Load` negates zPos1 (`neg.s` at V1.1 0x800614E4).
+- All-range: the z sign depends on the loader. **Verified** by disassembly of V1.1:
+  - `+zPos1`: Fortuna (ovl_i4 0x8018BB1C), Play_Setup360_CO (0x800A5424), Play_Setup360_SY (0x800A568C), Play_InitVsStage;
+  - `−zPos1` (`neg.s`): Bolse (ovl_i4 0x80191FF4), Sector Z (0x8019EB90), Venom 2 (ovl_i6 0x80196A78), Andross (0x80193820), Training_Setup360 (ovl_i1 0x80198D3C).
+  - Training_Setup360 also sets `y = yPos − RAND_FLOAT_SEEDED(300)` after `Rand_SetSeed(1, 29000, 9876)`.
+  - All-range scenery uses only rot.y: `T(pos)·RY`.
+- Versus: entries with id 147 (OBJ_SCENERY_LEVEL_OBJECTS) are bookkeeping and are not drawn.
 
-| preset | geometry mode | combiner (w0 w1) | render mode | used for |
-|---|---|---|---|---|
-| 20 | SHADE SMOOTH CULL_BACK FOG LIGHTING (no Z) | FC127FFF FFFFF238 (MODULATEIDECALA) | C8112048 (FOG_SHADE_A / AA_OPA_SURF2) | ground planes (drawn first) |
-| 29 | ZBUFFER SHADE SMOOTH CULL_BACK FOG LIGHTING | FC127FFF FFFFF238 | C8112078 (AA_ZB_OPA_SURF2) | default: scenery, actors, bosses, Titania ground |
-| 34 | ZBUFFER SHADE SMOOTH CULL_BACK FOG | FC11FFFF FFFFF638 (MODULATEI_PRIM) | C8112078 | Fortuna base part, warp props |
-| 37 | SHADE SMOOTH FOG | FC1197FF FFFFFE38 (MODULATEIA_PRIM) | C81041C8 (AA_XLU_SURF2) | Aquas water surface |
-| 45 | ZBUFFER … CULL_BACK FOG LIGHTING | FC127E03 FF0FF3FF | C81049D8 (AA_ZB_XLU_SURF2) | Corneria water ground |
-| 47 | ZBUFFER SHADE SMOOTH FOG | FC1197FF FFFFFE38 | C81049D8 | shadows, Aquas |
-| 57 | ZBUFFER … CULL_BACK FOG LIGHTING | FC127FFF FFFFF238 | C8113078 (AA_ZB_TEX_EDGE2) | cut-out scenery |
-| 60 | ZBUFFER SHADE SMOOTH FOG (unlit, no cull) | FCFFFFFF FFFCF238 (DECALRGBA) | C8113078 | sprites (trees, poles, cacti) |
+**Path turns and route branches.** The target computation is **verified** by disassembly of `ItemPathChange_Update` (V1.1 0x80068C88). Path smoothing and camera banking follow decomp `Player_UpdatePath`. No turn was observed in RAM: xPath stayed 0 on the Corneria main route.
+- Path items (`OBJ_ITEM_PATH_*`) only **translate** the path: `xPathTarget = xPath ± rot.z·100`, likewise for y. The yaw change is camera banking; the world never rotates.
+- Static placement is therefore correct on every route, and alternative routes sit at other x or y ranges.
 
-- **Othermode H:** 2CYCLE, PERSP, BILERP (`00182C00` for 29/34/57/60).
-- **Lighting:** presets 20/29/45/57 enable G_LIGHTING, so scenery vertex colours are **normals**. The colour is ambient + light·max(0, N·L) with the environment record's light and ambient.
-- **Light direction:** `Camera_SetupLights` rotates the record's light angles by the camera's yaw, pitch and roll every frame (runtime detail in §5.6). Bosses add a second light.
-- **Full dump** of all 88 presets: `lv/proto/presets_v11.txt`.
+  | level | path items |
+  |---|---|
+  | Corneria | TURN_RIGHT at zPos1 168296, width 7000; the lake route is at x ≈ 7000 |
+  | Sector X | SPLIT_X 117073 (4000); turns at 191038 and 192038 |
+  | Sector Y | SPLIT_Y 108430 (3500); TURN_DOWN/UP 163628: vertical routes |
+  | Venom 1 | 17 junction items |
 
-## 6. Music
+**Object id classes** (`sf64object.h`, consistent with list contents):
 
-Source notes: `notes/music.md`. Work dir: `/home/n64/.ai-tmp/r49/sf/mus/`. The prototype renderer is in `mus/proto/`.
+| ids | class |
+|---|---|
+| 0-160 | scenery |
+| 161-175 | sprites (trees, poles, cacti) |
+| 176-291 | actors |
+| 292-321 | bosses |
+| 322-338 | items |
+| 339-399 | effects |
+| 400-405 | environment markers |
+| 1000+ | event actors |
 
-### 6.1 System
+Level geometry is scenery, sprites, static actors and static event actors (*Event actors (ids ≥ 1000)*).
+
+**Object info table** `gObjectInfo[400]` (ids 0-399; `OBJ_ID_MAX` is 406 but ids 400-405 have no entry; the table is followed by the `$Id: fox_edisplay.c` string), 0x24 each, at V1.1 0x800CC124. **Verified** layout by decode:
+```
++0x00 u32 dList (drawType 0) or draw function (drawType 1/2)
++0x04 u8  drawType   0: plain segmented list; 1: C function; 2: function building its own matrices (skeletons)
++0x08 fn  action; +0x0C f32* hitbox; +0x10 f32 cullDistance; +0x14 s16, s16; +0x18 u8 damage, u8;
++0x1C f32 targetOffset; +0x20 u8 bonus
+```
+
+**Instance matrix** (decomp `Object_SetMatrix`, `Scenery_Draw`, `Sprite_Draw`; positions and angles **verified** in RAM, composition order per decomp and consistent with renders):
+- On-rails scenery, sprites and actors: `T(pos)·RY(rot.y)·RX(rot.x)·RZ(rot.z)`.
+- Objects with non-default drawing, **keyed by object id** (full table in `notes/levels.md` *MIO0*). Ids 8, 9, 19, 50 and 55 are drawType-0 lists whose preset and culling `Scenery_Draw` overrides by id, so a loader must dispatch these recipes on the id, not on drawType:
+  - **Preset 57 + cull off:** CO_HIGHWAY_4, CO_TOWER, VE1_WALL_3, CO_ROCKWALL.
+  - **Preset 60:** CO_HIGHWAY_3.
+  - **Fixed transforms:**
+    - CO_BUILDING_9: extra T(0,0,−95);
+    - VE1_WALL_1/2: preset 57, RY(180);
+    - AQ_BUMP_2: Scale(0.5);
+    - TI_RIB_0..8: Scale {1, 0.95, 0.9, 0.85, 0.8, 0.75, 0.7, 0.65, 0.6} + D_TI1_700BB10.
+  - **Preset 57 lists:** Macbeth tracks, signs and switches (D_MA_* lists), MA_TOWER (two lists, no cull).
+  - **Skeletons (*Skeleton models (frame 0)*):** CO_DOORS (aCoDoorsSkel / aCoDoorsAnim), MA_TRAIN_STOP_BLOCK, MA_SWITCH_TRACK (aMaSwitchTrackSkel + D_MA_601C170 at RY(−10)·T(0,0,−1800)), AND_PASSAGE (gate skeleton, limb 13 only) / AND_DOOR (gate skeleton without limb 13), Venom 2 base (aVe2BaseSkel / aVe2BaseAnim).
+  - **Other recipes:** CO_BUILDING_ON_FIRE no cull + D_CO_60199D0; TI_SKULL D_TI1_7007350; TI_PILLAR D_TI1_7002270; MA_PROXIMITY_LIGHT aMaProximityLightSidesDL, then preset 29 aMaProximityLightTopDL; Macbeth tracks, ids 92-105, preset 57 + the D_MA_* lists of `notes/levels.md` *MIO0* (105: preset 29 D_MA_602D380); Corneria all-range CO_BUMP_1 uses D_CO_6020760 instead of its info list.
+  - **Shadow decals:** 164 OBJ_SPRITE_FOG_SHADOW (drawType 1): preset 47 + aCoShadow1DL scaled per scenery type.
+  - **No geometry:** 147, 155 (NULL list), 156 (SY_SHOGUN_SHIP, draw unimplemented in the game), 167/168, 170-175.
+- Fixed bases created by code at (0,0,0), not by lists:
+  - Fortuna OBJ_BOSS_FO_BASE: preset 29 aFoBaseDL2, then preset 34 + cull + point filter + prim colour, aFoBaseDL1;
+  - Katina FL base: T(0,20,0) aKaFLBaseDL; saucerer at (−15000, 3240, 15000);
+  - Bolse base: D_BO_6002020, plus translucent shield aBoBaseShieldDL (preset 41);
+  - Venom 2 base: skeleton aVe2BaseSkel;
+  - Sector Z: Great Fox (aGreatFoxIntactDL).
+
+##### Placement lists
+
+Offsets are into the level file. **Verified** entry counts; all lists are byte-identical in V1.0 and V1.1 except Venom 1 (*Asset files*).
+
+| list | file + offset | entries | notable content |
+|---|---|---|---|
+| Corneria on-rails [0] | ast_corneria+0x371A4 | 803 | 380 scenery, 213 sprites, 171 event actors |
+| Corneria all-range (Granga arena) | ast_corneria+0x3B074 | 136 | 67 scenery, 69 CO_TREE |
+| Meteo [1] | ast_meteo+0x26CC4 | 876 | 2 ME_TUNNEL, 756 event actors |
+| Meteo warp | ast_meteo+0x2B148 | 323 | event actors |
+| Sector X [2] | ast_sector_x+0x2A164 | 1025 | 1008 event actors (the base) |
+| Sector X warp | ast_sector_x+0x2F18C | 166 | event actors |
+| Area 6 [3] | ast_area_6+0x23F64 | 443 | event actors |
+| UNK_4 [4] | ast_area_6+0x287A4 | 1 | one event actor |
+| Sector Y on-rails [5] | ast_sector_y+0x2E4F4 | 487 | 6 scenery, event actors |
+| Sector Y all-range | ast_sector_y+0x30B14 | 1 | Shogun ship |
+| Venom 1 [6] | ast_venom_1+0x7E74 | 1664 | 565 scenery, 162 actors |
+| Venom 1 beta (unused) | ast_venom_1+0x10088 | 1978 | *Unused and hidden content* |
+| Solar [7] | ast_solar+0x1F234 | 179 | actors |
+| Zoness [8] | ast_zoness+0x26714 | 500 | 143 scenery |
+| Andross tunnel [9] | ast_andross+0x35154 | 67 | 29 AND_PASSAGE |
+| Andross boss | ast_andross+0x356A4 | 1 | |
+| Andross base (all-range) | ast_andross+0x356CC | 156 | 123 scenery |
+| Andross escape 1/2/3 | ast_andross+0x36310 / 0x36B6C / 0x3733C | 106 / 99 / 100 | |
+| Training on-rails [10] | ast_training+0x6AA4 | 464 | 220 TR_BUILDING |
+| Training all-range | ast_training+0x8EF8 | 76 | |
+| Macbeth [11] | ast_macbeth+0x31000 | 901 | 585 scenery |
+| Macbeth trains | ast_macbeth+0x35678 / 0x357CC / 0x35920 | 16 / 16 / 6 | train cars |
+| Titania [12] | ast_titania+0x6C60 | 605 | 110 scenery, 81 cacti, 165 terrain records |
+| Aquas [13] | ast_aquas+0x2E5C8 | 322 | 103 scenery, seabed props |
+| Fortuna [14] | ast_fortuna+0xEAD4 | 79 | 45 scenery, 26 FO_POLE |
+| Katina [16] | ast_katina+0x11044 | 0 | base is created by code |
+| Bolse [17] | ast_bolse+0xFF74 | 29 | 11 scenery |
+| Sector Z [18] | ast_sector_z+0x6EB4 | 74 | 62 space-junk scenery |
+| Venom 2 [19] | ast_venom_2+0x14D94 | 29 | towers, mountains |
+| Versus Corneria [20] / Katina / Sector Z / Sector Z match | ast_versus+0x2DE3C / 0x2E0E4 / 0x2E170 / 0x2E378 | 33 / 6 / 25 / 24 | |
+
+##### Event actors (ids ≥ 1000)
+
+Almost everything visible in Meteo, Sector X, Area 6, Sector Y and the warp zones is an event actor. Many props elsewhere are too. **Verified** by decoding the scripts and tables (`lv/proto/events.ts`); semantics per decomp `fox_enmy2.c`.
+
+- **Script tables** (u16* arrays; index = id − 1000):
+
+  | level | table offset | level | table offset |
+  |---|---|---|---|
+  | Corneria | ast_corneria+0x3D9E8 | Solar | +0x20DD0 |
+  | Meteo | +0x2F3AC | Zoness | +0x2AAC0 |
+  | Sector X | +0x320D0 | Andross | ast_andross+0x37E3C |
+  | Area 6 | +0x27F50 | Training | +0x9B34 |
+  | UNK_4 | +0x289FC | Macbeth | +0x381D8 |
+  | Sector Y | +0x32E18 | Titania | +0x631C |
+  | Venom 1 | +0x1B1E4 (V1.0: +0x1B1D8) | Aquas | +0x308B8 |
+
+  Warp lists use their level's table.
+- **Script encoding.** A command is a pair of u16 words:
+  - word 0: `opcode = (w >> 9) & 0x7F`, `arg1 = w & 0x1FF`;
+  - word 1: arg2.
+
+  Opcodes that matter:
+
+  | opcode | command | arguments |
+  |---|---|---|
+  | 104 | INIT_ACTOR | arg2 = eventType, arg1 = health |
+  | 0 | SET_SPEED | |
+  | 1 | SET_ACCEL | |
+  | 9-12, 16-21 | turn, pitch, yaw, roll | |
+  | 40-47 | pursue, flee | |
+  | 48 | SET_WAIT | |
+  | 96 | SET_TRIGGER | arg1 < 200: command index; ≥ 200: switch to script arg1 − 200 |
+  | 119 | SET_SURFACE | |
+  | 126 | LOOP | |
+  | 127 | STOP | |
+- **Walker details** (`notes/levels.md`, “Event actor scripts”):
+  - speed commands encode speed `w & 0x7F` and z mode `(w >> 7) & 3` in word 0; this matters for the static/moving test;
+  - LOOP (126): arg1 < 200 goes to command arg1 after arg2 repetitions; arg1 ≥ 200 switches to script arg1 − 200;
+  - `aiIndex` counts u16 words, so command k is at byte 4k;
+  - levels without their own table fall back to the Corneria table;
+  - eventType ≥ 200 (EVENT_HANDLER, ME_MORA) has no model.
+- **Model.** `sEventActorInfo[eventType]` (108 entries of 0x20 at V1.1 0x800D003C, V1.0 0x800CB64C): `{Gfx* dList; f32* hitbox; f32 scale; f32 cull; ...}`.
+  - To find a static model, walk the script from command 0, following LOOP and script changes, to the first INIT_ACTOR. If there is none, follow trigger branches breadth-first.
+  - Unresolved (trigger-only handlers): Corneria 12 scripts, Area 6 11 scripts.
+  - Per-type draw extras for the main types:
+
+    | type | extra |
+    |---|---|
+    | WZ_* | preset 34, point filter, prim colour |
+    | SX_SPACE_MINE, SY_ROBOT_SPRITE_* | preset 60 |
+    | MA_LASER_TURRET, MA_RAILROAD_CART | preset 57 |
+    | A6_UMBRA_STATION | RX(90) |
+    | ME_ROCK_GULL | orientation rotations |
+    | VE1_PILLAR | Scale 0.6 |
+    | CRUISER_GUN | RY(180), Scale 1.5, skeleton |
+    | SX_WARP_GATE | skeleton (limb 5 with preset 34) |
+    | TRIPOD | T(0,−30,0), skeleton |
+    | ME_FLIP_BOT | aMeFlipBot1DL, then preset 53 aMeFlipBot2DL |
+    | A6_NINJIN_MISSILE, A6_ROCKET | no cull |
+
+  - Not reproduced: SY_ROBOT_1-3 (SectorY_SyRobot_Draw).
+- **Matrix.** `T(pos)·RZ(orient.z)·RY(rot.y)·RX(rot.x)·RZ(obj.rot.z)`, with `pos = (xPos, yPos, −zPos1 − 3000 + zPos2)`. At load, `obj.rot = (rx, ry, 0)` and `orient.z = rz`. At INIT_ACTOR with `info.unk16 == 0`, `obj.rot.z = rz` and `orient.z = 0` (A6_UMBRA_STATION keeps orient.z). VENOM_TANK (`info.unk19 ≠ 0`) and A6_UMBRA_STATION use `T·RY·RX·RZ` instead. Preset 29 unless the type overrides it.
+- **Static vs moving.** Static means the main script path never sets a speed, turn or pursuit before STOP.
+
+  | level | static props / total with a model |
+  |---|---|
+  | Meteo | 231 (asteroid field) |
+  | Sector X | 664 (the whole space base) |
+  | Area 6 | 101 (cruisers, guns, Umbra stations) |
+  | Sector Y | 61 ship props |
+
+  Moving event actors can be listed as `animated` instances at their spawn pose.
+
+##### Skeleton models (frame 0)
+
+**Verified** by decoding aCoDoorsSkel, aVe2BaseSkel and aMaTrainStopBlockSkel; semantics per decomp `fox_std_lib.c`.
+
+- **Limb** (0x20): `+0 Gfx* dList (may be NULL); +4 f32 trans x,y,z; +0x10 s16 rot x,y,z (unused); +0x18 Limb* sibling; +0x1C Limb* child`.
+- **Skeleton:** a NULL-terminated array of Limb*. Element 0 is the root; a limb's index is its array position + 1.
+- **Animation** (0x0C): `s16 frameCount; s16 limbCount; u16* frameData; JointKey* jointKey`.
+- **JointKey** (0x0C): `u16 xLen, x, yLen, y, zLen, z`. Channel value for frame f is `frameData[idx + (f < len ? f : 0)]`.
+  - Key 0: root translation (s16).
+  - Keys 1..limbCount: that limb's rotation, `value·360/65536` degrees.
+- **Drawing:**
+  - Root: `M = object · T(t) · RZ · RY · RX(key 1)`, with t = root limb trans (mode & 1) or key 0.
+  - Each limb: `M_limb = M_parent · T(limb.trans) · RZ · RY · RX(key[index])`.
+  - Children inherit M_limb; siblings inherit M_parent.
+
+### 4.2 Object and model formats
+
+#### Mapping onto the viewer: Detection and game object
+
+- **`src/rom/index.ts`:** add `case 'NFXE'` after `normalizeByteOrder()`. It calls `openStarFox64(rom)`.
+- **`src/rom/types.ts`:**
+  - extend `Game.id` with `'sf64'`;
+  - add `LevelKind` values `'onrails' | 'allrange' | 'versus'` if wanted, or map on-rails to `campaign`, all-range to `battle` and warp zones to `other`;
+  - use `LevelInfo.group` for the groups in *Level list*.
+- **Game title:** `Star Fox 64` for V1.1, `Star Fox 64 (V1.0)` for V1.0.
+- **Version choice:**
+  1. Find the DMA table by pattern (*DMA file table*).
+  2. Offset 0xDE480 means V1.1; 0xD9A90 means V1.0.
+  3. Select the address set in *Addresses that differ per version*.
+  4. Anything else: throw "unsupported revision".
+
+### 4.3 Skeletons and animation
+
+Static-pose or animation support and remaining omissions are stated in the object description.
+
+### 4.4 Behaviors, triggers, and scripted objects
+
+Behavioral records are documented only where they affect level extraction or presentation.
+
+## 5. Audio
+
+### 5.1 Audio storage and banks
+
+Audio storage is described with the sequence and bank tables below.
+
+### 5.2 Sequence format and driver
+
+#### Music
+
+Source notes: `notes/music.md`. Work dir: `sf/mus/`. The prototype renderer is in `mus/proto/`.
+
+#### Music: System
 
 Star Fox 64 uses **Nintendo's EAD sequence driver**, the lineage between Super Mario 64 and Ocarina of Time. It is **not** libultra `alSeqPlayer`/`ALBank`.
 - **Data:** a sequence table, a soundfont table and a sample-bank table.
@@ -941,106 +1339,9 @@ Star Fox 64 uses **Nintendo's EAD sequence driver**, the lineage between Super M
 | tempo clock | `tempoAcc += BPM·48` per update; one tick whenever `tempoAcc ≥ 10770` (then subtract). Seconds per tick = 10770 / (180·48·BPM); music runs 0.28 % faster than nominal; BPM is capped at 224.375 | verified (RAM gMaxTempo 10770; title loop period in capture 21.29 s vs model 21.274 s) |
 | time base | 48 ticks per quarter note | verified (ROM `gSeqTicksPerBeat`; leak `smf2mus.cfg`) |
 | voices | 22 notes per spec (32 for specs 21, 22 opening, 23 title and 27 ending), shared with the SFX and voice players | verified |
-| reverb | per audio spec: reverb 0 = delay 3072 samples (96 ms), decay 0x3000; reverb 1/2 per level (table in `notes/music.md` §1.1). Music uses reverb 0 almost always | verified (ROM specs, RAM) |
+| reverb | per audio spec: reverb 0 = delay 3072 samples (96 ms), decay 0x3000; reverb 1/2 per level (table in `notes/music.md`, “Audio specifications”). Music uses reverb 0 almost always | verified (ROM specs, RAM) |
 
-### 6.2 File formats
-
-**Locations.** The three audio files are byte-identical in V1.0 and V1.1; the leak's built `audio/fox64_{music,banks,table}.o` .data is md5-identical to them (**verified**).
-
-| data | V1.1 ROM | V1.0 ROM | size |
-|---|---|---|---|
-| audio_seq (DMA 3) | 0xDEA20 | 0xDA030 | 0x3ACF0 |
-| audio_bank (DMA 4) | 0x119710 | 0x114D20 | 0x1E020 |
-| audio_table (DMA 5) | 0x137730 | 0x132D40 | 0x73C580 |
-| sample-bank table (main) | 0xC4210 | 0xBFD90 | 0x50 |
-| sequence table | 0xC4260 | 0xBFDE0 | 0x430 |
-| soundfont table | 0xC4690 | 0xC0210 | 0x220 |
-| sequence → font map | 0xC48B0 | 0xC0430 | 283 |
-| gAudioSpecs | 0xC82B8 | 0xC3E38 | 29 × 0x30 |
-| note_data tables | 0xDD310 | 0xD8920 | |
-| sSoundTestTracks | 0xC6AE4 | 0xC2664 | 45 × 6 |
-
-A loader can find the tables by structure: the sample-bank table header has n = 4 and contiguous entries, and the sequence and font tables follow it. That works for both versions (`mus/proto/sf64audio.ts findTables`).
-
-**AudioTable** (sequences, fonts, sample banks). **Verified**; the lead re-checked the sequence table: 66 entries, 20 aliases, extents tile audio_seq exactly.
-```
-+0x00 s16 numEntries; s16 unk; u32 romAddr (0; add the file's ROM start); 8 pad
-+0x10 numEntries x { u32 offset; u32 size; s8 medium (2 = cart); s8 cachePolicy; s16 shortData1..3 }
-```
-- **Sequences:** 66 entries. `size == 0` marks an alias: `offset` is then another sequence id.
-
-  | alias ids | target |
-  |---|---|
-  | 11 | 9 |
-  | 15 | 10 |
-  | 16 | 4 |
-  | 21, 22, 26 | 18 |
-  | 20, 23, 24, 27, 30, 32, 48 | 19 |
-  | 29, 31 | 28 |
-  | 41 | 34 |
-  | 52, 53 | 37 |
-  | 57 | 56 |
-  | 59 | 43 |
-
-  That leaves 46 distinct sequences: SFX, voice, and 44 music.
-- **Fonts:** 33 entries. `shortData1 = sampleBank1<<8 | sampleBank2` (0xFF = none); `shortData2 = numInstruments<<8 | numDrums`.
-- **Sample banks:** 4 entries.
-
-  | bank | contents | offset | size |
-  |---|---|---|---|
-  | 0 | SFX | 0x000000 | 0x0E1E30 |
-  | 1 | map | 0x0E1E30 | 0x0FF9D0 |
-  | 2 | voice | 0x1E1800 | 0x497480 |
-  | 3 | music instruments | 0x678C80 | 0x0C3900 |
-
-**Sequence → font map.** `u16 offset[66]`, then at each offset `u8 count, u8 fontId[count]`. Every music sequence has exactly one font. The player's default font is the last one listed.
-
-| font | sequences |
-|---|---|
-| 21 | 34, 35, 37-40, 44, 45, 49-51, 54-56, 60, 64 |
-| 22 | 36 |
-| 23 | 42 |
-| 24 | 2, 10 |
-| 25 | 4, 7, 8, 13, 43, 47, 61-63 |
-| 26 | 5 |
-| 27 | 58 |
-| 28 | 6, 12, 17, 18 |
-| 29 | 3, 9, 46 |
-| 30 | 14 |
-| 31 | 19, 25, 28, 65 |
-| 32 | 33 |
-
-Aliases inherit their target's font.
-
-**Soundfont** (offsets relative to the font start in audio_bank). **Verified**: 33 fonts, 941 instruments, 479 drums and 1732 sample references all land in bounds, and font and bank extents tile their files.
-```
-Font:        u32 drumListOffset (0 = none); u32 instrumentOffset[numInstruments] (0 = empty)
-Drum list:   u32 drumOffset[numDrums]
-Instrument (0x20): u8 isRelocated; u8 normalRangeLo; u8 normalRangeHi; u8 releaseRate(adsrDecayIndex);
-                   u32 envelopeOffset; {u32 sampleOffset; f32 tuning} x 3 (low, normal, high)
-                   notes < lo use low (if lo != 0); notes > hi use high (if hi != 127)
-Drum (0x10):       u8 releaseRate; u8 pan; u8 isRelocated; pad; u32 sampleOffset; f32 tuning; u32 envelopeOffset
-Sample (0x10):     u32 bits: codec 31..28 (0 = VADPCM), medium 27..26 (0: font's sampleBank1), bit 25, reloc 24, size 23..0
-                   u32 offset in sample bank; u32 loopOffset; u32 bookOffset
-AdpcmLoop:         u32 start, end, count (0 = none, else forever), pad; if count != 0: s16 predictorState[16]
-AdpcmBook:         s32 order (2); s32 numPredictors (2 or 4); s16 book[8·order·numPredictors]
-Envelope:          s16 pairs {delay, arg}: delay > 0 ramp to arg (0..32767); 0 end; -1 hang; -2 goto arg; -3 restart
-```
-- **Pitch:** `freq = gPitchFrequencies[note] · tuning`. gPitchFrequencies[39] = 1.0 = C4, i.e. 2^((n−39)/12).
-- **VADPCM:** 9-byte frames make 16 samples, decoded exactly as the RSP does (the viewer's `decodeVadpcm`).
-- **Loops:** play [0, end), then jump to start with the decoder history loaded from `predictorState`. predictorState equals the decoded samples of the frame containing `loop.start` (**verified** 56/56 looped samples, both versions). That is the convention libultra.ts `prepareWave` already implements.
-- **Code tables** in note_data, used by the renderer (offsets from the note_data base):
-
-  | offset | table |
-  |---|---|
-  | 0x000 | wave pointers (vibrato uses the sine) |
-  | 0x020 | bendOctave f32[256] |
-  | 0x420 | bend ±2 semitones |
-  | 0x820 | gPitchFrequencies f32[128] |
-  | 0xA40 | default envelope {(4,32000), (1000,32000), (−1,0)} |
-  | 0xB70 / 0xD70 / 0xF70 | pan volume tables (default: cos-like, [0] = 1.0, [64] = 0.70272, [127] = 0) |
-
-### 6.3 Sequence bytecode
+#### Music: Sequence bytecode
 
 Semantics follow decomp `audio_seqplayer.c`; command names in brackets come from the leak's `mml64.def`. Argument encodings are **verified** by a reachability disassembly of all 46 sequences with zero errors (`mus/seqscan.py`, `mus/scan_all.txt`).
 
@@ -1132,7 +1433,81 @@ Encodings are big-endian. `var` = 1 byte, or 2 bytes if bit 7 is set: `((b0&0x7F
 
 Render everything with −1.
 
-### 6.4 Song list
+#### Mapping onto the viewer: Music
+
+**Module.** Add `src/rom/music/sf64.ts` and set `Game.music` / `Game.decodeMusic` from it. It locates the data as follows:
+- the three audio files come from DMA entries 3-5;
+- the sequence, font and sample-bank tables are found in main by structure (*File formats*);
+- `gAudioSpecs` and the note_data tables are found by signature.
+
+The same code works for V1.0 and V1.1 (**verified**: identical tables and identical renders).
+
+**Reuse from `src/rom/music/libultra.ts`:**
+- `decodeVadpcm`: the same RSP VADPCM decode;
+- the `prepareWave` loop convention: predictor state = decoded frame containing the loop start, **verified** 56/56;
+- `RESAMPLE_LUT` (exported), and the 4-tap resampler inner loop, which lives in the non-exported `mixVoice` and must be copied.
+
+**Do not reuse:**
+- ALBank parsing;
+- the MIDI scheduler;
+- the libultra envelope mixer. NEAD uses linear 8-sample volume ramps, `(s·vol)>>16`, and its own pan tables.
+
+**New code.** Port `mus/proto/sf64synth.ts` and `sf64audio.ts`: about 1300 lines covering the sequence player (*Sequence bytecode*), note pool, ADSR, reverb and synthesis (*Offline rendering and loop points*). The prototype's `renderSequence` returns `{sampleRate, left, right, loopStart?, loopEnd?, loopTicks?, info}`. A small adapter builds `DecodedMusic {channels: [left, right]}`, and the export should be renamed so it doesn't clash with `libultra.ts`'s `renderSequence`.
+
+**Track list.** `MusicTrack[]`: the 44 rows of *Song list*, with `index` = sequence id and `name` = viewer name.
+- Audio spec per track: from `sSoundTestTracks` in the ROM, or the table in `mus/proto/songs.ts`.
+- bgmParam: −1.
+
+**Loops.** Render the intro plus two passes. Set `loopStart`/`loopEnd` at the first and second executions of the sequence-level `FB` jump. One-shot tracks get no loop.
+
+**Cost.** Up to 352 s for Corneria, about 90 MB of Float32 and 1-10 s of CPU per song in Node. Render in the worker, one track on demand. To save memory, render intro + 1 pass + tail and crossfade the tail into the loop start.
+
+**Risks:**
+- in-game SFX and voice steal notes, which is not modelled;
+- two-part resampling above 2× and the downsample-2 reverb are approximations;
+- a PAL (Lylat Wars) build would need a 50 Hz update clock.
+
+#### Verification evidence: Music
+
+| claim | evidence |
+|---|---|
+| Tables, fonts, samples in bounds; loop-state 56/56 | `mus/check_data.py`, `mus/sfaudio.py`; lead re-check of the sequence table (66 entries, 20 aliases, tiles audio_seq) and V1.0 table equality |
+| Opcode coverage, 0 errors | `mus/seqscan.py` → `mus/scan_all.txt` |
+| Runtime constants (32000/32006 Hz, 3 updates/frame, gMaxTempo 10770, notes, reverbs) | RDRAM `mus/cap/ram_a.bin`, `mus/cap/ram_co.bin` + `mus/ramparse.py` |
+| RSP ucode NEAD SF | ROM word 0x110412CC at ucode_data+0x10 (V1.1 ROM 0xC3EE0; lead re-checked) and rsp-hle `try_audio_task_detection` |
+| Sequence state = game | `mus/ramchan.py` + `mus/proto/statecheck.ts` (Corneria, 181 fields, 0 mismatches) |
+| Audio = game | capture `mus/cap/run1.raw` (audio-dump plugin) vs renders, `mus/proto/compare.ts`: title, map, game over (waveform ncc 1.000), mission start, Corneria (SFX muted with `mus/tools/mute_sfx.sh`) |
+| All ids render, V1.0 = V1.1 | `mus/render_all.txt`, `mus/render_all_v10.txt` |
+| Leak audio = ROM | objcopy + md5 of `audio/fox64_*.o`; `.cart` byte compare |
+
+#### Open questions and hypotheses: Music
+
+- Where the opening sequence 35 is heard. It was not matched in the capture; the prologue plays 60.
+- In-game voice stealing by the SFX and voice players is not modelled.
+- Two-part resampling (rate ≥ 2) and the downsample-2 reverb write delay are approximations.
+- The meaning of the SEQ_FLAG 0x8000 "restart" bit comes from the decomp only.
+- Font choice for leak-only sequences is a guess.
+
+#### Unused and hidden content: Audio
+
+Consolidated from notes/music.md 11. VERIFIED unless noted.
+- **Unreferenced sequence ids.** Six alias ids have no code references: 26 BOSS_FO (alias of 18), 41 END_DEMO (34), 52 AQ_START_DEMO and 53 VE_START_DEMO (37), 57 VS_RESULT (56), 59 STAGE_BM3 (43).
+  - All 46 distinct sequences are reachable.
+  - Sequence 25 (a separate copy of "BB") is used only for Sector Y's boss.
+  - Label: decomp scan + VERIFIED table; high.
+- **Expert Sound Options** (hidden sound test, 11.4): tracks 0-44 are sSoundTestTracks; 45-49 are five scripted medleys following the Lylat routes. decomp; high.
+- **Unreferenced sample data.** About 186 KB of plausible VADPCM data in music sample bank 3 is not covered by any font: +0x5287A (31078 bytes), +0x62124 (19564), +0x6F1C8 (10136), +0x740EE (124706, about 6.9 s), +0xC2F8E (2418). Probably unused instrument samples. VERIFIED coverage; hypothesis on content; medium.
+- **Unused spec ids.** Audio spec ids 18-21 and 26 are defined but never selected. decomp; high.
+- **Unused drum slots.** Fonts 24-32 define 39 drums but use 1-6. One referenced drum sample (bank 3 +0x6C120) is never played. VERIFIED; high.
+- **Leak-only sequences:** 11.7.
+
+### 5.3 Instruments and sample encoding
+
+Instrument banks, envelopes, loops, and sample encoding are described above.
+
+### 5.4 Music catalog and loop points
+
+#### Music: Song list
 
 Sequence ids, decomp names (`include/bgm.h`), leak file names (`assets/en/audio` `.com` files byte-matched to the ROM), per-level assignments from the environment records' `seqId`, and loop lengths from the prototype. The environment `seqId` carries flag 0x8000 (except Aquas, 0x000E; Venom 2 is 0xFFFF), which is stripped before playing.
 - **Verified:** level `seqId` values (e.g. Corneria 0x8002, lead re-checked), the aliases, fonts and specs (`sSoundTestTracks` read from the ROM).
@@ -1192,14 +1567,14 @@ Type: S stage, B boss, M menu loop, D one-shot demo, J jingle.
 - Venom 2's environment `seqId` is 0xFFFF: code starts its music (62, 43, 33).
 - Proposed `MusicTrack` list: the 44 rows above, with index = sequence id and name = viewer name. Boss B, Boss B (Sector Y) and Boss B (resume) are near-identical arrangements; the viewer may keep only 19.
 
-### 6.5 Offline rendering and loop points
+#### Music: Offline rendering and loop points
 
 The spec below is implemented by `mus/proto/sf64synth.ts`, a direct port of about 1300 lines.
 
 - **Clock.**
   - A task covers `32000·numBuffers/60` samples (keep the fraction), split into `3·numBuffers` updates of 168/176/184 samples (last update takes the remainder).
   - Per update: tempo step and player script if a tick fires, then channel scripts, layers, volume/pan/pitch propagation, note processing (ADSR, vibrato), then synthesis.
-  - numBuffers comes from the song's audio spec (§6.4 column "spec"; the 29 specs are in `notes/music.md` §1.1).
+  - numBuffers comes from the song's audio spec (*Song list* column "spec"; the 29 specs are in `notes/music.md`, “Audio specifications”).
 - **Initial state.**
   - Player: tempo 120 BPM, fade 1, mute volume 0.5.
   - `D7` channel init: volume 1, pan 64, pan weight 128, priority 3, reverb send 0, release 0x20, default envelope, vibrato off, io −1.
@@ -1225,7 +1600,7 @@ The spec below is implemented by `mus/proto/sf64synth.ts`, a direct port of abou
   3. Add the notes' sends.
   4. `ring ← wet`.
 
-  Downsample-2 specs (Aquas, Map, Andross) store every second sample and read the ring back through the resampler at pitch 0.5. `notes/music.md` §1.1 quotes their windows doubled (raw windowSize·64 = 2560/4608/1536 for specs 12/15/24).
+  Downsample-2 specs (Aquas, Map, Andross) store every second sample and read the ring back through the resampler at pitch 0.5. `notes/music.md`, “Audio specifications”, quotes their windows doubled (raw windowSize·64 = 2560/4608/1536 for specs 12/15/24).
 - **Output:** `clamp16(main)/32768`, stereo, 32000 Hz.
 - **Loops.**
   - Every looping music sequence ends its loop with a sequence-level `FB` backward jump (**verified**).
@@ -1253,385 +1628,31 @@ The spec below is implemented by `mus/proto/sf64synth.ts`, a direct port of abou
 
 (All **verified** except the last row.)
 
-## 7. Version differences (V1.0 vs V1.1)
+## 6. Unused and hidden content
 
-**Summary.** The versions differ in **both code and data**. For the viewer, the difference is almost nothing:
-- all geometry, textures, display lists, render presets, environment records, audio files and scene compositions are byte-identical;
-- the data changes are limited to event scripts in Corneria and Titania, the Venom 1 placement list and scripts, and pointer relocation in the radio messages;
-- the code changes are four engine fixes, three overlay tweaks, and a libultra build that adds Nintendo's remote debugger.
+### 6.1 Unreferenced assets
 
-**V1.1 is the primary version**: the decomp symbols target it. **One loader serves both versions**: it finds the table by pattern and picks the per-version address set in §7.5.
-
-Method (**verified**, `fs/align_main.py`, `classify_main.py`, `ovl_diff.py`, `ovl_pos.py`):
-- Both main images and every overlay were aligned instruction by instruction, with relocatable fields masked (jal targets, lui, addiu/ori, load/store immediates).
-- Every remaining differing word was checked against the text, data and bss address maps and the overlay base shift (+0xA190). That covers 23441 code relocation pairs and 4287 differing data words in main, and 44351 relocation words in the overlays.
-- Decompressed asset files were byte-compared, and the differing ranges decoded.
-
-### 7.1 main (+0x49F0 bytes: text +0x4480, data +0x570; bss +0x57A0)
-
-| # | subsystem | V1.0 → V1.1 address | function (decomp / leak name) | change | status |
-|---|---|---|---|---|---|
-| 1-9 | libultra | 800227A0.. → 800227A0..8002E3E0 | osCreatePiManager (+ramromMain thread), osInitialize, `__osException` (+`__ptException`, calls kdebugserver), __osTimerInterrupt, `__osRdbSend`, kdebugserver, osReadHost, osInitRdb, the whole rmon (`__rmon*`), plus rmon data/rodata and bss | V1.1 links a libultra build with the remote debugger: +4380 instructions (text +0x4470), data +0x570, bss +0x57A0 (ramrom thread and stack, rmon buffers). rmonMain and osInitRdb are unreferenced. Strings `Set temp BP at %08x`, ` and %08x` are V1.1-only | verified |
-| 10 | HUD | 800538E0/EC → 80057D50/5C | Display_Update / `game_display` | hit counter clamp 999 → **511** (`slti at,t0,1000; li t1,999` → `slti at,t0,512; li t1,511`; lead re-checked the bytes) | verified |
-| 11 | player effects | 800A0230.. → 800A46A0.. | Player_DamageEffects / `player_kem_set_life` | `&& !gVersusMode` added to both broken-wing electric-arc spawns (+6 instructions) | verified |
-| 12 | screen fade | 800A2108.. → 800A6590.. | Play_UpdateFillScreen / `fade_cont` | flash frame sets `gFillScreenAlpha = 254` (V1.0 left it 255) | verified |
-| 13 | Landmaster | 800AEB84.. → 800B3010.. | Player_TankBoostBrake / `tank_dush_360` | boost/brake SFX condition: V1.0 on button press; V1.1 when `boostMeter == 0.0f` | verified |
-| 14 | padding | 800B4944 → 800B8DCC | end of fox_play text | 3 zero words → 1 | verified |
-
-Every other game-engine function (fox_*, sys_*, audio) is identical up to relocation (**verified**). Relocation side effects of the asset change:
-- main's 20 references to ast_venom_1 segment-6 addresses after the insertion point move by +0xC (2 in code, 18 in object-info tables);
-- main's references into ovl_i1 after the Golemech function move by a further +0x44.
-
-Interpretation (hypotheses, strongest first):
-- **#10** fixes a save bug. The save stores per-planet hits in 9 bits (`hitCount:8` + `hitCountOver256:1`, decomp `sf64save.h`), so 512-999 could not be stored.
-- **#12** avoids a premature transition. Several level-complete sequences wait for `gFillScreenAlpha == 255`, which a V1.0 flash frame could satisfy.
-- **#13** stops the sound retriggering on every press.
-- **#11** is a Versus effects or performance fix.
-- **#1-9** most likely come from linking the debug libultra by accident. It is inert on retail hardware and unrelated to PAL or Rumble; the motor code is unchanged.
-
-### 7.2 Overlays
-
-| overlay | V1.0 → V1.1 size | real change | status |
-|---|---|---|---|
-| ovl_i1 | 0x14160 → 0x141A0 | **Venom1_Ve1Golemech_Update** (leak `fox_bm1.o` `BM_Boss_move`). V1.1 adds `if (pos.z > gPlayer[0].trueZpos - 200) Math_SmoothStepToF(&pos.z, target, 0.5, 35, 0.01) else (the V1.0 call with 0.4, 10, 0.01)`: +17 instructions, and one new rodata float 0.01f in place of padding. The Golemech boss closes in faster when the player is within 200 units | verified (code); intent hypothesis |
-| ovl_i6 | 0x20A10 | **Venom2_LevelComplete**: `player->csTimer = 180` → `250` (V1.0 8018CE48 `li t8,180`, V1.1 80196FD8 `li t8,250`, file offset 0xFAB8 in both; lead re-checked the bytes). Applies (per decomp) when the player is within 4000 units of the boss at cutscene start | verified (code); condition per decomp |
-| ovl_menu | 0x30680 | **Map_801A2674**: a map animation factor `*= 1.04f` → `1.03f` (rodata V1.0 801AD528, V1.1 801B76B8) | verified |
-| ovl_i2, i3, i4, i5, ending | same | relocation only | verified |
-| ovl_unused | 0xA0 | byte-identical | verified |
-
-Internal overlay addresses: V1.0 = V1.1 - 0xA190. For ovl_i1 text past V1.1 0x80198310, subtract a further 0x44; for its rodata and data, a further 0x40.
-
-### 7.3 Asset files
-
-| file | range | change | status |
-|---|---|---|---|
-| ast_corneria | 0x3BC74, 12 bytes | Event script. After `SET_TRIGGER(11, EVC_NONE)`, V1.0 `INIT_ACTOR(30,0); LOCAL_ROTATION; SET_SPEED(0,10)` → V1.1 `LOCAL_ROTATION; SET_SPEED(0,10); INIT_ACTOR(30,0)` | verified |
-| ast_titania | 0x5BC7, 1 byte | Event script `STOP_SCRIPT; SET_SPEED(0, 200 → 150); STOP_BGM`: the music stops 50 frames sooner | verified (bytes); meaning hypothesis |
-| ast_venom_1 | list 0xD726-0xDAD3; scripts 0x1AE88-0x1B95E | `aVe1LevelObjects`: 23 of 1664 entries reordered or moved (ids 1023/1097-1099 event actors, two OBJ_ACTOR_VE1_MONKEY_STATUE). The three wingman scripts (EVC_PEPPY/FALCO/SLIPPY_ACTIVE) gain `SET_WAIT(40)`. The +0xC is absorbed by end padding, so the file size is unchanged, but later segment-6 pointers move +0xC | verified |
-| ast_radio | 0xCCB0-0xE50C | 779 absolute RAM pointers in the message table move by +0xA190 (the file loads at a different address). No text change | verified |
-
-For a static viewer the only visible effect is in Venom 1: a few event-actor and statue positions differ. The placement code is the same.
-
-### 7.4 makerom and dma_table
-
-- **makerom:** CRC1/CRC2, the version byte, and the entry-stub bss start/size and `sp` immediates.
-- **dma_table:** entries 1-54 shift +0x49F0 (ast_radio's romEnd +0x4A20); later entries shift +0x4A20 to +0x4CD0 on ROM and +0x4A30 on vrom. The compression flags are identical.
-
-Both **verified**.
-
-### 7.5 Addresses that differ per version
-
-| item | V1.0 | V1.1 |
-|---|---|---|
-| DMA table ROM offset | 0xD9A90 | 0xDE480 |
-| main data ROM range | 0xBFA60-0xD9A90 | 0xC3EE0-0xDE480 |
-| scene tables (sNoOvl_Logo) | 0x800C59C4 | 0x800CA3B4 |
-| sLevelSceneIds[21] | 0x800CDEC4 | 0x800D28B4 |
-| gLevelObjectInits[21] (placement lists) | 0x800CB3B0 | 0x800CFDA0 |
-| environment table [21] | 0x800CE5A8 | 0x800D2F98 |
-| gObjectInfo[400] | 0x800C7734 | 0x800CC124 |
-| gRcpSetupDLs[88] (render presets) | 0x800CE7C0 | 0x800D31B0 |
-| sEventActorInfo[108] | 0x800CB64C | 0x800D003C |
-| Venom 1 event-script table | ast_venom_1+0x1B1D8 | ast_venom_1+0x1B1E4 |
-| Load_SceneSetup jump table | 0x800D15C4 | 0x800D5FB4 |
-| audio tables, ROM (sample banks, sequences, fonts, seq→font, gAudioSpecs, sSoundTestTracks) | 0xBFD90, 0xBFDE0, 0xC0210, 0xC0430, 0xC3E38, 0xC2664 | 0xC4210, 0xC4260, 0xC4690, 0xC48B0, 0xC82B8, 0xC6AE4 |
-| note_data tables, ROM | 0xD8920 | 0xDD310 |
-| overlay/asset load base | 0x8017D390 | 0x80187520 |
-| gSegments (RAM) | 0x800DD5E0 | 0x800E1FD0 |
-
-The level tables listed here shift by exactly −0x49F0 from V1.1 to V1.0. The audio tables at the start of main's data shift by −0x4480 (note_data by −0x49F0, with relocated RAM pointers in its first 0x18 bytes). Their contents are identical, apart from the relocated segment-6 pointers noted in §7.1 (**verified**: `lv/proto/dump.txt`, `presets_v10.txt` = `presets_v11.txt`).
-
-### 7.6 The leak and the versions
-
-Relocation-masked matching of every leak `.o` function against both ROMs (`fs/leakver.py`): 1155 match both, 2 match only V1.0 (`game_display`, `fade_cont`), 0 match only V1.1, and 290 match neither (codegen differences). Every function V1.1 changed has its V1.0 behaviour in the leak.
-
-The leak's English objects are therefore a **V1.0-lineage build that is not byte-identical to either US ROM** (leak-supported conclusion; the individual matches are **verified**). The tree also carries the iQue (Chinese) localisation (leak-supported; lead check), with details in §11.7:
-- `#if LOCALE==CHINA` blocks in `Source/spec` select `audio/zh/*`. The file is EUC-JP, so plain `grep` treats it as binary; `grep -a` finds them.
-- `Source/fox_locale.h` has `#define CHINA 1`.
-- The `audio/zh/` and `i10n/` directories.
-- A Chinese ISBN in `Source/metadata/isbn.txt`. HYPOTHESIS: this is the iQue-era tree, restored from the V1.0 sources.
-
-All level data in the leak (`Source/XX_data.o`: environment records and placement lists) is byte-identical to the ROM data in both versions (**verified**, `lv/proto/leakcheck.txt`), with one exception: the only list that differs between the versions. The leak's `BM_data.o` Venom 1 list is byte-identical to **V1.0**'s `aVe1LevelObjects`, and differs from V1.1 in exactly the changed range, 145 bytes in 0xD726-0xDAD3 (**verified** by the lead, comparing `.data` of `BM_data.o` against both extracted `ast_venom_1` files). This is independent data-side confirmation that the leak follows V1.0.
-
-## 8. Mapping onto the viewer
-
-### 8.1 Detection and game object
-
-- **`src/rom/index.ts`:** add `case 'NFXE'` after `normalizeByteOrder()`. It calls `openStarFox64(rom)`.
-- **`src/rom/types.ts`:**
-  - extend `Game.id` with `'sf64'`;
-  - add `LevelKind` values `'onrails' | 'allrange' | 'versus'` if wanted, or map on-rails to `campaign`, all-range to `battle` and warp zones to `other`;
-  - use `LevelInfo.group` for the groups in §4.1.
-- **Game title:** `Star Fox 64` for V1.1, `Star Fox 64 (V1.0)` for V1.0.
-- **Version choice:**
-  1. Find the DMA table by pattern (§3.1).
-  2. Offset 0xDE480 means V1.1; 0xD9A90 means V1.0.
-  3. Select the address set in §7.5.
-  4. Anything else: throw "unsupported revision".
-
-### 8.2 New modules (suggested)
-
-| file | contents | port from |
-|---|---|---|
-| `src/rom/sf64/fs.ts` | table pattern search, MIO0, file cache by DMA index/vrom, per-version address sets, scene decoding | `fs/proto/sf64fs.ts` (tested on both ROMs) |
-| `src/rom/sf64/space.ts` | segment resolver: scene setup → 15 segment files, plus main (0x80000450 base) | `lv/proto/sf.ts` `Space` |
-| `src/rom/sf64/levels.ts` | level list (§4.1), per-entry recipe: scene, placement list pointer, loader z sign, environment record, ground recipe | `lv/proto/decode.ts` |
-| `src/rom/sf64/objects.ts` | ObjectInfo table, drawType-1 recipes, fixed bases, event-actor model walk, skeleton frame-0 walk, Titania terrain | `lv/proto/extras.ts`, `events.ts` |
-| `src/rom/sf64/env.ts` | environment record → Fog, clearColor, lights, backdrop/sky (§5.5, §5.6) | runtime notes |
-| `src/rom/music/sf64.ts` | sequence player and synthesizer (§6) | `mus/proto/` |
-
-### 8.3 Display lists
-
-- **`runDisplayList` options:**
-  - `ucode: 'f3dex'`, `vertexScale: 1`, `mirrorX: false`;
-  - `geometryMode: 0`, because the preset sets it;
-  - `combiner: true`, `decals: true`;
-  - `lighting` from the environment record;
-  - `resolve` = segment resolver.
-- **State:** SF64 object lists carry no render state (§5.2). Build a small wrapper list for each drawn object in a scratch area appended to the buffer, and let `resolve` map it:
-  1. `G_DL(push) → gRcpSetupDLs[preset]` (a main address);
-  2. any recipe commands: `G_CLEARGEOMETRYMODE(G_CULL_BACK)`, `G_SETPRIMCOLOR`, point filter;
-  3. `G_DL(push) → object list`;
-  4. `G_ENDDL`.
-
-  The prototype does exactly this with the unmodified `displaylist.ts` (**verified**).
-- **Ground textures:** synthesise `G_SETTIMG`, `G_SETTILE`, `G_LOADBLOCK`, `G_SETTILESIZE` for the 32×32 tile (`gDPLoadTileTexture` + `gDPSetupTile` encoders in `lv/proto/decode.ts`, **verified** to decode correctly).
-- **Changes needed in `displaylist.ts`:** none for geometry and textures. Optional:
-  - (a) texture filter mode from `G_SETOTHERMODE_H` (G_TF_POINT on the Fortuna base and warp props). This needs a new `Batch.pointFilter?` (or `Texture.filter`) field: `types.ts` has none, and the renderer's filter is global;
-  - (b) translucent presets 37/41/45/47 (Aquas water, Corneria water, Bolse shield) need nothing beyond emitting `G_SETPRIMCOLOR` in the wrapper. With `combiner: true` the fold already applies prim alpha (alpha = TEXEL0 × PRIM for presets 37 and 45), and render modes C81049D8 and C81041C8 are detected as `'blend'`. Preset 41: Z, combiner FC119623 FF2FFFFF, render mode 0x005049D8.
-- **Lighting.** The game uses one directional light plus ambient on lit presets (§5.7). Two options:
-  - **Bake:** run per instance with `matrix` and `lighting` in world space. This is correct shading without instancing; the prototype does it.
-  - **Normals:** extend `displaylist.ts` to emit per-vertex normals for `G_LIGHTING` batches and light them in the renderer. This is faster for big levels, but needs a new `Batch.normals?: Int8Array` field.
-
-  Either way the colours are unlit normals unless lighting is applied: presets 20/29/45/57 have G_LIGHTING, so vertex colour bytes are normals. The light-direction convention is in §5.6.
-
-### 8.4 Instances, bounds, camera
-
-- **Matrix:** column-major = transpose of the game's row-vector matrix.
-  - On-rails: `T(x, y, −zPos1 − 3000 + zPos2)·RY·RX·RZ`.
-  - All-range: `T(x, y, ±zPos1)·RY`, sign per loader (§5.3).
-  - Event actors: §5.3.2. Skeleton limbs: §5.3.3.
-- **Meshes:** one `Mesh` per distinct (list, preset, recipe). Instances share meshes when lighting is done in the renderer; they don't share when baked.
-- **Size:** on-rails levels are long. Corneria runs to about z −230000 and Venom 1 to about −635000. That is fine for Float32 at model sizes, but set the far plane from fog. Alternatively offer route sections as separate entries; the Corneria lake route is at x ≈ 7000 after z −171296.
-- **Ground:** tile the §5.4 ground list or a generated strip every 6000 units along the path's z range (12000-unit tiles for all-range), with world-anchored UVs and Corneria's per-section surface texture.
-- **Moving objects:** list moving enemies and event actors as `animated: true` instances at their spawn pose, or omit them. Items, effects and markers are skipped.
-- **`bounds`:** computed from placed instances.
-- **`camera`:** eye 3000 units behind the first scenery at y 300, looking −Z, for on-rails; above the origin for all-range. Runtime start-camera values are in §5.6.
-
-### 8.5 Environment
-
-| game | `types.ts` | how |
-|---|---|---|
-| clear colour | `clearColor` | RGBA5551 → RGB from the effective colour in §5.6: Corneria (8,8,16), Zoness (64,32,24), space (0,0,0) |
-| fog | `Fog` | `{color: record RGB (warp zone override), multiplier: trunc(128000/(far−near)), offset: trunc((500−near)·256/(far−near)), near: 10, far: 12800 (30000 Katina, Sector Z)}`. World units match the geometry (1 vertex unit = 1 world unit; captured modelviews have scale 1.00) |
-| planet backdrop | `Backdrop` | texture = the level's backdrop texture (64×32; 32×32 for BM03_BG02 and Versus Corneria), u0 0, u1 0.91 (wrap), v window from §5.5.1 at the start camera, no tint. Approximate: the game's window follows camera height and pitch, and clamps v |
-| space backdrops | – | skip, or add a screen sprite (below) |
-| starfield | – | skip, or add a point layer (below) |
-| ground | `meshes` + `instances` | generated strip or plane at y −3 (§5.4, §5.5.4): on-rails x ±4000 around each route's x along the level, UV period 391 × 293 units; all-range 24000 × 24000 tiles around the origin with the tile list's UVs. Corneria texture per z section (§5.4). Batches with `depthWrite: false`, drawn first, for Corneria, Katina, Fortuna, Venom 2, Versus and the Aquas floor. Corneria's water sections are the exception: preset 45 is z-buffered and translucent, drawn after objects, over a mirrored copy of the objects |
-| Solar / Zoness surface | mesh | the 17×17 grid with edges moved to ±1400, under S(3,2,3), tiled along the path; flat unless `Play_UpdateDynaFloor` is ported for one frame |
-| Aquas water | mesh | translucent quad (alpha 128) at y 1600, Scale(2,1,0.5), `blend` |
-| camera | `camera` | start eye and target from §5.6, fovY 45. For on-rails levels, place the eye at z = eyeZ (path progress 0) |
-| lights | – (baked) | directional light `RotX(rx)·RotY(ry)·RotZ(rz)·(0,0,1)`, colour = record light, ambient = record ambient. Either baked into vertex colours through `runDisplayList`'s `lighting` option (world space, per instance) or a new `Level.light` |
-
-**Proposed minimal `types.ts` extensions** (all optional; the level renders without them):
-1. `Backdrop.clampV?: boolean`, since the game's backdrops wrap in u, clamp in v and use windows outside [0,1]. Better still, a camera-space sky quad `{texture, width 7280, height 8680, viewZ −6000, yOffset, uvs}` drawn ignoring camera rotation, as the game does.
-2. A per-batch or per-mesh "draw first, no depth" flag for grounds, like `Sky` but with fog and camera translation.
-3. `Level.light?: {dir, color, ambient}`, if the renderer should shade lit geometry itself.
-4. `Level.starfield?: {count, seed, colors}` and `ScreenSprite {texture, center, size, alpha}` for space backdrops.
-5. `Batch.normals?: Int8Array` for renderer-side lighting (§8.3).
-6. `Batch.pointFilter?: boolean` (or `Texture.filter`) for G_TF_POINT lists (§8.3).
-
-### 8.6 Music
-
-**Module.** Add `src/rom/music/sf64.ts` and set `Game.music` / `Game.decodeMusic` from it. It locates the data as follows:
-- the three audio files come from DMA entries 3-5;
-- the sequence, font and sample-bank tables are found in main by structure (§6.2);
-- `gAudioSpecs` and the note_data tables are found by signature.
-
-The same code works for V1.0 and V1.1 (**verified**: identical tables and identical renders).
-
-**Reuse from `src/rom/music/libultra.ts`:**
-- `decodeVadpcm`: the same RSP VADPCM decode;
-- the `prepareWave` loop convention: predictor state = decoded frame containing the loop start, **verified** 56/56;
-- `RESAMPLE_LUT` (exported), and the 4-tap resampler inner loop, which lives in the non-exported `mixVoice` and must be copied.
-
-**Do not reuse:**
-- ALBank parsing;
-- the MIDI scheduler;
-- the libultra envelope mixer. NEAD uses linear 8-sample volume ramps, `(s·vol)>>16`, and its own pan tables.
-
-**New code.** Port `mus/proto/sf64synth.ts` and `sf64audio.ts`: about 1300 lines covering the sequence player (§6.3), note pool, ADSR, reverb and synthesis (§6.5). The prototype's `renderSequence` returns `{sampleRate, left, right, loopStart?, loopEnd?, loopTicks?, info}`. A small adapter builds `DecodedMusic {channels: [left, right]}`, and the export should be renamed so it doesn't clash with `libultra.ts`'s `renderSequence`.
-
-**Track list.** `MusicTrack[]`: the 44 rows of §6.4, with `index` = sequence id and `name` = viewer name.
-- Audio spec per track: from `sSoundTestTracks` in the ROM, or the table in `mus/proto/songs.ts`.
-- bgmParam: −1.
-
-**Loops.** Render the intro plus two passes. Set `loopStart`/`loopEnd` at the first and second executions of the sequence-level `FB` jump. One-shot tracks get no loop.
-
-**Cost.** Up to 352 s for Corneria, about 90 MB of Float32 and 1-10 s of CPU per song in Node. Render in the worker, one track on demand. To save memory, render intro + 1 pass + tail and crossfade the tail into the loop start.
-
-**Risks:**
-- in-game SFX and voice steal notes, which is not modelled;
-- two-part resampling above 2× and the downsample-2 reverb are approximations;
-- a PAL (Lylat Wars) build would need a 50 Hz update clock.
-
-### 8.7 Difficulty
-
-| part | effort | notes |
-|---|---|---|
-| file table, MIO0, scenes, segment resolver | small | reference TS exists and is tested |
-| placement, scenery, sprites, presets, grounds | small-medium | prototype ~600 lines; everything decodes with the existing DL interpreter |
-| event actors (space levels) | medium | script walk + 108-entry model table + per-type recipes |
-| skeletons (frame 0) | small | |
-| Titania terrain | medium | deterministic simulation, no type 8 in the data |
-| lighting model | medium | needs normals or per-instance baking |
-| backdrops, starfields, fog | see §5.5/§5.6 | |
-| music | see §6 | |
-
-## 9. Verification evidence
-
-Paths are relative to `/home/n64/.ai-tmp/r49/sf/`. The headless mupen64plus with the debugger core (`/home/n64/nviewer/EMULATOR.md`) was used for all running-game checks. Each agent used its own run dir (`run-fs`, `run-lv`, `run-rt`, `run-mus`) and one emulator at a time.
-
-### 9.1 ROM, filesystem, codec, loader
-
-| claim | evidence |
-|---|---|
-| Header, CRCs, CIC-6101, JP table | `fs/romid.py` (recomputes CRC1/2 over 0x1000-0x100FFF) |
-| DMA table layout, pattern, 64 entries, contiguity, 0xFF tail | `tools/extract.py`, `fs/mio0check.py`, `fs/proto/test.ts` (ALL OK on both ROMs) |
-| MIO0 format; 102 streams decompress to exact size; contiguous streams; 39/51 identical across versions | `fs/mio0check.py` → `fs/tmp/mio0check.out`; game routine disassembly (`fs/dis.sh`); leak `slidec/slid12.o` byte-identical |
-| Loader functions, scene structs, segment map | disassembly `fs/tmp/foxload10.txt`, `foxload11.txt`; `fs/scenes.py` → `fs/tmp/scenes.out` |
-| Segments in RAM = decompressed files | V1.1 Corneria RDRAM `fs/rdram_co11.bin` + `fs/ramcheck.py` (byte-identical except runtime-animated textures); V1.0 title RDRAM `fs/rdram_menu10.bin` + `fs/ramcheck10.py` |
-| V1.0 overlay base 0x8017D390 | V1.0 `Load_SceneFiles` immediates; overlay internal addresses; ovl_menu found at 0x8017D390 in V1.0 RAM |
-| Per-file V1.0/V1.1 identity | `notes/lead_filecompare.txt` (md5 of decompressed files) |
-
-### 9.2 Version differences
-
-| claim | evidence |
-|---|---|
-| main alignment and classification (23441 relocation pairs, 4287 data words) | `fs/align_main.py`, `fs/datamap.py`, `fs/classify_main.py` → `fs/tmp/classify_main.out`, `fs/tmp/blocks_main.txt` |
-| Function-level diffs | `fs/funcdump.py`, `fs/fdiff.sh` → `fs/tmp/f10_*`, `f11_*`, `o10_ve1.txt`, `o11_ve1.txt` |
-| Overlay diffs | `fs/ovl_diff.py`, `ovl_funcs.py`, `ovl_pos.py` → `fs/tmp/ovl_pos.out` |
-| Asset diffs (event scripts, Venom 1 list) | `fs/evdecode.py`, `fs/astyaml.py`, `lv/proto/vercmp.py` → `vercmp.txt` |
-| Lead re-checks | hit cap `slti 1000 / li 999` at V1.0 0x800538E0 vs `slti 512 / li 511` at V1.1 0x80057D50; Venom 2 `li t8,180` vs `li t8,250` at ovl_i6 file offset 0xFAB8 (objdump of ROM/extracted bytes) |
-| Leak version | `fs/leakver.py` → `fs/tmp/leakver.out`; lead: leak `BM_data.o` .data = V1.0 Venom 1 list, V1.1 differs in 145 bytes (0xD726-0xDAD3); `lv/proto/leakcheck2.py` → `leakcheck2.txt` |
-
-### 9.3 Levels
-
-| claim | evidence |
-|---|---|
-| Level tables (scene ids, list pointers, environment, object info, presets), both versions | `lv/proto/dump.ts` → `lv/proto/dump.txt`; `lv/proto/presets.py` → `presets_v10.txt` = `presets_v11.txt` |
-| Placement record and on-rails world position | Corneria RDRAM `lv/ram_co1.bin` + `lv/proto/ramcheck.py`: 15 live scenery objects equal decoded positions and rotations; gLevelObjects = seg 6 + 0x371A4 |
-| Camera and layout agreement | `lv/renders/corneria_emucam.png` (camera read from RAM) vs `lv/emu_co1.png` |
-| All-range z sign | disassembly `lv/disasm/*.txt` + `lv/proto/zsign.py` (quoted instructions in §5.3) |
-| Path items only translate | disassembly of ItemPathChange_Update (V1.1 0x80068C88); RAM log `lv/emu_fly2.log` (xPath = 0 on the main route) |
-| Corneria surface switch | `lv/proto/events.ts`; RAM gGroundSurface 2 → 0 between progress 38960 and 43240 (`lv/emu_fly2.log`, `lv/ram_fly_*.bin`) |
-| Opcode set of scenery lists | `lv/proto/dlscan.ts` |
-| Event actors, skeletons, Titania terrain | `lv/proto/events.ts`, `extras.ts`, `titerrain.ts`; renders `lv/renders/{meteo,sectorx,area6,sectory,titania,aquas,macbeth}.png` |
-| Leak level data = ROM | `lv/proto/leakcheck.py`, `leakcheck2.py` |
-| Title cards | `lv/titlecards/*.png` |
-| Reference comparison | runtime screenshots `shots/*.png` vs `lv/renders/*.png`. Lead comparison (qualitative): Corneria (RAM camera), Fortuna (towers, mountains, base) and Titania (ruins on terrain) show the same features |
-
-### 9.4 Music
-
-| claim | evidence |
-|---|---|
-| Tables, fonts, samples in bounds; loop-state 56/56 | `mus/check_data.py`, `mus/sfaudio.py`; lead re-check of the sequence table (66 entries, 20 aliases, tiles audio_seq) and V1.0 table equality |
-| Opcode coverage, 0 errors | `mus/seqscan.py` → `mus/scan_all.txt` |
-| Runtime constants (32000/32006 Hz, 3 updates/frame, gMaxTempo 10770, notes, reverbs) | RDRAM `mus/cap/ram_a.bin`, `mus/cap/ram_co.bin` + `mus/ramparse.py` |
-| RSP ucode NEAD SF | ROM word 0x110412CC at ucode_data+0x10 (V1.1 ROM 0xC3EE0; lead re-checked) and rsp-hle `try_audio_task_detection` |
-| Sequence state = game | `mus/ramchan.py` + `mus/proto/statecheck.ts` (Corneria, 181 fields, 0 mismatches) |
-| Audio = game | capture `mus/cap/run1.raw` (audio-dump plugin) vs renders, `mus/proto/compare.ts`: title, map, game over (waveform ncc 1.000), mission start, Corneria (SFX muted with `mus/tools/mute_sfx.sh`) |
-| All ids render, V1.0 = V1.1 | `mus/render_all.txt`, `mus/render_all_v10.txt` |
-| Leak audio = ROM | objcopy + md5 of `audio/fox64_*.o`; `.cart` byte compare |
-
-### 9.5 Environment and reference screenshots
-
-| claim | evidence |
-|---|---|
-| Environment records = RAM, per level | 25 RDRAM dumps `rt/dumps/*_a.bin` (+ `.task`), `rt/envread.sh`, `rt/env/*.txt`, `rt/table.txt`; static `rt/envdump.py v11\|v10` |
-| Clear, fog, projection, lights, presets, culling in real frames | frame display lists captured at `Graphics_SetTask` (`rt/capture.sh`), walked by `rt/dlwalk.py` / `rt/dlcalls.py` → `rt/dl/*.txt` |
-| Backdrop, ground and water display lists, UVs | `rt/astdl.py` |
-| Render presets = leak | ROM 0xD3DB0 vs leak `Source/fox_std_rcp.o` `fox_gsCPModeSet_Data` (0x18C0 bytes, 0 of 1584 words differ) |
-| Level switching and crash analysis | `rt/goto.sh`, `rt/dumps/crash_sx.bin`, `rt/log.txt` |
-| V1.0 environment | `rt/dumps/v10_corneria.bin` |
-
-**Reference screenshots** (`shots/`, described in `shots/index.md`; 320×240, V1.1 unless marked):
-
-| group | shots |
-|---|---|
-| menus | title, main menu, Lylat map |
-| on-rails | Corneria (intro, 2 in level), Meteo, Sector X, Area 6, Sector Y, Venom 1, Solar, Zoness, Venom Andross, Training, Macbeth, Titania, Aquas |
-| all-range and special | Meteo warp zone, Venom Andross phase 1, Fortuna, Katina, Bolse, Venom 2, Versus Corneria (4-way) |
-| unused | UNK_4 (level 4) |
-| V1.0 | Lylat map, Corneria intro, 2 Corneria in-level |
-
-There is no Sector Z shot; the candidate frames are in `rt/cand/`. Prototype renders for comparison are in `lv/renders/`, and the lead compared Corneria, Fortuna and Titania qualitatively (§9.3).
-
-### 9.6 Emulator hygiene
-
-Every agent stopped its emulator (`pkill -x -F <run dir>/pid mupen64plus` or `headless-debug.sh quit`) and checked with `pgrep -a mupen64plus`. Lead's final check, after all agents had finished: `pgrep -a mupen64plus` shows no process from any of this research's run dirs (`run-fs`, `run-lv`, `run-rt`, `run-mus`, `run-un` under `/home/n64/.ai-tmp/r49/sf/`), and the pid recorded in each run dir is no longer alive.
-
-## 10. Open questions and hypotheses
-
-### 10.1 Filesystem and versions
-
-- The intent of each behavioural V1.1 change is inferred and was not tested in the emulator. The 9-bit save field reason for the hit cap is the best supported.
-- Whether V1.1's remote-debugger libultra is libultra_d linked by mistake or a newer library (no libultra archive in the leak).
-- The exact semantics of the osInitialize / __osTimerInterrupt changes were not decoded instruction by instruction.
-- The JP ROM's 63rd missing table entry was not identified. EU (Lylat Wars) was not examined.
-- The leak's build identity: V1.0-lineage but not byte-identical; 290 functions match neither ROM.
-
-### 10.2 Levels
-
-- Whether the Corneria all-range Granga arena list (136 objects) is used in normal play. It was not reached in the emulator.
-- Titania terrain: implemented from the algorithm and deterministic, but not compared with the game. The z phase is uncertain to ±220 units, and the game's normal averaging is not reproduced exactly.
-- Event actors: the static/moving classification ignores trigger branches. 12 Corneria and 11 Area 6 scripts resolve to no model. SY_ROBOT_1-3 drawing is not reproduced. Warp-zone prim colours are set by code.
-- Ground UV anchoring is inferred from `gDPSetupTile` shift 5; the exact texel-to-world ratio is a hypothesis.
-- The Corneria lake route and its surface switches were not observed in the emulator (the unattended Arwing died first).
-- Moving event actors are placed at their spawn pose, which is not necessarily where the player sees them.
-
-### 10.3 Music
-
-- Where the opening sequence 35 is heard. It was not matched in the capture; the prologue plays 60.
-- In-game voice stealing by the SFX and voice players is not modelled.
-- Two-part resampling (rate ≥ 2) and the downsample-2 reverb write delay are approximations.
-- The meaning of the SEQ_FLAG 0x8000 "restart" bit comes from the decomp only.
-- Font choice for leak-only sequences is a guess.
-
-### 10.4 Environment
-
-- The planet backdrop's vertical texture window is computed from the decomp formulas, not pixel-matched against a screenshot.
-- The exact composition order of the world-space light vector. It is consistent with RAM on Corneria only.
-- Which code writes the Aquas light colours at run time: RAM (30,70,90)/(15,22,37) matches neither record.
-- Warp zone: whether the missing colour FILLRECT is the motion-blur path.
-- The V1.0 addresses of the level-poke variables are assumed to be V1.1 − 0xA190, untested. V1.0 was only reached through the menus.
-- Not captured: Versus Sector Z stage, Venom 2 phase 2, the Andross escape overrides.
-- Bolse's dynamic ground (`Bolse_DrawDynamicGround`) is not decoded.
-- Sector Z has no usable reference screenshot (mission card or plain starfield); its environment and display-list data were captured.
-- Whether the unused Corneria sky quad D_CO_602ECB0 is referenced from any data table. Only code was checked.
-
-## 11. Unused and hidden content
+#### Unused and hidden content
 
 This section consolidates the unused and hidden content found by all research passes, with a dedicated final pass (`notes/unused.md`).
 Every item has a location, evidence, a label and a confidence (high, medium or low).
 - **Labels:** as in the rest of the document; "decomp" means read from the sf64 decomp.
-- **Addresses:** V1.1 unless marked. V1.0 main addresses are identical below 0x800227A0; after that, subtract 0x4470 up to fox_play and 0x4480 after it. V1.0 overlay addresses are V1.1 − 0xA190 (§7.5).
+- **Addresses:** V1.1 unless marked. V1.0 main addresses are identical below 0x800227A0; after that, subtract 0x4470 up to fox_play and 0x4480 after it. V1.0 overlay addresses are V1.1 − 0xA190 (*Addresses that differ per version*).
 - **File offsets:** "file+0x" is an offset into the decompressed file.
-- **Research material:** scripts, outputs and renders are under `/home/n64/.ai-tmp/r49/sf/un/` (images in `un/png/`).
 
-### 11.1 Unused levels and level data
+#### Unused and hidden content: Unused levels and level data
 
 | item | location | evidence | label | conf. |
 |---|---|---|---|---|
 | **LEVEL_UNK_4** (leak prefix "SB") | Scene index 27 (`sOvli3_Unk4`, V1.1 0x800CB3BC, V1.0 0x800C69CC): ovl_i3 + the Area 6 file set. Environment ast_area_6+0x28760; list aA6Unk4LevelObjects ast_area_6+0x287A4 (1 entry); script table aA6Unk4EventScript +0x289FC | The list holds one event actor (script 0) at zPos1 100, zPos2 -4035, rot.y 180. No menu or map path selects level 4. It loads and plays after a RAM poke (`rt/goto.sh 4`): an empty on-rails space stage with a Venom-planet backdrop and 600 stars (`shots/v11_unk4_area6beta_01.png`). The leak's SB_Stage_Data matches the environment, and SB_BG_01 matches backdrop D_A6_601BB40. The SB model sources are the Area 6 assets | VERIFIED (ROM decode + emulator) + leak | high |
-| **LEVEL_UNK_15** | Index 15 of gLevelObjectInits (0x800CFDA0) and of the environment table (0x800D2F98) | NULL in both ROMs and in the leak's stage table (fox_play.o .data 0x84 has no relocation). sLevelSceneIds maps it to SCENE_TITLE. Engine code still special-cases it: 400 stars, RCP_SetupDL_23 for actors, free vertical path movement, starfield scroll. No data remains. HYPOTHESIS: a removed free-flight space stage | VERIFIED (tables); behaviour decomp | high (unused), low (purpose) |
+| **LEVEL_UNK_15** | Index 15 of gLevelObjectInits (0x800CFDA0) and of the environment table (0x800D2F98) | NULL in both ROMs and in the leak's stage table (fox_play.o .data 0x84 has no relocation). sLevelSceneIds maps it to SCENE_TITLE. Engine code still special-cases it: 400 stars, RCP_SetupDL_23 for actors, free vertical path movement, starfield scroll. No data remains. hypothesis: a removed free-flight space stage | VERIFIED (tables); behaviour decomp | high (unused), low (purpose) |
 | **Venom 1 beta placement list** aVe1BetaLevelObjects | ast_venom_1+0x10088, 1978 entries (V1.0 at the same offset) | Used only when Venom 1 runs with gLevelPhase == 1, and no code sets that. Contents: 1744 pillar actors, 149 scenery objects, temple interiors, walls, the Golemech and a checkpoint (`lv/renders/venom1_beta_actors.png`). Leak `BM_69_enemy_set_data` has the same size (0x9A9C). The leak's `fox_enmy.o` `set_object` selects it for stage 6 with `mapno_2` set, next to the Sector X warp (SS) and Andross phase lists | VERIFIED (decode) + decomp + leak | high |
 | **Scene 35 "Setup20"** | `sOvli2_Setup20` V1.1 0x800CB87C / V1.0 0x800C6E8C: ovl_i2 + planet set + ast_ve1_boss in segment 6 | SceneId 20 is not in sLevelSceneIds. The table is reachable only through the Load_SceneSetup switch | VERIFIED (tables) + decomp | high |
-| **ovl_unused** = leak `shpprog` / `fox_shp.o` | DMA file 63 (0xA0 bytes, identical in both versions); scene 43 `sOvlUnused_Unk` V1.1 0x800CBD3C / V1.0 0x800C734C | The scene table is never referenced (hilo, jal and data scan). The file holds an empty `look_shape` function and a pointer to the Andross hitbox (0x0C038DC0). The leak object also defines `collision_data_{kuzuhara,morita,okajima,sasaki,sumiyosi,tarukado,yamamoto,yoshida}`. HYPOTHESIS: a per-developer shape/collision viewer stub | VERIFIED + leak | high |
+| **ovl_unused** = leak `shpprog` / `fox_shp.o` | DMA file 63 (0xA0 bytes, identical in both versions); scene 43 `sOvlUnused_Unk` V1.1 0x800CBD3C / V1.0 0x800C734C | The scene table is never referenced (hilo, jal and data scan). The file holds an empty `look_shape` function and a pointer to the Andross hitbox (0x0C038DC0). The leak object also defines `collision_data_{kuzuhara,morita,okajima,sasaki,sumiyosi,tarukado,yamamoto,yoshida}`. hypothesis: a per-developer shape/collision viewer stub | VERIFIED + leak | high |
 | **Unused object ids** | gObjectInfo (0x800CC124) entries present for OBJ_SPRITE_SY_SHIP_2/3, OBJ_SPRITE_UNK_167/168, OBJ_ACTOR_AQ_UNK_188, OBJ_ACTOR_UNK_237, OBJ_BOSS_UNK_299/300, OBJ_BOSS_AQ_UNK_301, OBJ_SCENERY_UNK_155, OBJ_EFFECT_350/388 | These ids appear in none of the 37 placement lists (`lv/proto/unusedids.ts`). OBJ_EFFECT_350 is spawned only by the dead function `Effect_Effect350_Spawn` (11.5) | VERIFIED (lists) + decomp | high |
 | **Leak "BS" stage** | Leak `fox_object.h` / `fox_Sdata.h` (BS_enemy_set_data / BS_Stage_Data commented out); `Source/fox_bs_poly.h`; models `nshape/US/bs.o` | The model set is absent from the ROM (11.7) | leak-supported + VERIFIED absence | high |
 
-### 11.2 Unused and unreferenced assets
+#### Unused and hidden content: Unused and unreferenced assets
 
 **Method** (`un/assetrefs.py`, shared code scanner `un/assetrefs_code.py`):
 1. **Nodes.** All 3749 entries of the 49 decomp asset yamls.
@@ -1654,8 +1675,8 @@ Every item has a location, evidence, a label and a confidence (high, medium or l
 - **V1.0:** the asset files are byte-identical except for 4 files (none of them hold these nodes), and the code is identical up to relocation. The result therefore applies to V1.0 as well (inferred; high).
 
 Renders:
-- textures: `un/png/unref_<file>.png` (index `un/png/unref_index.txt`);
-- display lists: `un/png/dl_<file>_<offset>.png` and the montage `un/png/montage_unref_dls.png`.
+- textures: `un/png/unref_{file}.png` (index `un/png/unref_index.txt`);
+- display lists: `un/png/dl_{file}_{offset}.png` and the montage `un/png/montage_unref_dls.png`.
 
 | file | notable unreferenced assets (file offset) | what they are (from the renders) |
 |---|---|---|
@@ -1686,7 +1707,7 @@ Other asset leftovers:
 - **Aquas backdrop AC_BG02** (D_AQ_601C080) is selected only in an `else` inside `if (player.state == LEVEL_INTRO)` (fox_bg.c:447), so in practice it is never drawn. It is referenced by code, so it is not in the scan list. decomp; medium.
 - **Title cards.** No unused title cards or map text exist: ast_map and ast_font_3d have no unreferenced nodes, and every level title card texture is reached. VERIFIED; high.
 
-### 11.3 Unused text
+#### Unused and hidden content: Unused text
 
 **Radio messages** (`un/radio.py`, `un/radio.txt`):
 - **Table.** gMsgLookup is at ast_radio+0xCCAC (V1.1 RAM 0x80185CBC, V1.0 0x8017BB2C). It has 779 `{s32 id; u16* text}` entries.
@@ -1736,7 +1757,7 @@ Other asset leftovers:
 | 22011 | 0x0C0D8 | This is ONE / steep bill, / but it's worth it. |
 | 22012-22020 | 0x0C130-0x0C1FC | Twin laser / Hyper laser / Smart bomb / Shield ring / Check point / Supply / Wing repair / Supply ring / Wing damage |
 
-Interpretation (HYPOTHESIS):
+Interpretation (hypothesis):
 - **20284-20292** are control tutorial lines. "To hover, press Z and R" and "To get rid of the aim, pause and press R" describe controls that differ from the retail game, so they are probably an earlier training script.
 - **21070-21093** are three sets of wingman direction call-outs, one set per teammate.
 - **22000-22010** are scream and laugh voice captions.
@@ -1747,7 +1768,7 @@ Other text:
 - **Japanese menu and HUD text textures** in ast_common and the kanji 終 in ast_text (11.2). VERIFIED; high.
 - **Leak-only Japanese config screen** (cf.o): see 11.7.
 
-### 11.4 Debug features, codes and developer leftovers
+#### Unused and hidden content: Debug features, codes and developer leftovers
 
 **Crash debugger (sys_fault.c).** VERIFIED (ROM disassembly, both versions); high.
 - **Code location.** `Fault_ThreadEntry` is at 0x80007D58 in both versions (ROM 0x8958). Its disassembly is identical in V1.0 and V1.1 apart from data relocations (`un/fault_v11.txt`, `un/fault_v10.txt`).
@@ -1774,7 +1795,7 @@ Other text:
   - I forced a load fault in V1.1 (debug core, run dir run-un) by writing 0x8C000000 (`lw $zero,0($zero)`) over the first instruction of Graphics_SetTask (0x80003C50) during the intro.
   - The game froze: controller polls and screenshots stopped.
   - The CPU kept cycling through the exception vector (0x80000184) and the handler at 0x800257D0-0x80025900. The fault thread (gFaultMgr 0x80145360, priority 0x7F) stayed blocked on its own queue 0x80145D10. So the code could not be entered and no register-screen screenshot exists.
-  - The runtime agent's natural fault (notes/runtime.md 1.3) did reach the polling loop. The HYPOTHESIS is that a fault inside Graphics_SetTask interacts badly with the V1.1 exception path.
+  - The runtime agent's natural fault (notes/runtime.md 1.3) did reach the polling loop. The hypothesis is that a fault inside Graphics_SetTask interacts badly with the V1.1 exception path.
 
 | item | location | evidence | label | conf. |
 |---|---|---|---|---|
@@ -1783,7 +1804,7 @@ Other text:
 | Audio debug strings | main | `CAUTION:WAVE CACHE FULL %d`, `Alloc Error:Dim voice-Alloc %d`, `Err :Sub %x ,address %x:Undefined SubTrack Function %x`, `WARNING: Before Area Overlaid After.`; DMA mode names SUPERDMA/FastCopy/SLOWCOPY/BGCOPY | VERIFIED | high |
 | V1.1 remote debugger | V1.1 main 0x80029BA0-0x8002E3E0 (rmon, kdebugserver, osReadHost, osInitRdb); ramromMain thread 0x8002296C | A debug libultra build. kdebugserver is called from `__osException` and ramromMain is started by osCreatePiManager; rmonMain and osInitRdb are unreferenced. The strings `Set temp BP at %08x` and ` and %08x` exist only in V1.1 | VERIFIED | high |
 | DMA table capacity | ROM 0xDE480 (V1.0 0xD9A90) | 90 slots, 64 used | VERIFIED | high |
-| Leak TITL_DEBUG / MAP_DEBUG | leak `fox_title.c` (CameraTest, debug_display), `fox_map.c` (R+L on the map returns to the title) | The `#define`s are commented out, so the code is compiled out | leak-supported; absence HYPOTHESIS | medium |
+| Leak TITL_DEBUG / MAP_DEBUG | leak `fox_title.c` (CameraTest, debug_display), `fox_map.c` (R+L on the map returns to the title) | The `#define`s are commented out, so the code is compiled out | leak-supported; absence hypothesis | medium |
 | Leak `make_debug` / sys_debug | leak `Source/make_debug(_linux)` | Generates `date[]`/`user[]` under `#if 0 < FOX_DEBUG`; no such string in the ROM | leak + VERIFIED (string scan) | medium |
 | Leak `Source/light_color` | developer light notes | Values for mc/cl/as differ from the ROM Macbeth, Area 6 and Meteo environments (earlier tunings); bm/sz match | leak-supported (compared with ROM) | high |
 
@@ -1798,7 +1819,7 @@ Other text:
 - **Title screen variant.** Title_Screen_Setup (0x801881FC) checks `expertMedal` on every slot except VENOM_1. If all are set, the team members' title-screen placements change (fox_title.c:582-681).
 - **Where the medals are written:** at level end (fox_hud.c:1293-1305), on the map (fox_map.c:1805-1826), and after the ending when the Andross clear status is 1 or 2 (fox_option.c:437-457).
 
-### 11.5 Dead code
+#### Unused and hidden content: Dead code
 
 **Method** (`un/deadcode.py`):
 1. **Function starts.** Taken from the V1.1 ROM: the instruction after `jr ra` + delay slot, unless a branch of the current function or a jump-table word targets beyond it.
@@ -1834,20 +1855,7 @@ Other text:
 | rmonMain, osInitRdb and the rmon command set | V1.1 main 0x8002B140.. | debug libultra, not started | VERIFIED | high |
 | ovl_unused `Unused_80187520` / leak `look_shape` | ovl_unused | an empty function in an overlay whose scene is never loaded | VERIFIED | high |
 
-### 11.6 Audio
-
-Consolidated from notes/music.md 11. VERIFIED unless noted.
-- **Unreferenced sequence ids.** Six alias ids have no code references: 26 BOSS_FO (alias of 18), 41 END_DEMO (34), 52 AQ_START_DEMO and 53 VE_START_DEMO (37), 57 VS_RESULT (56), 59 STAGE_BM3 (43).
-  - All 46 distinct sequences are reachable.
-  - Sequence 25 (a separate copy of "BB") is used only for Sector Y's boss.
-  - Label: decomp scan + VERIFIED table; high.
-- **Expert Sound Options** (hidden sound test, 11.4): tracks 0-44 are sSoundTestTracks; 45-49 are five scripted medleys following the Lylat routes. decomp; high.
-- **Unreferenced sample data.** About 186 KB of plausible VADPCM data in music sample bank 3 is not covered by any font: +0x5287A (31078 bytes), +0x62124 (19564), +0x6F1C8 (10136), +0x740EE (124706, about 6.9 s), +0xC2F8E (2418). Probably unused instrument samples. VERIFIED coverage; HYPOTHESIS on content; medium.
-- **Unused spec ids.** Audio spec ids 18-21 and 26 are defined but never selected. decomp; high.
-- **Unused drum slots.** Fonts 24-32 define 39 drums but use 1-6. One referenced drum sample (bank 3 +0x6C120) is never played. VERIFIED; high.
-- **Leak-only sequences:** 11.7.
-
-### 11.7 Leak-only content (absent from the ROM)
+#### Unused and hidden content: Leak-only content (absent from the ROM)
 
 **Method** (`un/leakshape.py`, output `un/leakshape.txt`):
 1. For each of the 56 segment composites `nshape/US/*.o`, take `.data`/`.rodata` and mask every R_MIPS_32 relocation word (objdump -r).
@@ -1863,7 +1871,7 @@ Consolidated from notes/music.md 11. VERIFIED unless noted.
 | **`nshape/US/cf.o` config screen** (45 textures) | A Japanese options/config screen: katakana labels (フォックス, ファルコ, スリッピー, ペッピー, テスト, ターゲット, バックアップクリア "backup clear" ...), a 112x84 N64 controller picture (CF_con), normal/reverse Arwing pitch icons (CF_normal_AW / CF_revers_AW), a 3D icon, button letters A/B/C/R/Z, and frames. Sizes come from the rgb2c headers in `nshape/CF_txt_*/*.c` | `png/leak_tt_cf_textures.png` | high |
 | **`nshape/US/tt.o` test textures** | Four RGBA16 64x48 photos of food: `gyouza` (gyoza), `gyumesi` (beef rice), `karaage` (fried chicken), `yakimesi` (fried rice) | `png/leak_tt_cf_textures.png` (top row) | high |
 | **`nshape/US/s1.o`-`s4.o`: older snapshots of the Corneria, Meteo, Titania and Sector X shape sets** | Most names also exist in the retail composites but with different bytes (older revisions). Name groups that exist only here: **s1 (CN):** CN_Enemyface01/02, CN_ATC_Pilot_01/02 (face textures), CN_Takirock/Takiroad (waterfall), CN_Mt_Niji ("rainbow mountain"), CN_Gate_01, CN_Kumo/Kumo_04 (clouds), an older CN_Ground, CN_HiwayTX, CN_Boss_down(action). **s2 (AS):** AS_Bosspilot (Meteo boss pilot face). **s3 (TI):** a complete **different Titania boss** `TI_Boss_*` (about 100 parts: legs, wings, tail, heart, lips, hammer, beam hand, "ArwinHand"/"ArwinGuard" animations), enemies `TI_Tremars`, TI_sanddust01-06, TI_BG, TI_Ground. **s4 (SX):** an **older Sector X boss** `SX_Boss_*` (body, head, mouth, arms, `kama` sickles, `tama` projectiles, skeleton); the retail Spyborg (`SX_Handboss_*`) is also in s4 | `png/leak_s3_TI_Boss_parts.png`, `png/leak_s4_SX_Boss_parts.png` (parts at identity), `png/leak_s1_CN_only_*.png`; per-group coverage in `un/leakshape.json` | high (absent), medium (roles) |
-| Sequences not in the ROM | `BGM_kondo/Seqs/atack.com` (1997-03-27), `BGM_wakai/Seqs/BossAF.com` (1997-02-05), older `Music2.com` (Corneria, 1996-12-13), `Titania.com`, `Aquarie.com`, `test.com`. Renders in `mus/wav/leak/` (font choice is a HYPOTHESIS) | notes/music.md 9 | high |
+| Sequences not in the ROM | `BGM_kondo/Seqs/atack.com` (1997-03-27), `BGM_wakai/Seqs/BossAF.com` (1997-02-05), older `Music2.com` (Corneria, 1996-12-13), `Titania.com`, `Aquarie.com`, `test.com`. Renders in `mus/wav/leak/` (font choice is a hypothesis) | notes/music.md 9 | high |
 | `Source/AND360_map` | Map-editor output ("Ver1.4", dated Sun Mar 16 1997) of the Andross all-range placement: 155 entries against 156 in ROM aVe2AndLevelObjects (ast_andross+0x356CC). 149 positions are identical, 6 exist only in the map and 7 only in the ROM, so it is an earlier revision | `un/` inline python (entry compare) | high |
 | Leak voice/SFX data and staff roll | SFX/voice sequences, bank 2 and seq 42 differ from the ROM (notes/music.md 9) | VERIFIED byte compare | high |
 
@@ -1879,21 +1887,64 @@ Unusual leak files (leak-supported):
   - **`i10n/worksheet_ique.html`** is the "StarFox64 Asset Localization Worksheet". It covers voice text `voice/sf64msgs.txt` ("preserve # lines and 5 digit msg IDs") and the English demo, level-name, map, level-end ("moji") and menu textures, which were to be redrawn as `*_Z_*` Chinese versions following the "iQue game translation guideline".
   - `i10n/misc_words.txt` lists ranking/menu words (TOTAL HITS, RANK IN!!, the pilot names, OK, DOWN, TOP, CONGRATULATIONS, STARFOX RANKING, NAME, HITS, TOTAL SCORE), and `i10n/credits.txt` has the English credits.
   - **`Source/metadata`** holds the iQue Player title data: `title_e.txt` "StarFox"; `title_z.txt` "星际火狐" (GB2312); `isbn.txt` "ISBN 7-900381-09-0" (a Chinese ISBN); `title.inta`, an SGI image (magic 474) of 184x24 intensity+alpha showing "星际火狐"; `thumb.rgba`, a 56x56 RLE SGI RGB thumbnail of Fox and Slippy, saved from "E:/work/sf64/metadata/thmub.rgb". Decoded to `png/leak_ique_title.png` and `png/leak_ique_thumb.png` (`un/sgi.py`).
-  - **Region and version.** This is the iQue Player (mainland China) localisation. It was built from the English US code base of the **V1.0 lineage**: the leak's English objects carry V1.0 behaviour and none of the V1.1 fixes (§7.6). `LOCALE==CHINA` in `Source/spec` and `audio/zh/` belong to the same effort.
+  - **Region and version.** This is the iQue Player (mainland China) localisation. It was built from the English US code base of the **V1.0 lineage**: the leak's English objects carry V1.0 behaviour and none of the V1.1 fixes (*The leak and the versions*). `LOCALE==CHINA` in `Source/spec` and `audio/zh/` belong to the same effort.
   - Confidence: high for the region, medium for the build lineage.
 
-### 11.8 Version-diff leftovers
+### 6.2 Cut or inaccessible levels
 
-The V1.0/V1.1 comparison (§7) exposes little hidden content, but three things stand out:
-- **V1.1's debug libultra.** V1.1 was linked against a libultra with Nintendo's remote debugger. It adds 4380 instructions: rmon, kdebugserver, osReadHost, osInitRdb and a "ramrom" thread. rmonMain and osInitRdb are never called, and the strings `Set temp BP at %08x` / ` and %08x` exist only in V1.1. This is dormant debug code shipped by accident or for a dev-kit build (7.1 #1-9).
-- **Venom 1 placement edits.** V1.1 re-sorts 23 entries of the Venom 1 list: three event actors (1097-1099) move and pairs swap x. Its three wingman scripts gain `SET_WAIT(40)`. The +0xC growth is absorbed by V1.0's end padding (7.3).
-- **Script tweaks.** V1.1 reorders one Corneria script (INIT_ACTOR after SET_SPEED) and changes one Titania BGM-stop delay from 200 to 150 frames (7.3).
+Candidate levels are distinguished from alternate, debug, and intentionally hidden retail content above.
 
-The data side also confirms the leak's lineage: the leak's `BM_data.o` equals V1.0's Venom 1 list.
+### 6.3 Debug features
 
-### 11.9 Verification evidence
+Shipped debug strings and executable features are listed only when supported by a code or data reference.
 
-All paths are under `/home/n64/.ai-tmp/r49/sf/un/`.
+### 6.4 Prototype or revision-specific content
+
+Source-archive and prototype material is explicitly distinguished from shipped retail data.
+
+## 7. nviewer implementation
+
+### 7.1 Module mapping
+
+#### Mapping onto the viewer: New modules (suggested)
+
+| file | contents | port from |
+|---|---|---|
+| `src/rom/sf64/fs.ts` | table pattern search, MIO0, file cache by DMA index/vrom, per-version address sets, scene decoding | `fs/proto/sf64fs.ts` (tested on both ROMs) |
+| `src/rom/sf64/space.ts` | segment resolver: scene setup → 15 segment files, plus main (0x80000450 base) | `lv/proto/sf.ts` `Space` |
+| `src/rom/sf64/levels.ts` | level list (*Level list*), per-entry recipe: scene, placement list pointer, loader z sign, environment record, ground recipe | `lv/proto/decode.ts` |
+| `src/rom/sf64/objects.ts` | ObjectInfo table, drawType-1 recipes, fixed bases, event-actor model walk, skeleton frame-0 walk, Titania terrain | `lv/proto/extras.ts`, `events.ts` |
+| `src/rom/sf64/env.ts` | environment record → Fog, clearColor, lights, backdrop/sky (*Skies, backdrops, starfields*, *Fog, lights, clear colour, camera*) | runtime notes |
+| `src/rom/music/sf64.ts` | sequence player and synthesizer (*Music*) | `mus/proto/` |
+
+#### Mapping onto the viewer: Difficulty
+
+| part | effort | notes |
+|---|---|---|
+| file table, MIO0, scenes, segment resolver | small | reference TS exists and is tested |
+| placement, scenery, sprites, presets, grounds | small-medium | prototype ~600 lines; everything decodes with the existing DL interpreter |
+| event actors (space levels) | medium | script walk + 108-entry model table + per-type recipes |
+| skeletons (frame 0) | small | |
+| Titania terrain | medium | deterministic simulation, no type 8 in the data |
+| lighting model | medium | needs normals or per-instance baking |
+| backdrops, starfields, fog | see *Skies, backdrops, starfields*/*Fog, lights, clear colour, camera* | |
+| music | see *Music* | |
+
+### 7.2 Supported features
+
+The Technical summary states the supported releases and principal decoded features.
+
+### 7.3 Approximations and omissions
+
+Viewer approximations are distinguished from facts about the game formats.
+
+## 8. Verification and remaining work
+
+### 8.1 Verification evidence
+
+#### Unused and hidden content: Verification evidence
+
+All paths are under `sf/un/`.
 
 1. **`assetrefs.py` + `assetrefs_code.py` → `assetrefs.txt`, `assetrefs.json`.** The unreferenced asset scan, 3749 nodes. Validation: only gMsgLookup (absolute pointer) and aVsLandmasterCanonDL are name-referenced in the decomp; the ast_radio font textures are reached through absolute pointers.
 2. **`textures.py sheet` → `png/unref_*.png`, `png/unref_index.txt`.** `renderdl.ts` (the viewer's `displaylist.ts` + `lv/proto/raster.ts`) produces `png/dl_*.png`; `montage.py` produces `png/montage_unref_dls.png`.
@@ -1903,7 +1954,7 @@ All paths are under `/home/n64/.ai-tmp/r49/sf/un/`.
 6. **`leakshape.py` → `leakshape.txt`, `leakshape.json`, `leakshape.log`.** Relocation-masked leak composite search. `leaklink.py` → `leak_*.bin(.json)`; `renderleak.ts` → `png/leak_bs_*.png`, `png/leak_s3_*.png`, `png/leak_s4_*.png`, `png/leak_s1_*.png`; CF/tt textures in `png/leak_tt_cf_textures.png` (inline python with the rgb2c header sizes).
 7. **`sgi.py`** → `png/leak_ique_title.png`, `png/leak_ique_thumb.png`.
 8. **Emulator.**
-   - Setup: run dir `/home/n64/.ai-tmp/r49/sf/run-un`, V1.1, `--debug`, one instance.
+   - Setup: run dir `sf/run-un`, V1.1, `--debug`, one instance.
    - The induced fault attempt is described in 11.4 (debug.log: PCs 0x800257D0-0x80025900 and 0x80000184).
    - Stopped with `headless-debug.sh quit`; `pgrep -a mupen64plus | grep run-un` returns nothing.
 9. **Earlier evidence reused:**
@@ -1913,10 +1964,18 @@ All paths are under `/home/n64/.ai-tmp/r49/sf/un/`.
    - notes/fs.md 7 (ovl_unused, strings, rmon);
    - `lv/proto/leakcheck*.txt`, `fs/tmp/leakver.out`.
 
-### 11.10 Open questions
+#### Unused and hidden content: Open questions
 
 - Whether voice samples exist for the 52 unused radio ids. The voice sequence was not mapped to message ids.
 - The purpose of several dead functions (func_pause_800A3E00, func_bg_80042D38, func_blur_800846F0) is inferred from their bodies only.
 - 41 C files could not be name-mapped by boundary count, so dead functions in them (fox_edisplay, fox_enmy, fox_effect, fox_hud, most level overlays) are listed only when their decomp names encode addresses.
 - The crash screen could not be shown in the emulator: the induced fault looped in the V1.1 exception path. A natural fault (runtime notes 1.3) should allow entering the code.
 - The BS stage layout is drawn from the pieces' own coordinates; there is no placement data or code for it in the leak or the ROM.
+
+### 8.2 Known unknowns
+
+Unresolved semantics are labelled **Hypothesis** or **Open question** where they occur.
+
+### 8.3 References
+
+External documentation, decompositions, and source archives are cited inline where used.

@@ -1,0 +1,17 @@
+.vp-doc table.byte-layout {
+  display: table;
+  width: 100%;
+  table-layout: fixed;
+}
+
+.vp-doc table.byte-layout th,
+.vp-doc table.byte-layout td {
+  padding: 0.35rem 0.45rem;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.vp-doc table.byte-layout th:first-child {
+  width: 5rem;
+  text-align: right;
+}

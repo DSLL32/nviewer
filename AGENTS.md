@@ -21,17 +21,19 @@ When asked to investigate a game (ROM formats for the viewer):
  - At most one emulator session may be live per game investigation, including
    sessions launched by nested agents. Emulator tasks run serially, with
    process cleanup verified before the next session starts.
- - Deliverable: `docs/<GAME>.md`, structured like the existing specs
-   (`docs/STARFOX.md`, `docs/GOLDENEYE.md`, `docs/ZELDA64.md`): ROM identification
-   and versions, filesystem and compression, level list, geometry and textures,
-   environment (fog, sky, camera), objects, music (every game gets a music
-   player: driver, song list, loops), mapping onto `src/rom/` with difficulty,
-   verification evidence, open questions. Label every claim verified (and how:
-   ROM bytes, disassembly, RAM, frames, audio) or hypothesis.
+ - Deliverable: one `docs/<GAME>.md` per released game, following
+   `docs/SPECIFICATION_STYLE.md`. Keep revisions of one game together; give a
+   substantially different prototype a companion specification. Every manual
+   covers ROM identification and versions, filesystem and compression, level
+   list, geometry and textures, environment (fog, sky, camera), objects, music
+   (driver, song list, loops), mapping onto `src/rom/`, verification evidence,
+   and known unknowns. Label every claim verified (and how: ROM bytes,
+   disassembly, RAM, frames, audio), documented, source-derived, or hypothesis.
  - Unless told otherwise, finish the spec first, then surface unused and hidden
    content (cut levels, debug features, unreferenced assets, text, music) in
    its own section.
- - The lead reports only when the spec is proofread and every subagent has
+ - Run `npm run check:specs` and `npm run docs:build`. The lead reports only when
+   the spec is proofread, both checks pass, and every subagent has
    finished. The main session then copies the spec to `docs/<GAME>.md`, commits
    it, relays the findings and checks for leftover processes.
 

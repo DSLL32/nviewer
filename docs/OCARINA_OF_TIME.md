@@ -1,0 +1,2099 @@
+# The Legend of Zelda: Ocarina of Time — Nintendo 64 ROM format specification
+
+This manual describes the shipped data formats needed to identify, extract, and
+present The Legend of Zelda: Ocarina of Time content. Claims state their evidence inline; unsupported
+interpretations are labelled hypotheses.
+
+## 1. Overview
+
+### 1.1 Technical summary
+
+| Property | Value |
+|---|---|
+| Asset organization | `dmadata` VROM file table; scenes, rooms, objects, and overlays. |
+| Compression | Yaz0 per file; Master Quest debug files are raw. |
+| Graphics microcode | F3DEX2 for retail; additional draw-config code. |
+| Geometry | Scene headers, room headers, and mesh types 0–2. |
+| Textures | RDP textures, TLUTs, animated materials, and prerendered JPEG rooms. |
+| Collision | Scene collision header with polygons, surfaces, camera data, and water boxes. |
+| Music driver | Nintendo EAD sequence engine. |
+| Audio microcode | Nintendo EAD NEAD-family task; exact revision is not separately identified. |
+| Sample encoding | Nintendo ADPCM including 2-bit coefficients. |
+| Levels | 101 USA scenes; 110 Master Quest debug scenes. |
+| Memory requirement | Base 4 MiB. |
+| Viewer support | USA V1.0 and Master Quest debug source formats. |
+
+### 1.2 ROM identification
+
+| Release | NAME | Game code | Revision | Size | CRC1 | CRC2 | SHA-1 | CIC | Build |
+|---|---|---|---:|---:|---|---|---|---|---|
+| USA V1.0 | `THE LEGEND OF ZELDA` | `CZLE` | 0 | 32 MiB (`0x2000000`) | `EC7011B7` | `7616D72B` | `ad69c91157f6705e8ab06c79fe08aad47bb57ba7` | CIC-6105 | 98-10-21 04:56:31 |
+| Master Quest debug | `THE LEGEND OF ZELDA` | `NZLE` | 15 | 64 MiB (`0x4000000`) | `917D18F6` | `69BC5453` | `50bebedad9e0f10746a52b07239e47fa6c284d03` | CIC-6105 | 03-02-21 00:16:31 |
+
+Verified from the normalized ROM headers and complete-image SHA-1 hashes.
+
+### 1.3 Terminology and conventions
+
+ROM and memory ranges are half-open. Offsets, addresses, encoded sizes, masks,
+and opcodes are hexadecimal unless stated otherwise. Multi-byte CPU fields are
+big-endian. RAM addresses are virtual unless explicitly identified as physical;
+segmented, VROM, and file-relative addresses are named at each use.
+
+## 2. Program and storage architecture
+
+### 2.1 Boot and executable layout
+
+#### Boot and code
+
+| ROM | entry point | `boot` bss start + size (from the entry code) | `code` file (index, VROM, size, storage) | `code` VRAM |
+|---|---|---|---|---|
+| OoT US 1.0 | 0x80000400 | 0x80006830 + 0x4910 | 27, 0xA87000, 0x103D30, Yaz0 | 0x800110A0 |
+| OoT MQ debug | 0x80000400 | 0x80012370 + 0x4A30 | 28, 0xA94000, 0x13AF30, raw | 0x8001CE60 |
+| MM US | 0x80080000 | 0x80099500 + 0x63B0 | 31, 0xB3C000, 0x13E4E0, Yaz0 | 0x800A5AC0 |
+| MM debug PAL | 0x80080000 | 0x800A3F60 + 0xC7E0 | 49, 0xC95000, 0x17D600, Yaz0 | 0x800B6AC0 |
+
+- Files 0/1/2 are `makerom` (ROM header + IPL3, 0x1060 bytes), `boot` (loaded at entry point + 0x60: 0x80000460 for OoT,
+  0x80080060 for MM) and `dmadata`. Audio files are 3/4/5 in all four ROMs (*Audio data*).
+- **`code` VRAM** = `(bootBssStart + bootBssSize + dmadataSize + 0x1F) & ~0x1F`. `bootBssStart`/`size` come from the first
+  instructions at ROM 0x1000 (`lui t0; addiu t0` = bss start; `li t1` or `lui/ori t1` = size). **Verified**: the formula
+  gives an address under which the actor profiles of the internal actors (in `code`) carry their own ids, for all four
+  ROMs (`fs/tables.py`: `profileIdMatchesInternal = 3`). The loader only needs it for VRAM pointers inside `code` (MM entrance
+  tables, actor profiles, debug names); scene, object and actor overlay tables store VROM ranges.
+- **Finding `code`:** the only file containing a run of at least 60 scene-table records whose VROM pairs match dmadata files.
+  In that file, by structure (`fs/tables.py`, **verified** in all four):
+
+| table | record | OoT US 1.0 (code offset, VRAM, count) | OoT MQ debug | MM US | MM debug PAL | how to find |
+|---|---|---|---|---|---|---|
+| scene table | OoT 0x14 `{RomFile scene; RomFile title; u8 unk10; u8 drawConfig; u8 unk12; u8 pad}`, MM 0x10 `{RomFile scene; u16 titleTextId; u8 unkA; u8 drawConfig; u8 unkC; pad}` | +0xEA440, 0x800FB4E0, 101 | +0x10CBB0, 0x80129A10, 110 | +0x11E1E0, 0x801C3CA0, 113 (102 set) | +0x1562B0, 0x8020CD70, 113 | run of records whose RomFile is a dmadata file; OoT drawConfig < 0x40 |
+| entrance table (OoT) | 4: `{s8 scene; s8 spawn; u16 flags}` | +0xE8BF0, 1556 | +0x10B360, 1556 | - | - | ends at the scene table; first record `00 00 41 02` |
+| scene entrance tables (MM) | 0xC: `{u8 count; ptr table; ptr name}` | - | - | +0x11FC60, 110 | +0x157D38, 110 | run of such records with pointers into `code` |
+| actor overlay table | 0x20 (*Where actors come from*) | +0xD7490, 471 | +0xF9440, 471 | +0x109510, 690 | +0x140A50, 690 | run starting with the 3 internal actors' records |
+| object table | 8: RomFile | +0xE7F58, 402 | +0x10A6C8, 402 | +0x11CC80, 643 | +0x154D50, 643 | longest RomFile run; entry 0 empty |
+| effect overlay table | 0x1C | 37 | 37 | 39 | 39 | similar to the actor table (do not confuse) |
+| game state table | 0x30 | 6 | 6 | 7 | 7 | contains the map select overlay (state 1) |
+
+The map select overlay (`ovl_select`, game state 1) is present in all four ROMs, including retail, and holds the map select
+list: 12-byte records `{char* name; func; u32 entrance}` (OoT US: 118 entries, MQ debug: 126, MM: 143). **Verified** (`fs/maps.py`).
+
+### 2.2 Memory and address mapping
+
+Address conversions and load destinations are specified with the executable and file tables above.
+
+### 2.3 ROM map and asset organization
+
+See the executable, archive, and file-table descriptions in this section.
+
+### 2.4 Compression formats
+
+#### Filesystem and compression
+
+**dmadata** (**verified**, `fs/verify_dma.py` decodes every file with an independent Yaz0 decoder and compares with the extraction):
+
+- 16-byte records `{u32 vromStart, vromEnd, romStart, romEnd}`, terminated by a record with vromStart = vromEnd = 0 (after
+  record 0). Entry 2 describes the table itself.
+- `romEnd == 0`: stored uncompressed, `romStart` .. `romStart + size`. `romStart == 0xFFFFFFFF` (and `romEnd == 0xFFFFFFFF`):
+  file absent from this ROM (MM: 17 entries, e.g. indices 8, 9, 21, 652, 1539-1551 in MM US). Otherwise Yaz0 data at
+  `romStart .. romEnd` decompressing to `vromEnd - vromStart` bytes.
+- Game data refers to files only by VROM (`RomFile {vromStart, vromEnd}` pairs in `code`, scene room lists, etc.), so a
+  loader indexes files by `vromStart` (or by the exact pair).
+- VROM ranges are contiguous and ascending in the retail ROMs, with many files padded to 0x1000 boundaries. The MQ debug
+  table is not sorted by ROM offset in two places (records 27 and 1069). Do not assume ordering.
+- Compressed ROMs store files in ROM order with `romStart != vromStart` for most raw files (OoT US: 47 of 54).
+- Compressed sizes are multiples of 4.
+
+**Yaz0** (**verified** by decoding all 4488 compressed files): header `"Yaz0"`, `u32` decompressed size, 8 zero bytes; then
+groups of a code byte (MSB first; 1 = copy one literal byte, 0 = back-reference) and references `b1 b2`: distance
+`((b1 & 0x0F) << 8 | b2) + 1`, length `b1 >> 4` + 2, or when `b1 >> 4 == 0` a third byte + 0x12. This is the same Yaz0 as
+other Nintendo EAD games; `src/rom/` has no Yaz0 decoder yet (small; the SF64 module uses MIO0).
+
+**File names:** only OoT MQ debug has them: a table of string pointers in `boot` (find the string `makerom\0`, then the
+pointer to it in `boot` at its load address 0x80000460 - 0x1060; 1532 names, identical to the decomp's list). MM debug PAL
+has no name table (no `makerom\0` string). Retail ROMs have none. Names for other versions can be derived: code-table owners
+give file names (scene files `{name}_scene`, rooms `{name}_room_N` / MM `{name}_room_NN`, objects, overlays): **verified**
+equal to the true names for 1011 (OoT US), 1020 (MQ debug) and 1183 (MM US) files (`fs/tables.py` vs the decomps'
+`segments.csv` / the debug name table).
+
+### 2.5 Loading process
+
+Level and asset selection is described by the tables and loader call paths above.
+
+### 2.6 Revision differences
+
+Revision-specific addresses and data differences are stated in the relevant tables.
+
+## 3. Level data
+
+### 3.1 Level catalog and identifiers
+
+#### Levels: Alternate headers (layers)
+
+- A scene or room header may contain command 0x18: a list of segment pointers to alternate headers; slot `k` is used for
+  layer `k + 1`, layer 0 is the main header. Room files have their own 0x18 lists that follow the same layer number.
+  **Verified** (`fs/scenes.py`; no alternate header changes a scene's room list in any of the four ROMs), **doc** (z_scene.c).
+- **OoT layers:** 0 child day, 1 child night, 2 adult day, 3 adult night, 4+ cutscene layers (entrance cutscenes; layer =
+  4 + cutscene index). A null slot falls back: layer 1 or 2 -> main header; layer 3 -> the adult day header if present,
+  else the main header. **Doc** (`oot-decomp/src/code/z_scene.c` Scene_CommandAlternateHeaderList, `z_play.c`).
+- **MM setups:** layer = the low 4 bits of the entrance; a null slot uses the main header; there is no age/night meaning.
+  Time of day is handled by the actors' half-day masks and the environment. **Doc** (`mm-decomp/src/code/z_scene.c`).
+- **Viewer default:** layer 0 (child day for OoT, setup 0 for MM) at noon. The View panel offers the non-empty OoT
+  layers 1-3 (child night, adult day, adult night: e.g. Kakariko Village and Lon Lon Ranch have all four) and the
+  non-cutscene MM setups (a few scenes: North Clock Town, Termina Field, Romani Ranch, Snowhead, Path to Mountain
+  Village, Clock Tower rooftop). Alternate setups are hidden from the sidebar. Cutscene layers remain unavailable.
+- Several places are separate scenes per state rather than layers, and group naturally as variants of one level: OoT Market,
+  Market Entrance, Back Alley and Temple of Time exterior (day / night / ruins), Castle Courtyard (day / night); MM Southern
+  Swamp (poisoned 0x45 / cleared 0x00), Mountain Village (0x50 / 0x5A), Goron Village (0x4D / 0x48), Twin Islands (0x5D / 0x5E),
+  Stone Tower (0x58 / 0x59), Stone Tower Temple (0x16 / 0x18).
+
+#### Levels: Proposed sidebar
+
+`LevelInfo.kind` / `group` as in the tables: `hub` for overworld regions (grouped by region), `adventure` for dungeons,
+`boss` for boss rooms, `other` for interiors, grottos, cutscene and test maps. One entry per scene; layer variants as
+extra entries directly after the main one (e.g. "Kakariko Village (adult, night)"), or as a variant selector if the UI gets
+one. The test maps (MQ debug 0x65-0x6D) and the MM debug placeholder scene only appear for debug ROMs.
+
+The full tables follow (generated from ROM data by `lead/leveltables.py`; group assignment and the English names
+without a ROM title are the lead's proposal / **doc**).
+
+#### Mapping onto the viewer: Filesystem, tables and level list
+
+- `src/rom/zelda/fs.ts`: byte order normalisation, `zelda@` + dmadata detection, Yaz0 decoder, file access by VROM.
+- `src/rom/zelda/tables.ts`: `code` detection, `code` VRAM, scene/object/actor/entrance tables by structure.
+- `src/rom/zelda/names.ts`: OoT English names (static, from the decomp enum), MM title decoding from messages plus static
+  names for untitled scenes, sidebar grouping tables.
+- `src/rom/zelda/zelda.ts`: `Game` with levels = scenes (+ layer variants); `Game.id` gains `'oot'` and `'mm'` (and the alpha).
+- Difficulty: low (well-defined structures, all found generically and verified in four ROMs).
+
+#### Verification evidence: Identification, filesystem, tables, levels
+
+| claim | method |
+|---|---|
+| hashes, header codes, build strings, byte order | ROM bytes (md5sum, sha1sum, xxd, string search) |
+| dmadata location and record rules, absent files, ordering | ROM bytes (`fs/verify_dma.py`) |
+| Yaz0 format | ROM bytes (independent decoder, all files match the C decoder's output) |
+| `code` VRAM formula | ROM bytes (internal actor profile ids line up, `fs/tables.py`) |
+| code table locations and sizes | ROM bytes (`fs/tables.py`) |
+| OoT entrance table size and position | ROM bytes (`lead/levels.py`) |
+| file names derivable from code tables | ROM bytes vs decomp `segments.csv` / debug name table |
+| scene and room counts, alternate header presence, room lists unchanged by layers | ROM bytes (`fs/scenes.py`) |
+| MM scene titles from message data | ROM bytes (`lead/levels.py`) |
+| map select names | ROM bytes (`fs/maps.py`) |
+| MQ debug dungeons differ from US 1.0; 76 scenes identical | ROM bytes (md5 per file) |
+| layer meanings and fallback | doc (z_scene.c); layer 0 matches the reference captures (sidecars: sceneLayer 0) |
+| sidebar grouping, English names of untitled scenes | doc / proposal |
+
+#### Open questions and hypotheses: Filesystem and levels
+
+- MM debug PAL English message table layout (only needed if names should come from that ROM itself).
+- OoT English names could be shown as the title-card textures (US ROM, `g_pn_*` files) instead of decomp names; format not
+  examined.
+- The content of the MM debug placeholder scene (dmadata 1559) is not examined (it may be a test map).
+
+### 3.2 Level container
+
+#### Levels: Scene list and names
+
+A level is a scene: a scene file plus the room files listed by its command 0x04 (8-byte RomFile records). **Verified**
+(`fs/scenes.py`): OoT US 1.0 101 scenes / 388 rooms; OoT MQ debug 110 scenes / 401 rooms; MM US 102 scenes (11 unset ids) /
+299 rooms; MM debug PAL 113 ids / 310 rooms (the 11 ids unset in US all point to one extra debug-only file, dmadata 1559,
+with one room and 9 non-cutscene setups; not examined further).
+
+Names from the game's own data:
+
+- **MM:** each scene-table record has a message id (`titleTextId`, 0x100-0x149) of the area name shown on entry. The English
+  message table is in `code` (8-byte records `{u16 id; u8 typePos; u8 0; u32 0x08xxxxxx offset}`, ascending, ended by id
+  0xFFFF; MM US: code +0x1210D8, 4589 messages) pointing into `message_data_static` (dmadata 29); text starts 11 bytes into
+  a message and ends at byte 0xBF. This names 70 of the 102 MM scenes (e.g. 0x6F "South Clock Town", 0x2D "Termina Field");
+  the rest have no title (boss rooms, moon, cutscene maps) or share one (Zora Cape shows "Great Bay Coast"). **Verified**
+  (ROM bytes, `lead/levels.py`). The MM debug PAL ROM keeps its message tables in another layout (not located; its scene
+  ids and files match US one-to-one, so the US names apply by id).
+- **OoT:** area names are title-card textures (`g_pn_*` files referenced by the scene table), not text. The ROMs' map
+  select lists (Japanese kana, or `SPOTnn` for the overworld) give a name for most scenes (**verified**, ROM bytes).
+  English names come from the decomp's scene enum (**doc**).
+- Map select names exist for MM too (Japanese). The tables below list all three.
+
+#### Levels: Scene tables
+
+##### Ocarina of Time: scenes (OoT US 1.0: 0x00-0x64; MQ debug: 0x00-0x6D)
+
+Name = decomp scene enum, title-cased (**doc**); map select = the name in the ROM's own map select list (**verified**, ROM bytes; Japanese/romanised). Rooms and layers from the scene files (**verified**); layers list the non-empty alternate headers of the scene (cutscene layers counted).
+
+| kind / group | id | file | name | map select (ROM) | rooms | layers |
+|---|---|---|---|---|---|---|
+| hub / Hyrule Field and Castle | 0x51 | spot00_scene | Hyrule Field | SPOT00 | 1 | child day, child night, adult day + 9 cutscene |
+| hub / Hyrule Field and Castle | 0x63 | spot20_scene | Lon Lon Ranch | SPOT20 | 1 | child day, child night, adult day, adult night + 8 cutscene |
+| hub / Hyrule Field and Castle | 0x5F | spot15_scene | Hyrule Castle | SPOT15 | 1 | child day |
+| hub / Hyrule Field and Castle | 0x64 | ganon_tou_scene | Outside Ganon's Castle |  | 1 | child day + 1 cutscene |
+| hub / Castle Town | 0x1B | entra_scene | Market Entrance Day | じょうかまち いりぐち | 1 | child day |
+| hub / Castle Town | 0x1C | entra_n_scene | Market Entrance Night |  | 1 | child day |
+| hub / Castle Town | 0x1D | enrui_scene | Market Entrance Ruins |  | 1 | child day |
+| hub / Castle Town | 0x1E | market_alley_scene | Back Alley Day | うらろじ | 1 | child day |
+| hub / Castle Town | 0x1F | market_alley_n_scene | Back Alley Night |  | 1 | child day |
+| hub / Castle Town | 0x20 | market_day_scene | Market Day | じょうかまち | 1 | child day |
+| hub / Castle Town | 0x21 | market_night_scene | Market Night |  | 1 | child day |
+| hub / Castle Town | 0x22 | market_ruins_scene | Market Ruins |  | 1 | child day |
+| hub / Castle Town | 0x23 | shrine_scene | Temple Of Time Exterior Day | ときのしんでん まえ | 1 | child day |
+| hub / Castle Town | 0x24 | shrine_n_scene | Temple Of Time Exterior Night |  | 1 | child day |
+| hub / Castle Town | 0x25 | shrine_r_scene | Temple Of Time Exterior Ruins |  | 1 | child day |
+| hub / Castle Town | 0x45 | hairal_niwa_scene | Castle Courtyard Guards Day | ハイラルにわゲーム | 1 | child day |
+| hub / Castle Town | 0x46 | hairal_niwa_n_scene | Castle Courtyard Guards Night |  | 1 | child day |
+| hub / Castle Town | 0x4A | nakaniwa_scene | Castle Courtyard Zelda | ハイラルなかにわ | 1 | child day + 3 cutscene |
+| hub / Kokiri Forest and Lost Woods | 0x55 | spot04_scene | Kokiri Forest | SPOT04 | 3 | child day, adult day, adult night + 10 cutscene |
+| hub / Kokiri Forest and Lost Woods | 0x5B | spot10_scene | Lost Woods | SPOT10 | 10 | child day, adult day + 1 cutscene |
+| hub / Kokiri Forest and Lost Woods | 0x56 | spot05_scene | Sacred Forest Meadow | SPOT05 | 1 | child day, adult day + 2 cutscene |
+| hub / Kakariko and Death Mountain | 0x52 | spot01_scene | Kakariko Village | SPOT01 | 1 | child day, child night, adult day, adult night + 5 cutscene |
+| hub / Kakariko and Death Mountain | 0x53 | spot02_scene | Graveyard | SPOT02 | 2 | child day, child night, adult day, adult night + 2 cutscene |
+| hub / Kakariko and Death Mountain | 0x60 | spot16_scene | Death Mountain Trail | SPOT16 | 1 | child day, adult day + 5 cutscene |
+| hub / Kakariko and Death Mountain | 0x61 | spot17_scene | Death Mountain Crater | SPOT17 | 2 | child day, adult day + 2 cutscene |
+| hub / Kakariko and Death Mountain | 0x62 | spot18_scene | Goron City | SPOT18 | 4 | child day, adult day + 2 cutscene |
+| hub / Zora's River and Lake Hylia | 0x54 | spot03_scene | Zora's River | SPOT03 | 2 | child day, adult day |
+| hub / Zora's River and Lake Hylia | 0x58 | spot07_scene | Zora's Domain | SPOT07 | 2 | child day, adult day + 1 cutscene |
+| hub / Zora's River and Lake Hylia | 0x59 | spot08_scene | Zora's Fountain | SPOT08 | 1 | child day, child night, adult day + 3 cutscene |
+| hub / Zora's River and Lake Hylia | 0x57 | spot06_scene | Lake Hylia | SPOT06 | 1 | child day, adult day + 2 cutscene |
+| hub / Gerudo | 0x5A | spot09_scene | Gerudo Valley | SPOT09 | 1 | child day, adult day + 3 cutscene |
+| hub / Gerudo | 0x5D | spot12_scene | Gerudo's Fortress | SPOT12 | 2 | child day, adult day, adult night + 3 cutscene |
+| hub / Gerudo | 0x5E | spot13_scene | Haunted Wasteland | SPOT13 | 2 | child day |
+| hub / Gerudo | 0x5C | spot11_scene | Desert Colossus | SPOT11 | 1 | child day, adult day + 2 cutscene |
+| adventure / Dungeons | 0x00 | ydan_scene | Deku Tree | ようせいのきの ダンジョン | 12 | child day |
+| adventure / Dungeons | 0x01 | ddan_scene | Dodongos Cavern | ドドンゴ ダンジョン | 17 | child day |
+| adventure / Dungeons | 0x02 | bdan_scene | Jabu-Jabu's Belly | きょだいぎょ ダンジョン | 16 | child day + 1 cutscene |
+| adventure / Dungeons | 0x03 | Bmori1_scene | Forest Temple | もりのしんでん | 23 | child day |
+| adventure / Dungeons | 0x04 | HIDAN_scene | Fire Temple | ひのしんでん | 27 | child day |
+| adventure / Dungeons | 0x05 | MIZUsin_scene | Water Temple | みずのしんでん | 23 | child day |
+| adventure / Dungeons | 0x06 | jyasinzou_scene | Spirit Temple | じゃしんぞう ダンジョン | 29 | child day |
+| adventure / Dungeons | 0x07 | HAKAdan_scene | Shadow Temple | はかした ダンジョン | 23 | child day |
+| adventure / Dungeons | 0x08 | HAKAdanCH_scene | Bottom of the Well | いどした ダンジョン | 7 | child day |
+| adventure / Dungeons | 0x09 | ice_doukutu_scene | Ice Cavern | こおりのどうくつ | 12 | child day + 1 cutscene |
+| adventure / Dungeons | 0x0B | men_scene | Gerudo Training Ground | ゲルドのしゅうれんじょう | 11 | child day |
+| adventure / Dungeons | 0x0C | gerudoway_scene | Thieves Hideout | ゲルドつうろ 1-2 | 6 | child day |
+| adventure / Dungeons | 0x0D | ganontika_scene | Inside Ganon's Castle | ガノンちか ダンジョン | 20 | child day |
+| adventure / Dungeons | 0x0A | ganon_scene | Ganon's Tower | ガノンのとう | 10 | child day |
+| adventure / Dungeons | 0x0E | ganon_sonogo_scene | Ganon's Tower Collapse Interior | ガノンのとう そのご 1 | 5 | child day |
+| adventure / Dungeons | 0x0F | ganontikasonogo_scene | Inside Ganon's Castle Collapse | ガノンちか そのご | 2 | child day |
+| adventure / Dungeons | 0x1A | ganon_final_scene | Ganon's Tower Collapse Exterior | ガノンさいしゅうせん | 1 | child day |
+| boss / Boss rooms | 0x11 | ydan_boss_scene | Deku Tree Boss | ようせいのきの ダンジョン ボス | 2 | child day |
+| boss / Boss rooms | 0x12 | ddan_boss_scene | Dodongos Cavern Boss | ドドンゴ ダンジョン ボス | 2 | child day |
+| boss / Boss rooms | 0x13 | bdan_boss_scene | Jabu-Jabu's Belly Boss | きょだいぎょ ダンジョン ボス | 2 | child day |
+| boss / Boss rooms | 0x14 | moribossroom_scene | Forest Temple Boss | もりのしんでん ボス | 2 | child day |
+| boss / Boss rooms | 0x15 | FIRE_bs_scene | Fire Temple Boss | ひのしんでん ボス | 2 | child day |
+| boss / Boss rooms | 0x16 | MIZUsin_bs_scene | Water Temple Boss | みずのしんでん ボス | 2 | child day |
+| boss / Boss rooms | 0x17 | jyasinboss_scene | Spirit Temple Boss | じゃしんぞう ダンジョン アイアンナック | 4 | child day + 3 cutscene |
+| boss / Boss rooms | 0x18 | HAKAdan_bs_scene | Shadow Temple Boss | はかした ダンジョン ボス | 2 | child day |
+| boss / Boss rooms | 0x19 | ganon_boss_scene | Ganondorf Boss | ガノンのとうボス | 1 | child day |
+| boss / Boss rooms | 0x4F | ganon_demo_scene | Ganon Boss | ガノンさいしゅうせん デモ & バトル | 1 | child day + 1 cutscene |
+| other / Houses, shops and minigames | 0x34 | link_home_scene | Link's House | りんくのいえ | 1 | child day + 2 cutscene |
+| other / Houses, shops and minigames | 0x26 | kokiri_home_scene | Know-It-All Brothers' House | こきりのむら ものしりきょうだいのいえ | 1 | child day |
+| other / Houses, shops and minigames | 0x27 | kokiri_home3_scene | Twins' House | こきりのむら ふたごのいえ | 1 | child day |
+| other / Houses, shops and minigames | 0x28 | kokiri_home4_scene | Mido's House | こきりのむら ミドのいえ | 1 | child day |
+| other / Houses, shops and minigames | 0x29 | kokiri_home5_scene | Saria's House | こきりのむら サリアのいえ | 1 | child day |
+| other / Houses, shops and minigames | 0x2D | kokiri_shop_scene | Kokiri Shop | こきりぞくのみせ | 1 | child day |
+| other / Houses, shops and minigames | 0x2A | kakariko_scene | Kakariko Center Guest House | カカリコむらのながや | 1 | child day |
+| other / Houses, shops and minigames | 0x2B | kakariko3_scene | Back Alley House | うらろじの いえ | 1 | child day |
+| other / Houses, shops and minigames | 0x35 | impa_scene | Dog Lady House | うらろじ いぬおばさんのいえ | 1 | child day |
+| other / Houses, shops and minigames | 0x37 | labo_scene | Impa's House | かかりこむら インパのいえ | 1 | child day |
+| other / Houses, shops and minigames | 0x30 | drag_scene | Potion Shop Kakariko | カカリコむら  くすりや | 1 | child day |
+| other / Houses, shops and minigames | 0x39 | tent_scene | Carpenters' Tent | テント | 1 | child day |
+| other / Houses, shops and minigames | 0x3A | hut_scene | Gravekeeper's Hut | はかもりのいえ | 1 | child day |
+| other / Houses, shops and minigames | 0x2C | shop1_scene | Bazaar | たてのみせ | 1 | child day |
+| other / Houses, shops and minigames | 0x31 | alley_shop_scene | Potion Shop Market | じょうかまち くすりや | 1 | child day |
+| other / Houses, shops and minigames | 0x32 | night_shop_scene | Bombchu Shop | うらろじ よるのみせ | 1 | child day |
+| other / Houses, shops and minigames | 0x33 | face_shop_scene | Happy Mask Shop | おめんや | 1 | child day |
+| other / Houses, shops and minigames | 0x2E | golon_scene | Goron Shop | ゴロンのみせ | 1 | child day |
+| other / Houses, shops and minigames | 0x2F | zoora_scene | Zora Shop | ゾーラのみせ | 1 | child day |
+| other / Houses, shops and minigames | 0x4E | mahouya_scene | Potion Shop Granny | まほう の くすりや | 1 | child day |
+| other / Houses, shops and minigames | 0x10 | takaraya_scene | Treasure Box Shop | たからばこや | 7 | child day |
+| other / Houses, shops and minigames | 0x42 | syatekijyou_scene | Shooting Gallery | しゃてきじょう | 1 | child day + 3 cutscene |
+| other / Houses, shops and minigames | 0x4B | bowling_scene | Bombchu Bowling Alley | ボムチュウボーリング | 1 | child day |
+| other / Houses, shops and minigames | 0x49 | turibori_scene | Fishing Pond | つりぼり | 1 | child day |
+| other / Houses, shops and minigames | 0x50 | kinsuta_scene | House Of Skulltula | きん スタルチュラ ハウス | 1 | child day |
+| other / Houses, shops and minigames | 0x36 | malon_stable_scene | Stable | うまごや | 1 | child day |
+| other / Houses, shops and minigames | 0x4C | souko_scene | Lon Lon Buildings | ロンロンぼくじょう そうこ 1 | 3 | child day |
+| other / Houses, shops and minigames | 0x4D | miharigoya_scene | Market Guard House | みはり ごや | 1 | child day, adult day |
+| other / Houses, shops and minigames | 0x38 | hylia_labo_scene | Lakeside Laboratory | ハイリア けんきゅうじょ | 1 | child day |
+| other / Houses, shops and minigames | 0x43 | tokinoma_scene | Temple Of Time | ときのま | 2 | child day + 11 cutscene |
+| other / Houses, shops and minigames | 0x44 | kenjyanoma_scene | Chamber of the Sages | けんじゃのま | 1 | child day + 3 cutscene |
+| other / Fairy fountains, grottos and graves | 0x3B | daiyousei_izumi_scene | Great Fairy's Fountain Magic | だいようせいのいずみ | 1 | child day + 3 cutscene |
+| other / Fairy fountains, grottos and graves | 0x3D | yousei_izumi_yoko_scene | Great Fairy's Fountain Spells | まほうせき ようせいのいずみ | 1 | child day + 3 cutscene |
+| other / Fairy fountains, grottos and graves | 0x3C | yousei_izumi_tate_scene | Fairy's Fountain | とびこみ ようせい あな | 1 | child day |
+| other / Fairy fountains, grottos and graves | 0x3E | kakusiana_scene | Grottos | かくしとびこみあな 0 | 14 | child day |
+| other / Fairy fountains, grottos and graves | 0x3F | hakaana_scene | Redead Grave | はかしたとびこみあな | 1 | child day |
+| other / Fairy fountains, grottos and graves | 0x40 | hakaana2_scene | Grave With Fairy's Fountain | はかしたとびこみあな 2 | 1 | child day |
+| other / Fairy fountains, grottos and graves | 0x41 | hakaana_ouke_scene | Royal Family's Tomb | おうけ の はかあな | 3 | child day + 2 cutscene |
+| other / Fairy fountains, grottos and graves | 0x48 | hakasitarelay_scene | Windmill and Dampé's Grave | はかしたリレー | 7 | child day |
+| other / Cutscene map | 0x47 | hiral_demo_scene | Cutmap | ハイラル デモ | 1 | child day + 9 cutscene |
+| other / Test maps (MQ debug only) | 0x65 | test01_scene | Test01 | テストマップ | 1 | child day |
+| other / Test maps (MQ debug only) | 0x66 | besitu_scene | Besitu | べっしつ (たからばこワープ) | 1 | child day |
+| other / Test maps (MQ debug only) | 0x67 | depth_test_scene | Depth Test | depthテスト | 1 | child day |
+| other / Test maps (MQ debug only) | 0x68 | syotes_scene | Syotes | ちゅうスタロフォスべや | 1 | child day |
+| other / Test maps (MQ debug only) | 0x69 | syotes2_scene | Syotes2 | ボススタロフォスべや | 1 | child day |
+| other / Test maps (MQ debug only) | 0x6A | sutaru_scene | Sutaru | Sutaru | 1 | child day |
+| other / Test maps (MQ debug only) | 0x6B | hairal_niwa2_scene | Castle Courtyard test (hairal_niwa2) | ハイラルにわゲーム2 | 1 | child day |
+| other / Test maps (MQ debug only) | 0x6C | sasatest_scene | Sasatest | ささテスト | 1 | child day, child night, adult day, adult night |
+| other / Test maps (MQ debug only) | 0x6D | testroom_scene | Testroom | テストルーム | 5 | child day |
+
+#### Levels: Rooms
+
+Rooms are world-space (room vertices are not offset per room) and all rooms of a scene are drawn together for a level view;
+in game only the current and previous room are drawn. Per-room `LevelLayer`s (e.g. "room 3") are useful toggles for
+dungeons with overlapping rooms. **Doc** (z_room.c); **verified** by the scene renders (*Units and coordinates*).
+
+#### Scene and room format
+
+- Scenes are one scene file (segment 2) plus room files (segment 3). Both are lists of 8-byte header commands ending with
+  0x14; alternate headers select per-layer variants. The two games share command ids 0x00-0x19 (a few differ), MM adds
+  0x1A-0x1E.
+- Room geometry is F3DEX2 display lists in mesh headers (types 0/1/2), drawn in world space with an identity modelview
+  after `SETUPDL_25`, under two directional lights and fog from the scene's light settings. Segments 8-0xD (and 6) are
+  filled every frame by code (OoT: 53 per-scene draw config functions; MM: animated material lists in the scene file).
+- Units: 1 vertex unit = 1 world unit, right-handed, Y up, no mirroring. `mirrorX: false`, `vertexScale: 1`.
+- `displaylist.ts` needs: a direct-image texture path (the 4 KB texture memory model breaks many textures), a TLUT memory,
+  RDPHALF_1/BRANCH_Z for F3DEX2, initial combiner/othermode/prim/env from the caller, and (for correct appearance) the
+  second texture and combiner per batch. The renderer needs a 2-texture lerp and a half-texel offset.
+- Offline renders from ROM data + captured cameras match the emulator closely: mean absolute error over the best 75% of
+  pixels (excluding HUD/actors) 0.4-4.7 on 13 of 14 captures of both games and all four ROMs, 11.3 on MM US Termina
+  Field (*Scenes, display lists, environment*). Environment values computed from scene data (lights, fog, zFar, sky indices/colours) equal the RAM values
+  in every capture. Renders with placed static actors are in *Verification by render*.
+
+#### Scene and room format: Scene and room headers
+
+##### Scene table (how the loader finds scenes)
+
+| game | entry | layout | location (by structure) |
+|---|---|---|---|
+| OoT | 0x14 | `RomFile scene {vs, ve}; RomFile title {vs, ve} or 0; u8 unk10; u8 drawConfig; u8 unk12; u8 0` | US code +0xEA440 (101 entries), MQ code +0x10CBB0 (110) |
+| MM | 0x10 | `RomFile scene; u16 titleTextId; u8; u8 drawConfig; u8; u8` | US code +0x11E1E0, dbg PAL code +0x1562B0 (113 each; unset slots are {0,0}) |
+
+Finder (**verified**, `scenes/zscene.ts findSceneTable`, used by every render of all four ROMs): scan files ≥ 64 KB for a
+run of ≥ 60 entries whose (vromStart, vromEnd) equals a filesystem file whose first bytes parse as a header containing
+0x04 (room list); OoT also requires the title RomFile to be a file or zero; MM allows {0,0} gaps. drawConfig: OoT
+byte +0x11 (0..52), MM byte +0x0B (0..7). MM dbg PAL fills the 11 slots that are unset in US with one extra debug file
+(not investigated: unused-content rule).
+
+##### Commands
+
+8 bytes: `u8 code, u8 data1, u16 pad, u32 data2`; pointers are segment 2 in scene files and segment 3 in room files. A
+header ends at 0x14 (loader: at most 64 commands; no other terminator). Layouts **doc** (`oot-decomp/include/scene.h`,
+`src/code/z_scene.c`; `mm-decomp/include/z64scene.h`, `src/code/z_scene.c`); usage counts **verified** for OoT US by
+`scene-oot/census.py` → `scene-oot/census-oot-us10.txt` (main headers, 101 scenes / 388 room headers).
+
+| id | OoT name / MM name | data1 | data2 / bytes 4-7 | where | viewer use |
+|---|---|---|---|---|---|
+| 00 | PLAYER_ENTRY_LIST / SPAWN_LIST | count | ptr ActorEntry[0x10] `{s16 id; Vec3s pos; Vec3s rot; s16 params}` | scene (101/101) | start positions |
+| 01 | ACTOR_LIST | count | ptr ActorEntry[0x10] | room (369/388) | actors (*Actors and objects*) |
+| 02 | UNUSED_2 / ACTOR_CUTSCENE_CAM_LIST | — / count | ptr | scene (MM) | no |
+| 03 | COLLISION_HEADER | 0 | ptr CollisionHeader (*Collision and waterboxes*) | scene (101) | collision/water overlay, bg cameras |
+| 04 | ROOM_LIST | count | ptr RomFile[8] `{vs, ve}` | scene (101) | rooms |
+| 05 | WIND | 0 | bytes s8 x, y, z, u8 strength | room (7) | no |
+| 06 | SPAWN_LIST / ENTRANCE_LIST | 0 | ptr `{u8 playerEntryIndex; u8 room}[]`, no count | scene (101) | start room + position |
+| 07 | SPECIAL_FILES | navi hint file | u32 keep object id (→ segment 5) | scene (93) | actors (*Actors and objects*) |
+| 08 | ROOM_BEHAVIOR | room type | bits 0-7 env type, 8 lens mode, 10 disable warp songs; MM +11 enablePosLights, +12 storm | room (388) | MM point lights (hypothesis: ignore) |
+| 09 | undefined | | | | |
+| 0A | ROOM_SHAPE (mesh) | 0 | ptr mesh header (*Mesh headers (command 0x0A)*) | room (388) | geometry |
+| 0B | OBJECT_LIST | count | ptr s16[] | room (388) | actors (*Actors and objects*) |
+| 0C | LIGHT_LIST (positional) | count | ptr LightInfo[0x0E] | room | no (see *Lights used for rooms*) |
+| 0D | PATH_LIST | 0 | ptr Path[8] | scene (30) | optional markers |
+| 0E | TRANSITION_ACTOR_LIST | count | ptr [0x10] `{s8 room, s8 bgCam}×2; s16 id; Vec3s pos; s16 rotY; s16 params}` | scene (62) | doors (*Actors and objects*) |
+| 0F | LIGHT_SETTINGS_LIST | count | ptr EnvLightSettings[0x16] (*Light settings (command 0x0F)*) | scene (101) | lights, fog, zFar |
+| 10 | TIME_SETTINGS | 0 | bytes hour, min, speed (0xFF = keep) | room (388) | fixed-time rooms |
+| 11 | SKYBOX_SETTINGS | OoT 0; MM area texture file (0-8) | OoT bytes skyboxId, skyboxConfig, lightMode; MM byte4 & 3 = skyboxId | scene (101) | sky, light mode, MM segment 6 |
+| 12 | SKYBOX_DISABLES | 0 | bytes skyDisabled, sunMoonDisabled | room (388) | sky |
+| 13 | EXIT_LIST | 0 | ptr s16[] | scene (100) | no |
+| 14 | END | | | | |
+| 15 | SOUND_SETTINGS | spec | byte6 ambience, byte7 sequence | scene (101) | music (*Music*) |
+| 16 | ECHO | 0 | byte7 | room | no |
+| 17 | CUTSCENE_DATA / CUTSCENE_SCRIPT_LIST | — / count | OoT ptr script; MM ptr `{script*, s16 nextEntrance, u8 spawn, u8 flags}[8]` | scene alt headers | no |
+| 18 | ALTERNATE_HEADER_LIST | 0 | ptr to header pointers (*Alternate headers (layers)*) | scene (32) and room (83) | layers |
+| 19 | MISC_SETTINGS / SET_REGION_VISITED | camera type | world map area | scene | no |
+| 1A | — / ANIMATED_MATERIAL_LIST | 0 | ptr AnimatedMaterial[8] (*MM: draw configs and animated materials*) | MM scene | segments 8-0xD |
+| 1B | — / ACTOR_CUTSCENE_LIST | count | ptr [0x10] | MM scene | no |
+| 1C | — / MAP_DATA | 0 | ptr | MM scene | no |
+| 1E | — / MAP_DATA_CHESTS | count | ptr | MM scene | no |
+
+##### Alternate headers (layers)
+
+- **OoT** (**doc** `Scene_CommandAlternateHeaderList`): `gSaveContext.sceneLayer` 0 = child day, 1 = child night,
+  2 = adult day, 3 = adult night, 4+ = cutscene layers (cutsceneIndex 0xFFF0 + n → layer 4 + n). Layer 0 uses the main
+  header; layer L > 0 uses `altList[L-1]`; if that pointer is 0 the main header's remaining commands run, except that
+  layer 3 falls back to `altList[1]` (adult day). The 0x18 command must come first in the main header (it ends the main
+  header after running the alternate one). Room files carry their own 0x18 lists indexed by the same layer. The list has
+  no length: read pointers while they are 0 or segment-2/3 addresses of parsable headers.
+- Census (**verified**, `scene-oot/census-oot-us10.txt`): scene alternate list lengths {0: 69 scenes, 3: 2, 4: 6, 5: 8,
+  6: 9, 8: 2, 11: 1, 12: 2, 13: 1, 14: 1}; 32 scenes have alternate headers, and in those the alternate headers point
+  to their own room lists (often the same room files).
+- **MM** (**doc** `z_scene.c`): `sceneLayer` = low 4 bits of the entrance value (`scene << 9 | spawn << 4 | layer`);
+  `altList[layer-1]`, 0 → main header, no fallback. The MM Termina Field capture used layer 5 (**verified**, RAM:
+  `sceneLayer=5`, entrance 0x5400).
+- Recommendation: default = layer 0 for every scene (OoT child day). Offer layers whose alternate pointer is non-zero as
+  variants; label OoT 1-3 as child night / adult day / adult night and 4+ as "cutscene n"; MM 1+ as "setup n". *Alternate headers (layers)* gives
+  the recommended list (many cutscene layers only change actors).
+
+#### Scene and room format: Units and coordinates
+
+- 1 vertex unit = 1 world unit; right-handed, Y up; the N64 look-at/perspective are the standard GL-like ones.
+  **Verified**: renders with `mirrorX: false`, `vertexScale: 1` reproduce every screenshot (ladder left / vines right on the
+  Kokiri balcony; castle and hills positions in Hyrule Field; Clock Town walls); a mirrored render would swap sides.
+- Rooms are already in world space: the game loads the identity modelview before each room (**doc**); every room of a
+  scene shares the scene's coordinate frame (collision is one scene-wide mesh). Viewer: one instance per room with the
+  identity matrix.
+- Winding: front faces are counter-clockwise on screen with G_CULL_BACK (**verified** by render culling).
+- Angles: s16 binary angles (0x8000 = 180°); collision normals s16/0x7FFF; world coordinates up to ±32 760
+  (BGCHECK_XYZ_ABSMAX); OoT room vertices span x −11 048..11 320, y −4 055..5 701, z −11 491..17 911 (US census).
+
+#### Scene and room format: Per-version differences (scenes and rooms)
+
+##### OoT US 1.0 vs MQ GameCube debug
+
+(**verified**, `scenes/ootcmp.py`, `scenes/ootroomdiff.py`, `scenes/ootroomhdr.py`, room-list vroms masked)
+- Scene table 101 vs 110 entries (101-109: debug scenes, not investigated). 69 scenes byte-identical (scene + all rooms).
+- The 12 Master Quest dungeons differ completely (ids 0-9, 11, 13; e.g. Deku Tree scene 0xDA10/0xDA20, 30 vs 31 surface
+  types; all rooms differ).
+- Overworld rooms were restructured: US mesh type 0 with one entry → MQ type 2 with n cullable entries, same actor and
+  object counts: Kokiri Forest rooms 0/1/2 (1 → 18/3/7 entries), spot02 rooms 0/1 (1 → 9/20), spot09 (1 → 32), spot16
+  (1 → 9); spot01/08/17 rooms differ slightly in size with identical header summaries. Scene files of these scenes are
+  identical or differ in a few bytes (spot00 6, spot15 4, spot16 7, spot12 1 139, spot17 772, spot20 52 302).
+- Draw config: day/night pointer table placement (US after the 53-entry function table at +0xEAD4C, MQ directly after
+  sDefaultDisplayList at +0x10D498) and values (Deku Tree 0x0200BA08 vs 0x0200BA18, Water/Spirit/GTG/Ice Cavern MQ
+  values); Water Temple entrance texture segment 6 (US) vs 8 (MQ) (**doc** `#if OOT_MQ`; US census shows XLU SETTIMG
+  segment 6 in scene 5).
+- Renders: Hyrule Field US and MQ render to the same image apart from the time-of-day sun (identical data).
+
+#### Actors and objects: Census: what kinds of actors the levels use
+
+Instances = entries over all unique room actor lists of all setups plus transition actors (`actors/counts_{rom}.tsv`, ROM
+bytes). Draw class from the decomp source of each actor (`lead/actorclass.py`): `dl` = draws fixed display lists,
+`dyna` = has a collision mesh (DynaPoly), `skel` = skeletal model, `none` = no draw function or effects only.
+
+| draw class | OoT US ids | OoT US instances | MM US ids | MM US instances |
+|---|---|---|---|---|
+| dl | 64 | 2672 | 75 | 2932 |
+| dyna+dl | 91 | 1131 | 78 | 1274 |
+| dyna (draws via tables) | 16 | 439 | 15 | 139 |
+| skel | 83 | 937 | 137 | 1017 |
+| skel+dl | 47 | 819 | 75 | 692 |
+| dyna+skel (+dl) | 6 | 273 | 9 | 551 |
+| none | 41 | 1398 | 56 | 1353 |
+| total | 348 | 7669 | 445 | 7958 |
+
+OoT US by category: PROP 85 ids / 2923, BG 89 / 1289, ENEMY 49 / 820, ITEMACTION 27 / 715, NPC 75 / 689, DOOR 3 / 638,
+CHEST 1 / 179, MISC 1 / 173, SWITCH 5 / 117, BOSS 12 / 40.
+
+Static candidates (class with `dl` or `dyna`, category PROP/BG/SWITCH/CHEST/DOOR): OoT US 154 ids with 4311 instances,
+of which the 40 most used cover 3637 (84 %); MM US 142 ids / 3947 instances, top 40 cover 3377 (86 %). **Verified**
+(ROM counts) + **doc** (classification).
+
+The most used actors (both games): pots (Obj_Tsubo), torches (Obj_Syokudai), doors (En_Door, Door_Shutter), loading planes
+(En_Holl), trees and bushes (En_Wood02, En_Kusa), rocks (En_Ishi), crates (Obj_Kibako2), chests (En_Box), bomb rocks
+(Obj_Bombiwa), signs (En_Kanban), gossip stones (En_Gs), switches (Obj_Switch), item drops (En_Item00) and invisible
+helpers (En_Wonder_Item, Elf_Msg, En_River_Sound, Obj_Mure2). MM adds Deku flowers (Obj_Etcetera), lily pads (Bg_Lotus),
+the Clock Town clock tower parts (Obj_Tokeidai, Obj_Tokei_Step, Obj_Tokei_Turret), snowballs, barrels, En_Twig and the
+moon (En_Fall).
+
+### 3.3 Geometry
+
+#### Scene and room format: Mesh headers (command 0x0A)
+
+Layouts **doc** (`oot-decomp/include/room.h`, `mm-decomp/include/z64scene.h`), parser **verified** on every rendered
+room (`scenes/zscene.ts parseMesh`).
+
+| type | layout | draw |
+|---|---|---|
+| 0 normal | `u8 0; u8 n; ptr entries; ptr entriesEnd`; entry `{Gfx* opa; Gfx* xlu}` (8) | all entries in order |
+| 1 image | `u8 1; u8 amount (1 single, 2 multi); ptr entry {opa, xlu}`; single: `+8 source, +0xC unk, +0x10 tlut, +0x14 u16 w, h, +0x18 u8 fmt, siz, +0x1A u16 tlutMode, tlutCount` (0x20); multi: `+8 u8 n, +0xC ptr bg[0x1C] {u16 unk, u8 bgCamIndex, source, unk, tlut, u16 w, h, u8 fmt, siz, u16 tlutMode, tlutCount}` | opa, 2D background, xlu |
+| 2 cullable | `u8 2; u8 n (≤ 64); ptr entries; ptr end`; entry `{Vec3s center; s16 radius; Gfx* opa; Gfx* xlu}` (0x10) | entries sorted near to far, skipped when the sphere is behind the eye or beyond zFar |
+| 3 (MM) none | nothing drawn | |
+
+Either list pointer may be 0 (US: 1621 null list pointers). The game draws all OPA lists (after `SETUPDL_25`) into the
+opaque buffer and all XLU lists (after `SETUPDL_25` on the XLU buffer) into the translucent buffer, which is drawn after
+all opaque geometry and actors (**doc** `z_room.c`, `Play_Draw`). A viewer ignores culling and draws every entry.
+
+Census (**verified**, `scene-oot/meshscan-*.txt`, `scene-oot/census-*.txt`, `scene-mm/report-*.txt`): OoT US rooms
+type 2: 216, type 0: 144, type 1 single: 23, type 1 multi: 5; OoT MQ debug 226 / 145 / 24 / 5 (*Per-version differences (scenes and rooms)*); MM US: all 299 rooms
+type 2 (no type 0/1 in retail rooms).
+
+##### Prerendered backgrounds (type 1, OoT only in practice)
+
+- Scenes (**verified**, `meshscan`): 0x1B-0x1F market entrances/back alleys, 0x23-0x25 Temple of Time exterior (multi),
+  0x26-0x3A shops and houses (single).
+- Image data: segment-3 pointer to a baseline JFIF JPEG (`FF D8 FF E0 … JFIF`), 320×240; header fmt RGBA (0), siz 16b
+  (2). `Room_DecodeJpeg` decodes it in place into an RGBA16 320×240 frame and it is drawn with S2DEX `gSPBgRectCopy`
+  (**doc** `z_room.c`). **Verified**: `scenes/bgimage.py` extracts and decodes them with Pillow (e.g. market entrance
+  25 294 bytes, ToT exterior bgCam 0/1 17 037 / 21 288 bytes) → `scenes/renders/bg-oot-us10-1b-r0-0.png`,
+  `bg-oot-us10-23-r0-{0,1}.png`; the images are correct pictures (checked visually).
+- Which camera: the background is drawn only when the active camera setting is `CAM_SET_PREREND_FIXED` (0x19). For
+  multi images the entry whose `bgCamIndex` equals the camera's bg camera index (or its `roomImageOverrideBgCamIndex`)
+  is used (**doc**). The camera itself: collision bg camera data (*Collision and waterboxes*) with setting 0x19: eye = `pos`,
+  at = eye + VecGeo(pitch = −rot.x, yaw = rot.y), fov = data fov (≤ 360: degrees; else /100; −1: 60) (**doc**
+  `Camera_Fixed3`). **Verified exactly** (capture `ref/oot-us10/market-entrance-1`): RAM camera setting 25, bgCamIndex 0,
+  eye (−260, 820, 2200) = bg cam 0 pos; at − eye direction (0.409, −0.865, 0.287) = formula with rot (10923, 10012)
+  (pitch −60°, yaw 55°); fovy 46.83 = 4683/100; zFar 3000 from the light setting. The decoded JPEG as the whole frame
+  matches the screenshot: best-75% error 3.3 (`scenes/renders/sbs-oot-us10-market-entrance-1.png`; the differences are the
+  HUD, Navi and the player). Collision drawn from that camera lines up with the painted road/stairs
+  (`scenes/renders/sbs-oot-us10-prerendered.png`, also ToT exterior bgCam 0/1).
+- The OPA list of an image room is drawn before the background and gets overwritten by it (it only leaves depth for
+  actors); the XLU list is drawn over it. In market entrance room 0 the OPA list is 12 untextured triangles.
+- Viewer: show the JPEG as `Level.backdrop` (u 0..1, v 0..1) together with a `CameraView` from the bg camera, as a
+  "fixed camera" variant; free-flying over a prerendered room shows only the depth geometry and collision. Decoding needs
+  a baseline JPEG decoder (browser `createImageBitmap` in the worker, or a small in-repo decoder). MM keeps the code
+  but never draws a background (`isFixedCamera = false`, **doc** MM `z_room.c`).
+
+### 3.4 Display lists and render state
+
+#### Scene and room format: Display lists and render state
+
+##### Microcode and opcodes
+
+F3DZEX2 (F3DEX2 opcodes). Opcodes reached from room lists (**verified**, `scene-oot/census-oot-us10.txt`,
+`scene-mm/report-mm-us.txt`):
+
+| | OoT US (164 228 tris) | MM US (159 934 tris) |
+|---|---|---|
+| geometry | VTX 22390, TRI1 4318, TRI2 79955 | VTX 18204, TRI1 2434, TRI2 78750 |
+| state | GEOMETRYMODE 12745, SETOTHERMODE_L 3861 / _H 4503, SETCOMBINE 4250, TEXTURE 3298, SETPRIMCOLOR 3517, SETENVCOLOR 141 | 6378, 4495 / 4981, 4495, 4447, 5606, 36 |
+| textures | SETTIMG 18335, SETTILE 33822, LOADBLOCK 15381, SETTILESIZE 15487, LOADTLUT 2954, TILESYNC/LOADSYNC | 15372, 24962, 9590, 11021, 5782 |
+| flow | DL 1696, ENDDL 3278, CULLDL 3007, RDPHALF_1 + BRANCH_Z 38 | 3601, 7017, 4495, 801 |
+| matrix | MTX 303 | MTX 96, POPMTX 48 |
+
+Vertices are always segment 3. Textures: SETTIMG segment 3 (9236) and 2 (9072) in OoT, plus 6/8/9 from draw configs;
+MM segment 2 (12013), 3 (2568), 6 (790, area textures), 8 (1). No room list references segments 4/5 (gameplay_keep /
+field keep). G_DL targets: segment 3 and 8-0xD (and 6 in MM).
+
+- **G_CULLDL** (`03 …`): view-frustum test of a vertex range; a viewer ignores it.
+- **G_RDPHALF_1 + G_BRANCH_Z** (`E1000000 nearDL` then `04000000 zval`): after loading one bounding vertex,
+  branch to the detailed list if the vertex's screen depth is below `zval` (raw values 0x3E8, 0xC80, 0xE10, 0xFA0 seen),
+  otherwise continue (usually `ENDDL`): distance culling of detail. **Verified** by dumping instances
+  (`scenes/branchz.ts`: MM scene 0 room 0 +0x2620, OoT scene 0x52 room +0x5468). Viewer: always take the branch.
+  `displaylist.ts` today treats 0xE1/0x04 in F3DEX2 as unknown RDP words and never draws the near list.
+- **G_MTX** in OoT rooms (101 × segment 0 load, 101 × segment 3 load, 101 × segment 0xD multiply): segment 0xD is Jabu-
+  Jabu's pulsing-wall scale matrix from the draw config (*OoT: per-scene draw config functions*); the segment 0/3 loads are open questions.
+
+##### State when rooms are drawn
+
+`Play_Draw` (**doc**): segments 2 = scene, 4 = gameplay_keep, 5 = sub keep; fog (*Fog, clear colour, draw distance*); projection
+`guPerspective(fovy, 4:3, zNear, lightCtx.zFar)` with the look-at folded into the projection; Scene_Draw (draw config,
+*Draw configs and animated materials*); `Lights_BindAll` + `gSPSetLights` (ambient + directional lights, *Lights used for rooms*); then each room: `gSPSegment(3, room)`,
+`SETUPDL_25`, `gSPMatrix(identity, LOAD|MODELVIEW)`, the room lists (MM also `gSPSegment(6, area texture file)`).
+
+`SETUPDL_25` (**doc** `z_rcp.c`, identical in both games except MM `AD_PATTERN`):
+
+| state | value |
+|---|---|
+| texture | `gsSPTexture(0xFFFF, 0xFFFF, 0, 0, ON)` |
+| combiner | G_CC_MODULATEIDECALA, G_CC_MODULATEIA_PRIM2 = `FC127E03 FF0FF3FF` |
+| othermode H | 2CYCLE, BILERP, TT_NONE, TC_FILT, PERSP = `0x00102C10` |
+| othermode L | G_RM_FOG_SHADE_A \| G_RM_AA_ZB_OPA_SURF2 = `0xC8112078` |
+| geometry | ZBUFFER, SHADE, CULL_BACK, FOG, LIGHTING, SHADING_SMOOTH |
+| prim / env | not set: left by the draw config (*Draw configs and animated materials*) |
+
+State found at triangles (**verified**, OoT US census; MM similar in `report-mm-us.txt`):
+- Render modes: AA_ZB_OPA_SURF2 139 130 tris, AA_ZB_TEX_EDGE2 (CVG_X_ALPHA) 17 949, AA_ZB_XLU_SURF2 5 786, ZMODE_DEC
+  variants ~650, non-fog c1 `0x0C18…` modes ~550. Blend cycle 1 is always FOG/SHADE_A (fog) or IN/0 (no fog).
+- Geometry mode: 42 488 opaque and 1 171 translucent triangles have G_LIGHTING set (the room lists clear/set
+  FOG|LIGHTING around each material); CULL_BACK on most; TEXTURE_GEN on ~320 (environment-mapped).
+- Othermode H: TT_NONE 105 655 tris, TT_RGBA16 58 573 (CI textures); no IA16 TLUTs; always bilinear, 2-cycle.
+- Combiners (top): `(TEXEL0·SHADE ; ·PRIM)` 102 183 (+9 957 with TEXEL0 alpha); `SHADE·PRIM` 26 202;
+  `lerp(TEXEL0, TEXEL1, ENV_ALPHA) ; ·SHADE` 19 357 (+638 +92 +91 +36 variants); alpha `TEXEL1·PRIM_LOD_FRAC + COMBINED`
+  1 985 + 539; `PRIM` 503; `TEXEL0·PRIM` 374. MM has many more two-texture blends (`FC20AC04 FF0F93FF`,
+  `FC272C04 1F0C93FF`, ~1 300 render-tile-1 uses). PRIM_LOD_FRAC is the low byte of `G_SETPRIMCOLOR` w0.
+
+##### Textures and palettes
+
+Load sequence as stored (**verified**, `scenes/dldump.py oot-us10 1026 0x2790`):
+```
+FD100000 0201AB98   G_SETTIMG image
+F5100000 07014C53   G_SETTILE tile 7 (load tile): fmt, load siz, tmem
+F3000000 073FF100   G_LOADBLOCK tile 7: lrs = texels-1 in load-siz units (capped 0x7FF), dxt
+F5101000 00014C53   G_SETTILE render tile 0: fmt, siz, line = row bytes/8, pal, cmt/maskt/shiftt, cms/masks/shifts
+F2000000 0007C07C   G_SETTILESIZE tile 0: (0,0)-(31,31) = true image size
+...                 second texture: same with render tile 1 (e.g. F5101100 01017C5F / F2000000 0107C07C)
+FD100000 02013D70 / E8000000 / F5000100 07000000 / F0000000 0703C000   palette: TLUT entries (tmem field - 0x100), count-1 at w1 bits 14+
+```
+4-bit textures are loaded with a 16-bit load tile (count = w·h/4), so the load count is not the texel count.
+
+Direct-image model for Zelda (**verified**: all 7 renders with 0 size mismatches between G_SETTILESIZE, the line
+field and the load count; `sizeMismatchCount` in `scenes/renders/*.json`):
+1. On G_LOADBLOCK remember the image address (last G_SETTIMG).
+2. On G_SETTILE for render tile 0 or 1: that tile shows the remembered image with this fmt/siz, wrap cms/cmt, masks,
+   shifts, palette slot.
+3. The first G_SETTILESIZE after it gives the image width/height; later G_SETTILESIZE commands (scroll lists in segments
+   8-0xD) only move uls/ult.
+4. CI texels index TLUT[pal·16 + texel]; the TLUT memory is filled by G_LOADTLUT at entry (tmem field − 0x100).
+5. Texture coordinate: texel = s/32 · G_TEXTURE scale · shift(tile) − uls (s10.5 vertex s; shift 1..10 divide, 11..15
+   multiply).
+
+The existing 4 KB tile-memory emulation truncates: OoT US has 1 649 G_LOADBLOCKs at the 0x7FF cap; MM US has 903 of
+11 021 texture uses larger than 4 KB (e.g. CI8 64×128, RGBA16 64×64) (**verified**, `scene-oot/census.py`,
+`scene-mm/texcensus.py`). Formats at triangles: RGBA16, CI4/CI8 (RGBA16 TLUT), I4/I8, IA4/IA8/IA16; sizes 4×4 to
+256×32.
+
+**Filtering**: the RDP's bilinear filter has texel centres at integer texel coordinates. Sampling with the GL convention
+(centres at +0.5) shifts every texture by half a texel; at clamped edges and skybox seams this pulls in padding texels.
+**Verified**: the offline renderer showed a dark seam between skybox faces and blurred decal edges; removing the offset
+removed the seam and lowered the error on every capture (MAE KF 11.5 → 8.9, HF US 17.7 → 14.8, HF MQ 20.1 → 17.1, Deku
+Tree 12.2 → 10.6). Viewer: add 0.5/size to u and v (or sample with a half-texel shift) for Zelda batches.
+
+##### Lighting
+
+Rooms are lit by the RSP: vertex colour bytes are a normal when G_LIGHTING is set; colour = ambient + Σ light colour ·
+max(0, N·L) (clamped), alpha from the vertex. The bound lights are the scene's two directional lights (*Lights used for rooms*) in world
+space (identity modelview; the look-at is in the projection matrix, so light directions need no transform). **Verified**:
+renders use `runDisplayList`'s existing `lighting` option with these two lights and match the screenshots (*Scenes, display lists, environment*).
+Point lights (room command 0x0C, actor glows) are not bound for rooms in OoT (`Lights_BindAll(…, vec = NULL)` skips
+point lights, **doc**); MM rooms bind them when ROOM_BEHAVIOR bit 11 is set (**doc**, not rendered).
+
+##### Changes `displaylist.ts` needs
+
+Implemented and exercised in the research copy `scenes/dl/displaylist.ts` (diff against `scenes/dl/displaylist.orig.ts`,
+the HEAD copy; every change marked `ZELDA:`; 322 changed lines):
+
+| # | change | needed for | evidence |
+|---|---|---|---|
+| 1 | `directImages` option: *Textures and palettes* model, UVs normalised by the image size (not the tile window), texture key by image/format/size/TLUT | any correct texture | renders |
+| 2 | TLUT memory for `directImages` (256 entries, index = tmem field − 0x100) | CI textures | renders |
+| 3 | F3DEX2 `0xE1` RDPHALF_1 and `0x04` BRANCH_Z (take the branch: option `branchZ: 'near'`); `0x03` CULLDL no-op | 38 OoT / 801 MM detail lists | `branchz.ts` |
+| 4 | caller-supplied initial `combineMode`, `otherModeH`, `primColor`, `envColor` (today the combiner is hard-coded and prim/env are white) | SETUPDL_25 + draw config | renders |
+| 5 | keep all of othermode H (texture filter point/bilinear, TLUT type from the initial state) | filter flag | — |
+| 6 | PRIM_LOD_FRAC from `G_SETPRIMCOLOR` w0 low byte | alpha `TEXEL1·PRIM_LOD_FRAC` | renders |
+| 7 | `extended` output `Batch.ext`: render tile 1 texture + `uvs1`, the 16 combiner inputs, prim, env, primLod, render mode, geometry mode | two-texture materials | viewer-model renders (*Scenes, display lists, environment*) |
+| 8 | treat TEXEL0 in alpha inputs as texture use (alpha-only decals) | shadows/decals | — |
+
+Options a Zelda loader passes: `ucode 'f3dex2'`, `vertexScale 1`, `mirrorX false`, `geometryMode`/`renderMode`/
+`alphaCompare` from SETUPDL_25, `lighting` from *Lights used for rooms*, `decals true`, `textureGen true`, `combiner true` (fold prim/env/shade
+into vertex colours for single-texture materials).
+
+### 3.5 Textures and materials
+
+#### Scene and room format: Draw configs and animated materials
+
+##### OoT: per-scene draw config functions
+
+`sSceneDrawConfigs[53]` in code, indexed by the scene table's drawConfig byte, run every frame before the rooms
+(**doc** `oot-decomp/src/code/z_scene_table.c`). They set segments 8-0xD separately in the OPA and XLU display
+buffers (a room's OPA lists and XLU lists can see different segment contents), and usually `gDPSetEnvColor(128,128,
+128,128)` on both. SDC_DEFAULT (0) calls `sDefaultDisplayList`: segments 8-0xD = empty list, prim = env =
+(128,128,128,128). Other configs do not set unused segments or prim.
+
+Building blocks (frame f = gameplayFrames; x/y in 1/4 texel, `%= 2048`):
+- `TexScroll(x, y, w, h)` = `TILESYNC; SETTILESIZE(tile 0, x, y, x+(w−1)·4, y+(h−1)·4); ENDDL`.
+- `TwoTexScroll(0, x1, y1, w1, h1, 1, x2, y2, w2, h2)` = same for tiles 0 and 1 (`…EnvColor`/`…PrimColor` variants append
+  `SETENVCOLOR`/`SETPRIMCOLOR`).
+- `W(a)` below = `TwoTexScroll(0, 127−f%128, a·f%128, 32, 32, 1, f%128, a·f%128, 32, 32)` (the common water scroll).
+- `tex[i]` = the day/night texture pointer i+nightFlag from the table below.
+
+Static frame f = 0, day (nightFlag 0, dayTime 0x8000), child, drawParams 0 (the recommended viewer default). "e128" = env
+(128,128,128,128) on both buffers.
+
+| SDC | scene(s) | OPA segments | XLU segments | colours |
+|---|---|---|---|---|
+| 0 default | many | 8-D empty | 8-D empty | prim, env 128 |
+| 1 Hyrule Field | spot00 | — | 8 W(3), 9 W(10), A: day (07:00 < t ≤ 18:30) empty, night prim (255,255,255,dp0) + room DL 0x03012B20 | e128 |
+| 2 Kakariko | spot01 | 8 tex[30] window | — | e128 |
+| 3 Zora's River | spot03 | — | 8 W(6), 9 W(3), A W(1) | e128 |
+| 4 Kokiri Forest | spot04 | A env(128,128,128, 128); B env(…, 50); C TwoTexScroll(0,0,−dp0·0.02,32,16,…) | 9 W(1), 8 W(10), B env(…, 50) | e128; env alpha B = 215 after EVENTCHKINF_07, layer 4/6 use dp0 |
+| 5 Lake Hylia | spot06 | 8 TwoTexScrollEnv(f,f,32,32 / 0,0,32,32, env a 168+dp0), 9 (−f,−f / 0,0,16,64, same) | — | OPA env (255,255,255,128); adult unrestored/cutscene layers: dp0 = 87 |
+| 6 Zora's Domain | spot07 | C TwoTexScroll(0,0,64,32 / 0,127−f%128 (adult 0),64,32) | 8 tex[32] | OPA e128 |
+| 7 Zora's Fountain | spot08 | 8 TwoTex(f%128,0 / 0,0) | 9 (0,255−2f %256, 64×64 both), A (0,f%128 both) | e128 |
+| 8 Gerudo Valley | spot09 | B (0,0 / 0,127−3f%128) | 8 (0,3f%1024, 32×256 both), 9 (0,f%256, 64×64), A (0,2f%128), C (0,f%128), D (0,f%64, 16×16) | e128 |
+| 9 Lost Woods | spot10 | — | 8 TwoTex(f%128,0,32,16 both), 9 (127−f%128,f%128 / f%128,f%128) | e128 |
+| 10 Desert Colossus | spot11 | 8 (0,0 / 0,127−f%128) | — | e128 |
+| 11 Gerudo's Fortress | spot12 | 8 tex[34] wall | — | none |
+| 12 Haunted Wasteland | spot13 | 8 (0,f%128 both) | 9 same | e128 |
+| 13 Hyrule Castle | spot15 | — | 8 W(10), 9 W(3) | e128 |
+| 14 Death Mountain Trail | spot16 | — | 8: day (07:00 < t ≤ 18:00) empty, night prim + room DL | e128 |
+| 15 Death Mountain Crater | spot17 | 8 (0,f%128 both) | — | OPA env (c,c,255,128), c = (coss(f·1500)>>8>>1)+192 → 255 at f 0; XLU e128 |
+| 16 Goron City | spot18 | 8 (0,127−f%128 / f%128,0) | 8 tex[36] | e128 |
+| 17 Lon Lon Ranch | spot20 | 8 tex[38] window | — | e128 |
+| 18 Fire Temple | HIDAN | 8 (0,127−f%128 / 127−f%128,0), 9 (3f%128,127−6f%128 / 6f%128,127−3f%128) | — | env (128,128,128,64) both |
+| 19 Deku Tree | ydan | 8 tex[0] entrance | 9 W(1) | XLU e128 |
+| 20 Dodongo's Cavern | ddan | 8 tex[2], 9 lava tex[4 + (f&14)/2], A (0,f%128 / 0,2f%128), B/C env (255,255,255, eye alpha 0) | 9 (f%256,0,64,32 / 0,f%128,64,32) | e128 |
+| 21 Jabu-Jabu | bdan (+boss) | 8 (f%128,2f%128 / 127−f%128,2f%128), B (0,255−4f%256,32,64 both); boss: 8 TexScroll; D = Mtx Scale(1.005, sin(t)·0.8, 1.005) | — | e128 |
+| 22 Forest Temple | Bmori1 | A W(1) | 8 tex[26], 9 W(1) | e128 |
+| 23 Water Temple | MIZUsin | 8, 9 TwoTexScrollEnv(f,0 / 0,0, env a 255), A (…, a 160), B (3f, a 185) | US: 6 tex[14]; MQ: 8 tex[14]; C (f,f / 0,127−f, a 128), D (4f,0 / 4f,0, a 128) | env alphas depend on drawParams[1] (water level) |
+| 24 Shadow Temple, Well | HAKAdan, HAKAdanCH | boss scene: 8 (2f%128,0 both) | others: 8 same | e128 |
+| 25 Spirit Temple | jyasinzou | — | 8 tex[28] | none |
+| 26 Inside Ganon's Castle | ganontika | A W(1) | 8 (127−f%128,f%512,32,128 / f%128,f%512), 9 W(1) | e128 |
+| 27 Gerudo Training Ground | men | 9 W(1) | 8 tex[18], A W(1) | e128 |
+| 28 Deku Tree boss | ydan_boss | — | 8 (2f%256,0,64,32 / 0,2f%128,64,32) | XLU e128 |
+| 29 Water Temple boss | MIZUsin_bs | 8 TwoTex(f,0 / 0,0) | — | OPA env (128,128,128,dp0), XLU (…,145) |
+| 30 Temple of Time | tokinoma | 8 prim(255,255,255), 9 prim(76,76,76), A env(0,0,0,dp0), B prim(89,89,89)+env(0,0,0,dp0), C prim(255,…)+env, D env(0,0,0,dp1) | same | set only through segments |
+| 31 Grottos | kakusiana | A (0,0 / 0,127−f%128), B TexScroll(0,f%128,32,32), D (0,0,32,64 / 0,f%128) | 8 TexScroll(0,f%64,256,16), 9 W(1), C (0,50f%2048,8,512 / 0,60f%2048,8,512) | e128 |
+| 32 Chamber of the Sages | kenjyanoma | A W(1) | 8 TexScroll(0,2f%256,64,64), 9 (127−f%128,f%256,32,64 / 0,0,32,128) | e128 |
+| 33 Great Fairy's Fountain | daiyousei_izumi | — | 8 (127−f%128,3f%256,32,64 / f%128,3f%256), 9 W(3) | e128 |
+| 34 Shooting Gallery | syatekijyou | 8 TexScroll(0,f%64,4,16) | — | OPA e128 |
+| 35 Castle courtyard guards | hairal_niwa(_n) | — | 8 W(3); day scene: 9 TexScroll(0,10f%256,32,64) | e128 |
+| 36 Outside Ganon's Castle | ganon_tou, others | B (255−f%128,f%128 / f%128,f%128) | scene 0x64: 9 TexScroll(0,f%256,64,64), 8 (0,255−f%256 / 0,f%256, 64×64) | OPA env (255,255,255,128) at f 0; XLU e128 |
+| 37 Ice Cavern | ice_doukutu | 9 W(1) | 8 tex[16], A W(1) | e128 |
+| 38 Ganon's Tower collapse exterior | ganon_final etc. | 8 (0,f%512,64,128 / 0,511−f%512), 9 (0,f%256,32,64 / 0,255−f%256) | A (0,20f%2048,16,512 / 0,30f%2048) | OPA env (255,255,255,128), XLU e128 |
+| 39 Fairy's Fountain | yousei_izumi_tate | — | 8 W(3), 9 TexScroll(0,f%64,256,16) | e128 |
+| 40 Thieves' Hideout | gerudoway | 9 TexScroll(0,3f%128,32,32) | 8 tex[12] | none |
+| 41 Bombchu Bowling | bowling | 9 TexScroll(0,5f%64,16,16), A TexScroll(0,63−2f%64,16,16) | 8 TexScroll(127−4f%128,0,32,32), B (0,127−3f%128 / 0,0) | e128 |
+| 42 Royal Family's Tomb | hakaana_ouke | A (127−f%128,0 / f%128,0) | 8 TexScroll(0,f%64,256,16), 9 (0,60f%2048,8,512 / 0,50f%2048), B (0,1023−6f%1024,16,256 / 0,1023−3f%1024) | e128 |
+| 43 Lakeside Laboratory | hylia_labo | 8 (0,0 / 0,f%128) | A W(1), 9 TexScroll(0,255−10f%256,32,64) | e128 |
+| 44 Lon Lon buildings | souko, … | — | 8 tex[20] | e128 |
+| 45 Market guard house | miharigoya | 8 tex[24] view 2, 9 tex[22] view 1 (index adult ? 1 : nightFlag) | — | e128 |
+| 46 Potion shop (granny) | mahouya | 8 TexScroll(0,3f%128,32,32) | 9 (0,1023−3f%1024,16,256 / 0,1023−6f%1024) | e128 |
+| 47 Calm water | several | — | 8 W(1) | e128 |
+| 48 Grave exit light | hakasitarelay etc. | — | 8 TexScroll(0,f%64,256,16) | e128 |
+| 49 Besitu | debug scene | 8 TexScroll(127−2f%128,0,32,64), 9 TexScroll(0,2f%512,128,128) | — | e128 |
+| 50 Fishing pond | turibori | — | 8 TwoTexScrollPrim(W(1), prim (255,255,255, dp0+127)) | e128 |
+| 51, 52 | collapse interiors | screen shake only | | none |
+
+The full executable version (all 53, any frame/time) is `scenes/drawcfg.ts ootDrawConfig`; the scene-name column is
+from `oot-decomp/include/tables/scene_table.h` (**doc**). **Verified** in renders: SDC 1 (Hyrule Field, both versions),
+2 (Kakariko Village; the window texture is not in that view), 4 (Kokiri Forest), 19 (Deku Tree, US and MQ).
+
+**Day/night texture pointers** (tex[i]): 40 segment-2 pointers in 17 arrays in source order (Deku Tree entrance 0-1,
+Dodongo's Cavern entrance 2-3, DC lava floor 4-11, Thieves' Hideout 12-13, Water Temple 14-15, Ice Cavern 16-17, GTG
+18-19, Lon Lon house 20-21, guard house view 1 22-23, view 2 24-25, Forest Temple 26-27, Spirit Temple 28-29, Kakariko
+windows 30-31, Zora's Domain 32-33, Gerudo Fortress walls 34-35, Goron City 36-37, Lon Lon Ranch windows 38-39); element
+0 of each pair is used when nightFlag = 0. Loader (**verified**, `scenes/findsdc.py`, `drawcfg.ts findDayNightTextures`):
+find `sDefaultDisplayList` in code by its signature `DB060020 … DB060034` (6 × gsSPSegment 8-0xD) + PipeSync + prim +
+env + ENDDL, skip following 0x80xxxxxx words (N64 builds place the 53-entry function table there: OoT US), take the next
+40 words (all 0x02xxxxxx). US code +0xEAC28 (pointers +0xEAD4C, first `0200BA08 0200CA08`), MQ code +0x10D448 (pointers
++0x10D498, `0200BA18 0200CA18`). The two night display lists of SDC 1/14 are room-list addresses inside code
+instructions (not in data): **hypothesis** 0x03012B20 (spot00 room 0) and 0x0300A9C8 / 0x0300AA48 (spot16) per the decomp
+XMLs; only needed for night views.
+
+### 3.6 Collision
+
+#### Scene and room format: Collision and waterboxes
+
+Same layout in both games (**doc** `bgcheck.h`, MM `z64bgcheck.h`; **verified** parser `scenes/zscene.ts parseCollision`,
+`scenes/camcheck.ts`; overlay render below):
+
+```
+CollisionHeader (0x2C): Vec3s min, max; u16 numVertices @0x0C; Vec3s* vertices @0x10; u16 numPolys @0x14;
+  CollisionPoly* polys @0x18; SurfaceType* surfaceTypes @0x1C; BgCamInfo* bgCams @0x20; u16 numWaterBoxes @0x24;
+  WaterBox* waterBoxes @0x28
+CollisionPoly (0x10): u16 type (surface type index); u16 vIA (bits 13-15 ignore flags camera/entity/projectile);
+  u16 vIB (bit 13 conveyor flag); u16 vIC; Vec3s normal (/0x7FFF); s16 dist
+SurfaceType (8): u32 w0: bgCamIndex 0-7, exit 8-12, floorType 13-17, wallType 21-25, floorProperty 26-29, soft 30,
+  horse block 31; u32 w1: material 0-3, floorEffect 4-5, lightSetting 6-10, echo 11-16, hookshot 17, conveyor speed
+  18-20 / direction 21-26, wall damage 27
+BgCamInfo (8): u16 setting; s16 count; ptr data (0 = no data). No count: size = highest bgCamIndex used by surface
+  types or waterboxes + 1
+BgCamFuncData (0x12): Vec3s pos; Vec3s rot; s16 fov; s16 flags/roomImageOverrideBgCamIndex; s16 unused
+  (crawlspace settings point at `count` Vec3s points instead)
+WaterBox (0x10): s16 xMin, ySurface, zMin, xLength, zLength; u32 properties: bgCam 0-7, light setting 8-12
+  (0x1F none), room 13-18 (0x3F all rooms), bit 19 disabled
+```
+
+Examples (**verified**, `camcheck.ts`): Hyrule Field 1 162 vertices, 1 579 polys, 61 surface types, 4 bg cams, 6
+waterboxes (ySurface −60 / −315); Kokiri Forest 1 081 / 1 692 / 46 / 15 bg cams / 1 waterbox; Deku Tree 1 399 / 2 321 /
+30 (US) or 31 (MQ) / 11 / 3 (per-room waterboxes rooms 3, 5, 9).
+
+Overlay drawing (**verified**, `render.ts --collision`: `scenes/renders/sbs-oot-us10-kokiri-forest-1-collision.png`,
+`oot-us10-hyrule-field-1-collision.png`): one mesh of world-space triangles (no transform), flat-coloured by surface type
+(or by floor/wall/ceiling from the normal's y), translucent, depth-tested without depth write; waterboxes as translucent
+quads from (xMin, zMin) to (xMin + xLength, zMin + zLength) at y = ySurface (optionally extruded downward). Both line up
+exactly with the room geometry. Dynamic collision (actors) is not in the scene file.
+
+### 3.7 Environment, sky, fog, and lighting
+
+#### Environment: Skyboxes: OoT
+
+`skyboxId` from command 0x11 (**doc** `include/skybox.h`, `z_vr_box.c`, `z_vr_box_draw.c`, `Play_Draw`):
+- 0 none; 29 (0x1D, SKYBOX_UNSET) none (most dungeons and Kokiri Forest); 1 normal sky; 5 cutscene map (6 faces);
+  the other ids are "256" skyboxes: the pictures of shops, houses and the market (see "256 skyboxes" below).
+- Drawn first, only if `skyboxId ∉ {0, 29}` and the room's SKYBOX_DISABLES byte is 0; no depth, no fog, cube around the
+  eye (`Matrix_Translate(eye)`), `SETUPDL_40` combiner `lerp(TEXEL0, TEXEL1, PRIM_ALPHA)` with prim alpha = skyboxBlend.
+- Normal sky files: `gNormalSkyFiles[9] = {RomFile texture, RomFile palette}` = vr_fine0-3, vr_cloud0-3, vr_holy0,
+  filesystem files 941-958 in both OoT ROMs; the table is found (**verified**, `env.ts findSkyFiles`) as 9 consecutive
+  16-byte pairs of files with 0x100-byte palettes (US code +0xE07AC, MQ code +0x102EDC). Texture file 0xC000 bytes:
+  four 128×64 CI8 side faces at 128·64·k, then the 128×128 top face; palette file 128 RGBA16 colours. The two palettes of
+  the blended pair are concatenated into one 256-entry TLUT (order: sky 1 first if `(i1 & 1) ^ ((i1 & 4) >> 2)`, else
+  sky 2 first).
+- Which textures: `gTimeBasedSkyboxConfigs[skyboxConfig][9]` = {start, end, changeSkybox, index1, index2}; config 0 clear
+  (fine0 dawn 5:00-6:00, fine1 day 8:00-16:00, fine2 dusk 17:00-18:00, fine3 night, with blends between); config 1
+  cloudy/rain (cloud0-3). Blend = LerpWeight(end, start, time)·255 in changing entries; non-changing entries use 255 or 0
+  (both textures equal). **Verified**: Hyrule Field noon → fine1/fine1 = RAM skybox1Index/skybox2Index 1/1, blend 0;
+  Hyrule Field dusk 0xB3CA → fine1/fine2 blend 218 (changing entry 16:00-17:00) = RAM, render matches the screenshot's
+  orange sky; Kakariko midnight → fine3/fine3 blend 255 = RAM.
+- Geometry (`Skybox_CalculateFace128`, note the swapped inner/outer arguments): face params {xStart, yStart, zStart,
+  outer, inner} = {−64,64,−64,32,−32}, {64,64,64,−32,−32}, {−64,64,64,−32,−32}, {64,64,−64,32,−32}, {−64,64,64,32,−32}
+  (+ {−64,−64,−64,32,32} bottom for the cutscene map); 5×5 grid per face; s = 0..124 texels, side-face t = 0, 31, 62,
+  31, 0 (the lower half mirrors the upper), top face t = 0..124. **Verified**: `render.ts` builds exactly this and the
+  Hyrule Field sky matches the screenshot.
+- Viewer mapping: a `Sky` mesh (existing type: drawn around the camera, no depth/fog) with the day texture; bake the two
+  textures' blend for other times.
+
+**256 skyboxes** (OoT houses, shops, market; **doc** `z_vr_box.c Skybox_Setup/Skybox_Calculate256`, `Play_Draw`):
+- Files: one texture file with 256×256 CI8 faces at face·0x10000 and one palette file with a 256-colour RGBA16 palette per
+  face at face·0x200. They follow the normal-sky files in filesystem order (spec order), identical indices in both OoT
+  ROMs (**verified** by file sizes, `extracted/*/table.tsv`): 961/962 vr_MDVR (market child day, id 9), 963 MNVR (market
+  child night, 10), 965 RUVR (market adult, 4), 967 LHVR (Link's house, 7), 969 KHVR (Know-It-All brothers, 12), 971 K3VR
+  (house of twins, 14, 3 faces), 973 K4VR (Mido, 32, 3), 975 K5VR (Saria, 33, 3), 977 SP1a (bazaar, 2, 2 faces), 979 MLVR
+  (stables, 15), 981 KKRVR (Kakariko house, 16), 983 KR3VR (alley house, 34, 3), 985 IPVR (Richard's house, 26), 987 KSVR
+  (Kokiri shop, 17, 2), 989 GLVR (Goron shop, 19, 2), 991 ZRVR (Zora shop, 20, 2), 993 DGVR (Kakariko potion shop, 22, 2),
+  995 ALVR (market potion shop, 23, 2), 997 NSVR (bombchu shop, 24, 2), 999 LBVR (Impa's house, 27); TTVR (tent, 28) and
+  FCVR (Happy Mask shop, 11) follow. Texture file sizes 0x40000 / 0x30000 / 0x20000 = 4 / 3 / 2 faces. The file ↔ id
+  mapping is code (`Skybox_Setup` switch), so a loader needs a table per id (or the size rule plus spec order).
+- Geometry: face params {xStart, yStart, zStart, outer, inner} = {−126,124,−126,63,−31}, {126,124,−126,63,−31},
+  {126,124,126,−63,−31}, {−126,124,126,−63,−31} (inner/outer swapped at the call as for 128 skies); faces 0/2 lie in
+  z = zStart with x stepping, faces 1/3 in x = xStart with z stepping; 9 rows × 5 columns; s = 63·j texels, t = 31·i texels
+  (whole 256×256 texture). Camera-centred, no depth, no fog, TEXEL0 only (blend 0).
+- Draw order: after all room lists (unless the camera setting is PREREND_FIXED), so it covers the room's opaque lists
+  (they only leave depth for actors); XLU lists and actors come after it.
+- **Verified**: `ref/oot-us10/links-house-1` (scene 0x34, skybox 7, pivot camera at (0,34,0)) rendered from files 967/968
+  alone: best-75% error 0.4, overall 4.6 (only Link and the HUD differ): `scenes/renders/sbs-oot-us10-links-house-1.png`.
+  Viewer: the same `Sky` mesh type, with a camera fixed at the room's bg camera position (the look only works from there).
+
+#### Environment: Light settings (command 0x0F)
+
+`EnvLightSettings` (0x16 bytes, same in both games): `u8 ambient[3]; s8 light1Dir[3]; u8 light1Color[3]; s8 light2Dir[3];
+u8 light2Color[3]; u8 fogColor[3]; s16 blendRate<<10 | fogNear (10 bits); s16 zFar`. **Verified**: `env/zenv.py`'s layout
+reproduces RAM `envCtx.lightSettings` exactly for every capture (via `scenes/env.ts`, *Lights used for rooms*); blend rate = bits 10-15 × 4.
+
+Which entry (**doc** `z_kankyo.c Environment_Update`; MM `Environment_UpdateLights`):
+- `lightMode` (command 0x11 byte 6) **1 (settings)**: entry `lightSetting`, 0 at scene start; changed at run time by floor
+  polygons (SurfaceType w1 bits 6-10), waterboxes and actors, with blends. Viewer: entry 0. Directions are the stored
+  s8 vectors.
+- **0 (time)**: `sTimeBasedLightConfigs[lightConfig = 0][7]` picks entries by time and lerps them:
+  OoT {0:00-4:00 → 3,3; 4:00-6:00 → 3→0; 6:00-8:00 → 0→1; 8:00-16:00 → 1; 16:00-17:00 → 1→2; 17:00-19:00 → 2→3;
+  19:00-24:00 → 3} (end times +1); MM identical except 4:00-6:00 → 3→12 in config 0 (and night→dawn next settings 8,
+  8, 16, 16, 20, 24 in configs 1-6). Configs 1-4 (OoT, weather) use entries 4-7, 8-11, 12-15, 20-23. Colours and fogNear/
+  zFar are lerped (`LERP` truncating); light directions are not stored values but the sun: `l1 = (−sin(t − 12:00)·120,
+  cos(t − 12:00)·120, cos(t − 12:00)·20)`, `l2 = −l1` (moon). The stored directions of entries 0-3 are unused.
+- MM day ≥ 2 adds offsets to entries 4-7 from entries (day + 1)·4 + n (`func_800F6CEC`) and rain darkens them.
+- Clamps: fogNear ≤ 996, zFar ≤ 12800 (OoT) / 15000 (MM).
+- **Verified** (computed from ROM data by `scenes/env.ts currentLights` = RAM `lightCtx`/`envCtx.lightSettings`):
+  Kokiri Forest noon (80,80,80 / dir (0,120,20) / (255,255,255) / (70,70,90) / fog (200,200,150) 994 / 5800),
+  Hyrule Field dusk 0xB3CA (entries 1 → 2 at t 0.855: ambient (114,88,11), l1 (250,152,79) dir (−114,35,5), fog
+  (117,74,60), all = RAM),
+  Kakariko Village midnight (layer 1: entry 3, sun direction (0,−120,−20), ambient (40,70,100), fog (0,0,30) 992; sky
+  fine3/fine3 with blend 255 from the non-changing entry, all = RAM), Lake Hylia 0x838E, Market Entrance and Link's House
+  (lightMode 1 entry 0),
+  Hyrule Field 0x8A8C US and 0x871C MQ (dir (−30,116,19) and (−20,118,19)), Deku Tree MQ lightMode 1 entry 0, SCT day
+  and night, Termina Field (fog (70,80,70), zFar 12850).
+
+The viewer's **View → Lighting** radio buttons switch the baked RSP vertex lighting between the canonical Dawn, Noon,
+Dusk and Night settings for `lightMode` 0 scenes, or the stored Setting 1…N records for `lightMode` 1 scenes. **Off**
+uses full-bright shade colour. This control changes lighting only; fog, sky and other time-dependent scene state remain
+those of the loaded level variant.
+
+#### Environment: Lights used for rooms
+
+`dirLight1` = light 1 (sun) direction/colour, `dirLight2` = light 2 (moon), ambient = settings ambient (+ adjustments,
+0 by default). Both are bound as directional lights for room drawing (*Lighting*). Viewer: `DlLighting {ambient, lights: [{color:
+l1Color, dir: normalize(l1Dir)}, {color: l2Color, dir: normalize(l2Dir)}]}`; the direction points toward the light (a
+floor facing up is lit by the noon sun (0,120,20)) (**verified** by render).
+
+#### Environment: Fog, clear colour, draw distance
+
+- OoT `Play_SetFog` = `Gfx_SetFog(fogColor, near = fogNear, far = 1000)`; MM far = max(1000, trunc(zFar·5/64)) with
+  `Gfx_SetFogWithSync`. `near ≥ 1000`: no fog; `near > 996`: factors (0x7FFF, −0x7F00); else gSPFogPosition(near, far):
+  mul = trunc(128000/(far − near)), offset = trunc((500 − near)·256/(far − near)) (**doc** `z_rcp.c`).
+- The fog is evaluated with the game projection: zNear 10 (from the View), far = lightCtx.zFar (OoT; MM min(zFar,
+  12800)). This is exactly the viewer's `Fog {color, multiplier, offset, near: 10, far: zFar}` formula (`renderer.ts`).
+  **Verified** by render (fog colour in the distance of Hyrule Field/Termina Field matches) and RAM projection matrices
+  (e.g. zFar 5800 → [2][2] −1.0034, [3][2] −20.0345).
+- Blend: render modes with cycle 1 `(FOG, SHADE_A, IN, 1MA)` get fog; `0x0C18…` modes are unfogged.
+- Clear colour: black (`Gfx_SetupFrame(0,0,0)`); scenes without a sky show black beyond zFar (**doc**).
+- Draw distance: zFar per light setting (4000 Deku Tree, 5800 Kokiri Forest, 12800 fields); room type 2 entries beyond
+  zFar are culled by the game. Viewer: use zFar as the far plane default or ignore.
+
+#### Environment: Time of day, sun, default view
+
+- Default time: noon (0x8000) for lightMode 0 (outdoor) scenes: nightFlag 0 (day textures and draw-config day lists),
+  light entry 1, sky fine1 (OoT) / MM config colours. lightMode 1 scenes ignore time. Fixed-time rooms (command 0x10 hour
+  ≠ 0xFF) set their own time. Offer dawn/dusk/night variants (dusk and midnight blends verified, *Skyboxes: OoT*, *Light settings (command 0x0F)*; dawn not captured).
+- Sun/moon billboards and lens flare (`Environment_DrawSunAndMoon`, gameplay_keep textures, position eye + sunPos with
+  sunPos = (−sin·3000, cos·3000, cos·500)) are not in scene data; overhead at noon; skip.
+- Start position: spawn 0 → `playerEntries[spawns[0].playerEntryIndex]` pos/rot (rot.y s16 binary angle), room =
+  `spawns[0].room` (**verified**: Hyrule Field player home pos (160,0,1415) rot −3641 = entry 0; Kokiri Forest entrance
+  0xEE uses spawn 3 → (−31,100,1073)… RAM home (−30,100,1025) differs by the entrance's cutscene walk (**hypothesis**)).
+- Start camera: the bg camera of the floor under the player. **Verified**: Kokiri Forest balcony camera = bg cam 4
+  (setting 24 PIVOT_IN_FRONT) pos (−97,170,906) = RAM eye exactly, looking at the player. Hyrule Field uses bg cam 0
+  setting 2 (normal) without data: RAM at = player + (0,44,0), eye = at − 176·(sin yaw, 0, cos yaw) + (0,31,0).
+  Recommended `CameraView`: spawn 0 position; if its floor bg cam has data, eye = data pos, target = player + (0,40,0),
+  fov 60; otherwise the normal-camera offset above (MM: same rule is a **hypothesis**).
+
+#### Mapping onto the viewer: Scenes, rooms, display lists and environment
+
+| item | proposal | difficulty |
+|---|---|---|
+| `src/rom/zelda/scenetable.ts` | *Scene table (how the loader finds scenes)* finder, drawConfig byte, per-game stride | low |
+| `scene.ts` | header commands, alternate headers (*Alternate headers (layers)*), spawns, light settings, skybox settings, collision pointer | low |
+| `room.ts` | mesh types 0/1/2, per room one `Mesh` with OPA batches then XLU batches (or two meshes) | low |
+| `displaylist.ts` | *Changes `displaylist.ts` needs* changes 1-8 | medium |
+| `drawconfig.ts` | OoT 53-config table at frame 0 (*OoT: per-scene draw config functions*, port of `scenes/drawcfg.ts`) + pointer table finder; MM animated materials | medium |
+| `env.ts` | time → light entry blend, sun direction, fog factors, zFar (*Light settings (command 0x0F)*-7.5) | low |
+| `skybox.ts` | OoT normal sky and MM d2 sky as a `Sky` mesh; baked blend/tint per time; shop 256-skies later | medium |
+| `collision.ts` | collision + waterbox overlay meshes (*Collision and waterboxes*), bg camera list | low |
+| `prerender.ts` | JPEG backdrop + bg camera variant (*Prerendered backgrounds (type 1, OoT only in practice)*); needs a JPEG decoder in the worker | medium-high |
+| renderer | second texture + lerp mode, half-texel offset, point filter flag | medium |
+
+`types.ts` extensions (all optional):
+1. `Batch.texture1?: number; uvs1?: Float32Array; texMix?: {mode: 'lerp'; factor: number}` (factor = env alpha or prim
+   LOD frac, constant per batch) — or the full `combine?: number[16]` with prim/env for a generated shader.
+2. `Batch.pointFilter?: boolean` (G_TF_POINT; rare in rooms).
+3. Layers: one `LevelLayer` per room (`kind 'main'`, name "room N"), plus `'collision'` (collision mesh) and a waterbox
+   layer, both `visibleByDefault: false`; translucent room lists stay in the same instance (blend batches draw last).
+4. Variants: alternate headers and time of day as sub-levels (`LevelInfo` entries per variant) or a `Level.variants?:
+   {name, index}[]` selector: "child day (default) / child night / adult day / adult night / cutscene n" (OoT), "setup n"
+   (MM), and "noon (default) / dawn / dusk / night" for lightMode 0 scenes.
+5. `Level.fog` (existing), `clearColor` (0,0,0), `skies` (existing `Sky`), `camera` (existing `CameraView`, *Time of day, sun, default view*),
+   `backdrop` (existing, prerendered rooms).
+6. Lights: baked through `runDisplayList`'s `lighting` (rooms are static and in world space, so baking is exact).
+
+#### Verification evidence: Scenes, display lists, environment
+
+##### Offline renders compared with screenshots
+
+Research renderer (`scenes/render.ts`): ROM data → scene table, headers, rooms (`zscene.ts`), draw config
+(`drawcfg.ts`), lights/fog/sky (`env.ts`), display lists through the patched `scenes/dl/displaylist.ts` with SETUPDL_25
+state, software rasteriser `scenes/raster.ts` (perspective-correct textures, screen-linear shade and RSP per-vertex fog,
+full two-cycle combiner per pixel, TEX_EDGE coverage threshold, XLU blending, decal depth, near/far clipping, 2×2
+supersampling) → PNG (`png.ts`). Camera, time, room and layer come from the capture sidecar. `--mode viewer` renders what
+the viewer model gives (texture 0 × folded vertex colour). `scenes/runrefs.sh` renders all OoT captures;
+`scenes/sbs.py` builds side-by-sides and error numbers. The player, HUD, sun and particles are not rendered; static actors are drawn only in the *Verification by render* renders.
+
+| capture | render (full) | MAE all / best 75% / bias RGB | viewer model best 75% |
+|---|---|---|---|
+| OoT US Kokiri Forest (balcony, fixed cam) | `scenes/renders/sbs-oot-us10-kokiri-forest-1.png` | 8.9 / 3.2 / −3 −3 −2 | 3.5 |
+| OoT US Hyrule Field noon | `scenes/renders/sbs-oot-us10-hyrule-field-1.png` | 14.8 / 4.7 / +4 +4 +2 | 9.8 (blurry ground) |
+| OoT MQ Hyrule Field | `scenes/renders/sbs-oot-mqdbg-hyrule-field-1.png` | 17.1 / 4.7 / +4 +5 +2 | 10.1 |
+| OoT MQ Deku Tree entrance | `scenes/renders/sbs-oot-mqdbg-deku-tree-mq-1.png` | 10.6 / 2.7 / −2 −2 −1 | 2.7 (no TEXEL1 there) |
+| OoT US Deku Tree entrance | `scenes/renders/sbs-oot-us10-deku-tree-1.png` | 7.2 / 1.9 / −1 −1 0 | 1.9 |
+| OoT US Kakariko Village gate, noon | `scenes/renders/sbs-oot-us10-kakariko-village-1.png` | 11.1 / 3.1 / +3 +2 0 | 7.6 (blurry ground) |
+| MM US South Clock Town day | `scenes/renders/sbs-mm-us-south-clock-town-day-1.png` | 14.3 / 2.6 / +2 +2 0 | — |
+| MM US South Clock Town night | `scenes/renders/sbs-mm-us-south-clock-town-night-1.png` | 11.6 / 1.7 / +1 0 +1 | — |
+| MM US Termina Field (layer 5) | `scenes/renders/sbs-mm-us-termina-field-1.png` | 24.9 / 11.3 / +3 +5 +4 | — |
+| OoT US Lake Hylia (child, 12:20) | `scenes/renders/sbs-oot-us10-lake-hylia-1.png` | 10.7 / 3.0 / +2 +2 +1 | 9.0 (blurry ground) |
+| OoT US Market Entrance (prerendered JPEG) | `scenes/renders/sbs-oot-us10-market-entrance-1.png` | 5.8 / 3.3 / +3 +3 +3 | — |
+| OoT US Link's House (256 skybox) | `scenes/renders/sbs-oot-us10-links-house-1.png` | 4.6 / 0.4 / 0 0 0 | — |
+| MM dbg PAL South Clock Town day | `scenes/renders/sbs-mm-dbgpal-south-clock-town-day-1.png` | 16.4 / 3.2 / +2 +3 0 (actors: 15.4 / 3.0) | — |
+| OoT US Hyrule Field dusk (16:50) | `scenes/renders/sbs-oot-us10-hyrule-field-dusk-1.png` | 11.8 / 4.3 / −2 +1 +5 | — |
+| OoT US Kakariko Village gate, midnight (layer 1) | `scenes/renders/sbs-oot-us10-kakariko-village-night-1.png` | 6.9 / 1.9 / +1 +2 0 | — |
+| MM dbg PAL Termina Field (layer 0) | `scenes/renders/sbs-mm-dbgpal-termina-field-1.png` | 14.5 / 3.4 / +3 +4 +1 | — |
+| prerendered: collision over JPEG | `scenes/renders/sbs-oot-us10-prerendered.png` | visual alignment | — |
+
+Fixes made along the way (each changed the match visibly):
+1. Texture size from G_SETTILESIZE (a first attempt derived height from the load count, which is in load-siz units): the
+   Kokiri wall drawing was stretched vertical bars → correct.
+2. No half-texel offset in bilinear sampling (*Textures and palettes*): removed a dark skybox seam, sharpened decals, error down 1.5-3.
+3. Crack-free rasterisation of shared edges (pixel-distance inside test).
+4. MM time from the SaveContext line (not the warp note) → sun direction equal to RAM.
+5. MM sky: per-day config remap and colour tables; sky rotation from RAM (the opposite sign gave a worse sky MAE,
+   19.7 vs 24.0).
+
+Remaining differences and why: actors/player/HUD/sun (largest errors); Termina Field spires and ground (two-layer I8
+scroll materials at animation phase 0 vs the game frame, MM fog far 1003; sky clouds still offset); Kokiri Forest slightly
+darker (−3) and Hyrule Field slightly brighter (+4): RDP dithering, 3-point filter, colour-combiner integer rounding and
+the emulator plugin's output (not investigated); anti-aliasing of edges.
+
+Viewer-model conclusion: the current texture 0 × vertex colour model is close for single-texture scenes (Deku Tree:
+identical) but loses the detail layer of two-texture materials (Hyrule Field best-75% error 9.8 vs 4.7; the ground is
+the blurry low-frequency layer). Supporting `lerp(TEXEL0, TEXEL1, k) × shade × prim` per batch covers the TEXEL1
+combiners in the census (~21 000 OoT US triangles and ~1 300 MM tile-1 uses).
+
+##### Evidence list
+
+| claim | method |
+|---|---|
+| Scene table layouts/locations, all 4 ROMs | structure finder `scenes/zscene.ts` used by renders of all ROMs; `scene-oot/zrom.py`, `scene-mm/mmscene.py` |
+| Header command usage counts (OoT) | `scene-oot/census.py` → `census-oot-*.txt` |
+| Mesh layouts and type counts | `zscene.ts parseMesh` in renders; `scene-oot/meshscan-*.txt`, `scene-mm/report-*.txt` |
+| JPEG backgrounds are baseline JFIF 320×240 | `scenes/bgimage.py` decode with Pillow, images inspected |
+| Prerendered bg camera formula | collision rendered over JPEG, `sbs-oot-us10-prerendered.png` (visual) |
+| DL opcode set, render state, combiner census | `scene-oot/census-*.txt`, `scene-mm/report-mm-us.txt` |
+| Texture load sequence, direct-image model, TLUT indexing | `scenes/dldump.py`; renders; `sizeMismatchCount` 0 |
+| 4 KB model inadequate | census capped loads (OoT 1 649), `scene-mm/texcensus.py` (MM 903 > 4 KB) |
+| Half-texel convention | render seam and error before/after (`scenes/renders/*-full.json` history in *Scenes, display lists, environment*) |
+| BRANCH_Z semantics | `scenes/branchz.ts` dumps |
+| Draw config table | decomp `z_scene_table.c`; renders SDC 1, 4, 19 |
+| Day/night pointer table location/values | `scenes/findsdc.py` ROM bytes (US, MQ) vs decomp XML offsets |
+| MM animated materials | decomp `z_scene_proc.c`; renders SCT, Termina Field |
+| MM area texture table location | ROM scan (both MM ROMs), filelist names (`mm-decomp/tools/filelists/n64-us/all.csv`) |
+| Light settings layout and selection, sun direction | RAM (`ref/*/…txt` lightCtx/envCtx) equals `env.ts` output for every capture |
+| MM skybox config remap and colours | RAM skyboxCtx prim/env/config/indices (`runs/lead-mmus-1/sctd1c.bin`, `sctn1.bin`, `tf1c.bin`) |
+| OoT sky files and geometry | `env.ts findSkyFiles` ROM scan; Hyrule Field sky render vs screenshot |
+| Fog factors and projection | decomp `z_rcp.c`, RAM projection matrices, renders |
+| Start camera from bg cam data | `scenes/camcheck.ts` bg cam 4 = RAM eye (Kokiri Forest) |
+| Spawn → player entry | `camcheck.ts` vs RAM player home pos (Hyrule Field) |
+| Units, no mirror, world-space rooms | 14 renders vs screenshots |
+| Prerendered bg camera formula and JPEG = frame | RAM camera of `ref/oot-us10/market-entrance-1`; JPEG vs screenshot (*Prerendered backgrounds (type 1, OoT only in practice)*) |
+| 256 skybox files, layout and draw order | Link's House render vs screenshot (best-75% error 0.4); file sizes in both OoT ROMs |
+| MM debug PAL sky/light computation | RAM of `ref/mm-dbgpal/*` vs `env.ts` output; renders |
+| Actor transform, MM rotation/half-day decoding, recipes | renders with actors vs screenshots (*Verification by render*) |
+| Dusk light and sky blends | RAM of `ref/oot-us10/hyrule-field-dusk-1` = `env.ts` output (sky fine1/fine2 blend 218); render |
+| Collision/waterbox layout | `camcheck.ts`, `render.ts --collision` overlays aligned with geometry |
+| OoT US vs MQ differences | `scenes/ootcmp.py`, `ootroomdiff.py`, `ootroomhdr.py` |
+| MM US vs debug PAL differences | `scene-mm/compare2.py`, `scenes/mmdiff.py`, pixel-identical SCT render |
+
+#### Open questions and hypotheses: Scenes and environment
+
+1. OoT room lists with `G_MTX` on segments 0 and 3 (101 each, US census): which scenes and what they load.
+2. Night-only display lists of SDC 1/14 (Hyrule Field, Death Mountain Trail): addresses are in code instructions; confirm
+   per version (a Hyrule Field night capture would show the night list; see item 8).
+3. Jabu-Jabu segment 0xD matrix: best static value (identity vs the game's first frame, y scale ≈ 0.12).
+4. MM positional room lights (ROOM_BEHAVIOR bit 11, command 0x0C): how much they change the look.
+5. MM environment tables in code (sky configs, sky colours, light configs): ROM offsets for a loader not located yet
+   (values verified via RAM).
+6. 256 skyboxes: only Link's House rendered; the file ↔ id list for the remaining ids comes from the spec order and sizes
+   (TTVR/FCVR indices after 1000 not checked); which scenes use which id is in the scene headers (*Scene tables* scene list).
+7. Remaining Termina Field differences (spires, ground) — animation phase or a combiner detail.
+8. Dusk (light-entry and sky-texture blends) and midnight are verified (Hyrule Field dusk, Kakariko night); dawn is
+   not captured.
+   A Hyrule Field night capture was not possible: Stalchildren attack Link at the spawn
+   within 1-2 s, so there is no clean start camera. Night lights are therefore verified only indirectly, via Kakariko
+   Village at midnight. The Kakariko night capture does not show a window with the swapped
+   texture from the start position, so the night pointer of SDC 2 is still unverified.
+9. MM Termina Field spires keep the same residual on debug PAL (so not a version issue).
+10. MM alternate header meanings per scene (setups) for labelling variants (*Alternate headers (layers)* lists the non-cutscene setups).
+
+### 3.8 Cameras and paths
+
+Camera defaults and path data are described with the level data where known.
+
+## 4. Objects
+
+### 4.1 Placement records
+
+Placement records are structurally coupled to the level format and are described in Level data.
+
+### 4.2 Object and model formats
+
+#### Actors and objects
+
+Scripts and outputs: `lead/dumpscene.py` (lists of one scene/layer), `lead/actorclass.py` -> `lead/actors-{rom}.tsv`
+(every actor id used by the ROM: usage counts, category, object, scale, draw class, display lists resolved to
+object offsets and checked against the ROM), `lead/drawfuncs.py` -> `lead/drawfuncs-{rom}.txt` (init scale and
+draw function source of the 40 most used static actors), `actors/zdata.py`, `actors/count.py` -> `actors/counts_{rom}.tsv`
+(usage counts over all unique room actor lists of all setups), `fs/tables.py` (overlay/object tables).
+
+#### Actors and objects: Where actors come from
+
+| data | command / table | record | notes |
+|---|---|---|---|
+| room actor list | room cmd 0x01: count in byte 1, segment-3 pointer | 0x10: `s16 id; Vec3s pos; Vec3s rot; s16 params` | per room and per layer (room files have their own alternate headers, cmd 0x18) |
+| transition actors | scene cmd 0x0E | 0x10: `s8 frontRoom, s8 frontCam, s8 backRoom, s8 backCam; s16 id; Vec3s pos; s16 rotY; s16 params` | doors and loading planes between two rooms; belong to the scene, draw once |
+| player entries (spawns) | scene cmd 0x00 | ActorEntry with id 0 (Player); params = start mode | e.g. OoT Kokiri Forest has 12 |
+| entrance list | scene cmd 0x06 | 2 bytes: `u8 playerEntryIndex; u8 room` | indexed by the spawn number of an entrance |
+| object list | room cmd 0x0B: count, pointer to `u16` object ids | | objects loaded for the room (plus the keep objects) |
+| special files | scene cmd 0x07: byte 1 = OoT Navi hint file, `u16` keep object id | | 2 = gameplay_field_keep, 3 = gameplay_dangeon_keep, loaded as segment 5; gameplay_keep (object 1) is always segment 4 |
+| object table | in `code` | 8: RomFile {vromStart, vromEnd} | OoT 402 ids, MM 643 ids; entry 0 empty |
+| actor overlay table | in `code` | 0x20: RomFile; vramStart; vramEnd; loadedRamAddr (0 in ROM); profile pointer; name pointer (debug builds only); u16 allocType; s8 numLoaded | OoT 471 ids, MM 690 ids; 3 internal actors (in `code`) have no RomFile |
+| actor profile | pointed to by the table | `s16 id; u8 category; u32 flags; s16 objectId; u32 size; init; destroy; update; draw` | category and objectId are readable generically from the ROM |
+
+**Verified** (ROM bytes: `lead/dumpscene.py oot-us10 0x55` Kokiri Forest and `lead/dumpscene.py mm-us 0x6F` South Clock Town
+give plausible positions inside the rooms, actor ids that match the rooms' object lists, and rotations as described below;
+table locations and counts from `fs/tables.py`, where the profile id equals the table index for 420 of 426 OoT and 571 of 573 MM
+overlays; the debug ROMs carry name pointers for 429 (OoT) and 575 (MM) actors, the retail ROMs none).
+Record layouts: **doc** (`oot-decomp/include/scene.h`, `mm-decomp/include/z64scene.h`, `z64actor.h`).
+
+##### Rotation and id encoding
+
+- **OoT:** `rot` and transition `rotY` are binary angles (0x10000 = 360 degrees), used as is. Kokiri Forest room 0 has
+  e.g. `En_Ko rot.y = 0x4000` (90 degrees). **Verified** (ROM bytes), **doc** (`z_actor.c` Actor_SpawnEntry).
+- **MM** (`mm-decomp/src/code/z_actor.c` Actor_SpawnEntry, Actor_SpawnSetupActors, Actor_SpawnTransitionActors; **doc**,
+  spot-checked in ROM bytes):
+  - actor id = `id & 0x1FFF`; bits 15/14/13 flag rot.y / rot.x / rot.z as "raw".
+  - each rotation: `v = (rot >> 7) & 0x1FF`; without the flag the angle is `v` degrees (converted to a binary angle);
+    with the flag `v` (minus 360 if above 180) is passed on unconverted (actors with the flag use it as data; a viewer
+    should treat it as a binary angle, which is what the game does).
+  - `rot.y & 0x7F` = cutscene id (0x7F = none); half-day mask = `((rot.x & 7) << 7) | (rot.z & 0x7F)`, 0 = always.
+    Bits: 0x200 day 0 dawn (day), 0x100 day 0 night, 0x80 day 1 day, 0x40 day 1 night, ... 0x02 day 4 day, 0x01 day 4 night.
+  - transition actors: `rotY` = `(rotY >> 7) & 0x1FF` degrees, `rotY & 0x7F` = cutscene id.
+  - Examples (MM US South Clock Town room 0): `En_Akindonuts rot = (0x0007, 0x2D7F, 0x007F)` -> yaw 90 degrees, no cutscene,
+    all half-days; `Obj_Syokudai rot.x = 0x0002, rot.z = 0x0055` -> mask 0x155 = the five night bits (torches only at night);
+    `En_Talk id = 0xE261` -> actor 0x261 with all three raw flags; transition `En_Door rotY = 0x70FF` -> 225 degrees.
+    **Verified** (ROM bytes).
+  - Default filter for the viewer: day 1 daytime (bit 0x80), which is also the reference capture time.
+
+##### Entrances (for markers and the default spawn)
+
+- **OoT:** `gEntranceTable` in `code`, 1556 records `{s8 sceneId, s8 spawn, u16 flags}`, ending exactly where the scene
+  table begins (found by structure: a run of records with sceneId <= 0x6E and spawn < 0x20 before the scene table; first
+  record `00 00 41 02`). Entrance numbers come in groups of four for the layers child day, child night, adult day, adult
+  night, followed by cutscene entrances. **Verified** (both OoT ROMs: `lead/levels.py`), **doc** (`include/tables/entrance_table.h`).
+  37 records of the US ROM (4 of the MQ debug ROM) name scene 0x6E, which does not exist (test scenes absent from retail).
+- **MM:** entrance = `(sceneEntranceIndex << 9) | (spawn << 4) | layer`; per-scene tables in `code`: 110 records
+  `{u8 count, EntranceTableEntry** table, char* name}`, each entry `{s8 sceneId, s8 spawn, u16 flags}` (a negative scene id
+  is stored for some scenes; use its absolute value). **Verified** (`fs/maps.py` maps every map-select entrance of both
+  MM ROMs to a scene), **doc** (`mm-decomp` z_play/entrance code).
+- For a level view, spawn 0 (player entry referenced by entrance list entry 0) is the natural start marker; OoT and MM
+  also start Link there when a scene is entered from the map select. **Doc** (z_select.c).
+
+#### Actors and objects: How the game draws an actor
+
+`Actor_Draw` (**doc**: `oot-decomp/src/code/z_actor.c`, same in MM):
+
+    model = T(world.pos + (0, shape.yOffset * scale.y, 0)) * Ry(shape.rot.y) * Rx(shape.rot.x) * Rz(shape.rot.z) * S(scale)
+
+- `world.rot = shape.rot = spawn rot`; `Actor_Init` sets scale to 0.01, then the overlay's init chain
+  (`ICHAIN_VEC3F_DIV1000(scale, n)` = n/1000) or `Actor_SetScale` overrides it. So object vertices are typically in units
+  of 1/100 world unit per scale 0.01; some actors use 0.1 or 1.0 (see recipes).
+- Segment 6 = the actor's object (its profile objectId unless the actor chooses another object at run time);
+  segments 4/5 = gameplay_keep / the scene's keep object. Point lights and the scene's directional lights are bound
+  first (`Lights_BindAll`), so lit display lists need the environment lights (*Lights used for rooms*).
+- Draw functions call `Gfx_SetupDL_25Opa` / `_25Xlu` (the same setup display list as rooms), then one or more display
+  lists, often with extra matrices, primitive/environment colours or texture scroll segments 8/9.
+
+#### Mapping onto the viewer: bbgames source-object mode
+
+The viewer additionally supports a deliberately bounded first wave of historical and hidden source objects from a
+user-selected `bbgames` root. It prefers `z_ocarina2` when both trees exist and otherwise accepts `z_ocarina`.
+`showDirectoryPicker()` supplies a real directory handle; the frontend reads exactly 124 allowlisted object paths,
+without recursively enumerating, uploading, persisting, or caching the selected tree. **Verified** (repository code;
+`npm run check:zelda-source -- {bbgames-root}`).
+
+The 21 entries are the complete discarded `.GOMI/Ddanh_noanime` scene, 15 complete build-unreferenced top-level
+scene sets, the older `K_Home5.oo` scene, the sparse `zelda_tool_rom` historical payload, and the `Bdan_dd`,
+`Hidan_dd`, and `Mizusin_dd` tool-geometry fragments. The loader accepts `tool_data.o` or the linked
+`zelda_tool_rom.o` for the sparse payload. It parses bounded big-endian ELF32 MIPS relocatable objects and applies
+only `R_MIPS_32`, then adapts the resulting scene/room data to the shared Zelda renderer. **Verified** (object bytes,
+ELF relocation fixture, and two fresh loads of every entry: 54,028 total triangles).
+
+This is source-map support, not reconstruction of a complete game build. Available room geometry, textures,
+collision, lights, spawns, transitions, and actor placements are exposed; absent common objects, actor code,
+skies, and music are not guessed. Actor placements whose model data is unavailable remain markers, tool fragments
+show geometry only, and the sparse historical payload currently exposes its validated collision body. **Verified**
+(source objects and repository checker); fuller presentation is future work.
+
+#### Mapping onto the viewer: Actors
+
+- `src/rom/zelda/actors.ts`: parse actor/transition/spawn/entrance/object lists (OoT and MM encodings); read category and
+  objectId from the overlay table's profiles; static name tables per game; a recipe table (actor name -> object, display
+  lists by params, scale, yOffset, extra transforms, colours) with per-version offsets.
+- Draw static actors as `Instance`s whose matrix is the formula above, sharing one `Mesh` per (object, display list,
+  colour state); lit display lists use the scene lights like rooms do.
+- `Marker` already has `label`, `position`, `layer`, `info`: enough for NPCs, enemies, logic actors, spawns and
+  transitions. `LevelLayer` kinds `objects` and `markers` give the toggles; `visibleByDefault: false` for logic actors.
+- No `types.ts` change is required for actors. A marker orientation (yaw) would help for spawns and doors (optional
+  extension: `Marker.yaw?`).
+- Difficulty: lists and markers low; 40 static recipes per game medium (each needs its params rule); skeletal bind pose
+  medium; flex-skinned NPCs high (not needed for a first version).
+
+#### Verification evidence: Actors
+
+| claim | method |
+|---|---|
+| actor/transition/spawn/entrance/object record layouts, OoT binary-angle rotations | ROM bytes (`lead/dumpscene.py oot-us10 0x55`) + doc (scene.h) |
+| MM id flags, degree rotations, cutscene id, half-day mask | ROM bytes (`lead/dumpscene.py mm-us 0x6F`) + doc (z_actor.c) |
+| overlay/object table locations and sizes, profile id = index | ROM bytes (`fs/tables.py`) |
+| debug builds have actor name pointers, retail none | ROM bytes (`fs/tables-*.json`) |
+| OoT entrance table: 1556 records ending at the scene table | ROM bytes (`lead/levels.py`) |
+| usage counts and categories | ROM bytes (`actors/count.py`) + doc (profiles in source) |
+| draw classes, scales, params rules | doc (decomp source, `lead/actorclass.py`, `lead/drawfuncs-*.txt`) |
+| display-list offsets parse as display lists in each ROM | ROM bytes (`lead/actorclass.py`) |
+| object files that differ between versions | ROM bytes (`actors/objcmp.py`) |
+| draw transform (T, Ry Rx Rz, S, yOffset), scales, extra draw matrices, MM half-day mask | render vs screenshots (*Verification by render*): South Clock Town day/night, Kokiri Forest, Kakariko day/night |
+| static actors make up visible set pieces | render vs screenshots (*Verification by render*): tent, windmill, night torches |
+| MM degree rotations | ROM bytes + doc; render only with near-symmetric actors (weak test) |
+
+#### Open questions and hypotheses: Actors
+
+- MM degree rotations need a render check with an asymmetric static actor in view; pots, crates, bushes and rocks were
+  drawn in Kakariko but hidden from the capture camera (placement unverified by render).
+- Offsets of gameplay_keep display lists for each version (XML gives only lengths): derive from the decomp's version
+  offsets file, by pointer scanning, or by sequential layout from the XML order.
+- Which OoT actors hide themselves by age/time in init (for per-layer filtering beyond the room lists).
+- Skeleton rest pose: bind pose vs frame 0 of each actor's idle animation (per-actor choice).
+
+### 4.3 Skeletons and animation
+
+Static-pose or animation support and remaining omissions are stated in the object description.
+
+### 4.4 Behaviors, triggers, and scripted objects
+
+Behavioral records are documented only where they affect level extraction or presentation.
+
+## 5. Audio
+
+### 5.1 Audio storage and banks
+
+Audio storage is described with the sequence and bank tables below.
+
+### 5.2 Sequence format and driver
+
+#### Music
+
+Work dir: `zelda/music/`. Paths below are relative to it unless absolute.
+
+- **Engine.** Both games use Nintendo EAD's sequence driver ("Audio" in the decomps; original names `Nas_*`), the
+  same family as Star Fox 64 (`src/rom/music/sf64.ts`) and Yoshi's Story (`src/rom/music/nas.ts`): three-level
+  scripts (sequence player → 16 channels → 4 layers per channel), soundfonts, VADPCM samples, point-list envelopes,
+  a note pool with stealing, 32 kHz output, **3 driver updates per video frame**, 48 ticks per beat,
+  `maxTempo = 10770` (NTSC). OoT and MM differ from each other only in details (*Player/channel/layer/note state and processing*); both differ from SF64 in many
+  opcodes, the note/voice path, vibrato, reverb, filters and 2-bit ADPCM (*Driver: differences from Star Fox 64 (`sf64.ts`) and Yoshi's Story (`nas.ts`)*).
+- **Data.** Audiobank / Audioseq / Audiotable are dmadata files 3 / 4 / 5 (stored raw) in all four ROMs; the four
+  code tables (soundfont, sequence→font map, sequence, sample bank) sit contiguously in `code` and are found by
+  structure; every other table the renderer needs is found by signature (*Audio data*). OoT has 110 sequence ids (109
+  distinct), MM 128 (123 distinct).
+- **Research renderer.** `render/zdata.ts` (data), `render/zengine.ts` (driver), `render/zsynth.ts` (synthesis),
+  `render/zelda.ts` (CLI), run with `the repository/node_modules/.bin/tsx`. It renders any sequence of either
+  game from the ROM's files to WAV with loop points (`wav/`).
+- **Verification.** Renders compared with audio captured from the emulator (mupen64plus, rsp-hle, audio-dump
+  plugin): OoT title, file select, Inside the Deku Tree, Kakariko (child), Market Entrance, Link's house; MM title
+  theme, file select, Woodfall Temple, South Clock Town day 1 match in pitch (chroma ≥ 0.997 at 0 semitones), tempo (stretch 0.9989–1.000,
+  within the method's resolution), level (within 0.1 dB where the capture holds only music, ≤ 1.1 dB with in-game
+  sound; Market Entrance after applying the game's BGM volume scale 90/127 read from RAM) and waveform (NCC
+  0.28–0.94 on the loudest second). Lake Hylia (random field parts) matches statistically. MM Termina Field, entered by
+  walking out of South Clock Town in a second capture session, matches too (*Verification against captured game audio*).
+- **Viewer.** A new module `src/rom/music/zelda64.ts` (≈1300 lines, derived from `sf64.ts`) is better than
+  extending `sf64.ts` or `nas.ts`; difficulty medium (*Extend `sf64.ts` / `nas.ts`, or a new module?*, *Music*).
+
+#### Music: Audio data
+
+##### Files (verified: `scripts/tables.py` → `out/tables_summary.txt`; `render/probe.ts`)
+
+| ROM | Audiobank (file 3) | Audioseq (file 4) | Audiotable (file 5) | code file |
+|---|---|---|---|---|
+| oot-us10 | vrom 0xD390, 0x1CA50 | 0x29DE0, 0x4F690 | 0x79470, 0x460AD0 | 27, vrom 0xA87000 (Yaz0, ROM 0xA62840), RAM 0x800110A0 |
+| oot-mqdbg | 0x19030, 0x2BDC0 | 0x44DF0, 0x4FA80 | 0x94870, 0x451390 | 28, vrom = ROM 0xA94000 (raw), RAM 0x8001CE60 |
+| mm-us | 0x20700, 0x263F0 | 0x46AF0, 0x51480 | 0x97F70, 0x548770 | 31, vrom 0xB3C000 (Yaz0, ROM 0xA684D0), RAM 0x800A5AC0 |
+| mm-dbgpal | 0x2B2D0, 0x263F0 | 0x516C0, 0x51480 | 0xA2B40, 0x548770 | 49, vrom 0xC95000 (Yaz0, ROM 0xBB1320), RAM 0x800B6AC0 |
+
+The three audio files are stored uncompressed (ROM offset = VROM). The `code` RAM base is derived from the
+`gWaveSamples` pointer table (*AudioTable, aliases, seq→font map (verified; doc `include/audio.h`)*); it reproduces the decomp symbol addresses (OoT NTSC 1.0 gSoundFontTable
+0x80113740, gc-eu-mq-dbg 0x801550D0, MM US 0x801E1180) (**verified** against the decomp maps quoted in
+`CHECKPOINT.md`).
+
+##### Code tables (verified: `render/zdata.ts` finds all of them in the four ROMs; `render/probe.ts`)
+
+Offsets are into the decompressed `code` file.
+
+| table (decomp name) | oot-us10 | oot-mqdbg | mm-us | mm-dbgpal | entries |
+|---|---|---|---|---|---|
+| gSoundFontTable | 0x1026A0 | 0x138270 | 0x13B6C0 | 0x17A7E0 | OoT 38, MM 41 |
+| gSequenceFontTable (seq→font map) | 0x102910 | 0x1384E0 | 0x13B960 | 0x17AA80 | one per sequence id |
+| gSequenceTable | 0x102AD0 | 0x1386A0 | 0x13BB70 | 0x17AC90 | OoT 110, MM 128 |
+| gSampleBankTable | 0x1031C0 | 0x138D90 | 0x13C380 | 0x17B4A0 | OoT 7, MM 3 |
+| gAudioSpecs | 0xF36D8 | 0x116968 | 0x135E98 | 0x1671B8 | OoT 18, MM 21 (0x38 bytes each) |
+| gPitchFrequencies (f32[128], [39] = 1.0) | 0xEFB24 | 0x112A54 | 0x12FAF4 | 0x160954 | |
+| gBendPitchOneOctaveFrequencies / TwoSemitones (f32[256] each, adjacent) | 0xEF324 / 0xEF724 | 0x112254 / 0x112654 | 0x12F2F4 / 0x12F6F4 | 0x160154 / 0x160554 | |
+| gHeadsetPanVolume / gStereoPanVolume / gDefaultPanVolume (f32[128]) | 0xEFE98 / 0xF0098 / 0xF0298 | 0x112DC8 / … | 0x12FE68 / 0x130068 / 0x130268 | 0x160CC8 / … | |
+| gDefaultShortNoteVelocityTable + GateTime (u8[16] each) | 0xEFD24 | 0x112C54 | 0x12FCF4 | 0x160B54 | |
+| gDefaultEnvelope `{1,32000},{1000,32000},{-1,0},{0,0}` | 0xEFD44 | 0x112C74 | 0x12FD14 | 0x160B74 | |
+| gLowPassFilterData (s16[16×8]) / gHighPassFilterData (s16[15×8]) | 0xF0498 / 0xF0598 | 0x1133C8 / 0x1134C8 | 0x12D3C0 / 0x12D4C0 | 0x15E220 / 0x15E320 | |
+| gSawtoothWaveSample / gWaveSamples (9 pointers) | 0xEE300 / 0xEF300 | 0x111230 / 0x112230 | 0x12E2D0 / 0x12F2D0 | 0x15F130 / 0x160130 | |
+
+**Finding them generically.**
+- The four AudioTables (header `s16 count; s16 0; u32 0; 8 bytes 0`, then 16-byte entries) are the tables whose
+  entries tile a file exactly (gaps ≤ 0x100): the one with > 64 entries tiling Audioseq is the sequence table, the
+  one tiling Audiobank the font table, the one with < 16 entries tiling Audiotable the sample-bank table. Order in
+  `code`: font table, seq→font map (starts at font table + 16 + 16·count), sequence table, sample-bank table.
+- Float tables by their first three values (0.105112/0.111362/0.117984; 0.5/0.5/0.502736; 1.0/0.995386; 0.707/
+  0.716228; 1.0/0.999924), byte tables by content, the envelope and filter tables by their first words.
+- `gWaveSamples`: 9 pointers whose last two are equal; `RAM base = pointer[0] − offset(gSawtoothWaveSample)`, where
+  the sawtooth starts `0, 1023, 2047, 3071`.
+- `gAudioSpecs`: ≥ 16 consecutive 0x38-byte records `{u32 32000|22050; u8 1; u8 numNotes 8..32; u8 players 2..5;
+  u8 0; u8 0; u8 numReverbs 1..3; ptr reverbSettings}`.
+
+##### AudioTable, aliases, seq→font map (verified; doc `include/audio.h`)
+
+```
+header (16): s16 numEntries; s16 unkMediumParam; u32 romAddr (0 = start of the file); 8 bytes 0
+entry  (16): u32 offset (in its file); u32 size; u8 medium (2 = cart); u8 cachePolicy; u16 shortData1..3
+```
+- **size 0 = alias**: `offset` is the real index (`AudioLoad_GetRealTableIndex`). Sequence aliases:
+  OoT 87 (NA_BGM_FILE_SELECT) → 40 (NA_BGM_GREAT_FAIRY); MM 35 → 22, 40 → 24 (NA_BGM_FAIRY_FOUNTAIN → FILE_SELECT),
+  86 → 60, 96 → 87, 97 → 81. Sample bank 1 is an alias of bank 0 in both games (music fonts name bank 1).
+- **Font entries:** `shortData1 = sampleBankId1 << 8 | sampleBankId2` (0xFF = none), `shortData2 = numInstruments << 8
+  | numDrums`, `shortData3 = numSfx`.
+- **seq→font map:** `u16 offset[numSeqs]` indexed by the requested id (aliases have their own row), then at each
+  offset `u8 count, u8 fontId[count]`. Every sequence lists 1 font except the SFX sequences (0 and 109 in OoT: fonts
+  1, 0; 0 in MM: 1, 0). The player's default font is the **last** entry; channel commands C6/EB pick
+  `fontId[count − 1 − index]`. OoT US and MQ debug maps are identical, MM US and debug identical (**verified**,
+  `out/compare.txt`).
+
+##### Soundfonts and samples (verified: `render/zdata.ts` parses all fonts; doc `load.c` AudioLoad_RelocateFont)
+
+Offsets are relative to the font's start in Audiobank unless stated.
+```
+Font:        u32 drumListOffset; u32 sfxListOffset; u32 instrumentOffset[numInstruments] (0 = empty; ids ≥ 126 unusable)
+Drum list:   u32 drumOffset[numDrums]
+Sfx list:    numSfx × {u32 sampleOffset; f32 tuning}           (inline TunedSamples)
+Instrument:  u8 isRelocated; u8 normalRangeLo; u8 normalRangeHi; u8 adsrDecayIndex; u32 envelopeOffset;
+             {u32 sampleOffset; f32 tuning} low, normal, high  (low used below rangeLo if lo ≠ 0; high above rangeHi if hi ≠ 127)
+Drum (0x10): u8 adsrDecayIndex; u8 pan; u8 isRelocated; pad; u32 sampleOffset; f32 tuning; u32 envelopeOffset
+Sample (0x10): u32 bits {unk 31, codec 30..28, medium 27..26, bit 25, isRelocated 24, size 23..0};
+             u32 sampleAddr (offset in the sample bank named by medium: 0 → bank 1 of the font, 1 → bank 2);
+             u32 loopOffset; u32 bookOffset
+Loop:        u32 start; u32 end; s32 count (0 = none, −1 = forever; MM: 2 = loop until note off, then play to sampleEnd);
+             u32 sampleEnd; s16 predictorState[16] only if count ≠ 0
+Book:        s32 order (2); s32 numPredictors; s16 book[8 · order · numPredictors]
+Envelope:    s16 pairs {delay, arg}: delay > 0 ramp; 0 disable; −1 hang; −2 goto arg; −3 restart
+```
+- Sample data address = `Audiotable + sampleBankTable[realIndex(bank)].offset + sampleAddr`.
+- Differences from SF64: fonts gained the **sfx list** (second word, SF64 had instruments from word 1); the sample
+  header's codec field is 3 bits; loops gained `sampleEnd`.
+
+| | OoT US | OoT MQ dbg | MM US / dbg |
+|---|---|---|---|
+| sample references (instruments + drums + sfx) | 1754 | 1758 | 2492 |
+| codec 0 VADPCM / codec 3 SMALL_ADPCM | 1664 / 90 | 1668 / 90 | 2217 / 275 |
+| loop count 0 / −1 (no other values) | 1061 / 693 | 1057 / 701 | 1610 / 882 |
+| looped samples whose stored predictor state equals the decoded frame containing loop start | 692 / 692 | 700 / 700 | 872 / 876 (max diff 3) |
+| book sizes (entries) | 64, 128 (4 or 8 predictors) | same | same |
+
+- **VADPCM (codec 0):** 9-byte frames → 16 samples, as SF64/libultra.
+- **SMALL_ADPCM (codec 3):** 5-byte frames: 1 header byte (scale high nibble, predictor low nibble) + 4 bytes of
+  2-bit residuals, MSB first; residual = `((code << 14) as s16) >> (14 − scale)` (scale ≥ 14 → no shift), then the
+  same order-2 predictor as VADPCM (doc `synthesis.c` `aADPCMdec(flags | 4)`; rsp-hle `adpcm_predict_frame_2bits`).
+- **Loops:** restart from the frame containing `start` with `predictorState` as history (**verified** by the table
+  above).
+
+##### Audio specs and reverbs (verified: `render/probe.ts` decodes all specs; values equal
+`src/audio/game/session_config.c` (OoT) / `src/audio/session_config.c` (MM), doc)
+
+Record: `{u32 samplingFrequency; u8 unk_04 (1); u8 numNotes; u8 numSequencePlayers; u8 0; u8 0; u8 numReverbs;
+ptr reverbSettings; …cache sizes}`. ReverbSettings (0x18): `u8 downsampleRate; u16 windowSize (×64 samples);
+u16 decayRatio; u16 subDelay (OoT unk_6); u16 subVolume; u16 volume; u16 leakRtl; u16 leakLtr; s8 mixReverbIndex;
+u16 mixReverbStrength; s16 lowPassCutoffLeft; s16 lowPassCutoffRight`.
+
+| game | specs | notes / players | reverb 0 (every spec) | reverb 1 (per spec) |
+|---|---|---|---|---|
+| OoT | 18 | 24 (16–28) / 4 (3 for specs 10–12) | ds 1, 3072 samples, decay 0x3000 | e.g. spec 1: 3072, 0x1800, low-pass 11; spec 2: 3584, 0x2800, lp 7; spec 3: 4096, 0x5000, leak 0x1800, lp 7; specs 7/9/14: ds 2, 5120, 0x5000, leak 0xD000/0x3000 |
+| MM | 21 | 24 (16–28) / 5 (3 for 10–11) | same | specs 0–9, 15: 5120, 0x1800, lp 11; spec 13: a third reverb (ds 2); spec 14: three reverbs |
+
+- Specs 16 (OoT) / 19 (MM) run at 22050 Hz (not used by music scenes seen so far).
+- **Which spec plays:** the scene header's `SCENE_CMD_SOUND_SETTINGS` (0x15: `{0x15, specId, 0, 0, 0, 0,
+  natureAmbienceId, seqId}`) resets the audio heap with `specId` (doc `z_scene.c`); menus use spec 10
+  (`SEQCMD_RESET_AUDIO_HEAP(0, 10)` in OoT `z_file_choose.c`, `Audio_SetSpec(0xA)` in MM). Reverb index per note is
+  the channel's `E5` value & 3; notes with an index ≥ numReverbs get no reverb.
+- MM: `delayNumSamples = max(windowSize, 4) · 64 / downsampleRate`, minimum 256 (doc MM `heap.c`
+  AudioHeap_SetReverbData).
+
+##### US vs debug ROMs (verified: `scripts/compare.py` → `out/compare.txt`, `scripts/samplecmp.py` →
+`out/samplecmp_*.txt`, `scripts/seqscan.py` outputs diffed)
+
+- **OoT US 1.0 vs MQ debug:** same seq→font map and table sizes. Sequences differ only in 0 (SFX, 1 byte), 42
+  (NA_BGM_FIRE_TEMPLE: 0xE70 vs 0x1240 bytes, 7 vs 8 channels) and 109 (NA_BGM_CUTSCENE_EFFECTS). Sample bank 0
+  differs in size (0x3FA9E0 vs 0x3EB2A0) so sample offsets in 19 fonts shift by a few bytes; sample content is equal
+  for all references except font 10 (the Fire Temple font, 12 instrument samples replaced) and font 37 (size 0x3940
+  vs 0x12B60). That the change removes the chant from the Fire Temple theme is community knowledge
+  (**hypothesis** here; not checked by ear).
+- **MM US vs debug PAL:** fonts, sample banks and tables identical; only sequences 0 (SFX) and 43 differ (same
+  sizes). The debug ROM is PAL: its audio runs with PAL constants (refresh 50 Hz, `maxTempoTvTypeFactors` 20.03042,
+  doc MM `load.c`); a renderer should use the NTSC constants for all four ROMs (the music data is the same).
+- **Shared between the games:** 22 MM sequences are byte-identical to OoT sequences, e.g. MM 24 = OoT 40 (file
+  select / fairy fountain), MM 64–66 = OoT 64–66, MM 25 = OoT 59, MM 37 = OoT 108 (**verified**, md5 of every
+  sequence).
+
+#### Music: Driver: differences from Star Fox 64 (`sf64.ts`) and Yoshi's Story (`nas.ts`)
+
+Sources: OoT `src/audio/internal/{seqplayer,playback,effects,heap,load,synthesis}.c`, MM `src/audio/lib/*.c`
+(doc); rsp-hle `alist_nead.c`/`alist.c` (doc for the emulated RSP); `sf64.ts` and `nas.ts` as ported in the viewer.
+Opcode argument sizes are **verified** by `scripts/seqscan.py`, a reachability disassembly of every distinct
+sequence in all four ROMs with the decomp argument tables: 0 unknown or undefined opcodes; one read past the end in
+OoT seq 2, which is the field-logic sequence loading other sequences into its own buffer at run time (*Majora's Mask (US; debug PAL identical except 0 and 43)*). Its
+coverage agrees with the decomp's own disassembler (`notes/songlist/disasm/oot-us10/*.seq`, 105 files): e.g.
+channel `combfilter` 2385 = 2385, `bend` 2866 vs 2864, `vol` 25539 vs 25651, layer `notevg` 17360 = 17360.
+
+##### Common structure (unchanged from SF64)
+
+Sequence player (16 channels) → channel (4 layers) → layer; scripts with 4-deep call/loop stacks; compressed u16
+lengths; control flow F2–FF (same encodings, `FD var` delay, `FB` jump, `FC` call); note pools (channel, player,
+global) with disabled/decaying/releasing/active lists and the same allocation policies; ADSR point envelopes with
+decay/release/sustain states; 3 driver updates per frame, 176 (168–184) samples per update at 32 kHz; `tempoAcc +=
+tempo`, one tick when ≥ `maxTempo` = trunc(3·2880000/48/16.713) = **10770** (NTSC; PAL 50 Hz uses 20.03042, MPAL
+16.546, doc `load.c`); per-update NoteSampleState snapshots (all 3 script updates of a task run before the 3
+synthesis updates); VADPCM; the 4-tap RSP resampler; HILOGAIN; ENVMIXER with 8-sample linear ramps and 16-bit
+clamping.
+
+##### Player/channel/layer/note state and processing
+
+| item | OoT / MM | SF64 (`sf64.ts`) | YS (`nas.ts`) |
+|---|---|---|---|
+| IO ports | player 8, channel 8 (s8, −1 = none; ports 0–1 cleared on read) | player port 0 only | player/channel 8 |
+| channel reset | at every sequence start all 16 channels are re-initialised (volume 1, pan 64, weight 128, priority 3, released-note priority 1, decay index 0xF0, default envelope, vibrato rate 0x800) | D7 allocates | similar |
+| envelope delay | `delay = trunc(delay · 0.75)`, 0 → 1 (all delays) | only delays ≥ 4 scaled | same as OoT |
+| decay table | `[251..255] = (1/3)/{0.75,0.66,0.5,0.33,0.25}`; `[128..250] = (1/3)/(251−i)`; `[16..127] = (1/3)/(4·(143−i))`; `[1..15] = (1/3)/(60·(23−i))` | linear `i·3/2560/3` | same as OoT |
+| released note priority | channel high nibble (default 1) | 1 | – |
+| vibrato | `pitch = sine64[(time >> 10) & 63] + 32768`; `d = 1 + depth/4096`; `f = 1 / ((d − 1/d) · pitch / 65536 + 1/d)` (**MM** can use a per-layer vibrato) | `1 + depth/4096 · (bendOctave[128 + sine >> 8] − 1)` | as SF64 |
+| portamento | u16 `cur += speed` (speed = 0x20000/(time·3) or tempo-based, clamp 1..0x7FFF), index `(cur >> 8)`, stops at 127 | float | not modelled |
+| note frequency | `freq × vibrato × portamento × (32000 / samplingFrequency)` | same without rate factor | float step |
+| pan (default "stereo" option) | `gDefaultPanVolume[pan]` / `[127 − pan]`; with channel D0 bit 7: `gStereoPanVolume` and phase inversion of the far side for pan < 32 / > 96 (stereo type selects override/or/xor); headset mode: `gHeadsetPanVolume` + Haas delay 0–30 samples; mono 0.707 | pan tables + strong L/R | equal-power table |
+| volume | `(vol · volScale · fadeVolume · fadeVolumeScale)²·velocity²`, target `vel·pan·(4096 − 0.001)` | same | float |
+| **MM** surround | only in surround sound mode (volume halved, extra delay line mixed with gDefaultPanVolume[index]) | – | – |
+
+##### Synthesis (per note, per update)
+
+1. Sample stream: VADPCM or SMALL_ADPCM decode with loop (the RSP decodes per frame; decoding the whole sample and
+   appending the loop body is equivalent, as in `sf64.ts`); synthetic waves (gWaveSamples 64-sample periods,
+   harmonic chosen by frequency; OoT/MM ids 0x80–0xBF) (**MM** loop count 2 ends the loop after note-off; MM
+   `startSamplePos`).
+2. Frequency ≥ 2: two parts, **every other sample** (`INTERL`) then resampled at freq/2 (SF64 port approximated).
+3. RESAMPLE 4-tap (state = last 4 inputs + fraction), HILOGAIN (gain < 0x10 → 0x10).
+4. **Channel FILTER** (new): 8-tap FIR `y[n] = Σ c[j]·x[n−j] >> 15` (rounded); rsp-hle averages the coefficient table
+   with the previous set in place on every call (so a static table converges to half gain after the first update).
+   Coefficients from gLowPassFilterData[lp], gHighPassFilterData[hp − 1] or their average.
+5. **Comb filter** (new): `y[n] = x[n − d] + (x[n] · gain) >> 15`.
+6. ENVMIXER: dry `(x · vol) >> 16` per side with 8-sample ramps; wet = `(dry · send) >> 16` with
+   **send = (reverb & 0x7F) · 2 << 8** (twice SF64's) and bit 7 of the reverb byte swapping wet L/R.
+7. Haas delay (headset only), **MM** surround (surround only).
+
+Per reverb (in index order; notes of that reverb are mixed in between the load and save):
+- load the delay line (downsample 1: ring position; downsample 2: from the ring through the resampler at 0.5; the
+  CPU writes every second wet sample into the ring two tasks later),
+- `dry += wet · volume (0x7FFF) >> 15` (SF64 adds wet directly),
+- `wet += wet · (decayRatio − 0x8000) >> 15`, optional L/R leak (`aMix` with leakRtl/leakLtr),
+- **MM** sub-delay tap and mixing another reverb (unused by the specs: subDelay 0, mix index −1),
+- mix the notes' sends, then **low-pass FIR** on the wet signal when the spec sets a cutoff (OoT specs 1–6, 10, 17;
+  MM most specs), then save to the ring.
+
+Output: `clamp16(dry)`, 32 kHz stereo (the AI runs at 32006 Hz).
+
+##### Heap and loading behaviour that affects playback
+
+- All fonts in a sequence's map row are loaded before it starts; C6/EB switch only to loaded fonts.
+- Bn (LDSEQ) and 1n/6n loads are asynchronous in the game (the script polls io); a renderer can complete them
+  immediately with status 1. OoT's Hyrule Field logic depends on this.
+- The game writes player IO before starting a scene sequence: port 7 = resume point or 1 (skip harp intro) or −1;
+  port 0 = 1 for the morning variant (`Audio_PlayMorningSceneSequence`); MM port 4 = day − 1; port 2 = enemy/still
+  mode (*Majora's Mask (US; debug PAL identical except 0 and 43)*). Sound-mode (stereo/mono/headset/surround) comes from the save file.
+- Voices are shared with the SFX player (sequence 0) and ambience players; a music-only render has all notes.
+- Game-side volume: `gActiveSeqs[].volScales` (fanfare, SFX ducking 0x40, sub-BGM distance, BGM main) multiply into
+  the player's `fadeVolumeScale` (doc `sequence.c`); the amplitude goes with its square. Observed in RAM: 90/127 in
+  OoT Market Entrance (−6 dB), 1.0 in the other captured scenes (*Verification against captured game audio*).
+
+##### Extend `sf64.ts` / `nas.ts`, or a new module?
+
+**Recommendation: a new module** `src/rom/music/zelda64.ts`, ported from the research renderer
+(`render/zdata.ts` 330 lines + `render/zengine.ts` 1150 + `render/zsynth.ts` 330). Reasons:
+- The opcode layout below 0xB0 of `sf64.ts` is incompatible (channel 0n–Bn all mean different things); `nas.ts`
+  has the OoT layout but no note pool, priorities, reverb, filters or IO semantics, and uses a float mixer and
+  state fingerprint loops.
+- Shared helpers worth factoring out of `sf64.ts`: the linked-list note pool, ADSR state machine (with the OoT
+  delay rule as an option), ENVMIXER, resampler, ring reverb.
+
+If extending `sf64.ts` were preferred, the concrete changes are: arg-table channel decoding (≥ 0xB0 / MM ≥ 0xA0) and
+the new low-opcode layout; 8 IO ports per player/channel with clear-on-read; persistent script values; channel
+pre-allocation and reset at start (D7/D6 semantics); seq ops C4 C5 C6 CD CE D1 D2 4n 6n An Bn (+ MM C2 C3); channel
+ops A0–A8, B0–BE, D0, E6, E7/E8/E9 nibbles, EC; layer CE CF (+ MM F0 F1); instrument 0x7E sound effects and the
+font sfx list; zero-length notes; random variance; OoT decay table and envelope delay rule; released-note priority;
+new vibrato and integer portamento; stereo/headset pan tables and strong L/R; SMALL_ADPCM; exact two-part resampling;
+FIR filter (channel and reverb) with rsp-hle coefficient averaging; comb filter; doubled reverb send and 0x7FFF
+reverb return; spec-dependent reverbs with low-pass, leak and downsample 2; MM tempo clamp, 0n no-op, C5 jump,
+unk_0A bits, loop count 2, startSamplePos. **Difficulty: medium** (≈1.5–2× the `sf64.ts` port; the research code is
+the reference).
+
+#### Music: Research renderer
+
+Files (`render/`, TypeScript, run with `TMPDIR=$PWD the repository/node_modules/.bin/tsx`; nothing is written
+into the repo; it imports only `RESAMPLE_LUT` from `the repository/src/rom/music/libultra.ts`):
+
+| file | lines | content |
+|---|---|---|
+| `zdata.ts` | 330 | loads the extracted dmadata files of a ROM, finds every table (*Code tables (verified: `render/zdata.ts` finds all of them in the four ROMs; `render/probe.ts`)*), parses fonts/samples, decodes VADPCM and SMALL_ADPCM with loops |
+| `zengine.ts` | 1150 | sequence player / channel / layer interpreters (OoT and MM variants), note pool, ADSR, vibrato, portamento, ProcessNotes and sample-state snapshots |
+| `zsynth.ts` | 330 | reverbs (ring, downsample 2, leak, low-pass FIR), per-note resample / gain / FIR / comb / ENVMIXER |
+| `zelda.ts` | 90 | `render()` + CLI: `zelda.ts {rom} {seqId} {specId} <out.wav> [io=port:value,…] [--max s] [--passes n] [--mode stereo] [--volscale f]` → WAV + JSON (loop points, RMS, log); `--volscale` sets the player's fadeVolumeScale (game-side BGM volume) |
+| `scanall.ts` | 40 | renders every sequence without audio output → `out/renderscan_{rom}.json` |
+
+- **Clock:** per task `32000/60` samples (fraction kept), split into 3 updates of 176 ± 8 (last takes the rest);
+  3 script updates, then 3 synthesis updates (as `AudioSynth_Update`).
+- **Start:** `AudioLoad_SyncInitSeqPlayerInternal` + `AudioSeq_ResetSequencePlayer`; fonts = the seq→font map row;
+  player IO ports set from the command line after the reset (the game sets them before the start and the reset does
+  not clear them).
+- **Asynchronous loads** complete immediately (Bn LDSEQ copies the sequence into the script's buffer, io = 1;
+  1n/6n io = 1). **RUNSEQ** on the own player restarts the player with the new sequence, keeping IO.
+- **Loops:** a sequence-level backward jump (FB/F5/F9/FA taken to an earlier address) marks a pass; the render
+  stops at its third execution; `[second, third)` is the loop (as `sf64.ts`). A sequence that ends renders until 1 s
+  of silence (≤ 8 s). IO/random driven sequences run to `--max`.
+- **Random numbers:** a fixed LCG (the game mixes the task counter and `osGetCount`), so random choices (field
+  logic, ambience) are reproducible but not the game's.
+- **Not modelled:** Haas delay (headset mode), MM surround mode, book offsets 2/3 (commands absent from rsp-hle),
+  noise wave (book offset on a synthetic wave), other sequence players (SFX, ambience, fanfare, sub-BGM), game-side
+  volume scales and fades, channel IO written by game code (e.g. Ganon's Tower low-pass), MM custom sequence
+  functions (BE) and SFX channel state (A0–A3).
+- **Speed:** 3–9 s of CPU per 1–4 min song in Node on this machine (Water Temple 440 s: 27 s); all 109 OoT and 123
+  MM distinct sequences render without errors (`out/renderscan_*.json`).
+
+**WAVs** (32000 Hz stereo, with `.json` sidecars: loop points, RMS; `wav/`):
+
+| game | file | seq / spec / IO | length, loop |
+|---|---|---|---|
+| OoT | `wav/oot-us10-030-title.wav` | 30 / 10 | 211.3 s, loop 66.817 s from 77.683 s |
+| OoT | `wav/oot-us10-087-file-select.wav` (Fairy Fountain) | 87→40 / 10 / io7=1 | 73.7 s, loop 24.55 s from 24.55 s |
+| OoT | `wav/oot-us10-060-kokiri.wav` | 60 / 1 | 137.0 s, loop 42.917 s from 51.167 s |
+| OoT | `wav/oot-us10-002-hyrule-field.wav` (also Lake Hylia) | 2 / 2 / io2=0 | 240 s, random parts, no loop |
+| OoT | `wav/oot-us10-028-inside-deku-tree.wav` | 28 / 3 | 210.6 s, loop 67.017 s from 76.583 s |
+| OoT | `wav/oot-us10-039-kakariko-kid.wav` | 39 / 1 | 277.8 s, loop 91.417 s from 94.917 s |
+| OoT | `wav/oot-us10-092-water-temple.wav` | 92 / 4 | 440.2 s, loop 143.05 s from 154.05 s |
+| OoT | `wav/oot-us10-029-market.wav`, `wav/oot-us10-029-market-entrance-volscale90.wav` | 29 / 0 (second with fadeVolumeScale 90/127) | 118.9 s, loop 39.35 s from 40.167 s |
+| OoT | `wav/oot-us10-031-link-house.wav` | 31 / 5 | 79.6 s, loop 26.05 s from 27.517 s |
+| MM | `wav/mm-us-118-title-theme.wav` | 118 / 0 | 131.7 s, plays once |
+| MM | `wav/mm-us-030-opening.wav`, `wav/mm-us-117-opening-loop.wav` | 30, 117 / 0 | 70.8 s once; loop 46.45 s |
+| MM | `wav/mm-us-024-file-select.wav` | 24 / 10 / io7=1 | 73.7 s, loop 24.55 s |
+| MM | `wav/mm-us-021-clock-town-day-1.wav`, `wav/mm-us-029-clock-town-main-seq.wav` | 21, 29 / 1 / io4=0 | 161.0 s, loop 52.217 s from 56.567 s |
+| MM | `wav/mm-us-002-termina-field.wav` | 2 / 1 | 198.2 s, loop 66.017 s from 66.167 s |
+| MM | `wav/mm-us-028-woodfall-temple.wav` | 28 / 3 | 215.4 s, loop 67.817 s from 79.783 s |
+
+#### Mapping onto the viewer: Music
+
+##### Module
+
+`src/rom/music/zelda64.ts`, one module for both games (a `game: 'oot' | 'mm'` flag selects the MM variants of *Driver: differences from Star Fox 64 (`sf64.ts`) and Yoshi's Story (`nas.ts`)*),
+ported from `render/zdata.ts` + `zengine.ts` + `zsynth.ts`:
+```ts
+export function zelda64Music(files: { code: Uint8Array; audiobank: Uint8Array; audioseq: Uint8Array; audiotable: Uint8Array },
+                             game: 'oot' | 'mm'): { tracks: MusicTrack[]; decode(index: number): DecodedMusic }
+```
+- Inputs come from the Zelda filesystem loader (dmadata files 3–5 raw; `code` decompressed with Yaz0). All tables
+  are found by structure/signature (*Code tables (verified: `render/zdata.ts` finds all of them in the four ROMs; `render/probe.ts`)*), so the same code serves the four ROMs; the alpha ROM needs its own check.
+- Each track carries `{ seqId, specId, io }`: `specId` = the spec of the first scene header that plays the sequence
+  (*Song list*), 10 for menu music, 0 otherwise; `io` = the game's settings (file select `7: 1`; MM Clock Town `4: day − 1`;
+  field logic `2: 0`).
+- `decode`: render intro + two passes and report `loopStart/loopEnd` like `sf64.ts`; for sequences without a
+  sequence-level loop (*Majora's Mask (US; debug PAL identical except 0 and 43)*: field logic, IO-driven) render a fixed length (e.g. 4 min, fixed random seed) with no
+  loop, or leave them out.
+- Output gain 1 (`clamp16(dry)/32768`): songs sit at −18 to −34 dBFS RMS, inside the range of the other games.
+- Reuse from `sf64.ts` (copy or factor out): the linked-list note pool, ADSR, ENVMIXER ramps, resampler loop, ring
+  reverb; from `libultra.ts`: `RESAMPLE_LUT`.
+
+##### `types.ts`
+
+No change is required for a flat list. Two optional additions help a 100+ song soundtrack:
+- `MusicTrack.group?: string` (e.g. "Areas", "Dungeons", "Bosses and battles", "Menus and title", "Cutscenes",
+  "Fanfares", "Ocarina"), shown as sub-headings like `LevelInfo.group`.
+- `LevelInfo.music?: number` (a track index) so the player can start the song of the selected level (scene header
+  seqId, *Special sequences and game IO (doc: OoT `src/audio/game/general.c`, MM `src/audio/code_8019AF00.c`; renders verified where stated)*).
+
+##### Track list and level association (recommendation)
+
+- **Show:** every sequence of kind *music* (OoT 47, MM 61, aliases once), the title and menu pieces,
+  cutscene/credits pieces that play to their end (OoT 77, 94, 103–106; MM 30, 112, 116, 118, 124, 126, 127) and,
+  in a separate group, fanfares and the ocarina/song sequences (they are short and on the fanfare player in game).
+- **Leave out:** SFX sequences (OoT 0, 109; MM 0), ambience (OoT 1, MM 1; they only sound with game IO), field parts
+  OoT 3–23 (played by the field logic), logic sequences (OoT 2 may be offered as a fixed-length "Hyrule Field"
+  render; MM 29 → use 21–23 directly), OoT 46 Ganon's Tower (silent without game IO; offer with channel 15 io4 =
+  0x40 if wanted), MM 122, alias rows (OoT 87, MM 35, 40, 86, 96, 97).
+- **Names:** the decomp enum names made readable (*Song list*), with community names for OoT where they exist (labelled
+  community-derived); the games have no in-game sound test.
+- **Level → song:** the scene header `SCENE_CMD_SOUND_SETTINGS` gives `seqId` (0x7F = no sequence, the scene plays
+  only nature ambience `natureAmbienceId`), per header (child/adult day/night and cutscene headers differ, *Special sequences and game IO (doc: OoT `src/audio/game/general.c`, MM `src/audio/code_8019AF00.c`; renders verified where stated)*).
+  The viewer's level for a scene header should point at that track; for 0x7F show no song or the ambience note.
+
+##### Difficulty
+
+| part | effort | notes |
+|---|---|---|
+| tables, fonts, SMALL_ADPCM, spec reverbs | small | research code exists and is checked on four ROMs |
+| sequence interpreter (OoT + MM variants) | medium | ≈1100 lines; opcode tables verified against all sequences |
+| synthesis (FIR, comb, reverbs) | medium | verified against captures for Woodfall/title/file select/Deku Tree/Kakariko |
+| track metadata (names, groups, specs, IO, scene links) | small-medium | generated tables in `out/songlist_*.tsv` |
+| IO-driven pieces (field logic, Clock Town days, Ganon's Tower) | medium | optional; fixed presets are enough for a player |
+| CPU/memory | as `sf64.ts` | render in the worker, one track on demand |
+
+#### Verification evidence: Music
+
+| claim | method / evidence |
+|---|---|
+| audio files 3/4/5, raw; code file index per ROM | `scripts/tables.py` → `out/tables_summary.txt` |
+| table locations by structure and signature, code RAM base | `render/zdata.ts` + `render/probe.ts` on all four ROMs; RAM base reproduces decomp symbol addresses |
+| aliases, seq→font map, US vs debug differences | `scripts/tables.py`, `scripts/compare.py` → `out/compare.txt`; `scripts/samplecmp.py` → `out/samplecmp_*.txt` |
+| font/sample layout, codec counts, loop predictor states (692/692, 700/700, 872/876) | `render/probe.ts` (zdata parser over every font) |
+| SMALL_ADPCM decoding | doc (synthesis.c, rsp-hle `adpcm_predict_frame_2bits`); renders with 2-bit samples match captures (e.g. Woodfall Temple) |
+| audio specs and reverb settings | `render/probe.ts` decode = decomp `session_config.c` values |
+| opcode argument sizes, coverage, 0 unknown opcodes | `scripts/seqscan.py` → `out/seqscan_{rom}.txt/json`; agrees with the decomp disassembler output `notes/songlist/disasm/oot-us10/*.seq` |
+| MM sequences identical to OoT ones (22) | md5 of every sequence (python snippet in this session, uses `scripts/seqscan.py` locator) |
+| driver semantics (*Driver: differences from Star Fox 64 (`sf64.ts`) and Yoshi's Story (`nas.ts`)*) | doc (decomp sources named in *Driver: differences from Star Fox 64 (`sf64.ts`) and Yoshi's Story (`nas.ts`)*); rsp-hle for the RSP commands |
+| scene → sequence/spec | `notes/songlist/scenesound.py` output, 11/11 spot-checked against ROM scene headers via `fs/scenes-*.json` |
+| loops and lengths of every sequence | `render/scanall.ts` → `out/renderscan_*.json` (+ `_extra` for Water Temple) |
+| field logic loads parts, MM 29 day mapping, RUNSEQ chains | renders with logs (`wav/*.json`, `out/renderscan_*.json`), `scripts/seqdump.py` → `out/seqdump_oot-us10_002.txt` |
+| renders match the game | `scripts/compare.py` on the captures (*Verification against captured game audio*); RAM dumps for the active sequences |
+| OoT US 1.0 BGM player at RAM 0x80128B60, per-scene tempo/fade/volume scale/IO | lead RAM dumps `runs/lead-ootus-1/{dt1,kv1,lh3,me1,lk1}.bin` decoded with the decomp `SequencePlayer` layout (python snippet in this session) |
+| Market Entrance BGM volume scale 90/127 explains −6 dB | render with `--volscale 0.708661` vs capture (*Verification against captured game audio*) |
+| menus use spec 10; title OoT spec 10 (Hyrule Field header alt 7), MM title Clock Tower alt 1 spec 0 | doc (`z_file_choose.c`), scene sound table, captures |
+
+#### Open questions and hypotheses: Music
+
+1. **MM Termina Field** layers: the first-cycle layer 5 header plays the ambience sequence instead of field music (first capture); layer 0 plays sequence 2, verified in the second capture (*Verification against captured game audio*). Which setups play which sequence is in *Majora's Mask (US; debug PAL identical except 0 and 43)*.
+2. **MM boot audio 8–27 s** before the title theme matches no sequence; possibly sound effects of the boot/opening
+   (not a music track). A RAM dump in that window would settle it (request 2, low priority).
+3. The code that sets OoT Market Entrance's BGM volume scale to 90/127 was not located in the decomp (the value is
+   verified in RAM); other scenes may apply similar scales. A viewer should play songs at scale 1.0 (as composed).
+   The Temple of Time exterior (no sequence in the scene header, seqId 0x7F) was not captured.
+4. **rsp-hle vs RSP:** the FIR coefficient averaging in place (halving static tables), the ENVMIXER wet inversion
+   values (−4/−2) and the missing book-offset commands are rsp-hle behaviour; real hardware may differ
+   (hypothesis). The captures come from rsp-hle, and level matches with spec 10 low-pass reverbs support rsp-hle's
+   behaviour for that emulator only.
+5. Downsample-2 reverbs (OoT specs 7, 9, 14; MM spec 13) and leak settings are implemented from the decomp but no
+   captured scene used them.
+6. Headset (Haas) and MM surround modes, game-side volume scales and fades, and channel IO written by actors (Ganon's
+   Tower, Saria's song distance) are not modelled.
+7. Readable names: OoT uses community names (OoT Randomizer), MM enum names; an official name source was not found.
+8. The cutscene START_SEQ scan is heuristic; code call sites are a grep of the decomp (doc) and may miss indirect
+   uses.
+9. MM debug PAL: the audio code uses PAL timing constants on a PAL console; a viewer should probably play all four
+   ROMs with NTSC timing (the music data is the same) (hypothesis about the desired behaviour).
+10. The alpha ROM has no audio data (*Formats compared with retail OoT*, music and sound).
+
+### 5.3 Instruments and sample encoding
+
+Instrument banks, envelopes, loops, and sample encoding are described above.
+
+### 5.4 Music catalog and loop points
+
+#### Music: Song list
+
+##### How the tables were made
+
+`scripts/songlist.py` → `out/songlist_{rom}.tsv` / `.md`, from:
+- **enum names** (doc: `include/tables/sequence_table.h`, condensed in `oot_seq_enum.txt` / `mm_seq_enum.txt`),
+  including the sequence flags (FANFARE, ENEMY, RESUME, RESUME_PREV, RESTORE, NO_AMBIENCE, SKIP_HARP_INTRO);
+- **fonts** from the ROM's seq→font map and **loops** from a full render of each sequence (`render/scanall.ts`,
+  spec 0, all IO −1: "loop L s from T s" = loop length and the time of the third execution of the loop jump;
+  "ends" = the sequence reaches its end; verified for every id, `out/renderscan_*.json`);
+- **scene uses** from every scene header's `SCENE_CMD_SOUND_SETTINGS` (`notes/songlist/scenesound_{rom}.tsv`;
+  verified: 11 of 11 scenes spot-checked against the ROM scene files, header/spec shown as `main/spec1`, `alt4/…`);
+- **cutscene uses** from a heuristic scan for cutscene START_SEQ commands in scene files (`cutsceneseq_{rom}.tsv`;
+  hypothesis-grade, not all cutscenes live in scene files);
+- **code uses** from a grep of the decomp for the enum name (doc, `callsites_{game}.tsv`; overlay or file names).
+- **Names:** OoT names are the community names used by the OoT Randomizer's `Music.py` (fetched, community-
+  derived) where one exists, else the enum name made readable; MM names are the enum names made readable (the
+  games have no sound test).
+- **kind:** sfx player / ambience / logic / field part / ocarina (font 0 or OCARINA in the name) / fanfare (FANFARE
+  flag: played on the fanfare player) / jingle-cutscene (music that ends) / music (loops).
+
+MQ debug and MM debug PAL use the same ids and names; their only different sequences are listed in *US vs debug ROMs (verified: `scripts/compare.py` → `out/compare.txt`, `scripts/samplecmp.py` →*.
+
+##### Ocarina of Time (US 1.0; MQ debug identical except 0, 42, 109)
+
+| id | enum (NA_BGM_) | name | kind | fonts | loop / length | uses |
+|---|---|---|---|---|---|---|
+| 0 | GENERAL_SFX | General Sfx | sfx player | [1, 0] |  | scenes: GERUDOS_FORTRESS (alt4/spec1); LINKS_HOUSE (alt5/spec5); LON_LON_RANCH (alt4/spec2) | code: En_Syateki_Man, En_Zl1, file_choose, general, sfx, z_common_data, z_kankyo |
+| 1 | NATURE_AMBIENCE | Nature Ambience | ambience | [2] | ends 1.033 s | scenes: CHAMBER_OF_THE_SAGES (alt6/spec4); DESERT_COLOSSUS (alt5/spec8); GANONS_TOWER_COLLAPSE_EXTERIOR (main/spec6); GANONS_TOWER_COLLAPSE_INTERIOR (main/spec6); INSIDE_GANONS_CASTLE_COLLAPSE (main/spec6) | code: En_Okarina_Effect, En_Syateki_Man, debug.inc, general, z_kankyo |
+| 2 | FIELD_LOGIC | Hyrule Field | logic | [3] | no loop within 420 s (IO/random driven or silent) | scenes: DEATH_MOUNTAIN_TRAIL (main/spec2, alt2/spec2); HYRULE_CASTLE (main/spec2); HYRULE_FIELD (main/spec2, alt1/spec2, alt2/spec2, alt12/spec2); LAKE_HYLIA (main/spec2, alt2/spec2, alt4/spec2); OUTSIDE_GANONS_CASTLE (alt4/spec2); ZORAS_FOUNTAIN (main/spec0, alt1/spec0, alt2/spec0, alt4/spec1, alt5/spec1, alt6/spec1); ZORAS_RIVER (main/spec2, alt2/spec2) | code: En_Syateki_Man, general |
+| 3 | FIELD_INIT | Field Init | field part | [3] | ends 14.383 s |  |
+| 4 | FIELD_DEFAULT_1 | Field Default 1 | field part | [3] | ends 14 s |  |
+| 5 | FIELD_DEFAULT_2 | Field Default 2 | field part | [3] | ends 14.467 s |  |
+| 6 | FIELD_DEFAULT_3 | Field Default 3 | field part | [3] | ends 14.05 s |  |
+| 7 | FIELD_DEFAULT_4 | Field Default 4 | field part | [3] | ends 14.1 s |  |
+| 8 | FIELD_DEFAULT_5 | Field Default 5 | field part | [3] | ends 13.95 s |  |
+| 9 | FIELD_DEFAULT_6 | Field Default 6 | field part | [3] | ends 14.067 s |  |
+| 10 | FIELD_DEFAULT_7 | Field Default 7 | field part | [3] | ends 14.017 s |  |
+| 11 | FIELD_DEFAULT_8 | Field Default 8 | field part | [3] | ends 14.033 s |  |
+| 12 | FIELD_DEFAULT_9 | Field Default 9 | field part | [3] | ends 14 s |  |
+| 13 | FIELD_DEFAULT_A | Field Default A | field part | [3] | ends 13.917 s |  |
+| 14 | FIELD_DEFAULT_B | Field Default B | field part | [3] | ends 13.983 s |  |
+| 15 | FIELD_ENEMY_INIT | Field Enemy Init | field part | [3] | ends 13.867 s |  |
+| 16 | FIELD_ENEMY_1 | Field Enemy 1 | field part | [3] | ends 13.95 s |  |
+| 17 | FIELD_ENEMY_2 | Field Enemy 2 | field part | [3] | ends 13.967 s |  |
+| 18 | FIELD_ENEMY_3 | Field Enemy 3 | field part | [3] | ends 14.233 s |  |
+| 19 | FIELD_ENEMY_4 | Field Enemy 4 | field part | [3] | ends 14.233 s |  |
+| 20 | FIELD_STILL_1 | Field Still 1 | field part | [3] | ends 15.5 s |  |
+| 21 | FIELD_STILL_2 | Field Still 2 | field part | [3] | ends 15.65 s |  |
+| 22 | FIELD_STILL_3 | Field Still 3 | field part | [3] | ends 15.583 s |  |
+| 23 | FIELD_STILL_4 | Field Still 4 | field part | [3] | ends 15.55 s |  |
+| 24 | DUNGEON | Dodongo's Cavern | music | [11] | loop 89.75 s from 179.5 s | scenes: DEATH_MOUNTAIN_CRATER (main/spec4, alt2/spec4, alt4/spec4, alt5/spec4); DODONGOS_CAVERN (main/spec4); DODONGOS_CAVERN_BOSS (main/spec4); GERUDO_TRAINING_GROUND (main/spec3); GRAVEYARD (alt5/spec0); GRAVE_WITH_FAIRYS_FOUNTAIN (main/spec3); KAKARIKO_VILLAGE (alt7/spec1); REDEAD_GRAVE (main/spec3); ROYAL_FAMILYS_TOMB (main/spec3, alt4/spec3, alt5/spec3); THIEVES_HIDEOUT (main/spec3); WINDMILL_AND_DAMPES_GRAVE (main/spec3) | cutscenes: DEATH_MOUNTAIN_CRATER | code: En_Syateki_Man |
+| 25 | KAKARIKO_ADULT | Kakariko Village (adult) | music | [3] | loop 89.2 s from 181.733 s | scenes: KAKARIKO_VILLAGE (alt2/spec1, alt3/spec1) | code: En_Syateki_Man, Fishing |
+| 26 | ENEMY | Battle | music | [3] | loop 52.65 s from 110.1 s | code: En_Dnt_Demo, En_Dnt_Jiji, En_Syateki_Man, Fishing, general |
+| 27 | BOSS | Boss Battle | music | [3] | loop 65.817 s from 137.367 s | code: Boss_Goma, Boss_Mo, Boss_Sst, Boss_Tw, Boss_Va, En_Syateki_Man, En_fHG |
+| 28 | INSIDE_DEKU_TREE | Inside the Deku Tree | music | [4] | loop 67.017 s from 143.6 s | scenes: DEKU_TREE (main/spec3); DEKU_TREE_BOSS (main/spec4); GRAVEKEEPERS_HUT (main/spec5); GROTTOS (main/spec4); HOUSE_OF_SKULLTULA (main/spec5) | code: En_Syateki_Man |
+| 29 | MARKET | Market | music | [5] | loop 39.35 s from 79.5 s | scenes: BACK_ALLEY_DAY (main/spec0); MARKET_DAY (main/spec1); MARKET_ENTRANCE_DAY (main/spec0) | code: En_Syateki_Man |
+| 30 | TITLE | Title Theme | music | [6] | loop 66.817 s from 144.483 s | scenes: CUTMAP (alt8/spec0); HYRULE_FIELD (alt7/spec10) | code: En_Syateki_Man |
+| 31 | LINK_HOUSE | House | music | [3] | loop 26.05 s from 53.567 s | scenes: BACK_ALLEY_HOUSE (main/spec5); CARPENTERS_TENT (main/spec5); DOG_LADY_HOUSE (main/spec5); IMPAS_HOUSE (main/spec5); KAKARIKO_CENTER_GUEST_HOUSE (main/spec5); KNOW_IT_ALL_BROS_HOUSE (main/spec5); LINKS_HOUSE (main/spec5, alt4/spec5); LON_LON_BUILDINGS (main/spec5); MARKET_GUARD_HOUSE (main/spec5); MIDOS_HOUSE (main/spec5); POTION_SHOP_KAKARIKO (main/spec5); SARIAS_HOUSE (main/spec5); SHOOTING_GALLERY (alt4/spec5, alt5/spec5, alt6/spec5); STABLE (main/spec5); TWINS_HOUSE (main/spec5) | code: En_Syateki_Man |
+| 32 | GAME_OVER | Game Over | jingle/cutscene | [35] | ends 10.733 s | code: En_Syateki_Man, player_actor |
+| 33 | BOSS_CLEAR | Boss Defeated | jingle/cutscene | [3] | ends 12.667 s | code: Boss_Dodongo, Boss_Fd, Boss_Ganondrof, Boss_Goma, Boss_Mo, Boss_Sst, Boss_Tw, Boss_Va … |
+| 34 | ITEM_GET | Item Get | fanfare | [35] | ends 4.033 s | cutscenes: JABU_JABU | code: En_Hy, En_Ru1, En_Syateki_Man, En_Yabusame_Mark, Fishing, player_actor |
+| 35 | OPENING_GANON | Ganondorf Appears | fanfare | [3] | ends 16.983 s | scenes: CUTMAP (alt7/spec0, alt12/spec0) | cutscenes: HYRULE_FIELD | code: Boss_Ganon2, En_Syateki_Man, En_Viewer, En_fHG |
+| 36 | HEART_GET | Heart Container Get | fanfare | [35] | ends 4.983 s | cutscenes: GREAT_FAIRYS_FOUNTAIN_MAGIC, GREAT_FAIRYS_FOUNTAIN_SPELLS, TEMPLE_OF_TIME | code: En_Syateki_Man, Fishing, player_actor |
+| 37 | OCA_LIGHT | Oca Light | ocarina | [18] | ends 18.333 s | cutscenes: TEMPLE_OF_TIME | code: En_Syateki_Man, z_message |
+| 38 | JABU_JABU | Jabu-Jabu | music | [7] | loop 50.4 s from 100.767 s | scenes: JABU_JABU (main/spec3, alt4/spec3); JABU_JABU_BOSS (main/spec3) | code: En_Syateki_Man |
+| 39 | KAKARIKO_KID | Kakariko Village (child) | music | [8] | loop 91.417 s from 186.333 s | scenes: KAKARIKO_VILLAGE (main/spec1, alt1/spec1) | code: En_Syateki_Man, Fishing |
+| 40 | GREAT_FAIRY | Fairy Fountain | music | [9] | loop 24.55 s from 52.033 s | scenes: FAIRYS_FOUNTAIN (main/spec9); GREAT_FAIRYS_FOUNTAIN_MAGIC (main/spec9, alt4/spec3, alt5/spec3, alt6/spec3); GREAT_FAIRYS_FOUNTAIN_SPELLS (main/spec9) | code: En_River_Sound, En_Syateki_Man, general |
+| 41 | ZELDA_THEME | Zelda's Theme | music | [9] | loop 41.167 s from 82.35 s | scenes: CASTLE_COURTYARD_ZELDA (main/spec0, alt5/spec0, alt6/spec0) | code: En_Syateki_Man, En_Zl1 |
+| 42 | FIRE_TEMPLE | Fire Temple | music | [10] | loop 93.2 s from 190.617 s | scenes: FIRE_TEMPLE (main/spec4); FIRE_TEMPLE_BOSS (main/spec4) | code: En_Syateki_Man |
+| 43 | OPEN_TRE_BOX | Treasure Chest | fanfare | [3] | ends 9.633 s | code: En_Box, En_Syateki_Man |
+| 44 | FOREST_TEMPLE | Forest Temple | music | [12] | loop 96.75 s from 198.6 s | scenes: FOREST_TEMPLE (main/spec6); FOREST_TEMPLE_BOSS (main/spec6) | code: En_Syateki_Man |
+| 45 | COURTYARD | Castle Courtyard | music | [3] | loop 22.983 s from 45.95 s | scenes: CASTLE_COURTYARD_GUARDS_DAY (main/spec0); CASTLE_COURTYARD_GUARDS_NIGHT (main/spec0) | code: En_Dnt_Demo, En_Syateki_Man |
+| 46 | GANON_TOWER | Ganondorf's Theme | music | [30] | no loop within 420 s (IO/random driven or silent) | scenes: GANONDORF_BOSS (main/spec6); GANONS_TOWER (main/spec6) | code: En_River_Sound, En_Syateki_Man, general |
+| 47 | LONLON | Lon Lon Ranch | music | [13] | loop 118.267 s from 244.967 s | scenes: LON_LON_RANCH (main/spec2, alt1/spec2, alt2/spec2, alt3/spec2) | code: En_Ma1, En_Ma2, En_Ma3, En_Syateki_Man, general |
+| 48 | GORON_CITY | Goron City | music | [14] | loop 66.6 s from 150.1 s | scenes: GORON_CITY (main/spec3, alt2/spec3) | cutscenes: DEATH_MOUNTAIN_TRAIL, GORON_CITY | code: En_Syateki_Man |
+| 49 | FIELD_MORNING | Field Morning | jingle/cutscene | [3] | ends 31.283 s | code: general |
+| 50 | SPIRITUAL_STONE | Spiritual Stone Get | fanfare | [3] | ends 15.383 s | cutscenes: DEATH_MOUNTAIN_TRAIL, KOKIRI_FOREST, ZORAS_FOUNTAIN | code: En_Syateki_Man |
+| 51 | OCA_BOLERO | Oca Bolero | ocarina | [18] | ends 19.75 s | cutscenes: DEATH_MOUNTAIN_CRATER | code: En_Syateki_Man, z_message |
+| 52 | OCA_MINUET | Oca Minuet | ocarina | [18] | ends 17.4 s | cutscenes: SACRED_FOREST_MEADOW | code: En_Syateki_Man, z_message |
+| 53 | OCA_SERENADE | Oca Serenade | ocarina | [18] | ends 18.1 s | cutscenes: ICE_CAVERN | code: En_Syateki_Man, z_message |
+| 54 | OCA_REQUIEM | Oca Requiem | ocarina | [18] | ends 25.933 s | cutscenes: DESERT_COLOSSUS | code: En_Syateki_Man, z_message |
+| 55 | OCA_NOCTURNE | Oca Nocturne | ocarina | [18] | ends 24.083 s | cutscenes: KAKARIKO_VILLAGE | code: En_Syateki_Man, z_message |
+| 56 | MINI_BOSS | Miniboss Battle | music | [3] | loop 57.433 s from 117.283 s | cutscenes: SPIRIT_TEMPLE_BOSS | code: En_Bigokuta, En_Dh, En_Fd, En_GeldB, En_Ik, En_Po_Sisters, En_Syateki_Man, En_Test … |
+| 57 | SMALL_ITEM_GET | Heart Piece Get | fanfare | [35] | ends 4.033 s | code: En_Diving_Game, En_Si, En_Syateki_Man, En_Ta, player_actor |
+| 58 | TEMPLE_OF_TIME | Temple of Time | music | [9] | loop 71.267 s from 144.917 s | scenes: TEMPLE_OF_TIME (main/spec6, alt7/spec6, alt8/spec6, alt9/spec6, alt10/spec6, alt11/spec6, alt12/spec6) | cutscenes: TEMPLE_OF_TIME | code: En_Syateki_Man |
+| 59 | EVENT_CLEAR | Escape from Ranch | fanfare | [3] | ends 9.033 s | cutscenes: HYRULE_FIELD | code: En_Syateki_Man |
+| 60 | KOKIRI | Kokiri Forest | music | [15] | loop 42.917 s from 94.083 s | scenes: KOKIRI_FOREST (main/spec1, alt2/spec1, alt3/spec1, alt13/spec1) | cutscenes: KOKIRI_FOREST | code: Bg_Treemouth, En_Syateki_Man |
+| 61 | OCA_FAIRY_GET | Learn Song | ocarina | [9] | ends 10.067 s | cutscenes: CASTLE_COURTYARD_ZELDA, LON_LON_RANCH, LOST_WOODS, ROYAL_FAMILYS_TOMB, SACRED_FOREST_MEADOW, TEMPLE_OF_TIME, WINDMILL_AND_DAMPES_GRAVE | code: En_Syateki_Man |
+| 62 | SARIA_THEME | Lost Woods | music | [5] | loop 30.783 s from 63.25 s | scenes: LOST_WOODS (main/spec9, alt2/spec9); SACRED_FOREST_MEADOW (main/spec9, alt2/spec9) | cutscenes: GORON_CITY, SACRED_FOREST_MEADOW | code: En_Dnt_Demo, En_River_Sound, En_Syateki_Man |
+| 63 | SPIRIT_TEMPLE | Spirit Temple | music | [16] | loop 104.917 s from 268.017 s | scenes: SPIRIT_TEMPLE (main/spec3); SPIRIT_TEMPLE_BOSS (main/spec4, alt4/spec4, alt5/spec4, alt6/spec4) | cutscenes: SPIRIT_TEMPLE_BOSS | code: En_Syateki_Man |
+| 64 | HORSE | Horse Race | music | [17] | loop 37.05 s from 77.85 s | cutscenes: GERUDOS_FORTRESS, LON_LON_RANCH | code: En_In, En_Syateki_Man |
+| 65 | HORSE_GOAL | Epona Race Goal | jingle/cutscene | [17] | ends 4.517 s | code: En_Horse, En_Horse_Game_Check, En_Syateki_Man |
+| 66 | INGO | Ingo's Theme | music | [17] | loop 47.867 s from 101.717 s | code: En_Horse_Game_Check, En_Syateki_Man |
+| 67 | MEDALLION_GET | Medallion Get | fanfare | [3] | ends 12.917 s | cutscenes: CHAMBER_OF_THE_SAGES | code: Demo_Du, Demo_Im, Demo_Sa, En_Nb, En_Ru2, En_Syateki_Man |
+| 68 | OCA_SARIA | Oca Saria | ocarina | [0] | ends 6.35 s | code: En_Syateki_Man, z_message |
+| 69 | OCA_EPONA | Oca Epona | ocarina | [0] | ends 7.883 s | code: En_Syateki_Man, z_message |
+| 70 | OCA_ZELDA | Oca Zelda | ocarina | [0] | ends 10.05 s | code: En_Syateki_Man, z_message |
+| 71 | OCA_SUNS | Oca Suns | ocarina | [0] | ends 6.917 s | code: En_Syateki_Man, z_message |
+| 72 | OCA_TIME | Oca Time | ocarina | [0] | ends 10.5 s | code: En_Syateki_Man, z_message |
+| 73 | OCA_STORM | Oca Storm | ocarina | [0] | ends 5.567 s | code: En_Syateki_Man, z_message |
+| 74 | NAVI_OPENING | Fairy Flying | music | [3] | loop 12.517 s from 28.683 s | cutscenes: DEATH_MOUNTAIN_TRAIL, KOKIRI_FOREST, LAKE_HYLIA | code: En_Syateki_Man |
+| 75 | DEKU_TREE_CS | Deku Tree | music | [9] | loop 25.867 s from 51.75 s | scenes: KOKIRI_FOREST (alt5/spec1, alt6/spec1, alt7/spec1) | cutscenes: KOKIRI_FOREST | code: Bg_Treemouth, En_Syateki_Man |
+| 76 | WINDMILL | Windmill Hut | music | [8] | loop 39.5 s from 82.567 s | code: En_Syateki_Man, general |
+| 77 | HYRULE_CS | Hyrule Cs | jingle/cutscene | [19] | ends 117.383 s | scenes: CUTMAP (alt4/spec0, alt6/spec0, alt11/spec0); DEATH_MOUNTAIN_TRAIL (alt4/spec2); GERUDO_VALLEY (alt4/spec1, alt5/spec1); KOKIRI_FOREST (alt4/spec1) | cutscenes: CUTMAP | code: En_Syateki_Man, En_Zl1 |
+| 78 | MINI_GAME | Shooting Gallery | music | [20] | loop 28.717 s from 60.733 s | scenes: BOMBCHU_BOWLING_ALLEY (main/spec5); FISHING_POND (main/spec0); SHOOTING_GALLERY (main/spec5); TREASURE_BOX_SHOP (main/spec3) | code: En_Syateki_Man |
+| 79 | SHEIK | Sheik's Theme | music | [9] | loop 24.567 s from 49.15 s | scenes: TEMPLE_OF_TIME (alt13/spec6) | cutscenes: DEATH_MOUNTAIN_CRATER, DESERT_COLOSSUS, ICE_CAVERN, KAKARIKO_VILLAGE, LAKE_HYLIA, SACRED_FOREST_MEADOW, TEMPLE_OF_TIME | code: En_Syateki_Man |
+| 80 | ZORA_DOMAIN | Zora's Domain | music | [21] | loop 71.8 s from 153.883 s | scenes: ZORAS_DOMAIN (main/spec4, alt2/spec4) | code: En_Syateki_Man |
+| 81 | APPEAR | Zelda Turns Around | fanfare | [3] | ends 5.4 s | code: En_Daiku, En_Du, En_Go2, En_Ru1, En_Ru2, En_Syateki_Man, En_Zl1, En_Zl4 |
+| 82 | ADULT_LINK | Adult Link | music | [3] | loop 41.167 s from 82.35 s | scenes: HYRULE_FIELD (alt11/spec2); TEMPLE_OF_TIME (alt14/spec6) | cutscenes: TEMPLE_OF_TIME | code: En_Syateki_Man |
+| 83 | MASTER_SWORD | Master Sword | jingle/cutscene | [3] | ends 13.25 s | code: Bg_Toki_Swd, En_Syateki_Man |
+| 84 | INTRO_GANON | Intro Ganon | fanfare | [3] | loop 31.283 s from 62.55 s | cutscenes: CUTMAP, HYRULE_FIELD, TEMPLE_OF_TIME | code: En_Syateki_Man |
+| 85 | SHOP | Shop | music | [22] | loop 54.717 s from 114.533 s | scenes: BAZAAR (main/spec5); BOMBCHU_SHOP (main/spec5); GORON_SHOP (main/spec5); HAPPY_MASK_SHOP (main/spec5); KOKIRI_SHOP (main/spec5); POTION_SHOP_MARKET (main/spec5); ZORA_SHOP (main/spec5) | code: En_Dnt_Demo, En_Syateki_Man |
+| 86 | CHAMBER_OF_SAGES | Chamber of the Sages | music | [19] | loop 55.85 s from 147.583 s | scenes: CHAMBER_OF_THE_SAGES (main/spec4, alt4/spec4, alt5/spec4) | cutscenes: CUTMAP | code: En_Syateki_Man, general |
+| 87 → 40 | FILE_SELECT | File Select | music | [9] | loops (static) | code: En_Syateki_Man, file_choose, general |
+| 88 | ICE_CAVERN | Ice Cavern | music | [23] | loop 32.35 s from 67.917 s | scenes: ICE_CAVERN (main/spec5, alt4/spec3) | cutscenes: ICE_CAVERN | code: En_Syateki_Man |
+| 89 | DOOR_OF_TIME | Door of Time | fanfare | [18] | ends 14.633 s | code: En_Okarina_Tag, En_Syateki_Man |
+| 90 | OWL | Kaepora Gaebora | fanfare | [36] | loop 49.417 s from 101.933 s | code: En_Owl, En_Syateki_Man |
+| 91 | SHADOW_TEMPLE | Shadow Temple | music | [24] | loop 73.633 s from 165.7 s | scenes: BOTTOM_OF_THE_WELL (main/spec3); SHADOW_TEMPLE (main/spec3); SHADOW_TEMPLE_BOSS (main/spec4) | code: En_Syateki_Man |
+| 92 | WATER_TEMPLE | Water Temple | music | [25] | loop 143.05 s from 297.1 s | scenes: WATER_TEMPLE (main/spec4); WATER_TEMPLE_BOSS (main/spec4) | code: En_Syateki_Man |
+| 93 | BRIDGE_TO_GANONS | Ganon's Rainbow Bridge | fanfare | [19] | ends 21.467 s | cutscenes: OUTSIDE_GANONS_CASTLE | code: En_Syateki_Man |
+| 94 | SEAL_OF_SAGES | Seal of Sages | jingle/cutscene | [32] | ends 29.017 s | cutscenes: CHAMBER_OF_THE_SAGES | code: En_Syateki_Man |
+| 95 | GERUDO_VALLEY | Gerudo Valley | music | [27] | loop 71.8 s from 157.567 s | scenes: DESERT_COLOSSUS (main/spec8, alt2/spec8); GERUDOS_FORTRESS (main/spec1, alt2/spec1, alt3/spec1, alt6/spec1); GERUDO_VALLEY (main/spec1, alt2/spec1); HAUNTED_WASTELAND (main/spec8) | code: En_Syateki_Man |
+| 96 | POTION_SHOP | Potion Shop | music | [28] | loop 40.75 s from 84.017 s | scenes: LAKESIDE_LABORATORY (main/spec5); MARKET_GUARD_HOUSE (alt2/spec5); POTION_SHOP_GRANNY (main/spec5) | code: En_Syateki_Man |
+| 97 | KOTAKE_KOUME | Kotake and Koume | music | [29] | loop 34.817 s from 82.133 s | cutscenes: SPIRIT_TEMPLE_BOSS | code: Boss_Tw, En_Syateki_Man |
+| 98 | ESCAPE | Castle Escape | music | [3] | loop 22.983 s from 71.383 s | code: En_Syateki_Man, En_Zl3, general |
+| 99 | UNDERGROUND | Castle Underground | music | [31] | loop 76.583 s from 155.567 s | scenes: INSIDE_GANONS_CASTLE (main/spec3) | code: En_Syateki_Man |
+| 100 | GANONDORF_BOSS | Ganondorf Battle | music | [32] | loop 62.783 s from 129.55 s | code: Boss_Ganon, En_Syateki_Man |
+| 101 | GANON_BOSS | Ganon Battle | music | [32] | loop 58.217 s from 152.283 s | code: Boss_Ganon2, En_Syateki_Man |
+| 102 | OCARINA_OF_TIME | Ocarina of Time | ocarina | [9] | ends 31.367 s | cutscenes: HYRULE_FIELD | code: En_Syateki_Man |
+| 103 | STAFF_1 | Staff 1 | jingle/cutscene | [33] | ends 157.75 s | scenes: DEATH_MOUNTAIN_TRAIL (alt7/spec2); GERUDOS_FORTRESS (alt5/spec1); GERUDO_VALLEY (alt6/spec1); GORON_CITY (alt5/spec3); HYRULE_FIELD (alt9/spec2); KAKARIKO_VILLAGE (alt8/spec1); KOKIRI_FOREST (alt10/spec1, alt11/spec1); LAKE_HYLIA (alt5/spec2); ZORAS_DOMAIN (alt4/spec4) |
+| 104 | STAFF_2 | Staff 2 | jingle/cutscene | [34] | ends 148.317 s | scenes: DEATH_MOUNTAIN_TRAIL (alt8/spec2); LON_LON_RANCH (alt6/spec2, alt7/spec2, alt8/spec2, alt9/spec2, alt10/spec2, alt11/spec2) |
+| 105 | STAFF_3 | Staff 3 | jingle/cutscene | [33] | ends 68.833 s | scenes: TEMPLE_OF_TIME (alt5/spec6) |
+| 106 | STAFF_4 | Staff 4 | jingle/cutscene | [9] | ends 50.9 s | scenes: CASTLE_COURTYARD_ZELDA (alt4/spec0) |
+| 107 | FIRE_BOSS | Fire Boss | music | [32] | loop 52.15 s from 115.133 s | code: Boss_Dodongo, Boss_Fd |
+| 108 | TIMED_MINI_GAME | Mini-game | music | [3] | loop 23.283 s from 49.167 s | code: En_Diving_Game, En_Ta, general |
+| 109 | CUTSCENE_EFFECTS | Cutscene Effects | sfx player | [1, 0] | ends 1.05 s | code: En_Syateki_Man, general |
+
+Water Temple (92) loops after 154 s (143.05 s loop) in a 1100 s render with spec 4 (`out/renderscan_oot-us10_extra.json`).
+
+## 6. Unused and hidden content
+
+### 6.1 Unreferenced assets
+
+No separate unreferenced-asset finding is recorded.
+
+### 6.2 Cut or inaccessible levels
+
+Candidate levels are distinguished from alternate, debug, and intentionally hidden retail content above.
+
+### 6.3 Debug features
+
+Shipped debug strings and executable features are listed only when supported by a code or data reference.
+
+### 6.4 Prototype or revision-specific content
+
+Source-archive and prototype material is explicitly distinguished from shipped retail data.
+
+## 7. nviewer implementation
+
+### 7.1 Module mapping
+
+#### Actors and objects: Recommendation for the viewer
+
+1. **Static scenery, drawn by default:** props and background actors with fixed display lists (a recipe table, below).
+   Several set pieces are actors, not room geometry: e.g. MM South Clock Town's clock face, gears, stairs and scaffold
+   (Obj_Tokeidai x5, Obj_Tokei_Step, Obj_Tokei_Turret x7 in room 0), OoT's gravestones (Bg_Haka), Spirit Temple pillars
+   (Bg_Jya_Ironobj), Ice Cavern icicles, dungeon doors (Door_Shutter) and wooden doors (En_Door). **Verified** by render
+   (*Verification by render*): the carnival tent left of the South Clock Town start view is Obj_Tokei_Turret, Kakariko's windmill sails are
+   Bg_Spot01_Fusya and the night torches are Obj_Syokudai; without them the renders show holes where the screenshots have
+   these set pieces.
+2. **Skeletal models** (NPCs, enemies, chests, flags, doors with a skeleton): markers by default. Optional later: draw the
+   skeleton in its bind pose or frame 0 of the actor's idle animation. Formats (**doc**, `include/animation.h`):
+   `SkeletonHeader {Limb** limbs; u8 limbCount}`, `FlexSkeletonHeader {SkeletonHeader; u8 dListCount}`,
+   `StandardLimb {Vec3s jointPos; u8 child; u8 sibling; Gfx* dList}` (0x0C), `LodLimb` (0x10, near/far display lists),
+   `AnimationHeader {s16 frameCount; s16* frameData; JointIndex* jointIndices; u16 staticIndexMax}` with
+   `JointIndex {u16 x, y, z}` (index < staticIndexMax: a constant from frameData). Flex skeletons (most NPCs) pass limb
+   matrices to their skinned meshes; that is the hard part. Wooden doors (En_Door) and chests (En_Box) are skeletal but
+   their closed pose is the bind pose plus a per-scene door display list (**hypothesis** for the closed pose).
+3. **Invisible logic actors** (class `none`: loading planes En_Holl, En_Wonder_Item, Elf_Msg*, En_River_Sound, Obj_Mure*,
+   Object_Kankyo, En_Light's flames): markers in a layer hidden by default.
+4. **Spawns and transitions:** a marker for every player entry (label with the spawn number and the room from the entrance
+   list) and every transition actor (label with the two rooms).
+5. **Markers:** label = actor name + params in hex (e.g. "En_Ko 0xFF02"), `info` = id, params, raw rotation, room,
+   category, object; one `LevelLayer` of kind `markers` per category group (NPCs, enemies, items, logic), all but spawns
+   hidden by default. Names: a static table from the decomp `actor_table.h` (both games; the ids are the same in all
+   versions of a game), cross-checked against the debug ROMs' own name pointers.
+6. **Layer/time filtering:** OoT actor sets come from the room header of the selected layer (child day, child night, adult
+   day, adult night). Many actors also kill themselves in their init for the wrong age or time (e.g. `LINK_IS_ADULT`,
+   `IS_DAY` checks in source); that is not derivable from data, so draw everything the layer lists. MM: filter by the
+   half-day mask against the selected time (default day 1 daytime, bit 0x80).
+
+##### Recipe table (most used static actors)
+
+Offsets are into the dmadata file of the object (object table id -> file), for OoT US 1.0 and MM US; `lead/actors-{rom}.tsv`
+lists every display list the source references, with its offset for that ROM and whether the offset parses as a display
+list in that ROM (`ok`/`bad`). DL offsets: **doc** (decomp asset XMLs, with `{Version Pattern}` blocks applied for the ROM),
+checked against ROM bytes (**verified** that each listed offset starts a well-formed F3DEX2 display list; drawing correctness
+not yet verified by render). Params rules and scales: **doc** (actor source; `lead/drawfuncs-{rom}.txt`).
+
+**OoT US 1.0**
+
+| actor (id) | object | display list(s) | selection | scale | notes |
+|---|---|---|---|---|---|
+| Obj_Tsubo (0x111) | gameplay_dangeon_keep / object_tsubo | 0x17870 (pot) / 0x17C0 | params bit 8: 0 dangeon_keep, 1 object_tsubo | 0.15 | object chosen by params |
+| Obj_Syokudai (0x05E) | object_syokudai | golden 0x3A0, timed 0xB90, wooden 0x870 | params >> 12 | 1.0 | flame (gameplay_keep gEffFire1DL, billboard, +52 Y) optional |
+| En_Wood02 (0x077) | object_wood02 | opaque + translucent pairs, e.g. 0x78D0/0x7968, 0x7CA0/0x7D38, 0x80D0/0x81A8 (trees), 0x90/0x160, 0x340/0x440 (bushes), 0x700 (leaf) | params = type; draw type and scale set in init | per type | env colour per type (green 50,170,70; yellow 180,155,0; else white) |
+| Obj_Kibako2 (0x1A0) | object_kibako2 | 0x960 | - | 0.1 | large crate |
+| Obj_Bombiwa (0x127) | object_bombiwa | 0x9E0 | - | 0.1 | yOffset -200 |
+| En_Kusa (0x125) | gameplay_field_keep / object_kusa | field bush 0xB9D0 / 0x140 | params & 3: 0 field_keep, 1-2 object_kusa | 0.4 | |
+| En_Ishi (0x14E) | gameplay_field_keep | small 0xA880, large silver rock 0xA3B8 | params & 1 | per type | |
+| Bg_Haka (0x09D) | object_haka | stone 0x1B0 (opaque), earth 0x2A8 (translucent) | - | 0.1 | gravestone |
+| Bg_Ice_Turara (0x1C7) | object_ice_objects | 0x23D0 | - | 0.1 | yOffset 1200 |
+| En_Kanban (0x141) | object_kanban | material 0xC30 and the 11 sign parts 0xCB0..0x1540 in one pass (the material list only sets state) | - | 0.01 | translate Z -100; a child's sign is lowered 15 units in init (**verified** by render) |
+| Bg_Spot01_Fusya (Kakariko windmill) | object_spot01_objects | sails 0x100 | - | 0.1 | rot.z animated; pick a phase (**verified** by render) |
+| Door_Ana (0x09B) | gameplay_field_keep | 0x1390 (translucent) | - | grows from 0 | grotto hole |
+| Obj_Switch (0x12A) | gameplay_dangeon_keep | floor 1/2/3, rusty, eye (texture on segment 8), crystal (opaque + translucent) | params & 7 = type, subtype bits | 0.1 | |
+| En_Gs (0x1B9) | object_gs | material 0x950, stone 0x9D0, 0xA60 | - | 0.1 | primitive colour white |
+| Bg_Jya_Ironobj (0x169) | object_jya_iron | pillar 0x240, throne 0x1050 | params | 0.1 | |
+| Bg_Spot02_Objects (0x09C) | object_spot02_objects | 0x13F0, 0x126F0, ... | params type | 0.1 | Graveyard/Kakariko set pieces |
+| Door_Shutter (0x02E, transition) | per scene (object_ydan_objects 0x67A0 / 0x6910, object_ddan_objects 0xC0, object_bdoor 0x10C0, ...) | door + bars display lists from its per-scene graphics table | scene + params | 0.1 | |
+| En_Door (0x009, transition) | gameplay_keep / gameplay_field_keep (left 0x47A0, right 0x4978) / object_hidan_objects / object_haka_door | skeleton + door DL by scene | scene | 0.01 | skeletal |
+| En_Box (0x00A) | object_box | skeleton gTreasureChestSkel + front/side DLs (0x6F0, 0x10C0; boss key 0xAE8, 0x1678) | params type | 0.005 small, 0.01 big | skeletal |
+
+**MM US**
+
+| actor (id) | object | display list(s) | selection | scale | notes |
+|---|---|---|---|---|---|
+| Obj_Tsubo (0x082) | per type (`sPotTypeData`) | type's model DL | params type | per type | |
+| En_Kusa (0x090) | gameplay_keep | sprout (gKusaSproutDL) | - | 0.4 | |
+| Obj_Syokudai (0x039) | object_syokudai | three torch types | params type | 1.0 | often night-only via the half-day mask |
+| En_Ishi (0x0B0) | gameplay_keep / object_ishi | small rock, silver boulder / gSmallRockDL | params size/object flags | per size | |
+| Obj_Etcetera (0x183) | gameplay_keep | pink flower 0xED80 (types 0/1), gold flower 0x11BD0 (types 2/3) when idle; skeleton when animated | type = (params & 0xFF80) >> 7 | 0.01, scale.y 0.02 | **verified** by render (SCT gold flower) |
+| Obj_Tokei_Turret (0x221) | object_tokei_turret | base 0x2508, top 0x2A88, flags 0x3038 | params & 3 | 0.1 | carnival tower tiers stacked by half-day mask (**verified** by render) |
+| En_Twig (0x1A5) | object_twig | 0x1C38 (type 1), 0x14C8 (type 2) | params | varies | Deku race rings |
+| Bg_Lotus (0x1B9) | object_lotus | gLilyPadDL | - | 0.1 | |
+| En_Wood02 (0x041) | object_wood02 | as OoT | params type | per type | |
+| Obj_Tokeidai (0x19C) | object_obj_tokeidai | clock face assembly (minute ring, centre and hand, face, sun/moon panel), counterweight + spotlight, exterior gear, wall clocks; opaque/translucent DL chosen in init | params type | 0.1 (some types 0.15, 0.02, 0.01) | draws with pivot translations (e.g. Z -1791); rest pose = zero rotations |
+| Obj_Snowball (0x1DC), Obj_Snowball2 (0x1F9) | object_goroiwa | 0x8B90 | - | 0.1 x size / 0.025 | |
+| En_Kanban (0x0A8) | object_kanban | material + sign parts | - | 0.01 | |
+| En_Gs (0x0EF) | object_gs | material, stone, bottom | - | 0.1 | primitive colour per params |
+| Obj_Switch (0x093) | gameplay_dangeon_keep | floor, rusty, eye, crystal | params type | per type | |
+| Obj_Kibako2 (0x0E5) | object_kibako2 | gLargeCrateDL | - | 0.1 | |
+| Obj_Taru (0x22D) | object_taru | barrel / breakable pirate panel | params & 0x80 | 0.1 | |
+| Bg_Umajump (0x07C) | gameplay_keep | gHorseJumpFenceDL | - | 0.1 | |
+| Obj_HsStump (0x25E) | object_hsstump | 0x3B8 | - | 0.18 | |
+| Bg_Icicle (0x11F), Obj_Tree (0x229), Obj_Bombiwa (0x092), Obj_Comb (0x0E4), Obj_Visiblock (0x1C0), Bg_Lbfshot (0x297) | own objects | single DL each | - | 0.1-0.15 | |
+| En_Fall (0x17C) | object_fall / object_lodmoon | the moon (gMoonDL / gLodmoonMoonDL) | params type | per type | the moon in the sky of Clock Town and Termina Field |
+| En_Door (0x005, transition), En_Box (0x006) | per scene / object_box | skeletal | | 0.01 / 0.0075 | as OoT |
+
+##### Version differences that affect recipes
+
+- Actor ids and object ids are identical across the versions of each game (same tables: OoT 471/402, MM 690/643).
+  **Verified** (table sizes; profile ids).
+- Object files: OoT US vs MQ debug: 267 identical, 115 differ (sizes or bytes, e.g. gameplay_keep); MM US vs debug PAL:
+  453 identical, 12 differ. **Verified** (`actors/objcmp.py`). So display-list offsets must be per version.
+- Of the display-list offsets resolved from the decomp XMLs, 589 parse as display lists in OoT US (9 fail), 568 in MQ debug
+  (18 fail), 901 in MM US (4 fail), 892 in MM debug PAL (13 fail; the MM XMLs describe the US build). Failures are
+  objects whose layout differs in that build and the XML has no version block for it (e.g. object_fa, object_sd,
+  object_bv in OoT; object_market_obj in MM). **Verified** (ROM bytes, `lead/actorclass.py`).
+- gameplay_keep entries in the OoT XML have no explicit offsets (lengths only), so they resolve as `?` in the TSV; the
+  loader needs those offsets by another route (see open questions).
+
+##### Generic alternative to hard-coded offsets
+
+Actors reference their display lists either from pointer tables in the overlay's data section (e.g. Obj_Syokudai's
+`{gGoldenTorchDL, gTimedTorchDL, gWoodenTorchDL}`) or from `lui rX, 0x0600` + `addiu rX, rX, imm` pairs in code
+(segment addresses are not relocated). Scanning an overlay for both forms and keeping targets that parse as display lists
+in the actor's object finds the same offsets as the decomp XMLs: Obj_Syokudai (data table 0x3A0/0x870/0xB90), Obj_Bombiwa
+(0x9E0), Obj_Kibako2 (0x960, 0x1000), Bg_Haka (0x1B0, 0x2A8) in OoT US; Obj_Tokeidai (8 display lists), Bg_Lotus (0x40),
+Obj_Taru, Obj_Kibako2 (0x960, 0x1040) in MM US. **Verified** (ROM bytes; lead's scan script in this session). Actors
+whose object is chosen at run time (Obj_Tsubo: profile object gameplay_keep, draws from gameplay_dangeon_keep or
+object_tsubo) need the scan against the other candidate objects. The scan gives candidates, not the params rule, so a
+hand-written recipe table keyed by actor name remains necessary; the scan can supply per-version offsets for its entries.
+
+#### Mapping onto the viewer: Summary and module plan
+
+One loader family, `src/rom/zelda/`, serves the four retail/debug ROMs through structure-based detection; the alpha is a
+variant selected by hash. The existing viewer types cover almost everything; the display-list interpreter and the
+renderer need the most work.
+
+| module (proposed) | contents | depends on | difficulty |
+|---|---|---|---|
+| `zelda/fs.ts` | byte order, `zelda@` + dmadata, Yaz0, files by VROM | - | low |
+| `zelda/tables.ts` | `code` detection and VRAM; scene, object, actor overlay, entrance, map select tables | fs | low |
+| `zelda/names.ts` | scene names (OoT decomp enum names; MM titles decoded from messages + static names), sidebar groups, actor names | tables | low |
+| `zelda/scene.ts`, `room.ts` | header commands, alternate headers, mesh types 0/1/2, spawns, light and sky settings, sound settings | tables | low |
+| `displaylist.ts` changes | direct texture fetch, TLUT memory, F3DEX2 RDPHALF_1/BRANCH_Z, caller-supplied initial state, second texture and combiner per batch (*Changes `displaylist.ts` needs*) | - | medium |
+| `zelda/drawconfig.ts` | OoT 53 draw configs at frame 0 + day/night texture table finder; MM animated materials | scene | medium |
+| `zelda/env.ts`, `skybox.ts` | time-of-day light blend, sun direction, fog, zFar; OoT vr_* and MM d2 sky cubes | scene | low / medium |
+| `zelda/collision.ts` | collision and waterbox overlay meshes, bg cameras (start camera) | scene | low |
+| `zelda/prerender.ts` | JPEG backdrop + fixed camera for OoT image rooms (needs a JPEG decoder in the worker) | scene | medium-high |
+| `zelda/actors.ts` | placement parsing (OoT/MM encodings), markers, ~40 static recipes per game | scene, tables | medium |
+| `zelda/alpha.ts` | hash detection, static scene table, F3DEX, RGBA16 backgrounds, 12-byte waterboxes, alpha actor id map | scene, room | low (once retail exists) |
+| `music/zelda64.ts` | EAD driver variant for OoT and MM, tables by structure, SMALL_ADPCM, FIR/comb filters, spec reverbs | fs, tables | medium |
+| renderer | two-texture lerp, half-texel sampling offset for Zelda batches, optional point filter | types | medium |
+
+`types.ts` changes, all small:
+- `Game.id`: add `'oot'`, `'mm'`, `'ootalpha'`.
+- `Batch`: optional second texture (`texture1`, `uvs1`) and a mix mode/factor (or full combiner inputs) (*Scenes, rooms, display lists and environment*).
+- Optional: `LevelInfo.music?` (level -> track), `MusicTrack.group?`, a variant selector for layers/time of day
+  (`Level.variants?`) if sub-level entries in the list are not wanted, `Marker.yaw?`.
+
+Suggested order: fs/tables/names and the level list; rooms with the display-list changes (first visible result, with
+the second texture and half-texel fix in the renderer); environment and sky; draw configs; collision overlay; static
+actors and markers; music; prerendered backgrounds; the alpha.
+
+### 7.2 Supported features
+
+The Technical summary states the supported releases and principal decoded features.
+
+### 7.3 Approximations and omissions
+
+Viewer approximations are distinguished from facts about the game formats.
+
+## 8. Verification and remaining work
+
+### 8.1 Verification evidence
+
+#### Actors and objects: Verification by render
+
+Method: `scenes/actors.ts` reads room actor lists (per layer) and transition actors, decodes MM ids/rotations and the
+half-day mask; `scenes/inview.ts` lists the actors that project into a capture's view; `scenes/actordraw.ts` holds draw
+recipes transcribed from the actors' draw functions; `render.ts --actors` draws them with the actor's object as segment 6,
+gameplay_keep as segment 4, the scene's keep object (command 0x07) as segment 5, SETUPDL_25 state and the scene lights,
+matrix `T(pos + (0, yOffset·scale.y, 0)) · Ry · Rx · Rz · S(scale)` followed by the draw function's own matrices.
+Skeletal actors (NPCs, En_Box, En_Door, En_Akindonuts, ...) are left out. Object files by id from `fs/tables-{rom}.json`.
+
+| capture | static actors drawn (in view) | MAE all / best 75%, rooms only → with actors | render |
+|---|---|---|---|
+| MM US South Clock Town day 1 | Obj_Tokei_Turret base + top (the carnival tent with the red sign, left of the start view), Obj_Etcetera gold Deku flower | 14.25 / 2.60 → 13.25 / 2.55 | `scenes/renders/sbs-mm-us-south-clock-town-day-1-actors.png` |
+| MM US South Clock Town night | + Obj_Syokudai ×2 (night-only mask) with flames | 11.58 / 1.71 → 11.17 / 1.68 | `sbs-mm-us-south-clock-town-night-1-actors.png` |
+| MM dbg PAL South Clock Town day | as US day | 16.39 / 3.16 → 15.35 / 3.02 | `sbs-mm-dbgpal-south-clock-town-day-1.png` |
+| OoT US Kokiri Forest balcony | En_Kanban (sign below the ladder) | 8.89 / 3.16 → 8.83 / 3.04 | `sbs-oot-us10-kokiri-forest-1-actors.png` |
+| OoT US Kakariko gate, day | Bg_Spot01_Fusya (windmill sails; rot.z set to 0x2000 to match the animation phase) | 11.08 / 3.05 → 10.65 / 3.02 | `sbs-oot-us10-kakariko-village-1-actors.png` |
+| OoT US Kakariko gate, midnight (layer 1) | same, rot.z 0 (the screenshot has another sails phase); the street lamp at the left edge (night layer) has no recipe | 6.91 / 1.93 → 6.80 / 1.87 | `sbs-oot-us10-kakariko-village-night-1.png` |
+
+Identification: the tent/stall left of the SCT start view is **Obj_Tokei_Turret** (room 0 actors 20-26, all at
+(−290, y, 160)): params & 3 = 0 base (`gClockTownTurretPlatformBaseDL` 0x2508), 1 top (`…PlatformTopDL` 0x2A88), 2 flags
+(`gClockTownFlagsDL` 0x3038); the seven instances stack the carnival tower by half-day (y 0/80/160/240): on day 1 daytime
+only base@0 (mask 0xFC) and top@80 (mask 0xC0) pass, which is exactly the tent in the screenshot.
+
+Findings on the actor recipes (*Where actors come from*-6.4):
+
+| claim | result |
+|---|---|
+| draw transform `T(pos + (0, yOffset·scale.y, 0)) · Ry · Rx · Rz · S(scale)` | **confirmed** by render: tent, flower, torches, KF sign and Kakariko sails land exactly on the screenshot; `Matrix_SetTranslateRotateYXZ` rotation sense = x' = x cos + z sin (checked in `sys_matrix.c`) |
+| extra draw-function matrices (En_Kanban `T(0,0,−100)`, Obj_Syokudai flame `T(0,52,0)·RY(camYaw − rot.y + 0x8000)·S(0.0027)`) | **confirmed** (sign plank and flames at the right place) |
+| scales (turret 0.1, Deku flower 0.01 with scale.y 0.02, torch 1.0, En_Kanban 0.01) | **confirmed** |
+| En_Kanban init lowers a child's sign by 15 (`world.pos.y −= 15`) | needed for the match (now in the recipe table) |
+| En_Kanban draws `gSignRectangularDL` (gameplay_keep, offset unknown in the OoT XML) | equivalent: object_kanban material 0xC30 followed by the 11 parts 0xCB0…0x1540 in one pass (the material list only sets state; drawing it separately gives no textures) |
+| MM half-day mask `((rot.x & 7) << 7) \| (rot.z & 0x7F)`, day-1-day bit 0x80 | **confirmed**: day render shows 2 of 7 turret parts and no torches, night render (bit 0x40) shows the torches (mask 0x155), both matching the screenshots |
+| MM rotation in degrees (`(rot >> 7) & 0x1FF`) | consistent (flower yaw 90°) but not a strong test: the actors in the captured views are near-symmetric; the transition door (225°) is skeletal |
+| Obj_Etcetera type `(params & 0xFF80) >> 7`, types 0/1 pink 0xED80, 2/3 gold 0x11BD0 in gameplay_keep | **confirmed**: SCT params 0x017F → type 2 → gold flower, as in the screenshot |
+| Obj_Syokudai type `params >> 12` → {0x3A0, 0xB90, 0x870}; flame gameplay_keep 0x7D590 (MM US) | **confirmed** (type 2 wooden torch) |
+| DL offsets for object_tokei_turret, object_kanban, object_spot01_objects (0x100 sails), gameplay_keep (MM flower, flame) | **confirmed** by render; MM dbg PAL uses the same offsets for these objects |
+| Bg_Spot01_Fusya: static sails DL, rot.z animated | **confirmed**; phase matters visually (0 vs 0x2000) |
+| which actors matter | the set pieces: Obj_Tokei_Turret (tent), Obj_Syokudai at night (bright flames), Bg_Spot01_Fusya (windmill against the sky); signs, pots, bushes, crates are small or hidden by walls in these views; the largest remaining actor errors are skeletal (Link, NPCs, the Deku Scrub, the gate guard, Kakariko's carpenters) |
+
+Not tested by the captures: OoT Obj_Tsubo/Obj_Kibako2/En_Kusa/En_Ishi/Bg_Spot01_Idohashira recipes are drawn in Kakariko
+but hidden behind the gate walls from the capture camera (they produce geometry; placement unverified).
+
+Viewer notes: actors are instances with the formula above; lists that only set material state must be concatenated with
+the lists they prepare; half-day filtering (MM) is required or night-only torches and later-day tent tiers appear.
+
+#### Music: Verification against captured game audio
+
+**Captures** (made by the lead): mupen64plus with rsp-hle and the audio-dump plugin, AI at 32006 Hz, stereo
+big-endian PCM plus per-buffer log and a timestamped segment log: `cap/mm-us/` (boot, title, file select, new-game
+intro, South Clock Town day and night, Termina Field, Woodfall Temple), `cap/mm-us-tf/` (Termina Field entered on foot, layer 0), `cap/oot-us10/` (title, file select,
+intro, Inside the Deku Tree, Kakariko Village child, Lake Hylia). Loudness timelines: `out/captimeline_{rom}.txt`
+(`scripts/captimeline.py`).
+
+**Method** (`scripts/compare.py`): capture span resampled 32006 → 32000 Hz; render offset chosen by the best NCC of
+20 ms log-loudness envelopes; time stretch from the offsets of the first and last thirds (resolution ≈ ±0.0006 for
+55 s); Welch log-magnitude spectrum correlation (40 Hz–12 kHz); 12-bin chroma correlation at 0 semitones (and the
+best other shift); waveform NCC over the loudest 1 s after ±40 ms sample alignment. Renders use the scene's spec
+and the game's IO (*Special sequences and game IO (doc: OoT `src/audio/game/general.c`, MM `src/audio/code_8019AF00.c`; renders verified where stated)*), stereo mode.
+
+| capture span (raw byte / time) | render | env NCC | stretch | RMS cap / render (dBFS) | spectrum | chroma 0 (other) | wave NCC | result |
+|---|---|---|---|---|---|---|---|---|
+| MM file select 18945472 / 148.0 s, 40 s | 24 / spec 10 / io7=1 | 0.984 | 1.000 | −33.18 / −33.13 | 0.9987 | 0.9993 (0.35) | 0.717 | match |
+| MM Woodfall Temple 124500000 / 972.5 s, 55 s | 28 / 3 | 0.972 | 0.9995 | −20.64 / −20.64 | 0.9867 | 1.000 (0.40) | 0.943 | match |
+| MM title logo 11000000 / 85.9 s, 35 s | 118 / 0 | 0.997 | 1.000 | −26.07 / −26.03 | 0.9990 | 0.9994 (0.63) | 0.643 | match |
+| MM after boot 3500000 / 27.3 s, 18 s | 118 / 0 (offset 0.46 s) | 0.995 | 1.000 | −28.04 / −28.08 | 0.9991 | 0.9987 (0.47) | 0.489 | match: 118 starts 26.9 s after boot |
+| MM South Clock Town day 1 42435136 / 331.5 s, 58 s | 21 / 1 / io4=0 | 0.764 | 0.9995 | −23.29 / −24.39 | 0.9504 | 0.972 (0.52) | 0.631 | match with dialogue/SFX/ambience in the capture |
+| OoT title 1837056 / 14.3 s, 60 s | 30 / 10 | 0.822 | 0.9995 | −22.58 / −23.25 | 0.9362 | 0.9991 (0.38) | 0.891 | match (title demo SFX in capture) |
+| OoT file select 10652736 / 83.2 s, 45 s | 87→40 / 10 / io7=1 | 0.973 | 1.000 | −33.05 / −33.04 | 0.9987 | 0.9999 (0.39) | 0.889 | match |
+| OoT Inside the Deku Tree 26400000 / 206.2 s, 55 s | 28 / 3 | 0.940 | 0.9989 | −23.94 / −23.73 | 0.9984 | 0.9968 (0.28) | 0.900 | match |
+| OoT Kakariko child 40400000 / 315.6 s, 55 s | 39 / 1 | 0.935 | 0.9995 | −28.15 / −28.62 | 0.855 | 0.9991 (0.33) | 0.595 | match with nature ambience in the capture |
+| OoT Market Entrance day 75600000 / 590.5 s, 45 s | 29 / 0 | 0.908 | 1.000 | −29.92 / −24.46 | 0.9839 | 0.943 (0.26) | 0.276 | tune/tempo match, game 5.5 dB quieter |
+| same span | 29 / 0, fadeVolumeScale 90/127 (value from RAM `me1.bin`) | 0.908 | 1.000 | −29.92 / −30.45 | 0.9838 | 0.943 (0.26) | 0.276 | match (level within 0.5 dB); crowd/ambience in capture |
+| OoT Market Entrance later 78300000 / 611.6 s, 28 s | 29 / 0, fadeVolumeScale 90/127 | 0.898 | 1.000 | −30.81 / −31.06 | 0.9833 | 0.9973 (0.24) | 0.547 | match |
+| OoT Link's house 90500000 / 706.9 s, 35 s | 31 / 5 | 0.942 | 1.000 | −26.19 / −26.83 | 0.9852 | 0.9845 (0.28) | 0.548 | match |
+| OoT Lake Hylia 52900000 / 413.2 s, 30 s | 2 / 2 / io2=0 | 0.317 | – | −24.27 / −23.44 | 0.9542 | 0.714 (0.61) | 0.063 | same instruments and level; the field logic picks random parts, so not note-identical (expected) |
+| MM Termina Field 73676096 and 99000000, 58–80 s (first session) | 2 / 1 | 0.07–0.23 | – | −41.4 / −21.7 | – | – | – | no field music in that capture: the warp loaded Termina Field in layer 5 (the first cycle before the ocarina is recovered), whose header plays the ambience sequence 1 instead of field music (*Majora's Mask (US; debug PAL identical except 0 and 43)*: AMBIENCE, 00KEIKOKU alt5); RAM dumps `runs/lead-mmus-1/tf1*.bin` hold 29 and 21, not 2 |
+| MM Termina Field `cap/mm-us-tf/audio.raw` 37837696 / 295.6 s, 45 s (second session: walked out of South Clock Town's south gate, layer 0, 09:17) | 2 / 1 | 0.904 | 0.9993 | −21.08 / −21.12 | 0.9953 | 0.9984 (0.27) | 0.639 | **match**; RAM dump `runs/lead-mmus-2/tfm.bin` holds sequence 2 (lead's check, same method) |
+| MM boot 8.3–22.3 s | all sequences 1–127 (`scripts/idmatch.py` → `out/idmatch_mm-boot-demo.txt`) | best 0.46 | – | −19.9 | – | best 0.73 (seq 105) | – | **no sequence matches** (open question) |
+
+**RAM cross-check** (verified: lead's RAM dumps; each sequence found by its first 64 bytes, the player by the
+pointer to it at `SequencePlayer + 0x18`, layout doc `include/audio.h`):
+- MM (`runs/lead-mmus-1/*.bin`): the audio heap holds 118 during the new-game intro, 29 + 21 in South Clock Town day
+  and night, 28 in Woodfall Temple, and 24 (file select) everywhere after the file select; no 2 in the first session's Termina
+  Field dumps (layer 5), sequence 2 in the second session's `runs/lead-mmus-2/tfm.bin` (layer 0).
+- OoT US 1.0 (`runs/lead-ootus-1/*.bin`): `gAudioCtx.seqPlayers[0]` (BGM main) is at RAM **0x80128B60**; sequence data
+  at 0x801C0BD0. Player fields per dump:
+
+  | dump (scene) | seqId | tempo (BPM) | fadeVolume | fadeVolumeScale | io[0..7] |
+  |---|---|---|---|---|---|
+  | `dt1.bin` (Inside the Deku Tree) | 28 | 50 | 0.5512 (70/127) | 1.0 | all −1 |
+  | `kv1.bin` (Kakariko, child) | 39 | 100 | 0.5512 | 1.0 | −1 −1 2 5 −1 −1 −1 −1 |
+  | `lh3.bin` (Lake Hylia) | 2 | 137 | 0.5118 (65/127) | 1.0 | 0 −1 2 2 2 0 0 21 |
+  | `me1.bin` (Market Entrance day) | 29 | 146 | 0.5118 | **0.7087 (90/127)** | 0 −1 2 2 2 2 0 −1 |
+  | `lk1.bin` (Link's house) | 31 | 147 | 0.5118 | 1.0 | −1 −1 2 −1 −1 −1 −1 −1 |
+
+  fadeVolume and tempo are the values the sequences set themselves (renders reach the same); the field logic's
+  io 7 = 21 is the last part it loaded (NA_BGM_FIELD_STILL_2), io 2 = 2 is the sequence mode written by the game.
+
+**Fixes made while verifying:** none of the renderer's audio behaviour had to change to match the captures (the
+first renders matched). The Market Entrance level difference was traced to the game's BGM volume scale (RAM), not
+the renderer; `--volscale` reproduces it. Bugs fixed during bring-up (before the comparisons): LDFILTER must read the coefficients
+already stored in the sequence; RUNSEQ restarting the own player (MM Clock Town, credits); a name clash in the
+engine. The render scan's 420 s limit was too short for the Water Temple (143 s loop after 154 s).
+
+**What the numbers show:** pitch and instrument choice are right (chroma at 0 semitones ≥ 0.997 while other shifts
+stay ≤ 0.63); tempo is right to the method's resolution (so `maxTempo` 10770 and 3 updates per frame hold for both
+games); levels are right to 0.05 dB where only music plays, which also checks the doubled reverb send, the 0x7FFF
+reverb return and the spec 10 low-pass reverb with rsp-hle's coefficient averaging (file selects); waveform NCC
+0.64–0.94 shows sample-level agreement is close but not exact (the game's AI buffer lengths vary 510–544 samples per
+task, which shifts note starts by up to one update relative to the render).
+
+#### Verification evidence: Runtime captures
+
+All sessions used the headless mupen64plus described in `EMULATOR.md` (debug core for RAM access,
+rsp-hle, software rendering), one run directory each. Each reference capture is a 320x240 screenshot plus a sidecar with
+RAM values read by `env/zram.py` (scene, layer, room, time, player, View eye/at/fovy/zNear/zFar, light context, skybox),
+and an 8 MB RAM dump in the run directory. Warps were done by RAM pokes on the SaveContext/PlayState fields named in
+`env/EMU-BRIEF.txt`; the exact input sequences are in the `env/emu-*-notes.txt` files. Two traps for repeat
+captures: in OoT the sky and time-based lights follow `skyboxTime` (SaveContext + 0x141A), which only moves forward, so
+a warp back to noon must write it too; in both games the clock keeps running during loads and camera settling, so each
+sidecar records the time at the dump, not the poked time.
+
+| session | ROM | captures (`ref/{rom}/`) | audio (`music/cap/`) | addresses verified |
+|---|---|---|---|---|
+| env-1 (first round) | OoT US 1.0 | kokiri-forest-1, hyrule-field-1 | - | PlayState 0x801C84A0, SaveContext 0x8011A5D0 |
+| env-2 (first round) | OoT MQ debug | deku-tree-mq-1, hyrule-field-1 (via the map select) | - | PlayState 0x80212020, SaveContext 0x8015E660 |
+| lead-ootus-1 | OoT US 1.0 | deku-tree-1, kakariko-village-1, lake-hylia-1, market-entrance-1 (prerendered background, fixed camera setting 25), links-house-1 (pivot camera, 3D room), kakariko-village-night-1 (layer 1), hyrule-field-dusk-1 (sky blend 1→2); Hyrule Field at night skipped (enemies attack at the spawn) | `oot-us10/`: title, file select, Deku Tree, Kakariko child, Lake Hylia, Market Entrance, Link's house, Hyrule Field night, game over, Kakariko night, Hyrule Field dusk; 140.7 MB at 32006 Hz with segment log | PlayState 0x801C84A0, SaveContext 0x8011A5D0 (re-verified) |
+
+#### Open questions and hypotheses
+
+Cross-area items first, then the open questions of each area.
+
+- **Texture memory in `displaylist.ts`:** both the scenes and the alpha work found that the 4 KB tile-memory emulation
+  mis-decodes Zelda textures (retail: textures above 4 KB; alpha: 5 of 1,554 textures of at most 4 KB, mechanism not
+  traced). The direct image fetch fixes both; whether other games in the viewer rely on the tile-memory behaviour
+  should be checked before changing the default (keep it behind an option).
+- **Actors in renders:** the transform, scales, half-day filtering and the set pieces in the captured views are verified
+  by render (*Verification by render*); MM degree rotations and most small props were not in a view that tests them (*Actors*).
+- **Naming:** OoT area names are title-card textures, not text; MM debug PAL's message table layout was not located.
+  English names for untitled scenes are documented or proposed names.
+- **Time-of-day variants:** dawn, dusk and night lights, skies and draw-config night lists are implemented from the
+  decomps; night/dusk captures exist only where *Verification evidence* lists them.
+- **Alpha:** no comparison with Spaceworld 1997 footage; several scene names are the sw97 project's guesses (*Open questions*).
+
+### 8.2 Known unknowns
+
+Unresolved semantics are labelled **Hypothesis** or **Open question** where they occur.
+
+### 8.3 References
+
+External documentation, decompositions, and source archives are cited inline where used.
