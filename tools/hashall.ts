@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { Game } from '../src/rom/types';
+import { prepareGame } from './assets';
 import { parseJobArguments, runRomJobs } from './jobs';
 import { romPaths } from './roms';
 
@@ -29,6 +30,7 @@ if (!jobArgs.workerRom && jobArgs.jobs > 1 && roms.length > 1) {
 
 for (const rom of roms) {
   const game = openRom(new Uint8Array(readFileSync(rom)));
+  await prepareGame(game, src ?? undefined);
   const h = createHash('sha1');
   for (const info of game.levels) {
     const level = game.loadLevel(info.index);

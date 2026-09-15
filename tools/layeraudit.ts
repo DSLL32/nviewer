@@ -4,6 +4,7 @@
 // Exits 1 if any level has drawable instances outside every layer, or a game has no collision layer.
 import { readFileSync } from 'node:fs';
 import { openRom } from '../src/rom';
+import { prepareGame } from './assets';
 import { parseJobArguments, runRomJobs } from './jobs';
 import { romPaths } from './roms';
 
@@ -21,6 +22,7 @@ let failed = false;
 
 for (const rom of roms) {
   const game = openRom(new Uint8Array(readFileSync(rom)));
+  await prepareGame(game);
   const step = sample ? Math.max(1, Math.floor(game.levels.length / 8)) : 1;
   let checked = 0, withCollision = 0;
   const loose: string[] = [];

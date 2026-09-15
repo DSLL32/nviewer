@@ -1,9 +1,10 @@
-// Bundle the viewer into one self-contained HTML file that runs from the filesystem (no server, no sibling files):
+// Bundle the viewer into one self-contained HTML file that runs from the filesystem (no required sibling files):
 //   npm run build:single   ->   dist/nviewer.html
 //
 // Vite builds the app in memory (no separate files), with every asset inlined and the parser worker embedded through
 // `?worker&inline`. The script and the stylesheet are then written into the HTML itself. The worker is compiled as a
-// classic script: a file:// page may start a blob worker, but not a module one.
+// classic script: a file:// page may start a blob worker, but not a module one. Optional static game packages are
+// deliberately not embedded; their failed preparation is non-fatal, leaving each retail ROM usable.
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

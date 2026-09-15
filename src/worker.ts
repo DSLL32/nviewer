@@ -25,6 +25,35 @@ function open(bytes: ArrayBuffer): { game: Game; ms: number } {
   return { game, ms: performance.now() - t0 };
 }
 
+function staticAssetUrl(path: string): URL {
+  // Game implementations provide repository-relative public/ paths. Keep them inside the deployed Vite base rather
+  // than letting an accidental leading slash or .. select something else on the host.
+  if (!path || path.startsWith('/') || path.includes('\\') || path.split('/').some((part) => part === '' || part === '.' || part === '..')) {
+    throw new Error(`Invalid static asset path ${JSON.stringify(path)}`);
+  }
+  // The parser worker is inlined as a blob, so its own URL cannot resolve relative assets. Blob workers created by
+  // an HTTP(S) page retain that page's origin; Vite supplies the deployment path (including a GitHub Pages prefix).
+  // A file:// single-file build has origin "null" and intentionally cannot fetch optional sibling assets.
+  if (self.location.origin === 'null') throw new Error('Optional static assets are unavailable in the file:// build');
+  const base = new URL(import.meta.env.BASE_URL, `${self.location.origin}/`);
+  return new URL(path, base);
+}
+
+async function prepare(game: Game): Promise<void> {
+  if (!game.prepare) return;
+  try {
+    await game.prepare(async (path) => {
+      const response = await fetch(staticAssetUrl(path));
+      if (!response.ok) throw new Error(`${path}: HTTP ${response.status} ${response.statusText}`.trim());
+      return new Uint8Array(await response.arrayBuffer());
+    });
+  } catch (err) {
+    // Optional data must never make the retail ROM unusable. The game may keep unavailable optional levels in its
+    // metadata so the sidebar can explain their load error, while its retail levels continue to work.
+    console.warn(`Could not prepare optional assets for ${game.title}:`, err);
+  }
+}
+
 function summary(g: OpenGame, ms: number): RomSummary {
   const { game } = g;
   return {
@@ -51,6 +80,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
         post({ type: 'rom', id: req.id, ok: false, error: errorText(err) });
         return;
       }
+      await prepare(result.game);
       // A ROM of a game that is already open replaces it.
       const entry: OpenGame = { game: result.game, buffers: [req.bytes], size: req.bytes.byteLength, name: req.name, persisted: true };
       games.set(result.game.id, entry);
@@ -100,6 +130,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
           errors.push(`Cached ROM "${c.name}" could not be opened: ${errorText(err)}`);
           continue;
         }
+        await prepare(result.game);
         const id = result.game.id;
         if (isLegacyCacheKey(c.key) || c.key !== cacheKeyForGame(id)) {
           // Migrate to the per-game key unless that game was already restored from its own entry.

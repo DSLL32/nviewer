@@ -4,9 +4,11 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
 import { openRom, type Level } from '../src/rom';
+import { prepareGame } from './assets';
 
 const [romPath, sheetDir] = process.argv.slice(2);
 const game = openRom(new Uint8Array(readFileSync(romPath)));
+await prepareGame(game);
 console.log(game.title);
 if (sheetDir) mkdirSync(sheetDir, { recursive: true });
 

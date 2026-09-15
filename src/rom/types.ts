@@ -255,11 +255,16 @@ export interface DecodedMusic {
   loopEnd?: number;
 }
 
+// Optional static data that belongs to a game but is intentionally not bundled with the viewer. The worker supplies
+// the bytes from the deployed site; command-line checks supply the same committed asset from public/.
+export type StaticAssetLoader = (path: string) => Promise<Uint8Array>;
+
 // A loaded ROM of one supported game.
 export interface Game {
   id: 'rush2049' | 'rush1' | 'bm64' | 'bm64sa' | 'bmhero' | 'battletanx' | 'battletanxga' | 'gex64' | 'gex3' | 'yoshistory' | 'sf64' | 'goldeneye' | 'perfectdark' | 'oot' | 'mm' | 'oot-alpha' | 'pilotwings64' | 'pokemonsnap' | 'offroadchallenge' | 'airboarder64' | 'bugslife' | 'spiderman' | 'mk64' | 'zelda-source';
   title: string;
   levels: LevelInfo[];
+  prepare?(loadAsset: StaticAssetLoader): Promise<void>;
   loadLevel(index: number): Level;
   music?: MusicTrack[];
   decodeMusic?(index: number): DecodedMusic;

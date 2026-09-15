@@ -4,6 +4,7 @@
 // usage: npx tsx tools/transfer.ts [rom name filter ...] [--jobs N]
 import { readFileSync } from 'node:fs';
 import { openRom } from '../src/rom';
+import { prepareGame } from './assets';
 import { parseJobArguments, runRomJobs } from './jobs';
 import { romPaths } from './roms';
 
@@ -33,6 +34,7 @@ if (!jobArgs.workerRom && jobArgs.jobs > 1 && roms.length > 1) {
 for (const rom of roms) {
   const bytes = new Uint8Array(readFileSync(rom));
   const game = openRom(bytes);
+  await prepareGame(game);
   let loads = 0;
   for (let pass = 0; pass < 2; pass++) {
     for (const info of game.levels) {
