@@ -3,6 +3,7 @@ import type { Game, LevelInfo } from '../types';
 import { mk64Music } from '../music/mk64';
 import { COURSES, detectLayout, romHeader } from './fs';
 import { loadCourseLevel } from './level';
+import { decodeTownPackage, loadTownLevel, TOWN_ASSET_PATH, type TownPackage } from './town';
 
 export function openMarioKart64(rom: Uint8Array): Game {
   const header = romHeader(rom);
@@ -28,14 +29,36 @@ export function openMarioKart64(rom: Uint8Array): Game {
     group: course.kind === 'race' ? course.cup : course.kind === 'battle' ? 'Battle' : 'Other',
     };
   });
+  const townIndex = levels.length;
+  levels.push({ index: townIndex, name: 'Town', kind: 'other', group: 'Source Archive' });
+  let town: TownPackage | null = null;
+  let townError: Error | null = null;
+  let townPrepare: Promise<void> | null = null;
   const music = mk64Music(rom);
   return {
     id: 'mk64',
     title: 'Mario Kart 64',
     levels,
+    prepare(loadAsset) {
+      if (!townPrepare) townPrepare = (async () => {
+        try {
+          town = await decodeTownPackage(await loadAsset(TOWN_ASSET_PATH));
+          townError = null;
+        } catch (error) {
+          town = null;
+          townError = error instanceof Error ? error : new Error(String(error));
+        }
+      })();
+      return townPrepare;
+    },
     loadLevel(index) {
       if (!Number.isInteger(index) || index < 0 || index >= levels.length)
         throw new Error(`invalid Mario Kart 64 level ${index}`);
+      if (index === townIndex) {
+        if (town) return loadTownLevel(town, levels[index]);
+        if (townError) throw new Error(`TOWN source-archive package is unavailable: ${townError.message}`, { cause: townError });
+        throw new Error('TOWN source-archive package is unavailable: Mario Kart 64 assets have not been prepared');
+      }
       const loaded = loadCourseLevel(rom, layout, courseIds[index]);
       loaded.level.info = levels[index];
       return loaded.level;

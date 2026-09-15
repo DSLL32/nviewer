@@ -111,6 +111,7 @@ Z shows or hides collision · Shift+F collision wireframe · the View panel can 
     - `fs.ts`, `courses.ts`: structural course-table discovery, MIO0 resources, packed F3DEX lists and draw recipes
     - `level.ts`, `collision.ts`, `objects.ts`, `environment.ts`: 20 courses and the award ceremony, course geometry,
       collision surfaces, object markers and decoded static actors, continuous course-path overlays, start markers, skies and fog
+    - `town.ts`: optional source-archive TOWN static art, loaded from the committed gzip package only for Mario Kart 64
   - `spiderman/`: Spider-Man (USA; format notes in `docs/SPIDERMAN.md`)
     - `fs.ts`: ERZ2 decompression and the eight-group master directory; `model.ts`, `texture.ts`: model shells,
       native render banks and the global texture dictionary

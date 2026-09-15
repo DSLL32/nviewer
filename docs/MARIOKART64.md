@@ -1383,6 +1383,75 @@ texture streams survive; two stale texture-size entries are recoverable. It is n
 course-table/draw slot, collision classifications, placements, environment, camera or dedicated music survives, and
 its two 296-entry route arrays are renamed copies of Luigi Raceway's paths.
 
+#### 14.9.1 TOWN archive payloads
+
+Unlike the retail course resources described in §3, TOWN survives as generated C arrays and symbol/address metadata,
+not as a block inside any released ROM. The relevant July 1996 files are self-contained for static rendering:
+
+| archive input | representation | decoded use |
+|---|---|---|
+| `map/TOWN_pk.c:TOWN_VERTEX` | one MIO0 stream | 79,786 bytes = 5,699 packed 14-byte `CourseVtx` records; each expands by the normal MK64 rule to a 16-byte segment-4 `Vtx` |
+| `map/TOWN_pk.c:TOWN_GFX` | 15,429-byte, `0xFF`-terminated packed command stream | 68,720 bytes of segment-7 F3DEX commands; `TOWN.h` records 68,712 bytes before the unpacker's final eight-byte `G_ENDDL` |
+| `map/TOWN_pk.c:TOWN_MATERIAL` | 11 records of six bytes | ambient RGB followed by directional-light RGB; the course loader supplies the engine's archived `(0,120,0)` light direction |
+| `map/TOWN_info.c` plus `image/*_txt.c` | 73 named MIO0 texture streams | 223,232 decoded bytes concatenated in manifest order as segment 5 |
+
+All 73 texture streams decode to their declared output sizes. Two compressed-size fields in `TOWN_info.c` are stale:
+`renga4_pk` is 540 bytes rather than 294 and `green_pk` is 1,502 rather than 1,111. The package generator reads the
+complete C arrays and validates their MIO0 output sizes, so it does not truncate either stream or repair texture data.
+The model reaches 72 of the 73 resulting segment-5 offsets; `te_pk` is retained in the package but neither full-model
+root references it. **Leak-supported; mechanically validated by `tools/mk64-town-package.ts`.**
+
+#### 14.9.2 July packed display-list variant
+
+TOWN predates the October 1996 F3DEX/32-slot packed format used by the retail courses. Its command framing, texture
+commands, display-list calls and 5-bit packed triangle indices are otherwise the same, but vertex loads target only
+cache slots 0--15 and encode a full-to-end load with the value `1`:
+
+| packed record | arguments after opcode | July interpretation |
+|---|---|---|
+| general vertex load `0x28` | `sourceLo, sourceHi, encodedCount, v0` | `source = sourceLo | sourceHi << 8`; if `encodedCount == 1`, `n = 16 - v0`, otherwise `n = encodedCount`; load source vertices `[source, source+n)` into cache slots `[v0, v0+n)` |
+| compact vertex load `0x33` | `sourceLo, sourceHi` | the `v0=0`, 16-vertex sentinel |
+| compact vertex loads `0x34`--`0x3B` | `sourceLo, sourceHi` | `v0=0`, literal `n = opcode - 0x32` (2--9 vertices) |
+
+The conversion emits an ordinary F3DEX `G_VTX` targeting segment 4 at `source * 16`; it does not change a source
+index, cache destination or triangle index. Across both roots, the stream contains 705 loads: 70 general sentinels,
+37 general literal loads, 235 compact sentinels and 363 compact literal loads. Executing the converted lists through
+a 16-slot cache reaches all 2,817 archived triangles with no uninitialised reference, source overrun or cache overrun.
+The roots are `TOWN_grp_ALLT = 0x07002C18` (332 cutout/translucent triangles) and
+`TOWN_model = 0x07010C60` (2,485 opaque triangles).
+
+The later surviving `memory.c` decoder treats every general count literally and maps compact `0x33` to one vertex, so
+it cannot by itself decode this earlier stream. The count-1 sentinel is established by the complete TOWN stream: the
+literal interpretation corrupts cache provenance and produces cross-surface triangles, while the sentinel/literal
+split preserves local surfaces at every reported camera; treating every value as a complemented endpoint corrupts
+the values 2 and above. These comparisons are diagnostics for determining the old encoding, not edits to the model.
+No vertex, source pointer, cache destination, triangle or texture is adjusted by the generator. **Leak-supported;
+verified by complete-stream execution, deterministic package generation, and report-camera renders 0053--0065.**
+
+#### 14.9.3 Viewer package and presentation
+
+There is no separate TOWN collision payload: `TOWNDATA.c` only includes the texture table, `TOWN.h` declares only the
+packed visual model/material/texture data, and no TOWN `TrackSections`, surface records, section display-list table or
+retail 16-byte collision vertices are referenced by the surviving integration code. The visible 14-byte source
+vertices and display lists could only be used to invent an unclassified collision mesh, so the viewer does not do so.
+
+The viewer exposes `Town` after the retail courses and award ceremony (the archive's internal name remains `TOWN`). It fetches the optional, deterministic
+gzip-9 package `public/assets/mk64-town.bin.gz` only while a Mario Kart 64 ROM is active. The versioned package holds
+only TOWN's 5,699 decoded source vertices, expanded F3DEX display-list bytes, 73 decoded texture streams and the model's
+66-byte, 11-entry light-material table; it deliberately
+omits the copied Luigi Raceway routes, minimap, common/retail data, collision, objects, environment and music. The
+opaque `TOWN_model` and cutout/translucent `TOWN_grp_ALLT` roots are separate toggleable layers. The empty hidden
+`collision (not recovered)` layer and bounds-framed viewer camera state explicitly reflect what the archive lacks.
+No recovered TOWN environment is claimed: by user choice, the viewer uses Luigi Raceway's sky gradient and clear colour
+as an explicitly labelled presentation fallback, not as archival evidence. Asset fetch or validation failure leaves every retail course usable and
+is reported only when TOWN is selected. `tools/mk64-town-package.ts` regenerates and validates the package from the
+Kimura source snapshot using the format above. It verifies every load against the 16-slot cache and 5,699-entry source
+array, executes both roots with no uninitialized cache references, preserves all 2,817 triangles and the archived
+display-list offsets, and contains no geometry-scoring or report-specific repair. The viewer applies all 11
+archived material changes with their recovered `+Y` light direction through the shared F3DEX lighting path and exposes
+the resulting per-material shading as an interactive lighting preset; its CPU shading remains an approximation of RSP
+fixed-point lighting.
+
 The archives also retain self-contained earlier visual revisions of Mario Raceway, Banshee Boardwalk, Yoshi Valley
 and Rainbow Road without matching gameplay data; smaller old recipes/metadata; an orphan Mario Raceway route with a
 likely erroneous `z=7680` point; and an incomplete loose `dokan` pipe model. Every archived packed `KT1`--`KT20`
