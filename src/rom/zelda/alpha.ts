@@ -1,6 +1,7 @@
-// The Ocarina of Time prototype (late 1997) in the upper half of an F-Zero X development cartridge (docs/ZELDA64.md §11).
+// The Ocarina of Time prototype (late 1997) in the upper half of an F-Zero X development cartridge
+// (docs/OCARINA_OF_TIME_1997_PROTOTYPE.md).
 // No build string, file table, code, objects, skies or audio survive: 52 scenes (each scene file followed by its rooms)
-// lie raw at 0x10FA150-0x19A4470. Identified by the whole file's MD5. Same header, mesh and collision formats as
+// lie raw at 0x10FA150-0x19A4470. Identified by a complete-image hash. Same header, mesh and collision formats as
 // retail OoT with these differences: F3DEX 1.x display lists, raw RGBA16 prerendered backgrounds, 12-byte waterboxes,
 // alpha actor ids, and lost draw configs (dynamic segments 7-0xD) and keep objects.
 import { buildLevel, fogPosition } from '../bomberman/common';
@@ -436,7 +437,7 @@ function loadAlphaLevel(rom: Uint8Array, def: AlphaDef, info: LevelInfo): Level 
       const { name: an, retail: rid } = alphaActorName(e.rawId);
       markers.push({
         label: `${an} ${hex(e.params)}`, position: e.pos, layer: layer(groupOf(an), 'markers', false),
-        info: { actor: an, alphaId: hex(e.rawId), retailId: rid >= 0 ? hex(rid) : 'none (alpha only)', idMapping: 'derived (docs/ZELDA64.md §11.5)', params: hex(e.params), room: r!.index, record: `room ${hex(r!.start + e.at)}`, rotation: e.rot.map(hex).join(' ') },
+        info: { actor: an, alphaId: hex(e.rawId), retailId: rid >= 0 ? hex(rid) : 'none (alpha only)', idMapping: 'derived (docs/OCARINA_OF_TIME_1997_PROTOTYPE.md)', params: hex(e.params), room: r!.index, record: `room ${hex(r!.start + e.at)}`, rotation: e.rot.map(hex).join(' ') },
       });
     }
   }

@@ -1,4 +1,4 @@
-// Collision and waterbox overlays (docs/ZELDA64.md §5.5) and the floor below a point, for the start camera.
+// Collision and waterbox overlays (docs/OCARINA_OF_TIME.md and docs/MAJORAS_MASK.md) and the floor below a point, for the start camera.
 import type { Batch } from '../types';
 import type { Collision } from './scene';
 

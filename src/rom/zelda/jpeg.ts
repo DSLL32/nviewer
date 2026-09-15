@@ -1,5 +1,5 @@
 // Baseline JPEG decoding (Huffman, 8-bit, any sampling factors, restart markers) for Ocarina of Time's prerendered
-// room backgrounds (docs/ZELDA64.md §5.2.1: 320x240 JFIF, 4:2:0 or 4:2:2). Output RGBA8, alpha 255.
+// room backgrounds (docs/OCARINA_OF_TIME.md: 320x240 JFIF, 4:2:0 or 4:2:2). Output RGBA8, alpha 255.
 
 const ZIGZAG = [
   0, 1, 8, 16, 9, 2, 3, 10, 17, 24, 32, 25, 18, 11, 4, 5, 12, 19, 26, 33, 40, 48, 41, 34, 27, 20, 13, 6, 7, 14, 21, 28,

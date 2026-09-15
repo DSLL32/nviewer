@@ -84,7 +84,7 @@ export interface DisplayListContext {
   // Added to every vertex position before scaling (GoldenEye's room position).
   vertexOffset?: [number, number, number];
 
-  // Zelda 64 (docs/ZELDA64.md §5.3.3): textures are the whole images G_SETTIMG points at instead of the 4 KB RDP texture
+  // Zelda 64 (docs/OCARINA_OF_TIME.md and docs/MAJORAS_MASK.md): textures are the whole images G_SETTIMG points at instead of the 4 KB RDP texture
   // memory. The G_SETTILE of render tile 0 or 1 after a G_LOADBLOCK shows that load's image with its format, wrap and
   // shifts; the first G_SETTILESIZE after it gives the image size, later ones only move the window (texture scroll).
   // Texture coordinates are normalised by the image size. G_LOADTLUT writes its entries into a 256-entry TLUT memory

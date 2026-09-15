@@ -1,4 +1,4 @@
-// The Legend of Zelda: Ocarina of Time and Majora's Mask (docs/ZELDA64.md): one loader for the retail and debug ROMs,
+// The Legend of Zelda: Ocarina of Time and Majora's Mask (docs/OCARINA_OF_TIME.md and docs/MAJORAS_MASK.md): one loader for the retail and debug ROMs,
 // detected by structure. A level is a scene with all its rooms for one layer (OoT child/adult day/night, MM setups):
 // room display lists with the scene's draw config at a static frame and its lights at noon, the sky, the
 // prerendered background of OoT image rooms, static actors with fixed display lists, markers for the other actors,
@@ -153,7 +153,7 @@ export function meshOf(name: string, batches: Batch[], info: DebugInfo): Mesh {
 }
 
 // The RDP samples texel centres at integer texel coordinates, GL at +0.5: shift every texture coordinate by half a
-// texel (docs/ZELDA64.md §5.3.3).
+// texel (see the texture sections in docs/OCARINA_OF_TIME.md and docs/MAJORAS_MASK.md).
 export function halfTexel(batches: Batch[], textures: Texture[]) {
   for (const b of batches) {
     const shift = (uvs: Float32Array | undefined, tex: number | undefined) => {
@@ -206,7 +206,7 @@ function trianglesHit(tris: Float32Array, a: number[], b: number[]): number {
   return best;
 }
 
-// The start camera for a player entry (docs/ZELDA64.md §7.6): the game's normal camera 176 units behind the player and 31
+// The start camera for a player entry (see the camera sections in docs/OCARINA_OF_TIME.md and docs/MAJORAS_MASK.md): the game's normal camera 176 units behind the player and 31
 // above its 44-unit target. Candidates: behind the player, turned by 45 and 90 degrees, and with the player walked
 // forward (spawns at doors and gates walk in). A candidate needs a clear line to the player and a floor below; its
 // openness is the mean free distance (up to 700 units) of 15 rays across the view (collision and room geometry). The first candidate
@@ -734,7 +734,7 @@ export function loadZeldaLevel(z: ZeldaRuntime, def: ZeldaLevelDef, info: LevelI
     if (wb) place('waterboxes', 'collision', meshOf('waterboxes', [wb], cInfo), translation([0, 0, 0]), 'waterboxes', cInfo, false);
   }
 
-  // ---- start camera: spawn 0 and the bg camera of the floor under it (docs/ZELDA64.md §7.6) ----
+  // ---- start camera: spawn 0 and the bg camera of the floor under it (see the Zelda manuals) ----
   // Fixed and pivot camera settings look from their data position at the player; otherwise the normal camera
   // follows 176 units behind the player, pulled in front of walls as the game's camera collision does.
   let camera: CameraView | undefined = fixedCamera;

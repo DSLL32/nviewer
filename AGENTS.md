@@ -45,7 +45,7 @@ When asked to investigate a game (ROM formats for the viewer):
    `texture.ts`, `libultra.ts`) get one owner at a time, and contract fields in
    `types.ts` are added by the main session.
  - Agents don't commit, don't restart the user's dev server, and verify with the
-   checking scripts in `tools/` (see README.md; ROMs come from `$NVIEWER_ROMS`):
+   checking scripts in `tools/` (see README-FULL.md; ROMs come from `$NVIEWER_ROMS`):
    - `npm run typecheck`;
    - `npm run check:hashes` — every level of every game hashed; compare against a
      baseline from a worktree of HEAD (`tsx tools/hashall.ts --src <worktree>`)
@@ -65,7 +65,7 @@ When asked to investigate a game (ROM formats for the viewer):
    `npm run check:layers [-- <rom name filter>]`: every level, exit code 0.
  - The main session commits each piece separately, staging only that agent's
    files (or hunks), checks the commit in a clean `git worktree` of HEAD
-   (tsc + level loads), and keeps README.md and the game's spec up to date,
+   (tsc + level loads), and keeps README-FULL.md and the game's spec up to date,
    correcting the spec where implementation proves it wrong.
  - Bug reports from the app's Copy button go to the agent that owns the code,
    with the copy text verbatim; fix the class of bug (scan every level), not

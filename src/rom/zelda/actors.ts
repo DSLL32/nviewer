@@ -1,4 +1,4 @@
-// Actors (docs/ZELDA64.md §6): placements from room actor lists, transition actors and player entries, decoded per game
+// Actors (docs/OCARINA_OF_TIME.md and docs/MAJORAS_MASK.md): placements from room actor lists, transition actors and player entries, decoded per game
 // (MM: id flags, degree rotations, half-day masks), and draw recipes for static props that draw fixed display lists.
 // Everything without a recipe becomes a marker.
 import { MM_ACTORS, OOT_ACTORS } from './names';

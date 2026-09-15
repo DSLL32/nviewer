@@ -1,4 +1,4 @@
-// Scene and room files (docs/ZELDA64.md §5.1-§5.5, §6.1): header commands, alternate headers, light settings, mesh
+// Scene and room files (docs/OCARINA_OF_TIME.md and docs/MAJORAS_MASK.md): header commands, alternate headers, light settings, mesh
 // headers, collision and the actor, transition, spawn and object lists. Scene pointers are segment 2, room pointers
 // segment 3; every parser works on one file's bytes.
 import type { ZeldaGame } from './tables';

@@ -1,4 +1,4 @@
-// Environment at a time of day (docs/ZELDA64.md §7.1-§7.5; z_kankyo.c Environment_Update): the light setting blend of
+// Environment at a time of day (docs/OCARINA_OF_TIME.md and docs/MAJORAS_MASK.md; z_kankyo.c Environment_Update): the light setting blend of
 // LIGHT_MODE_TIME scenes, the sun direction, fog and zFar, and the sky textures and colours.
 import type { DlLighting } from '../displaylist';
 import type { LightSetting } from './scene';
