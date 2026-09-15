@@ -68,6 +68,19 @@ const summaryProperties = [
 ];
 const identificationHeader =
   '| Release | NAME | Game code | Revision | Size | CRC1 | CRC2 | SHA-1 | CIC | Build |';
+const inheritedHeadingPrefixes = [
+  'Filesystem and compression:',
+  'Level geometry:',
+  'Mapping onto the viewer:',
+  'Music:',
+  'Unused and hidden content:',
+  'Verification evidence and open questions:',
+];
+const boilerplate = [
+  'Geometry representation is described above.',
+  'The complete known song catalog and loop policy are included above.',
+  'Candidate levels are distinguished from shipped content above.',
+];
 
 let failures = 0;
 const files = (await readdir(docsDir))
@@ -114,6 +127,20 @@ for (const file of files) {
     if (properties.join('\n') !== summaryProperties.join('\n')) {
       problems.push('nonstandard technical-summary properties or order');
     }
+    const summaryValues = new Map(
+      [...summary.matchAll(/^\|\s*([^|]+?)\s*\|\s*(.*?)\s*\|$/gm)]
+        .map((match) => [match[1].trim(), match[2].trim()] as const),
+    );
+    const audioValues = ['Music driver', 'Audio microcode', 'Sample encoding']
+      .map((property) => [property, summaryValues.get(property)] as const)
+      .filter((entry): entry is readonly [string, string] => entry[1] !== undefined);
+    for (let left = 0; left < audioValues.length; left++) {
+      for (let right = left + 1; right < audioValues.length; right++) {
+        if (audioValues[left][1] === audioValues[right][1]) {
+          problems.push(`duplicate ${audioValues[left][0]} and ${audioValues[right][0]} summaries`);
+        }
+      }
+    }
     if (/^\|\s*Byte order\s*\|/im.test(summary)) {
       problems.push('byte order belongs with the affected format, not the technical summary');
     }
@@ -142,6 +169,34 @@ for (const file of files) {
   if (/\/home\/n64\/\.ai-tmp\/|research archive\//.test(text)) problems.push('published scratch path');
   if (/^#{2,4} .*Research.process|^#{2,4} .*Process and artifact hygiene|^#{2,4} .*Emulator and process hygiene/im.test(text)) {
     problems.push('published research-process section');
+  }
+  let parentTitle = '';
+  let parentNumber = '';
+  for (const line of text.split('\n')) {
+    const parent = /^### (\d+\.\d+) (.+)$/.exec(line);
+    if (parent) {
+      parentNumber = parent[1];
+      parentTitle = parent[2].trim().toLowerCase();
+      continue;
+    }
+    const child = /^#### (.+)$/.exec(line);
+    if (!child) continue;
+    const heading = child[1].trim();
+    const normalized = heading.replace(/\s*\([^)]*\)\s*$/, '').toLowerCase();
+    if (
+      normalized === parentTitle
+      || (normalized === 'music' && parentNumber.startsWith('5.'))
+      || ((normalized === 'unused and hidden content' || normalized === 'unused or hidden content')
+        && parentNumber.startsWith('6.'))
+    ) {
+      problems.push(`redundant subheading ${heading}`);
+    }
+    if (inheritedHeadingPrefixes.some((prefix) => heading.startsWith(prefix))) {
+      problems.push(`subheading repeats its former parent: ${heading}`);
+    }
+  }
+  for (const sentence of boilerplate) {
+    if (text.includes(sentence)) problems.push(`generic navigation prose: ${sentence}`);
   }
   if (problems.length) {
     failures++;

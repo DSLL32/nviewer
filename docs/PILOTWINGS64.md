@@ -46,7 +46,7 @@ segmented, VROM, and file-relative addresses are named at each use.
 
 ### 2.1 Boot and executable layout
 
-#### Boot and code: Layout
+#### Layout
 
 Nothing in the code area is compressed or relocated: there are no overlays, and the only runtime copy is the app segment.
 
@@ -71,13 +71,13 @@ E and J have the same structure, shifted (E app ROM 0x51F10 → 0x802CCFC0, J 0x
 
 **Boot chain** (decomp names, call order consistent with the disassembly): `bootproc` → `osInitialize` → `Thread_Kernel` (PI manager, `Thread_Render`, VI scheduler) → `Thread_App` (`_uvMediaCopy` of the app, bss clear) → `app_entrypoint`. The game state machine (`GameState`: 0 title, 2 test details, 3 pilot select, 4 test setup, 5 test update, 6 results, 7 options, 8/9 demo, 10 file menu, 11 vehicle/class select, 12 test overview, 13 cannonball results, 14 congratulations, 15 credits) calls `taskInitTest` and then `levelLoad` in state 4 (*How the game loads a task [decompilation control flow; ROM bytes/disassembly tables and constants]*).
 
-#### Boot and code: Microcode
+#### Microcode
 
 - Both GFX microcode data blocks carry `RSP SW Version: 2.0D, 04-01-96`. The two text blobs are both 0x1430 bytes and differ in 1953 bytes.
 - `uvGfxEnd` (US 0x8022217C) first stores ucode 1 into the OSTask, then overwrites the same fields with ucode 2 (text 0x80246A30, data 0x802503C0, at 0x80222394/98). So **every graphics task runs ucode 2, Fast3D**.
 - The model and contour parsers emit Fast3D commands: `G_VTX` 0x04, and `G_TRI1` 0xBF with vertex indices multiplied by 10 (*Geometry and textures*).
 
-#### Boot and code: Key functions
+#### Key functions
 
 | symbol | US | E | J | role |
 |---|---|---|---|---|
@@ -97,7 +97,7 @@ E/J addresses come from masked-instruction matching of the US functions (`fs/too
 
 Source: `fs/notes/versions.txt`, `unused/notes/geodiff_versions.txt`, and version renders under `unused/png/`.
 
-#### Release differences: Structural compatibility
+#### Structural compatibility
 
 All releases use the same engine, formats, 61 task files, SPTH/3VUE/PDAT data, environment/terrain/palette data and
 byte-identical audio. The app and filesystem bases differ, so code addresses are version-specific; a viewer derives
@@ -118,7 +118,7 @@ and task resolution does not.
 
 ### 2.2 Memory and address mapping
 
-#### Filesystem and compression: File table and addressing
+#### File table and addressing
 
 - **TABL.** `FORM UVRM` holds `PAD PAD GZIP(TABL)`. TABL is `N × {char[4] type, u32 size}` with size = FORM size + 8, rounded up to 4. N is 1272 (US), 1434 (E) and 1281 (J).
 - **File offsets.** File i starts at `base + Σ size[0..i−1]`.
@@ -144,11 +144,9 @@ and task resolution does not.
 
 ### 2.3 ROM map and asset organization
 
-See the executable, archive, and file-table descriptions in this section.
-
 ### 2.4 Compression formats
 
-#### Filesystem and compression: Container
+#### Container
 
 ```
 file  := 'FORM' u32 size char[4] type chunk*     size counts the bytes after the size field; files are padded to 4 bytes
@@ -161,7 +159,7 @@ PAD   := 'PAD ' u32 4, 00000000                   every file starts with one or 
 - **Naming.** Despite the tag, the payload is **MIO0**, not DEFLATE.
 - **Unused wrapper.** `uvUserFileRead` also handles a `UVRW` wrapper, which no ROM file uses.
 
-#### Filesystem and compression: MIO0
+#### MIO0
 
 - **Header:** `+0 "MIO0"` (the magic is not checked), `+4 u32 size`, `+8 u32 back-reference offset`, `+0xC u32 literal offset`, `+0x10` control words.
 - **Control words:** 32 bits, MSB first. Bit 1 copies one literal byte. Bit 0 reads a u16 `v` and copies `(v >> 12) + 3` bytes from `out − ((v & 0xFFF) + 1)` one byte at a time, so overlapping copies act as runs.
@@ -171,17 +169,13 @@ This is the same codec as Star Fox 64 and Super Mario 64. Streams end 0-7 bytes 
 
 ### 2.5 Loading process
 
-Level and asset selection is described by the tables and loader call paths above.
-
 ### 2.6 Revision differences
-
-Revision-specific addresses and data differences are stated in the relevant tables.
 
 ## 3. Level data
 
 ### 3.1 Level catalog and identifiers
 
-#### Filesystem and compression: File types
+#### File types
 
 | type | count US (E, J) | chunks | contents |
 |---|---|---|---|
@@ -210,7 +204,7 @@ Revision-specific addresses and data differences are stated in the relevant tabl
 - `fs/tools/extract.py` dumps every file to `fs/files/{us|eu|jp}/{global}_{type}_{typeidx}/{chunk}_{TAG}.bin`, with an inventory (`inventory.tsv`/`.json`, md5 per chunk).
 - `fs/proto/pwfs.ts` is the TypeScript reader (`openFs`, `file(type, i)`, `userFile(i)`, `comm(type, id)`). `fs/proto/test.ts` checks every file offset, index and chunk md5 against the Python inventory: **ALL OK** on US, E and J.
 
-#### Levels: How the game loads a task [decompilation control flow; ROM bytes/disassembly tables and constants]
+#### How the game loads a task [decompilation control flow; ROM bytes/disassembly tables and constants]
 
 1. **Task table.** At boot, `taskInit` reads the COMM chunk of all 61 tasks and builds `[class][test][vehicle] → task index` from COMM bytes 0 (class), 2 (test) and 1 (vehicle).
 2. **Test start.** `taskInitTest(class, vehicle, test, &map, &terraId, &envId)` loads the UPWT and sets:
@@ -242,7 +236,7 @@ Revision-specific addresses and data differences are stated in the relevant tabl
 
 **For a static viewer**, an island in a given task is: UVLV[map] + UVTR[terraId] with its contours + UVLV[0x70 + envId] (sky) + UVEN[envId] (fog, clear colour) + the UVTP palette for envId + UPWL objects + UPWT task objects.
 
-#### Levels: Level list
+#### Level list
 
 Class A has no test 3, and Beginner has only test 1 for the three main vehicles. The bonus games use the class slot as their level (1-3). Cannonball has four UPWT files per level, one per target, all with the same JPTX id and name. Birdman has four tasks per island that differ only in weather/time.
 
@@ -310,7 +304,7 @@ Class A has no test 3, and Beginner has only test 1 for the three main vehicles.
 | 59 | 0x25 | P_BD_3 | Birdman | Pilot Class | Variant 3 | Little States | 4 | 16 | 3 (start 3) | TPAD1 | Skywalk 15 |
 | 60 | 0x26 | P_BD_4 | Birdman | Pilot Class | Variant 4 | Little States | 5 | 17 | 3 (start 3) | LWIN1 TPAD1 | Skywalk 16 |
 
-#### Mapping onto `src/rom/`: Level list and assembly [viewer design backed by ROM bytes]
+#### Level list and assembly [viewer design backed by ROM bytes]
 
 Expose all 61 task rows in the *Level list* order, grouped by vehicle/class or island, with `kind: 'stunt'` for main tests,
 `'bonus'` for Cannonball/Sky Diving/Jumble Hopper/Birdman. `loadLevel(i)` should read the task through the ROM lookup,
@@ -335,7 +329,7 @@ renders. This corrects the task-18 green-triangle false alarm [evidence: capture
 
 ### 3.2 Level container
 
-#### Levels: Concepts
+#### Concepts
 
 | concept | ids | where it lives |
 |---|---|---|
@@ -348,7 +342,7 @@ renders. This corrects the task-18 green-triangle false alarm [evidence: capture
 | night / snow textures | UVTP palette (texture id substitution) | `envLoadTerrainPal(envId)`: env 6→palette 0, 11→1, 17→2, 18/19→5, 20→4, 21→3 |
 | names and texts | ADAT user file 0x42 (E: 0x42 English, 0x70 French, 0x6F German) | keys `{C}_{V}_{n}_N` name, `_H` hint, `_M` message |
 
-#### Objects, paths and task logic: UPWT record formats and visible objects
+#### UPWT record formats and visible objects
 
 Every task's 16 object counts at COMM +0x41C exactly matches its chunk sizes, including padding. No SDFM or OBSV
 chunk occurs in any task. The table below is the viewer-relevant summary; exact fields, values and per-instance rows
@@ -378,7 +372,7 @@ plane inside that radius. Active rings enable ordinary children; timed-child edg
 graph has linked courses only in tasks 0, 3, 6, 13 and 15; tasks 1, 10, 18, 20 and 25 are free order. Exact edges
 come from `tasks_summary.tsv`. [ROM bytes links; decompilation pass semantics]
 
-#### Unused and hidden content: Dormant level/object systems
+#### Dormant level/object systems
 
 All 61 task slots, all UPWL/SPTH/3VUE/PDAT files and all ten terrains are reachable; there is no cut playable island
 or hidden 62nd task in these tables [evidence: ROM bytes]. In particular, reduced Little States terrains 4/5/6 are used by the
@@ -414,7 +408,7 @@ Vertices are the standard 16-byte `Vtx {s16 x, y, z; u16 flag; s16 s, t; u8 r, g
 - colours are prelit, and no stored state enables lighting;
 - `flag` is 0 in models and 1 or 3 in terrain (meaning unknown, unused by the RSP).
 
-#### Collision: Query model
+#### Query model
 
 A segment query returns at most five `{type, surfaceId, t, point, normal}` hits:
 
@@ -511,7 +505,7 @@ f32 × 5                                      bounding sphere + 1.0
   displaying integer metres: E3 pose z 5.745 produced SEA LEVEL 4 m, while 0.745 above ground produced altimeter 0 m
   [RAM/captured frames, decompilation]. Whether the same 0.7 metres-per-unit convention is universal is [open question].
 
-#### Release differences: Geometry and asset differences
+#### Geometry and asset differences
 
 | release/data | verified change |
 |---|---|
@@ -530,7 +524,7 @@ UVAN differs by one to three bytes per PART in all 115 E files and 75 J files; t
 US texture 326 unexpectedly matches Japanese glyph art while E makes it empty, yet US Sky Diving code still uses id
 326 [ROM bytes/disassembly, semantic purpose open question].
 
-#### Verification evidence: Structural level builds and frames
+#### Structural level builds and frames
 
 `obj/tools/render_tasks.ts check-all` validates finite cameras/bounds/matrices, mesh/texture references, exact batch
 array lengths, texture byte lengths, exactly-one-layer instance ownership and hidden collision for every scene. The
@@ -544,7 +538,7 @@ Raw MAD 75.32/104.60 is not a fidelity score because captures include HUD/Start,
 matched. Manifests and images are `obj/renders/render_manifest_{tasks,cmp}.json`,
 `task_{18,9}_{start,top}.png`, and `cmp_task_{18,9}_vs_emu.png`.
 
-#### Verification evidence: Runtime captures
+#### Runtime captures
 
 E1 captured the title path, Hang Glider Beginner and Rocket Belt Beginner start sequences; evidence lives under
 `emu/e1/`. Its camera reads were incomplete and must not be treated as final matrices.
@@ -667,11 +661,9 @@ B900031D render mode (cycle 1 | cycle 2 from the table below)
 
 ### 3.6 Collision
 
-#### Collision
-
 Source: `obj/notes/collision.md` and `obj/tools/check_geo.ts`.
 
-#### Collision: Surface classes
+#### Surface classes
 
 The UVTX trailer class, selected by the batch's low-12-bit texture id, is the only per-surface classification:
 
@@ -681,7 +673,7 @@ The UVTX trailer class, selected by the batch's low-12-bit texture id, is the on
 | 4 | 25, 26, 40, 48, 60, 110, 111, 242 | water [decompilation `func_802DC8E4`] |
 | 32 | 0, 3, 5, 6, 18, 19, 32, 89, 99, 157, 165, 166, 167, 186, 194, 201, 235 | [open question] tested by a function with no located caller; likely non-landable/soft surface [hypothesis] |
 
-#### Collision: UVMD box trees
+#### UVMD box trees
 
 Two hundred thirty-four models contain 830 36-byte volumes:
 
@@ -697,7 +689,7 @@ Bounds are world units in the part frame. A missed parent skips the following `s
 The cumulative end index is monotonic and ends at `nTri6` for every checked model except one still-unidentified model
 [ROM bytes, open question]. Box-less objects collide by their model-radius sphere [evidence: decompilation].
 
-#### Open questions and hypotheses: Objects and collision
+#### Objects and collision
 
 1. Dump a live ring dobj and its hide mask/matrices to confirm model selection, part visibility and scale.
 2. Capture ground, roof, water and texture-40/48 collision hits to verify type/id packing and pass-through behavior.
@@ -713,7 +705,7 @@ The cumulative end index is monotonic and ends at `nTri6` for every checked mode
 Source: `obj/notes/environment.md`, `fs/notes/small_us.txt`, and the task/environment columns generated in
 `obj/notes/tasks_summary.tsv`.
 
-#### Environment: UVEN records and task environments
+#### UVEN records and task environments
 
 Each of the 24 COMM records in the single UVEN file is packed as follows; all records decode to their exact length.
 
@@ -738,7 +730,7 @@ u8 raw[0x3c] = {
 The task fog colours and chosen sky/sea ids are enumerated per task in the canonical
 `obj/notes/tasks_summary.tsv`; the file, rather than a duplicated hand-maintained table, is authoritative.
 
-#### Environment: Sky, sea and draw order
+#### Sky, sea and draw order
 
 The sky models are UVMD 352, 354–357 and 359. Their bounds are approximately x = ±1700, y = ±1788, z = 0–1604;
 flag 8 makes `_uvEnvDraw` translate the dome to `(camera.x, camera.y, 0)`, so it follows the camera horizontally but
@@ -756,7 +748,7 @@ fog-coloured translucent horizon band; far terrain cells with the fog projection
 cells and objects without fog; sprites and HUD. [evidence: decompilation] The dynamic haze quad begins at 0.875 of the far distance and
 meets sea level; its precise viewer approximation is [open question].
 
-#### Environment: Fog and projection
+#### Fog and projection
 
 `uvGfxSetFogFactor` clamps its input to 0–0.996 and emits `gSPFogPosition(f · 1000, 1000)`. For task environments the
 factor is 0.996, giving multiplier 32,000 and offset -31,744. Far terrain uses near = far/50 = 40 and far = 2,000,
@@ -774,7 +766,7 @@ The live global geometry-mode words remained OR = `0x00000000` and AND = `0xFFFF
 globally forced or masked in that frame [evidence: RAM]; this does not replace a display-list capture. Environments 5 and 16
 adjust fog colour by camera heading through a nine-entry table [evidence: decompilation].
 
-#### Environment: Time-of-day palettes and recolouring
+#### Time-of-day palettes and recolouring
 
 `envLoadTerrainPal` installs UVTP substitutions before later UVLV appends: env 6 → palette 0, env 11 → 1,
 env 17 → 2, env 18/19 → 5, env 20 → 4 and env 21 → 3. The tables and call constants are [evidence: ROM bytes, disassembly].
@@ -799,7 +791,7 @@ identification as water/shore animation is [hypothesis].
 
 ### 3.8 Cameras and paths
 
-#### Environment: Start cameras
+#### Start cameras
 
 The take-off pose comes from the first TPAD record using the task's position and Z/X/Y rotation. All computed task
 poses and approximate start views are generated in `obj/notes/tasks_summary.tsv`.
@@ -834,7 +826,7 @@ the live camera-pointer chain in task 19: state base 0x80362698, pointer field a
 Source: `obj/notes/objects.md`; complete generated censuses are `obj/notes/tasks_objects.tsv` (414 rows),
 `obj/notes/tasks_summary.tsv`, and `obj/notes/island_objects.tsv` (752 rows) [evidence: ROM bytes, deterministic decoding].
 
-#### Objects, paths and task logic: SPTH, 3VUE and demonstrations
+#### SPTH, 3VUE and demonstrations
 
 Each SPTH axis is `u32 count; count × {f32 time, f32 value}`. Across all 48 axes the first time is zero and keys
 increase to 100, resolving the earlier value/time ambiguity. SCPX/Y/Z are position and SCPH/P/R are angles in degrees;
@@ -846,7 +838,7 @@ title; 0x4E–0x53 drive the six-pilot Congratulations sequence, not replay. All
 the credits attitude path, 0x55–0x5A attract demos and 0x5B–0x6C per-vehicle Beginner demonstrations. [ROM bytes constants
 and headers; decompilation control flow]
 
-#### Open questions and hypotheses: Runtime rendering and camera
+#### Runtime rendering and camera
 
 1. Capture one task frame display list to confirm fog words, both projection matrices and the near/far cell split;
    E3 already verified that live global state masks remained OR 0 / AND `0xFFFFFFFF` for task 9.
@@ -860,7 +852,7 @@ and headers; decompilation control flow]
 
 ### 4.1 Placement records
 
-#### Objects, paths and task logic: Placement and matrices
+#### Placement and matrices
 
 Object/camera forward is +Y; rotations stored in most records are degrees in order Z, X, Y. `func_80313640` applies
 those local rotations and then translation. UPWL LPAD is the exception: its angle is already radians. `uvDobjPosm`
@@ -873,7 +865,7 @@ properties hide/show individual model parts and scale the cull/collision radius.
 
 ### 4.2 Object and model formats
 
-#### Objects, paths and task logic: Code-driven moving objects [decompilation; starts cross-referenced to ROM models/data]
+#### Code-driven moving objects [decompilation; starts cross-referenced to ROM models/data]
 
 Normal play creates additional moving scenery when `animateToys` is enabled. A static viewer should show the start
 pose, mark instances `animated`, and optionally draw their paths.
@@ -887,11 +879,9 @@ pose, mark instances `animated`, and optionally draw their paths.
 
 ### 4.3 Skeletons and animation
 
-Static-pose or animation support and remaining omissions are stated in the object description.
-
 ### 4.4 Behaviors, triggers, and scripted objects
 
-#### Objects, paths and task logic: UPWL island objects
+#### UPWL island objects
 
 All four island files decode exactly. LEVL supplies counts for ESND, WOBJ, LPAD, TOYS, TPTS, APTS and BNUS.
 
@@ -909,7 +899,7 @@ Three island pads are never selected by a task landing target: Crescent pads 2/5
 The Little States TOYS point at `(-1687.6,981.9,501.4)` identifies UVCT model 0x99, the Mount Rushmore Mario head;
 repeated hits swap it with model 0x55 (Wario) and back [ROM bytes placement; decompilation behavior; runtime frame open question].
 
-#### Unused and hidden content: Debug and developer features
+#### Debug and developer features
 
 | feature | activation / status |
 |---|---|
@@ -928,15 +918,11 @@ credits strings [evidence: ROM bytes]. Whether retail `_uvDebugPrintf` emits usa
 
 ### 5.1 Audio storage and banks
 
-Audio storage is described with the sequence and bank tables below.
-
 ### 5.2 Sequence format and driver
-
-#### Music
 
 Source: `mus/notes/music.md`, canonical `mus/notes/songs_us.tsv`, and render indexes under `mus/wav*/`.
 
-#### Music: Driver
+#### Driver
 
 The game uses stock libultra 2.0D audio: one `ALCSPlayer` for compact MIDI and one `ALSndPlayer` for effects. Audio
 initialization creates 32 virtual/physical synth voices, 256 updates, a 16-voice/16-channel sequence player and a
@@ -963,7 +949,7 @@ Options volume setting overwrites every vehicle entry. The title issues a 110-BP
 playing. Cannonball ramps 75→95 BPM while aiming, uses 165 in flight and returns to 75 on landing. [disassembly; call-site
 meaning decompilation]
 
-#### Music: Audio data
+#### Audio data
 
 | data | US | E | J | logical size |
 |---|---:|---:|---:|---:|
@@ -982,7 +968,7 @@ The music bank has one 22,050-Hz bank, 48 non-null instrument slots, percussion,
 67 seconds). Closed hi-hat key 42 uses velocity layers split at 112/113. UVSX is effects only: 120 one-sound
 instruments/107 waves corresponding to ids 0x00–0x77; its carousel "music" is a 0.88-second looping sample.
 
-#### Mapping onto `src/rom/`: Music player [viewer design backed by ROM bytes/audio analysis]
+#### Music player [viewer design backed by ROM bytes/audio analysis]
 
 Reuse `src/rom/music/cseq.ts` and `src/rom/music/libultra.ts`. Apply `mus/libultra-lookup.diff` under a dedicated
 regression gate: render representative/all tracks for GoldenEye, Perfect Dark, Bomberman, BattleTanx and Rush, and
@@ -990,7 +976,7 @@ show unchanged hashes where velocity layering is absent or explain authentic imp
 31 sound-test tracks and return TSV-derived loop positions. Keep 16 voices, 22,047-Hz US output and sequence-native
 tempo; custom reverb and Cannonball tempo modulation are optional later fidelity work.
 
-#### Verification evidence: Music evidence
+#### Music evidence
 
 `mus/notes/tracks_us.txt` walks every track and event; `scan_us.txt` and `bank_scan.txt` record parser/bank censuses;
 `songs_us.tsv` is the generated song/loop/render table. `mus/wav/` and `mus/wav-patched/` contain baseline and corrected
@@ -1001,7 +987,7 @@ exact custom-reverb equivalence remains [open question]. Existing tools were use
 `../mk64/mus/tools/compare.ts` (MD5 `fa46f27c4f94eb4dd053d00a83f3cb41`). The latter's 10-ms onset, spectral and
 band metrics resolved id 29's periodic alignment where the older 50-ms envelope comparator was ambiguous.
 
-#### Open questions and hypotheses: Audio and releases
+#### Audio and releases
 
 1. Model or quantify the custom reverb, verify title 110-BPM behavior, loop phase and Cannonball tempo call cadence.
    E4 already verified the NTSC output rate/frame size and the patched hi-hat lookup on sound-test ids 8 and 29.
@@ -1012,11 +998,9 @@ band metrics resolved id 29's periodic alignment where the older 50-ms envelope 
 
 ### 5.3 Instruments and sample encoding
 
-Instrument banks, envelopes, loops, and sample encoding are described above.
-
 ### 5.4 Music catalog and loop points
 
-#### Music: Complete song list
+#### Complete song list
 
 Song id equals the S1 index and Options → Sound number minus one. The game displays no titles, so unquoted names are
 descriptive. Loop/BPM/duration values below are generated from `mus/notes/songs_us.tsv`.
@@ -1062,12 +1046,10 @@ looping songs. Exact sample loop positions at 22,047 Hz are in the TSV.
 
 ### 6.1 Unreferenced assets
 
-#### Unused and hidden content
-
 Source: `unused/notes/unused.md`, generated reference graph `unused/notes/refgraph_us.{txt,json}`, and renders under
 `unused/png/`. Claims below distinguish unreachable data from merely unplaced or not statically referenced data.
 
-#### Unused and hidden content: Unloaded manifests and unreferenced assets
+#### Unloaded manifests and unreferenced assets
 
 The reference graph roots every constant/computed UVLV load and follows UVLV, UVTR, UVCT, UVMD, UVTX second-image,
 UVTP, UVSQ and UVEN edges.
@@ -1092,7 +1074,7 @@ does not imply placed or drawn. Models 63 (wooden pier/trestle), 203 (red cube m
 [ROM bytes reference census; non-use decompilation scan]. Fifty-four UI textures 283–336 lack data references but likely have code
 constant uses; their individual reachability is [open question], so they are not classified as unused.
 
-#### Unused and hidden content: Text and photo-album remnants
+#### Text and photo-album remnants
 
 Eighteen US ADAT keys have no found name or constant-id lookup path: `WINDOW1`, `WINDOW2`, `OPTION2`, `CONTINUE`,
 `HANG`, `ROCKET`, `GYRO`, `CANNON`, `SKYDIVER`, `LEVEL1`–`LEVEL3`, `CRASH`, `OUT`, `MUSHI`, `LAND_GAI`, `STRIKE`,
@@ -1101,7 +1083,7 @@ UVTX 318–326 these suggest a removed photo-album workflow [hypothesis]. Numeri
 scanned, so the non-use conclusion is medium confidence. J additionally contains `DUMMY` and `FIRST`, the latter a
 0x00–0x3F glyph test page.
 
-#### Unused and hidden content: Unused audio
+#### Unused audio
 
 Song 26, Birdman: Landing, is selectable in the sound test but no normal Birdman state starts it. Songs 11/22 are
 near-duplicates; 10/21 and 17/24 are transposed/revoiced relatives, not unused.
@@ -1114,21 +1096,15 @@ traced; those 36 remain candidates, not verified-unused content [open question].
 
 ### 6.2 Cut or inaccessible levels
 
-Candidate levels are distinguished from alternate, debug, and intentionally hidden retail content above.
-
 ### 6.3 Debug features
 
-Shipped debug strings and executable features are listed only when supported by a code or data reference.
-
 ### 6.4 Prototype or revision-specific content
-
-Source-archive and prototype material is explicitly distinguished from shipped retail data.
 
 ## 7. nviewer implementation
 
 ### 7.1 Module mapping
 
-#### Collision: Viewer overlay
+#### Viewer overlay
 
 `obj/proto/pwtask.ts` builds hidden-by-default `collision: terrain surfaces` and `collision: object boxes` layers.
 Terrain is colour-coded by surface class; object parents/leaves/triangle leaves receive distinct translucent colours.
@@ -1142,7 +1118,7 @@ This section is a proposed implementation plan. Statements about current reposit
 choices not yet implemented are [viewer design]. Prototype sources are under `fs/proto/`, `geo/proto/`, `obj/proto/`
 and `mus/proto/`.
 
-#### Mapping onto `src/rom/`: Detection and module boundaries
+#### Detection and module boundaries
 
 Add `'pilotwings64'` to `Game.id` in `src/rom/types.ts`, detect `NPWE` (optionally `NPWP`/`NPWJ`) in
 `src/rom/index.ts`, and create a `src/rom/pilotwings/` directory:
@@ -1161,7 +1137,7 @@ Add `'pilotwings64'` to `Game.id` in `src/rom/types.ts`, detect `NPWE` (optional
 Do not copy the five independent scratch FORM/MIO0 readers. Promote the already cross-checked `pwfs.ts` reader as
 the sole implementation, and make all builders consume that interface. [viewer design; efficiency finding]
 
-#### Mapping onto `src/rom/`: Shared renderer contracts
+#### Shared renderer contracts
 
 Current `Batch` already supports `texture1`, `uvs1`, `texBlend`, `decal`; `Instance` already supports `noFog`; and
 `Level` supports skies, fog, layers, markers and a camera. Pilotwings therefore does not need game-specific rendering
@@ -1180,17 +1156,13 @@ paths for most state. Remaining choices:
 
 ### 7.2 Supported features
 
-The Technical summary states the supported releases and principal decoded features.
-
 ### 7.3 Approximations and omissions
-
-Viewer approximations are distinguished from facts about the game formats.
 
 ## 8. Verification and remaining work
 
 ### 8.1 Verification evidence
 
-#### Music: Offline player and verification
+#### Offline player and verification
 
 `parseCompressedSequence`, `parseBank` and `renderSequence` render all 31 tracks with rate 22,047, 16 voices,
 sequence volume 32767 and parsed loop points. The baseline `mus/wav/` run completes in about 13 seconds with no NaN
@@ -1218,7 +1190,7 @@ The patched render needs about ×0.97–0.98 amplitude gain to match these captu
 the game's custom reverb, so byte identity is neither expected nor claimed; title/Cannonball tempo behavior and loop
 phase remain [open question]. The known 16-voice overflow concerns song id 30 (Ending), not captured Sound Track 30/id 29.
 
-#### Mapping onto `src/rom/`: Verification gates and performance
+#### Verification gates and performance
 
 The scratch builder already passes `check-all` for four islands plus all 61 tasks. Port that structural checker into
 normal repository checks rather than retaining another ad hoc script. Required implementation checks are the repository
@@ -1228,7 +1200,7 @@ hidden collision for every task currently costs roughly 0.4–1.4 seconds per ta
 builds. Image comparisons should disable collision after the full collision gate and use representative scenes rather
 than blanket supersampled output. [Measured: `obj/renders/render_manifest_check-all.json`]
 
-#### Verification evidence: Static data and parser evidence
+#### Static data and parser evidence
 
 - `fs/files/{us,eu,jp}/inventory.{tsv,json}` records every extracted file/chunk and decompressed MD5; the TypeScript
   reader reproduces every file offset, index and chunk hash in all three ROMs.
@@ -1239,14 +1211,10 @@ than blanket supersampled output. [Measured: `obj/renders/render_manifest_check-
 - `obj/tools/decode_tasks.ts`, `check_geo.ts` and `check_mtx0.ts` reran successfully in 0.90–1.15 seconds [evidence: deterministic decoding].
   The one bad collision cumulative-index check remains an explicit [open question] issue, not a passing assertion.
 
+### 8.2 Known unknowns
+
 #### Open questions and hypotheses
 
 Every item in this section is unresolved; none is required to parse the ROM safely unless stated.
 
-### 8.2 Known unknowns
-
-Unresolved semantics are labelled **Hypothesis** or **Open question** where they occur.
-
 ### 8.3 References
-
-External documentation, decompositions, and source archives are cited inline where used.

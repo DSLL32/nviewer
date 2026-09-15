@@ -16,9 +16,9 @@ interpretations are labelled hypotheses.
 | Geometry | grid-binned old F3DLX 1.21 display lists, standard 16-byte vertices, Y-up identity scale; near/detail table plus optional far-LOD replacement table |
 | Textures | CI8 texels with RGBA5551 TLUTs, 561 resolved image/TLUT source combinations (395 distinct decoded images by content and dimensions), from 16x16 through 128x16 |
 | Collision | grid-binned 20-byte quad/plane records using a packed s16 XYZ bank; eight course/area meshes fully decoded |
-| Music driver | eight raw old-libmus songs, one 303-wave VADPCM bank, every song referenced and looping; parameterize and reuse `music/libmus64.ts` |
+| Music driver | Software Creations old-libmus; eight raw songs, all referenced and looping. |
 | Audio microcode | **Unknown** |
-| Sample encoding | eight raw old-libmus songs, one 303-wave VADPCM bank, every song referenced and looping; parameterize and reuse `music/libmus64.ts` |
+| Sample encoding | Nintendo 4-bit VADPCM; one bank containing 303 waves. |
 | Levels | Tutorial/Lecture plus Green Park, Lost Forest, Snow Festival '64, Sunset Island and Giant House; Giant House has three simultaneous connected areas |
 | Memory requirement | Base 4 MiB. |
 | Viewer support | archive/environment/collision low; F3DLX geometry/CI8/materials medium; marker/coin objects low-medium; exact material/fog parity medium; old-libmus profile extraction medium |
@@ -47,8 +47,6 @@ segmented, VROM, and file-relative addresses are named at each use.
 
 ### 2.1 Boot and executable layout
 
-#### Boot and executable layout
-
 IPL3 loads ROM `0x1000` to entry `0x80025C00`; the resident conversion is `RAM = ROM + 0x80024C00`. Startup clears BSS and enters `0x80039BD0`. Do not extend that conversion through later ROM bytes: ten separately linked overlays reuse load addresses. [evidence: disassembly]
 
 #### Boot and executable layout: Japanese executable map
@@ -75,15 +73,11 @@ The ROM contains `RSP Gfx ucode F3DLX 1.21 Yoshitaka Yasumoto Nintendo.` at J `0
 
 ### 2.2 Memory and address mapping
 
-Address conversions and load destinations are specified with the executable and file tables above.
-
 ### 2.3 ROM map and asset organization
-
-See the executable, archive, and file-table descriptions in this section.
 
 ### 2.4 Compression formats
 
-#### Archive, ROM map and compression: Resource groups
+#### Resource groups
 
 | J IDs | Storage and established role |
 |---|---|
@@ -106,7 +100,7 @@ Every direct archive call in resident and all ten bounded overlays was inventori
 
 The archive is not the whole post-code ROM. Songs begin at J `0xA4750`, followed by pointer bank `0xB5B00`, wave bank `0xC29A0`, sample payload ending at `0x454BE7`, padding `[0x454BE7,0x454BF0)`, then the archive table. Every meaningful J byte before padding at `0x76A3D0` is assigned to header/boot/code/overlay, linked graphics/audio, archive table/payload or the 12-byte alignment tail `[0x76A3C4,0x76A3D0)`. [evidence: ROM bytes, disassembly]
 
-#### Archive, ROM map and compression: Headerless LH5 codec
+#### Headerless LH5 codec
 
 Compressed files are:
 
@@ -127,11 +121,7 @@ There is no magic. Decoder `0x80026A80` reads the size and fills an 8 KiB circul
 
 ### 2.5 Loading process
 
-Level and asset selection is described by the tables and loader call paths above.
-
 ### 2.6 Revision differences
-
-Revision-specific addresses and data differences are stated in the relevant tables.
 
 ## 3. Level data
 
@@ -154,7 +144,7 @@ Each stage overlay's initializer at runtime `0x80127180` contains the fixed cour
 
 Giant House parses all three headers unconditionally into runtime contexts `0x800EC058`, `0x800F9190` and `0x801062C8`, stride `0xD138`. They share environment values but have different grids/geometry/collision and are connected areas, not difficulty variants. [evidence: disassembly]
 
-#### Complete courses and setup list: Mode/setup dispatch
+#### Mode/setup dispatch
 
 Every normal course has three static setup slots for each applicable family. Runtime directly observed only setup value 0 labeled `LEVEL 1`; retail labels/availability for values 1 and 2 remain open. [evidence: disassembly, RAM]
 
@@ -182,7 +172,7 @@ For nviewer, list six base courses and expose mode/setup as selectors or optiona
 
 ### 3.2 Level container
 
-#### Archive, ROM map and compression: Top-level table
+#### Top-level table
 
 | Version | Table | Records | Payload base | Payload end |
 |---|---:|---:|---:|---:|
@@ -205,7 +195,7 @@ ROM start = payloadBase + relativeOffset
 
 J `0x80027BD8` reads `table + id*8`; raw accessor `0x80027CA8` returns/copies the extent, while wrapper `0x80027E5C` decodes compressed entries. All record extents are in bounds and contiguous. The complete regional manifests are `fs/j_manifest.csv` and `fs/e_manifest.csv`. [evidence: disassembly, deterministic decoding]
 
-#### Course objects and player assets: Family A: transformed disk markers
+#### Family A: transformed disk markers
 
 Descriptor points to 24-byte records:
 
@@ -220,7 +210,7 @@ Descriptor points to 24-byte records:
 
 `0x800DF650` builds a 64-byte matrix per record; `0x800DF7D0` draws it. Bits `0x100/0x200` distinguish player views. Street Work and Time Attack select these records. The fixed overlay-3 asset is an untextured 18-triangle disk: vertices at J RAM `0x800E9EA0`, setup DL at `0x800E9FD0`, and draw DL at `0x800EA020` (J VROM `0x89710`, `0x89840`, `0x89890` respectively). Put the exact positions, orientations and disk meshes in a `markers` layer; only the retail gameplay label/role remains open.
 
-#### Course objects and player assets: Family B: coins
+#### Family B: coins
 
 The ten-byte record is:
 
@@ -232,17 +222,15 @@ The ten-byte record is:
 
 `0x800DFA10` initializes them; `0x800DFA48` view-transforms/culls at most 40 in 1P or 80 otherwise; `0x800DFF6C` constructs view-facing textured quads. Family B's use only by Coin mode and exact retail counts proves the semantic label. Fixed Gfx at J RAM `0x800EA080` and `0x800EA100` supplies two tint variants; archive 68 is referenced through runtime pointer `0x800EBF98` and contains the RGBA5551 TLUT at `+0x7630` plus nine 24x24 CI8 animation frames at `+0x7830 + n*0x240`. Put them in an `objects` or `coins` layer, separately toggleable from `main`. [evidence: disassembly, ROM bytes]
 
-#### Course objects and player assets: Boards/riders
+#### Boards/riders
 
 Gameplay selects board `n` from archive `38+n` and paired resource `50+n`; parallel player-two code does the same. Overlay 2 starts with four boards, and one condition expands the selector bound to eight. Another flag-controlled path expands it to twelve, proving a code path to resources 8–11 but not whether normal retail progression can set that flag. The assets and selection path are [evidence: disassembly]; their intended retail/debug status is [open question]. Rider/board animation is not needed to show course geometry; if implemented later, keep it separate from world objects.
 
 ### 3.3 Geometry
 
-Geometry representation is described with the level container above.
-
 ### 3.4 Display lists and render state
 
-#### Course geometry, materials and textures: Vertices and display lists
+#### Vertices and display lists
 
 Vertices use the standard 16-byte form:
 
@@ -267,7 +255,7 @@ Old F3DLX commands used include `04` VTX, `B1` TRI2, `BF` TRI1, `06` DL and `B8`
 
 ### 3.5 Textures and materials
 
-#### Course geometry, materials and textures: Header and spatial grid
+#### Header and spatial grid
 
 The source header begins with a `0x2C` environment prefix (*Environment, sky and camera*), followed by:
 
@@ -286,15 +274,13 @@ Parser `0x800CECC0` copies scalars, rebases pointers and initializes the grid; t
 
 The tables are distance alternatives, not additive render passes. Runtime classifies cells into three groups: near cells use table 0, distant cells with a table-1 entry use table 1, and cells without a far entry fall back to table 0. Table 0 is the complete/high-detail representation. Table-0/table-1 triangle counts are Tutorial 4,409/4,409, Green Park 3,126/2,118, Lost Forest 10,687/10,515, Snow Festival '64 9,985/0, Sunset Island 7,987/7,633, with equal counts in each Giant House area. Green Park's far table includes a coarser retriangulation but fewer total faces; no table-1-only geometric surface is absent from table 0. The viewer therefore shows table 0 by default and preserves each nonempty table 1 as a hidden `far LOD` layer. [evidence: disassembly, ROM bytes, deterministic decoding, nviewer source]
 
-#### Course geometry, materials and textures: Textures/materials
+#### Textures/materials
 
 The textured pass uses CI8 texels and RGBA5551 TLUTs from segment 3. Width/height come from `G_SETTILESIZE`; observed dimensions are 16x16, 16x32, 32x16, 32x32, 32x64, 64x8, 64x16, 64x32 and 128x16. Production display-list execution resolves 561 image/TLUT source combinations and 395 distinct decoded RGBA images by content and dimensions: Tutorial 72/36, Green Park 84/43, Lost Forest 80/80, Snow Festival '64 63/63, Sunset Island 80/80 and Giant House 182/93. The earlier 162-specification research census sampled texture state only when vertices were loaded; it missed later texture swaps used with cached vertices through `G_MODIFYVTX` and triangle commands. The production parser therefore associates material state at triangle emission. `levels/course_textures_sheet.png` visibly resolves grass, snow, pavement, metal, wood, signage and Giant House art, verifying palette/channel order. Raw row 0 is image top. [evidence: ROM bytes, deterministic decoding, nviewer source]
 
 Both distance tables carry display-list material state. A production parser must preserve material state, UVs, tile masks/shifts/wrap, culling and blend/depth mode rather than flatten all triangles into one material, and must not draw both distance representations simultaneously. Exact state words and fog/light setup are in *Environment, sky and camera*. [evidence: disassembly, nviewer source]
 
 ### 3.6 Collision
-
-#### Collision
 
 Collision uses packed `s16 x,y,z` vertices (stride 6) and per-grid-cell lists:
 
@@ -325,7 +311,7 @@ High-Y faces near 10,000 in Green/Snow are valid indexed faces, not parser overr
 
 ### 3.7 Environment, sky, fog, and lighting
 
-#### Environment, sky and camera: Environment prefix
+#### Environment prefix
 
 | Source | Type | Runtime | Meaning |
 |---:|---|---:|---|
@@ -351,13 +337,13 @@ High-Y faces near 10,000 in Green/Snow are valid indexed faces, not parser overr
 
 Renderer `0x800CF20C` constructs one ambient and one directional `Lights1` block, optionally halving both colors under a visibility/culling branch. Preserve source direction bytes; normalize only at the viewer API boundary if needed. [evidence: disassembly]
 
-#### Environment, sky and camera: Clear, fog and sky
+#### Clear, fog and sky
 
 The course overlay converts fog RGB to duplicated RGBA5551 and fills its gameplay viewport. The same RGB is emitted as `G_SETFOGCOLOR`. Common static DL J ROM `0x845E0` selects two-cycle mode and hardcodes `gSPFogPosition(996,1000)` (`BC000008 7D008400`) with raw render/combine words `C8113078` and `FC127FFF FFFFF238`. The cell/material path uses state words `00552078` and `FC127E24 FFFFF3F9`, then installs course lighting. [evidence: disassembly]
 
 There is no separate sky texture, skydome resource or stage-overlay sky draw pass. Background color is the fog-colored clear; any distant scenery is ordinary course-cell geometry and stays in `main`, not a fabricated `sky` layer. [evidence: disassembly] Runtime captures are used only as visual confirmation, not as the basis for this absence claim.
 
-#### Unused and hidden content: Empty placeholders and stale fog fields
+#### Empty placeholders and stale fog fields
 
 J65–67 / P66–68 are each `0x12C0` zero bytes, the size of 2,400 empty `u16` samples, with no located reference. They may reserve more recording slots but contain no recoverable content. [evidence: ROM bytes, deterministic decoding]
 
@@ -365,7 +351,7 @@ Every course header carries uncopied u16s at `+0x18/+0x1A`: Tutorial 996/996, Gr
 
 ### 3.8 Cameras and paths
 
-#### Environment, sky and camera: Camera/projection
+#### Camera/projection
 
 Normal gameplay FOV is 65°. A mode selected by state `+0x202 == 1` uses 45°. Projection is 4:3, near 10, scale 1, and uses the course's 1P/2P far clip. FOV lives at J `0x8004C830`; projection setup starts `0x800B4324`. [evidence: disassembly]
 
@@ -388,29 +374,19 @@ Use these as default viewer cameras. If a regional/version variation later needs
 
 ### 4.1 Placement records
 
-Placement records are structurally coupled to the level format and are described in Level data.
-
 ### 4.2 Object and model formats
-
-Object geometry uses the model and display-list formats described above unless stated otherwise.
 
 ### 4.3 Skeletons and animation
 
-Static-pose or animation support and remaining omissions are stated in the object description.
-
 ### 4.4 Behaviors, triggers, and scripted objects
-
-Behavioral records are documented only where they affect level extraction or presentation.
 
 ## 5. Audio
 
 ### 5.1 Audio storage and banks
 
-Audio storage is described with the sequence and bank tables below.
-
 ### 5.2 Sequence format and driver
 
-#### Music player: Driver, banks and regional timing
+#### Driver, banks and regional timing
 
 Air Boarder uses the older Software Creations/N64 Sound Tools `libmus` revision already modeled for Gex 64 by `src/rom/music/libmus64.ts`: 0x120-byte channel state, commands `0x80–0xA9`, libultra synthesizer. It is not the newer `music/libmus.ts` revision.
 
@@ -436,11 +412,9 @@ Offsets are song-relative; wave numbers directly index the common bank. All used
 
 ### 5.3 Instruments and sample encoding
 
-Instrument banks, envelopes, loops, and sample encoding are described above.
-
 ### 5.4 Music catalog and loop points
 
-#### Music player: Complete soundtrack and loops
+#### Complete soundtrack and loops
 
 Names are descriptive because the ROM embeds none. Every song has a direct static caller and every active channel encodes one forever loop; there is no unreferenced ninth song or one-shot. [evidence: ROM bytes, disassembly, deterministic decoding]
 
@@ -463,11 +437,9 @@ Gameplay selector J `0x800E0310` uses overlay-3 table at ROM `0x899E0` / RAM `0x
 
 ### 6.1 Unreferenced assets
 
-#### Unused and hidden content
-
 Core formats were completed before this bounded reference audit.
 
-#### Unused and hidden content: Likely unused alternate controller recording
+#### Likely unused alternate controller recording
 
 J archive ID63 (`0x51D490–0x51E750`, SHA-256 `0033613f2ab66ee64ac0ebabf58806667addd01d700eebf805e8b9af535f6963`) is 2,400 big-endian `u16` controller samples; P ID64 is byte-identical. It has no fixed or computed archive-access path in resident or ten overlays. [evidence: ROM bytes, deterministic decoding]
 
@@ -475,38 +447,32 @@ Adjacent used J64 is loaded by overlay 3 `0x800B01B4`; input-source case 2 at `0
 
 Therefore ID63 is a strong obsolete alternate-demo/controller-recording candidate. Its absolute unreachability and intended scenario remain [hypothesis] because a synthesized index/call path cannot be disproved solely from direct-call auditing.
 
-#### Unused and hidden content: Things that looked hidden but are accounted for
+#### Things that looked hidden but are accounted for
 
 - All six large course packages have fixed calls in stage overlays; no unreferenced/cut course package exists. [evidence: disassembly]
 - Giant House's three headers are all initialized and represent connected areas. [evidence: disassembly]
 - All eight music sequences have callers; ID4 is omitted from the main seven-pair table but explicitly referenced by the front end. [evidence: disassembly]
 - Board resources 8–11 exist and a flag-controlled selector path can reach all twelve indices; whether normal retail progression reaches that path is open. [evidence: disassembly, open question]
 
-#### Unused and hidden content: Narrow unused-wave candidates
+#### Narrow unused-wave candidates
 
 The eight songs reference 35 distinct waves; all 257 indexed effect streams reference 220. Their union leaves 52 distinct records (584,577 encoded VADPCM bytes) unreferenced by either bytecode source; five have infinite sample loops (212, 214, 221, 223, 230). [evidence: deterministic decoding] This is deliberately not a global-unused claim: direct/dynamic wave users outside indexed libmus song/effect bytecode remain [open question]. Full IDs/extents are in `music/REPORT.md` and `music/J.json`.
 
-#### Unused and hidden content: Debug/text/build audit
+#### Debug/text/build audit
 
 A targeted CP932 scan of the J ROM and extracted archive data found none of the explicit Japanese terms for test, debug, sound, stage, course, character, mode, unused, boss, ending, demo, hidden or sample. This bounded negative does not exclude image text or unlabeled code. Save signatures and microcode IDs are accounted for; no timestamp or developer debug menu/string was found. [evidence: deterministic decoding]
 
 ### 6.2 Cut or inaccessible levels
 
-Candidate levels are distinguished from alternate, debug, and intentionally hidden retail content above.
-
 ### 6.3 Debug features
 
-Shipped debug strings and executable features are listed only when supported by a code or data reference.
-
 ### 6.4 Prototype or revision-specific content
-
-Source-archive and prototype material is explicitly distinguished from shipped retail data.
 
 ## 7. nviewer implementation
 
 ### 7.1 Module mapping
 
-#### Archive, ROM map and compression: Regional mapping
+#### Regional mapping
 
 PAL inserts localized compressed ID 3; J IDs 0–2 map directly to P IDs 0–2, while J `n >= 3` maps to P `n+1`. Of the first three, only J0/P0 and J2/P2 are byte-identical. After decoding:
 
@@ -518,7 +484,7 @@ PAL inserts localized compressed ID 3; J IDs 0–2 map directly to P IDs 0–2, 
 
 A single loader should use a small region profile for table IDs/offsets, then share every parser. [evidence: ROM bytes, deterministic decoding]
 
-#### Music player: nviewer implementation
+#### nviewer implementation
 
 Refactor `src/rom/music/libmus64.ts` into a profile-driven old-libmus core instead of copying it. Profile fields: nominal/sample update rate, VI rate, EQ table offset, pointer/wave banks, song extents/labels, voice limit and gameplay volume (112; front-end default-volume behavior remains an inference). Cache parsed/prepared waves per ROM using `WeakMap`.
 
@@ -554,17 +520,13 @@ Regional contract: select table/ID/overlay/audio offsets from `NABJ` vs `NABP`; 
 
 ### 7.2 Supported features
 
-The Technical summary states the supported releases and principal decoded features.
-
 ### 7.3 Approximations and omissions
-
-Viewer approximations are distinguished from facts about the game formats.
 
 ## 8. Verification and remaining work
 
 ### 8.1 Verification evidence
 
-#### Verification evidence and open questions: Static/tool verification
+#### Static/tool verification
 
 - `fs/extract.py` validates every regional table recurrence and decodes 44/45 compressed entries to exact declared sizes.
 - `fs/make_disasm.py` derives resident/overlay bounds structurally; `archive_xrefs.py` inventories archive calls across every mapped text image.
@@ -574,11 +536,13 @@ Viewer approximations are distinguished from facts about the game formats.
 - `music/analyze_audio.py` parses all eight songs, 303 waves, 257 indexed effects, regional timing and every loop; the audition player completes all tracks.
 - Green Park structural/culling renders use nviewer's existing rasterizer, not a second raster implementation.
 
-#### Verification evidence and open questions: Runtime verification
+#### Runtime verification
 
 Session1 produced no game evidence: `headless.sh` was backgrounded in a short-lived command execution context and was reaped before debugger initialization, leaving zero-byte logs. Session2 was a fresh serialized child using a persistent foreground exec session and successfully booted the J ROM. It captured Tutorial plus all five courses, 65° FOV and initial camera triplets for each, live environment sources for each, Green Park/Lost Forest disk-marker records, all 110 original Giant House Coin level-1 records, and five gameplay music-selector calls. Screenshots, RAM dumps, debugger contexts and provenance are in `emulator/session2/`; `NOTES.md` identifies two invalid signed-address dumps that are excluded from all claims. [evidence: RAM, captured frames]
 
-#### Verification evidence and open questions: Open implementation/research questions
+### 8.2 Known unknowns
+
+#### Open implementation/research questions
 
 1. Exact F3DLX tile mask/shift/wrap and blend/depth translation should be checked against game-camera captures during implementation.
 2. Static setup values 1 and 2 need their exact retail availability and UI labels confirmed; only value 0=`LEVEL 1` was observed live.
@@ -589,10 +553,4 @@ Session1 produced no game evidence: `headless.sh` was backgrounded in a short-li
 7. The likely unused controller recording can be substituted into the used demo path to identify its intended course/character, but this is optional hidden-content work, not loader work.
 8. Exact star-coin presentation still needs viewer support for spherical billboards and a nine-frame material clock; the loader preserves all frames and source metadata but currently displays frame 0 in the authored quad orientation.
 
-### 8.2 Known unknowns
-
-Unresolved semantics are labelled **Hypothesis** or **Open question** where they occur.
-
 ### 8.3 References
-
-External documentation, decompositions, and source archives are cited inline where used.

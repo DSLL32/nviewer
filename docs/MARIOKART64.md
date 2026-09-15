@@ -77,15 +77,11 @@ Useful US RAM addresses (**Verified** by disassembly unless marked):
 
 ### 2.2 Memory and address mapping
 
-Address conversions and load destinations are specified with the executable and file tables above.
-
 ### 2.3 ROM map and asset organization
-
-See the executable, archive, and file-table descriptions in this section.
 
 ### 2.4 Compression formats
 
-#### Filesystem and compression: No file table
+#### No file table
 
 Mario Kart 64 has no DMA table. Assets are linked at fixed ROM offsets and located by code:
 - common data by `lui`/`addiu` constant pairs in main (`setup_game_memory`, `init_segment_*`);
@@ -119,7 +115,7 @@ US ROM map. Ranges marked (D) come only from decomp `mk64.ld` comments; all othe
 
 All 3354 `MIO0` magics in each ROM are 4-byte aligned, decode without error and none overruns the next stream (**Verified**, `fs/proto/streams.ts`, all five ROMs).
 
-#### Filesystem and compression: MIO0
+#### MIO0
 
 **Verified**: the TypeScript decoder reproduces every stream in all five ROMs; the game routine `mio0decode` (0x800400D0) reads the header fields as below.
 ```
@@ -133,15 +129,15 @@ bit 0: u16 v from the back-reference stream; copy (v >> 12) + 3 bytes, one at a 
 ```
 This is the same codec as Star Fox 64 (STARFOX.md *gCourseTable*): one shared decoder serves both games. Streams are contiguous (control words, back-references, literals), padded to 16 bytes (course and texture streams) or not padded (CourseVtx streams, followed by the packed list at the next 4-byte boundary).
 
-#### Filesystem and compression: TKMK00
+#### TKMK00
 
 63 `TKMK00` images at US ROM 0x7FA3C0-0x821D10 (**Verified** count and range) are decoded by `tkmk00decode` (main) into RGBA16 for menus (player select, options, character names). Header (Decomp `tools/libtkmk00.c`): `"TKMK00"`, u8 flags at +6, u16 width at +8, u16 height at +0xA, 8 x u32 stream offsets at +0xC, u32 bit flags at +0x2C, data from +0x30. No course, collision or 3D asset uses TKMK00; the viewer does not need a decoder.
 
-#### Filesystem and compression: Extracting everything
+#### Extracting everything
 
 `cd mk64/fs/proto && npx tsx extract.ts` decodes every course of every ROM in about 3 s, checks all sizes of *gCourseTable* and writes `files/us/` (per course: `seg6_course_data.bin`, `seg9_offsets.bin`, `segF_vertex_packed.bin`, `course_vtx14.bin`, `packed_dl.bin`, `seg4_vtx.bin`, `seg7_gfx.bin`, `seg5_textures.bin`, `textures/*.bin`; common: `seg2_data_segment2.bin`, `segD_common_textures.bin`, `segB_ceremony_data.bin`, `seg6_startup_logo.bin`) with an `index.txt` of sizes and sha1. It reports "ALL CHECKS OK" for US and both EU versions.
 
-#### Verification evidence: ROMs, tables and codecs
+#### ROMs, tables and codecs
 
 - **Verified, ROM bytes:** header ids, versions and hashes in *ROM identification*; unique structural discovery of `gCourseTable` and
   `other_textures` in all five ROMs.
@@ -152,8 +148,6 @@ This is the same codec as Star Fox 64 (STARFOX.md *gCourseTable*): one shared de
   Japanese differences. `fs/proto/streams.ts` decodes all 3,354 aligned MIO0 signatures in each ROM without overrun.
 
 ### 2.5 Loading process
-
-Level and asset selection is described by the tables and loader call paths above.
 
 ### 2.6 Revision differences
 
@@ -197,7 +191,7 @@ Recommendation: **US primary**. EU V1.0 and V1.1 can be accepted cheaply (course
 
 ### 3.1 Level catalog and identifiers
 
-#### Courses: Course list
+#### Course list
 
 `gCurrentCourseId` indexes every per-course table. Names **Verified** as ROM strings (`gCourseNames`, stored in lower case, e.g. `mario raceway`); debug names (`gDebugCourseNames`) **Verified** in all five ROMs; cup order **Verified** from the bytes of `gCupCourseOrder` (US ROM 0xF37B4: `8 9 6 11 / 10 5 1 0 / 14 12 7 2 / 18 4 3 13 / 19 15 17 16`). Leak numbering **Verified** by the `KTn.h` counts; the ceremony is the leak's `RESULT`.
 
@@ -227,7 +221,7 @@ Recommendation: **US primary**. EU V1.0 and V1.1 can be accepted cheaply (course
 
 There is no test/debug course slot in the retail table or selector: the course table ends after 20 entries, and the debug course menu cycles ids 0..19 only (Decomp `menus.c`; *No retail test-course slot was found*).
 
-#### Courses: Suggested sidebar
+#### Suggested sidebar
 
 `LevelInfo.name` is the course name; `group` is the cup.
 
@@ -242,7 +236,7 @@ There is no test/debug course slot in the retail table or selector: the course t
 
 ### 3.2 Level container
 
-#### Filesystem and compression: gCourseTable
+#### gCourseTable
 
 20 entries of 0x30 bytes at US ROM 0x122390 (RAM 0x802B8D80), followed by an all-zero entry: the award ceremony (id 20) has no entry. **Verified** by decoding all 20 entries in all five ROMs (and by the raw bytes of entries 0 and 1).
 ```
@@ -270,7 +264,7 @@ Size checks that pass for every course of every ROM (**Verified**, `fs/proto/ext
 - every texture decodes to its listed size, and its stream fits in align16(compressedSize);
 - US/EU: the leak's generated headers `include/KTn.h` match exactly (`VTX_NUMBER` = vertexCount, `VTX_ROM_SIZE` = CourseVtx stream length, `GFX_ROM_SIZE` = packed bytes, `GFX_RAM_SIZE` = finalDisplaylistOffset, `TRI_NUMBER` = triangles in the unpacked list, `TEXT_NUMBER` = texture-list entries), so leak course KTn = course id n - 1.
 
-#### Filesystem and compression: Per-course data (US)
+#### Per-course data (US)
 
 | id | course | entry ROM | course data MIO0 (ROM) | seg 6 bytes | vertex blob (ROM) | vertices | packed bytes | Gfx (unpacked bytes) | triangles | textures (seg 5 bytes) | offsets file (ROM, bytes) |
 |---|---|---|---|---|---|---|---|---|---|---|---|
@@ -297,7 +291,7 @@ Size checks that pass for every course of every ROM (**Verified**, `fs/proto/ext
 
 "triangles" counts G_TRI1 + 2 x G_TRI2 in the whole unpacked list; it equals the leak's `TRI_NUMBER`.
 
-#### Filesystem and compression: How a course is loaded
+#### How a course is loaded
 
 Decomp `load_course` (`src/racing/memory.c`), `setup_game_memory` (`src/main.c`), `setup_race`; the unpacker, templates and jump table are **Verified** by disassembly. RAM placement is Decomp (the actual bases are read from `gSegmentTable` in the RAM dumps, *Verification evidence*).
 
@@ -331,7 +325,7 @@ Course assets are position-independent within their segments: a static loader ne
 
 The podium ceremony (`load_ceremony_cutscene`, Decomp) sets `gCurrentCourseId` to Royal Raceway (7), loads that course, loads the ceremony data as segment B and then **replaces segment 6** with Banshee Boardwalk's course-data stream. It draws a fixed list in the ending segment that calls only Royal Raceway packed lists (*Draw recipes*), so segment 6 does not matter for its geometry. The credits (`load_credits`) load a race course and draw it with `render_course_credits`.
 
-#### Filesystem and compression: Vertices: CourseVtx to Vtx
+#### Vertices: CourseVtx to Vtx
 
 The CourseVtx stream decodes to vertexCount x 14 bytes (**Verified**, all courses). Expansion per Decomp `func_802A86A8`:
 ```
@@ -344,7 +338,7 @@ Vtx (16 bytes, segment 4): s16 x, y, z; u16 flag; s16 s, t; u8 r, g, b, a
 ```
 The 4-bit flag is used only by collision (*Vertex flags*). Some lists get their vertex alpha and colour rewritten after loading (*Load-time edits and animation*).
 
-#### Courses: Other 3D scenes
+#### Other 3D scenes
 
 - **Startup logo** (segment 6 from US ROM 0x825800): the spinning "Mario Kart 64" logo; lists at seg6+0x2B00, 0x2C88, 0x2D58, 0x2F20, 0x2FF0 (Decomp `startup_logo.yml`). Optional.
 - **Award ceremony**: Royal Raceway geometry from the ending list plus the podium and trophies from segment B (*Draw recipes*, *Objects and the kart path*).
@@ -352,7 +346,7 @@ The 4-bit flag is used only by collision (*Vertex flags*). Some lists get their 
 
 The title screen and menus are 2D.
 
-#### Course geometry and render state: What makes up a static course
+#### What makes up a static course
 
 The game draws only the part of a course around the camera:
 - `render_course_segments(table)` draws one entry of a Gfx* table: `table[(section - 1) * 4 + direction]`, where `section` is the path section id of the collision triangle under the camera (*How the game builds it* `sectionId`) and `direction` is the camera yaw quadrant (0 south, 1 east, 2 north, 3 west). Each entry is a segment-6 list that sets a texture and calls the packed lists visible from there.
@@ -393,7 +387,7 @@ The game draws only the part of a course around the camera:
 
 Addresses **Verified** by locating the decomp's element lists byte for byte in the decoded US segments (`lv/proto/scan.ts`); they hold for US and EU (identical files, *Version differences*) but not for J. The section table has 4 x (highest section id) entries.
 
-#### Collision: Per-course results (US)
+#### Per-course results (US)
 
 | id | course | collision triangles | skipped (flag 4 / degenerate / floor / wall) | surfaces (triangles) |
 |---|---|---|---|---|
@@ -420,7 +414,7 @@ Addresses **Verified** by locating the decomp's element lists byte for byte in t
 
 Every TrackSections table ends with section-255 records (walls, ramps, out-of-bounds pieces). A few small lists (at most 32 triangles per course) are reached only by the collision walk and never drawn: candidates for invisible walls and hidden floors (Yoshi Valley 12, Koopa Troopa Beach 6, Luigi Raceway 28, Sherbet Land 7, Rainbow Road 12, Wario Stadium 9, Big Donut 32 triangles; list addresses in `lv/notes/collision.md`). The viewer gets them from the collision layer.
 
-#### Music: File formats (big-endian)
+#### File formats (big-endian)
 
 **Sequence file:**
 ```
@@ -454,7 +448,7 @@ Envelope:          s16 pairs {delay, arg}: delay > 0 ramp to arg; 0 disable; -1 
 
 **Bank sets:** `u16 offset[30]` (from the table start), and at each offset `u8 count, u8 bankId[count]`. Every sequence has exactly one bank: sequences 1-10 use banks 1-10; 11-15, 20, 22 use bank 11; 16 and 24 bank 12; 23 bank 13; 17 bank 14; 18 bank 15; 19 bank 16; 21 bank 17; 25 bank 18; 26, 27, 29 bank 19; 28 bank 20; sequence 0 (sound effects) bank 0.
 
-#### Mapping onto the viewer: Level assembly and layers
+#### Level assembly and layers
 
 For each race course, the implementation creates a `SegmentSpace` for 2/4/5/6/7/9/D and executes the retail
 `render_course_credits` whole-course root. This is the game's coherent unsplit static model: each course part appears
@@ -482,7 +476,7 @@ Implemented `runDisplayList` defaults are `ucode: 'f3dex'`, scale 1, no mirror, 
 decals enabled, and lighting disabled for course geometry. The recipe supplies inherited texture/render state; never
 execute packed segment-7 leaf lists in isolation.
 
-#### Unused and hidden content: No retail test-course slot was found
+#### No retail test-course slot was found
 
 - **Verified (ROM bytes):** the US course table begins at ROM `0x122390` and has exactly twenty `0x30`-byte records, for course IDs 0--19. The next record at `0x122750` is zero. The corresponding offsets are `0x122570` (EU 1.0), `0x122490` (EU 1.1), `0x122DC0` (JP 1.0), and `0x121BF0` (JP 1.1). The award ceremony is ID 20 but has no course-table record; it loads Royal Raceway through ceremony code.
 - **Decomp:** `gCourseTable` has twenty initializers and the course enum contains the sixteen race courses, four battle courses, then `COURSE_AWARD_CEREMONY`. The splash debug selector also wraps within the ordinary twenty playable courses; it exposes no additional test ID.
@@ -492,11 +486,9 @@ This proves that the retail course filesystem and selector contain no extra/cut 
 
 ### 3.3 Geometry
 
-Geometry representation is described with the level container above.
-
 ### 3.4 Display lists and render state
 
-#### Filesystem and compression: Packed display lists
+#### Packed display lists
 
 A byte stream: an opcode, then 0-4 argument bytes; 0xFF ends it. Undefined opcodes (0x31, 0x32, 0x59-0xFE) are skipped without arguments. The output is F3DEX 0.95 Gfx in segment 7; addresses inside the stream are segment-relative. Handler grouping **Verified** by disassembly (one handler per row); the constant words **Verified** against the templates in ROM; field layouts Decomp (`memory.c`) and consistent with every course unpacking to exactly the table's size and the leak's triangle count.
 
@@ -554,13 +546,13 @@ The texture address is `segment 5 + index x 0x800`: every course texture is 0x80
 
 Caution: the decomp's packer tool (`tools/displaylist_packer.c`) swaps 0x26 and 0x27 and differs elsewhere; the game's unpacker above is authoritative (**Verified** against the ROM templates).
 
-#### Course geometry and render state: Microcode, vertices, units
+#### Microcode, vertices, units
 
 - **Microcode:** F3DEX 0.95. Course lists use F3DEX 1.x opcodes (G_VTX 0x04, G_TRI1 0xBF, G_TRI2 0xB1, G_DL 0x06, G_ENDDL 0xB8).
 - **Vertices:** standard 16-byte Vtx (*Vertices: CourseVtx to Vtx*). Vertex colours are colours: every course draw function clears G_LIGHTING, so there is no RSP lighting on course geometry.
 - **Units and axes:** 1 vertex unit = 1 world unit, no scaling; right-handed, Y up; **no mirroring**. **Verified** visually: signs read correctly ("MARIO STAR", "Luigi's", "Nintendo", DK's arrow signs) with X unmirrored, and the start-line stripe lies across the first path point (e.g. Mario Raceway (0, 0, -232), the path heading -Z). Courses span about ±5000 units.
 
-#### Course geometry and render state: Draw recipes
+#### Draw recipes
 
 Frame setup before `render_course` (Decomp `init_rdp`, `render_player_one_1p_screen`): combiner SHADE, geometry mode `G_ZBUFFER | G_SHADE | G_CULL_BACK | G_LIGHTING | G_SHADING_SMOOTH`, render mode AA_ZB_OPA_SURF, texture filter BILERP, perspective correction on, 1-cycle, no fog unless the course sets it. Every course function clears G_LIGHTING first.
 
@@ -590,7 +582,7 @@ Shorthands: combiners IA = MODULATEIA `FC121824 FF33FFFF`, I = MODULATEI `FC127E
 | 19 Big Donut | [cam] SHADE 7000DE8; 7000450, 7000AC0, 7000D20, 7000230 | - |
 | 20 Award Ceremony | ending-segment list at RAM 0x80284F70 (US ROM 0x1285B0, 41 commands): IA/OPA/texture on, then 35 Royal Raceway packed lists | - |
 
-#### Course geometry and render state: Render state inside the lists
+#### Render state inside the lists
 
 Opcode census over every list any route draws (**Verified**, `lv/proto/census.ts`):
 
@@ -620,7 +612,7 @@ Absent everywhere: G_QUAD, G_CULLDL, G_MTX, G_POPMTX, G_MOVEMEM, G_LOADTLUT, G_S
 
 ### 3.5 Textures and materials
 
-#### Filesystem and compression: Texture lists and segment 5
+#### Texture lists and segment 5
 
 The offsets file (segment 9) starts with the texture list (**Verified**, all courses):
 ```
@@ -632,7 +624,7 @@ The offsets file (segment 9) starts with the texture list (**Verified**, all cou
 ```
 The segment-5 offset of entry k is the sum of align16(size) of the entries before it. The rest of the offsets file holds the section Gfx* tables (*What makes up a static course*). The other_textures base per version is found by searching for the unique base at which every Mario Raceway entry points at a MIO0 stream of the listed size: US 0x641F70 (**Verified**; the other versions in *Version differences*).
 
-#### Course geometry and render state: Textures
+#### Textures
 
 - Formats: RGBA16 and IA16 only (IA16 in Banshee Boardwalk, Koopa Troopa Beach, Rainbow Road, Wario Stadium, D.K.'s Jungle Parkway); sizes 32x32, 64x32 and 32x64. No CI, TLUT or mip-maps (**Verified**, census of every G_SETTILE and G_LOADBLOCK).
 - Wrap: from each render-tile G_SETTILE (cms/cmt 0 wrap, 1 mirror, 2 clamp; masks 5 or 6); all combinations occur.
@@ -640,7 +632,7 @@ The segment-5 offset of entry k is the sum of align16(size) of the entries befor
 - Framebuffer textures: Luigi Raceway's TV screen and Wario Stadium's jumbotron are overwritten every frame with a copy of the previous frame (Decomp `copy_framebuffer`); a viewer shows the ROM texture there.
 - Texture sheets: `lv/renders/NN_{course}_textures.png`.
 
-#### Unused and hidden content: Course display lists and texture-list entries
+#### Course display lists and texture-list entries
 
 The structural reachability scan in `unused2/coverage.txt` starts at every command after `G_ENDDL` and follows known race recipes, credits roots, and track-section roots. Its `never` set is deliberately an over-approximation: many addresses are internal fragments, terminal sentinels, or roots selected by control flow that the static route model does not encode. It did not establish any coherent cut course or model as genuinely unreachable.
 
@@ -660,7 +652,7 @@ The earlier three apparent unused course texture-list entries are false positive
 
 After those credits and normal-course routes are included, every course texture-list entry has a consumer. None requires an object-code explanation. The Koopa Beach comment is a decomp naming/comment artifact, not proof of unused content.
 
-#### Unused and hidden content: Development-archive course material
+#### Development-archive course material
 
 A read-only audit of `~/bbgames/mk64` and its original `kimura.lzh` is recorded in
 `archive_cut/ARCHIVE_COURSE_AUDIT.md`. **Leak-supported:** `TOWN` is the only distinct non-retail course identity.
@@ -747,7 +739,7 @@ alternate award ceremony was found. These distinctions were verified by the reus
 
 ### 3.6 Collision
 
-#### Collision: How the game builds it
+#### How the game builds it
 
 There is no collision file. At course load, `course_generate_collision_mesh` (racing 0x80295DC4; **Verified** by disassembly, logic Decomp `render_courses.c`, `collision.c`) walks display lists, turns their triangles into `CollisionTriangle` records and bins them into a 32 x 32 grid:
 - race courses: `parse_course_displaylists(TrackSections table)` (*What makes up a static course* table). Mario Raceway first adds 0x07001140 and 0x070008E8 (1P; 0x07002D68 in multiplayer) with surface -1 and section 0xFF;
@@ -773,7 +765,7 @@ There is no collision file. At course load, `course_generate_collision_mesh` (ra
 6. flags = sectionId, | 0x400 if all three vertex flags are 1, | 0x800 if all are 2, | 0x1000 if all are 3, else | 0x200 when section flag 0x4000 is set; plus the dominant normal axis 0x4000 (Y), 0x8000 (X) or 0x2000 (Z);
 7. surfaceType = (u16)(s8)surface.
 
-#### Collision: CollisionTriangle (RAM, 0x2C bytes)
+#### CollisionTriangle (RAM, 0x2C bytes)
 
 ```
 +0x00 u16 flags          low byte: section id; 0x200/0x400/0x800/0x1000 as above; 0x2000/0x4000/0x8000 facing axis
@@ -785,7 +777,7 @@ There is no collision file. At course load, `course_generate_collision_mesh` (ra
 ```
 Layout Decomp (`common_structs.h`); size **Verified** from `count * 44` in `func_80295C6C`. RAM (**Verified** by disassembly): `gCollisionMesh` 0x8015F580, `gCollisionMeshCount` 0x8015F588 (u16), slot counter 0x8015F58C, course bounds 0x8015F6E8-0x8015F6F2 (s16 maxX, minX, maxY, minY, maxZ, minZ). The grid cells widen by 20 units on each side.
 
-#### Collision: Surface types
+#### Surface types
 
 Names Decomp (`include/mk64.h`); usage **Verified** from the TrackSections data of all courses (`lv/proto/analysis.txt`).
 
@@ -816,7 +808,7 @@ Names Decomp (`include/mk64.h`); usage **Verified** from the TrackSections data 
 
 The decomp's `docs/courses/surfacetypes.md` gives other names for some values (4 "Cement", 12 "Rock walls", 255 "walls/ramps"); the enum above is the one the code uses.
 
-#### Collision: Vertex flags
+#### Vertex flags
 
 | Vtx.flag | effect (when all three vertices of a triangle share it) |
 |---|---|
@@ -828,7 +820,7 @@ The decomp's `docs/courses/surfacetypes.md` gives other names for some values (4
 
 The physics meaning of 0x400/0x800/0x1000 (and 0x200) is open (*Open questions and hypotheses*).
 
-#### Verification evidence: Geometry, textures and collision
+#### Geometry, textures and collision
 
 - **Verified, exhaustive static analysis:** `lv/proto/scan.ts`, `coverage.ts`, `census.ts`, `analysis.ts` and
   `tilecfg.ts` resolve every recipe address, enumerate every reachable display list, texture command, render state and
@@ -846,7 +838,7 @@ The physics meaning of 0x400/0x800/0x1000 (and 0x200) is open (*Open questions a
 
 ### 3.7 Environment, sky, fog, and lighting
 
-#### Environment: sky, fog, clouds, camera: Screen-space sky
+#### sky, fog, clouds, camera: Screen-space sky
 
 The sky is not a dome. `render_skybox` draws two untextured orthographic 320x240 gradients: screen top to a computed
 horizon row, then the horizon row to screen bottom. The split row is the projection of world point `(0,0,30000)` using
@@ -881,7 +873,7 @@ The four RGB values per course are **Verified** at US ROM 0x1220E0 and 0x1221DC 
 A `Level.skyGradient` contract with these four colours and the horizon point is the faithful solution. A camera-centred
 vertex-coloured dome only matches one camera pitch/FOV and is an explicit fallback.
 
-#### Environment: sky, fog, clouds, camera: Fog
+#### sky, fog, clouds, camera: Fog
 
 `gSPFogPosition(min,max)` becomes `multiplier = trunc(128000/(max-min))` and
 `offset = trunc((500-min)*256/(max-min))`. Constants are **Verified** by racing-segment disassembly:
@@ -897,7 +889,7 @@ does not visibly fog geometry (**Decomp**). Moo Moo Farm lists contain fog colou
 (18285,-18139), but the effective inherited render-mode interaction is open. Choco and Toad map directly to
 `Level.fog` with the table's projection planes.
 
-#### Environment: sky, fog, clouds, camera: Lighting and clear colour
+#### sky, fog, clouds, camera: Lighting and clear colour
 
 Course geometry clears `G_LIGHTING` and uses vertex colour. The two common lights at US ROM 0xDD210 are ambient 175 or
 115, directional white 255 with direction `(0,0,120)`; a few actor models named in *Objects and the kart path* use them. Choco and Yoshi rotate
@@ -907,7 +899,7 @@ using the bottom sky colour as `Level.clearColor` is a safe fallback.
 
 ### 3.8 Cameras and paths
 
-#### Objects and the kart path: Runtime systems
+#### Runtime systems
 
 The game has two relevant object pools. `gActorList[100]` at US RAM 0x8015F9B8 uses 0x70-byte actors for foliage,
 item boxes, signs, vehicles and some course hazards. Position is three f32 values at +0x18, rotation three s16 values
@@ -944,7 +936,7 @@ below was decoded to its terminator and its segmented address appears as the con
 | 18 | D.K.'s Jungle Parkway | item boxes 0x06013EC0 (22), 10-byte trees 0x06013F78 (95) |
 | 19 | Big Donut | item boxes 0x06000058 (24) |
 
-#### Objects and the kart path: Vehicles
+#### Vehicles
 
 - **Kalimari Desert trains (Decomp; path pointer Verified):** segment-6 path 0x06006C60, 75 control points, resampled
   approximately every 20 units; two trains start half a path apart plus index 160. A full 1-player train is engine,
@@ -956,7 +948,7 @@ below was decoded to its terminator and its segmented address appears as the con
   around track path 0 with offsets 0, 75, 50 and 25 points and one of three lanes. The viewer should use the deterministic
   non-Time-Trials distribution and label it animated.
 
-#### Objects and the kart path: Kart and auxiliary paths
+#### Kart and auxiliary paths
 
 `TrackPathPoint` is `s16 x, y, z; u16 trackSectionId` (8 bytes), terminated by all three coordinates 0x8000. The
 pointer table at US ROM 0xDD4D0 / RAM 0x800DC8D0 holds up to four track paths per course; the allocation-size table is
@@ -979,7 +971,7 @@ are not used for racing, while the ceremony row's four segment-B paths are used 
 **Decomp** use.) Expose track paths as a `paths` markers/line layer, colourable by `trackSectionId`, with train/ferry
 paths separately named and path point 0 marked as the start.
 
-#### Environment: sky, fog, clouds, camera: Clouds, stars and particles
+#### sky, fog, clouds, camera: Clouds, stars and particles
 
 Cloud/star records are 8 bytes: `u16 yaw, screenHeight, scalePercent, subtype`, terminated by yaw 0xFFFF. **Verified**
 lists: Luigi/Mario clouds 13, Yoshi/Moo Moo 10, Koopa 6, Royal 13, Sherbet 12, Kalimari 13, Toad/Rainbow stars 43 and
@@ -988,7 +980,7 @@ computed horizon row, and draws common I4 cloud (64x32) or star (16x16) textures
 (**Decomp** formulas; **Verified** records/textures.) They require optional camera-yaw screen sprites for fidelity.
 Frappe Snowland's 50 falling snow particles (25 in multiplayer) are dynamic and may be omitted.
 
-#### Environment: sky, fog, clouds, camera: Projection and default camera
+#### sky, fog, clouds, camera: Projection and default camera
 
 Perspective values are **Verified** by disassembly of `set_perspective_and_aspect_ratio`:
 
@@ -1008,7 +1000,7 @@ space. The offsets and FOV are **Verified** in Mario Raceway RAM; per-course sta
 Grand Prix instead stages karts into ranked slots and begins with an FOV-80 fly-in, so it is less useful as a fixed
 default view.
 
-#### Verification evidence: Objects, environment and camera
+#### Objects, environment and camera
 
 - **Verified, all ROM course data:** `ob/proto/spawns.ts` finds every actor spawn list and terminator in segment 6,
   cross-checks each pointer against a code constant, decodes every track/auxiliary path, and applies foliage grounding.
@@ -1033,7 +1025,7 @@ default view.
 
 ### 4.1 Placement records
 
-#### Objects and the kart path: Placement and actor rendering
+#### Placement and actor rendering
 
 Foliage is grounded against the generated collision mesh: among Y-facing triangles whose XZ triangle contains the
 point, the game selects the eligible plane near the authored Y and replaces Y with its plane height. Trees then draw
@@ -1091,11 +1083,9 @@ course model roots documented in `ob2/OBJECTS_ENV.md`; use the near LOD for a fi
 
 ### 4.2 Object and model formats
 
-Object geometry uses the model and display-list formats described above unless stated otherwise.
-
 ### 4.3 Skeletons and animation
 
-#### Course geometry and render state: Load-time edits and animation
+#### Load-time edits and animation
 
 `find_vtx_and_set_colours(list, alpha, r, g, b)` runs after collision generation and rewrites every vertex a list loads: alpha, and r/g/b when r != 0 (Decomp; applied by the prototype, and the renders show the expected translucency):
 
@@ -1113,19 +1103,13 @@ Scrolling textures (`course_update_water`, per frame, changes uls/ult of the fir
 
 ### 4.4 Behaviors, triggers, and scripted objects
 
-Behavioral records are documented only where they affect level extraction or presentation.
-
 ## 5. Audio
 
 ### 5.1 Audio storage and banks
 
-Audio storage is described with the sequence and bank tables below.
-
 ### 5.2 Sequence format and driver
 
-#### Music
-
-#### Music: System
+#### System
 
 Mario Kart 64 uses Nintendo EAD's sequence driver ("Nas"), the Super Mario 64 lineage: **the code is the SM64 EU revision, the data files use the SM64 US/JP container formats**. It is older than Star Fox 64's driver (`src/rom/music/sf64.ts`).
 
@@ -1153,7 +1137,7 @@ Mario Kart 64 uses Nintendo EAD's sequence driver ("Nas"), the Super Mario 64 li
 
 Reverb feedback = `1 + s16(0x8000 + gain) / 32768`: 0x4FFF gives 0.625, 0x5FFF gives 0.75.
 
-#### Music: Data locations
+#### Data locations
 
 | data | US ROM | size | how to find it (`mus/proto/mk64audio.ts`) |
 |---|---|---|---|
@@ -1166,7 +1150,7 @@ Reverb feedback = `1 + s16(0x8000 + gain) / 32768`: 0x4FFF gives 0.625, 0x5FFF g
 
 All sequences, banks, instruments, drums, samples, loops, books and envelopes parse in all five ROMs (**Verified**, `mus/proto/check.ts`). Music data (sequences 1-29, music banks and samples) is identical in US, EU V1.0/V1.1 and J V1.0/V1.1; only the sound-effect sequence, bank and samples and build padding differ (**Verified**, `verdiff.ts`). The per-version offsets are in *Version differences*.
 
-#### Music: Sequence bytecode
+#### Sequence bytecode
 
 Three script levels (sequence player, channel, layer) as in Star Fox 64 (STARFOX.md *Surface types*). Semantics Decomp (`seqplayer.c`); argument encodings **Verified** by a reachability disassembly of all 30 sequences with no undefined opcodes (`mus/proto/scan.ts`). `var` = 1 byte, or 2 when bit 7 is set: `((b0 & 0x7F) << 8) | b1`. Opcodes used by the music (sequences 1-29): player `D3 D5 D7 DD DB FD 9n FB FF D6 F8 F7`; channel `C1 C4 D3 D4 D7 D8 D9 DC DD DF E3 E9 FD FF 9n` (plus `CC 7n` in the title); layer `C0 C2 FC FF` and the three large-note forms.
 
@@ -1188,7 +1172,7 @@ Differences from `sf64.ts` (everything else matches STARFOX.md *Surface types*):
 
 Note timing: `delay = len; duration = (gate x len) >> 8`; the note decays when `delay <= duration`; gate 0 holds it until the next event. Pitch: `note = (op & 0x3F) + player, channel and layer transpositions` (u8; >= 0x80 is muted).
 
-#### Music: Engine and synthesis
+#### Engine and synthesis
 
 The prototype `mus/proto/mk64synth.ts` (about 1200 lines) ports decomp `seqplayer.c`, `effects.c`, `playback.c`, `heap.c`, `synthesis.c`, `port_eu.c` and rsp-hle's NEAD MK handlers. What differs from Star Fox 64 (full detail in `mus/notes/music.md` *Course geometry and render state*):
 - **Frame schedule:** all 3 updates' sequence processing runs first (each ending with a snapshot of every note's sub-state); then the 3 synthesis updates use the snapshots. A non-looped sample that ends in update u is disabled in the later snapshots of that frame.
@@ -1199,7 +1183,7 @@ The prototype `mus/proto/mk64synth.ts` (about 1200 lines) ports decomp `seqplaye
 - **Reverb (per update):** clear wet, load `len` samples from the ring, `dry += (wet x 0x7FFF) >> 15`, `wet = wet x (0x8000 + gain) >> 15` (feedback), mix the notes with reverb index 0, save `len` samples back. The ring is a pure delay of `window x 64` samples. Output = dry L/R, no master gain.
 - **Pan:** stereo tables (`gStereoPanVolume`, strong-side flags for pan < 0x20 / > 0x60), mono 0.707, headphones (Haas delay, not ported; stereo is the default).
 
-#### Music: Loops and offline rendering
+#### Loops and offline rendering
 
 Every looping song ends its section with a **sequence-level backward jump** (`FB`; Results uses `F8 40 ... F7`); non-looping songs end with `D6 mask; FF` (**Verified**, static scan and render). Standard layout: `D3 20; D5 32; D7 mask`, channel setup scripts, `DD bpm; DB vol; FD 08`, then the loop: start the section's channel scripts, `FD len`, `FB loop`. Songs with a real intro (4, 6, 8, 9, 23) jump back to a later section.
 
@@ -1241,11 +1225,11 @@ Loop points at 26800 Hz (US; sequence 3 with preset 5 has the same points) (**Ve
 
 Renders: all 29 songs in about 50 s of CPU, no undefined opcodes, no note-allocation failures; per-second RMS medians -23 to -14 dBFS, peaks reaching full scale in 8 songs (16-bit clamping as on the RSP); spectral peaks within ±9 cents of the A440 grid in 27 of 29 songs (**Verified**, `mus/proto/analyze.ts`). Game comparison: *Music*.
 
-#### Music: Reuse verdict
+#### Reuse verdict
 
 **`sf64.ts` cannot be reused as is, with parameters, or behind a format adapter**: the containers differ (sequence file / ctl / tbl vs AudioTable / soundfonts / sample banks; 0x14 vs 0x10 sample structs; 6 x 0x28 presets vs spec tables; 26800 vs 32000 Hz), and so do about 25 engine behaviours (*Sequence bytecode*, *Engine and synthesis*). **Recommended: fork it** into `src/rom/music/mk64.ts` with the same architecture (data, engine, note pool, ADSR, vibrato and portamento, mixer loop, reverb ring, PCM output with loop points); the prototype `mus/proto/mk64synth.ts` + `mk64audio.ts` is already written in that shape. Reuse from `libultra.ts`: `decodeVadpcm`, `RESAMPLE_LUT` and the `prepareWave` loop-state convention. Estimate: about 1400 lines, difficulty small-medium. A shared EAD core with per-revision flags would risk Star Fox 64's bit-identical renders and is not worth it for two games.
 
-#### Mapping onto the viewer: Camera, fog and music
+#### Camera, fog and music
 
 Use the Time Trials start rule for a stable default: kart at path point 0 plus `(0,0,30)`, eye 50 units behind and 9.5
 above, target 70 ahead, FOV 40; use the course near/far values of *Environment: sky, fog, clouds, camera*. Fog maps directly to `Level.fog` for Choco
@@ -1254,8 +1238,6 @@ Mountain and Toad's Turnpike. Course paths and collision remain in native units 
 Expose music sequences 1-29 with the descriptive names in *Song list*. `decodeMusic` chooses the normal caller's audio preset
 (Raceway uses preset 5 for Mario/Luigi and preset 4 for Royal/Wario; use preset 5 for the standalone track) and returns
 the loop points in *Loops and offline rendering* at 26,800 Hz. Do not include sequence 0, which is sound effects.
-
-#### Verification evidence: Music
 
 - **Verified, exhaustive parsers:** `mus/proto/check.ts`, `scan.ts`, `verdiff.ts`, `tblcover.ts` and `unusedinst.ts`
   parse all sequences, banks, instruments, drums, envelopes, books, samples and bank sets; every reachable music opcode
@@ -1277,11 +1259,9 @@ the loop points in *Loops and offline rendering* at 26,800 Hz. Do not include se
 
 ### 5.3 Instruments and sample encoding
 
-Instrument banks, envelopes, loops, and sample encoding are described above.
-
 ### 5.4 Music catalog and loop points
 
-#### Music: Song list
+#### Song list
 
 30 sequences: id 0 is the sound-effect player; ids 1-29 are music. Ids and decomp names from `include/seq_ids.h` (Decomp); internal names from the leak's `kart_sou_inc.h` (Leak-supported); uses from the call sites (`play_music_for_current_track`, `menus.c`, `ceremony_and_credits.c`) (Decomp); bank, tempo and loop structure **Verified** (parse and render). **The game has no sound test and no track titles: the viewer names below are descriptive** (course names are the official course names).
 
@@ -1325,17 +1305,15 @@ Suggested viewer track list: the 29 music sequences with `MusicTrack.index` = se
 
 ### 6.1 Unreferenced assets
 
-#### Unused and hidden content
-
 This pass separates data that is genuinely unreachable in the retail program from content that is merely hidden behind a dormant debug gate, restricted to a game mode, or misleadingly named in the decompilation. `Verified` means checked in the retail ROM bytes or by an exhaustive parser; `Decomp` means control flow in the matching public decompilation; `Leak-supported` means the local development-source snapshot agrees but is not retail-ROM proof.
 
-#### Unused and hidden content: Retail debug facilities
+#### Retail debug facilities
 
 - **Decomp:** the complete splash-screen debug menu remains in retail code. Its options toggle debug mode, choose one of the twenty courses, screen mode, player and sound mode, or grant all gold cups. Start/A can launch the selection; holding L selects demo behavior; Z-modified selections reach the ending or credits paths.
 - **Decomp:** an IDO retail build initializes `gEnableDebugMode` to zero and `gDebugMenuSelection` to `DEBUG_MENU_DISABLED`; the source contains no normal retail transition into the menu. `ENABLE_DEBUG_MODE` is one only for `GCC` or `DEBUG` builds. Thus the menu is **present but dormant**, not deleted content.
 - **Decomp:** other retained debug controls include R+B resource meters, A+B with L/R path-direction UI, D-pad shortcuts for the final lap, controller-5 Z to start a race, A+B+L+R reset, and ceremony character selection with C/D-pad. These are debug-mode or special-state features, not unused assets.
 
-#### Unused and hidden content: Genuinely unused paths and object data
+#### Genuinely unused paths and object data
 
 - **Verified (ROM table) + Decomp:** `gCoursePathTable` contains a secondary coordinate path for each of the sixteen race courses (44--109 points each). `load_track_path` uses `gCoursePathTable2` during races and consults `gCoursePathTable` only for `COURSE_AWARD_CEREMONY`, whose row contains four used ceremony paths. The sixteen race-course secondary paths are therefore genuine unused retail coordinate data.
 - **Decomp:** `D_800E5740`, `D_800E579C`, and `D_800E57F8` are three 16-position particle tables consumed only by uncalled function `func_80076884`.
@@ -1343,14 +1321,14 @@ This pass separates data that is genuinely unreachable in the retail program fro
 
 These are small abandoned placement/path resources, not hidden levels. `indexObjectList4` is not one of them: despite its old “unused list” description, allocation and deletion code both reference it.
 
-#### Unused and hidden content: Dormant packed-display-list operations
+#### Dormant packed-display-list operations
 
 - **Verified (all twenty packed streams):** no retail course stream emits opcodes `0x00`--`0x14`, `0x2D`--`0x30`, or `0x53`--`0x56`. `0x31` and `0x32` have no useful handler (`0x32` would encode a zero-count vertex load).
 - **Decomp:** the unused implemented operations cover light loads, `G_CULLDL`, an alternate combiner, translucent/decal render modes, `G_QUAD`, and back-face-culling state. The light operations address segment 9 as if it held `Light` structures, whereas retail course segment 9 begins with the texture list; no retail stream invokes them.
 
 This is unused **converter/engine capability**, not hidden visual content. The decomp's standalone `displaylist_packer` reverses the ROM meanings of packed opcodes `0x26` and `0x27` (texture on/off); that is a reconstruction-tool mismatch, not a retail leftover.
 
-#### Unused and hidden content: Audio that is unused or practically hidden
+#### Audio that is unused or practically hidden
 
 - **Verified (sequence disassembly and offline render):** Results sequence 16 repeats section A 64 times (`64 x 49.36 s`, about 52.6 minutes) before section B, which then loops twice at 6,336 ticks per pass. Section B is reachable, but practically unheard in normal play; the patched render places it at 49.4--148.2 seconds.
 - **Verified + Decomp:** audio preset 1 (20 voices) is never selected. It is genuine unused configuration data.
@@ -1363,39 +1341,33 @@ This is unused **converter/engine capability**, not hidden visual content. The d
 
 JP's additional `0x190` bytes of SFX sample data and changed sequence 0, EU 1.0's retuned SFX instrument 80, JP 1.0's slightly smaller Bowser geometry, and the JP Luigi Raceway changes are version-specific **used revisions**, not unused content.
 
-#### Unused and hidden content: Why the ceremony loads Banshee Boardwalk segment 6
+#### Why the ceremony loads Banshee Boardwalk segment 6
 
 - **Decomp:** `load_ceremony_cutscene` loads Royal Raceway, then separately decompresses Banshee Boardwalk's course-data stream into segment 6.
 - **Decomp:** ending-state object update calls `update_cheep_cheep(1)`; initialization assigns `d_course_banshee_boardwalk_dl_cheep_cheep`, and rendering calls the Banshee fish display lists at `0x7650`, `0x78C0`, `0x7978`, and `0x7B38`.
 
 The extra segment-6 load therefore supplies the animated Cheep Cheep used in the award ceremony. It is intentional cross-course asset reuse, not an unexplained or unused load.
 
-#### Unused and hidden content: Remaining open classification
+#### Remaining open classification
 
 - **Hypothesis/Open:** individual addresses in the conservative `coverage.txt` `never` sets may include truly dead display-list fragments, but no candidate was proven to be a complete object or scene. Classifying them requires command-by-command ownership and every runtime mode, not merely rendering the raw address.
 - **Hypothesis/Open:** an arbitrary orphan texture or tiny geometry fragment could exist outside all known filesystem records. The complete twenty-entry course table and matching leak build units rule out an additional normal course package, not every possible byte-level remnant.
 
 ### 6.2 Cut or inaccessible levels
 
-Candidate levels are distinguished from alternate, debug, and intentionally hidden retail content above.
-
 ### 6.3 Debug features
 
-Shipped debug strings and executable features are listed only when supported by a code or data reference.
-
 ### 6.4 Prototype or revision-specific content
-
-Source-archive and prototype material is explicitly distinguished from shipped retail data.
 
 ## 7. nviewer implementation
 
 ### 7.1 Module mapping
 
-#### Collision: Viewer presentation
+#### Viewer presentation
 
 Following `rushcollision.ts`: a hidden `collision` layer with one mesh per surface type (`collision {surface}`), translucent (alpha 150), depth test without depth write, no culling, decal, lifted 0.5 along the normal; floors (|ny| > 0.5) full brightness, walls darker. `Mesh.info` carries the surface value and triangle count; `Batch.triSource` the segmented address of the triangle command. Colours in the prototype: asphalt grey, dirt brown, sand beige, stone grey-brown, snow white, bridge and wood brown-orange, grass green, ice light blue, cliff dark brown, boost ramps orange, out of bounds red, 0xFF walls and ramps magenta. Optional extras: colour by section id, and flag layers for 0x400/0x800/0x1000 once their meaning is known.
 
-#### Objects and the kart path: Viewer scope
+#### Viewer scope
 
 The implemented static scope includes decoded spawn-list foliage and item boxes, hard-coded static actors where their
 retail models and placements are reconstructable, continuous path ribbons, path starts, and markers for the remaining
@@ -1403,7 +1375,7 @@ code-created or moving objects. It does not simulate actor state machines, parti
 vehicle motion or karts. Authored flat sprites use `Instance.billboard: 'y'`; rendering, picking, highlights and
 selection diagnostics all derive the same camera-facing matrix.
 
-#### Mapping onto the viewer: Detection and files
+#### Detection and files
 
 The implementation adds `mk64` to `Game.id`, accepts `NKTE` revision 0, and locates `gCourseTable` with the structural
 test in *gCourseTable*. It rejects PAL despite largely shared course data because its 50 Hz driver timing and envelope branches
@@ -1428,7 +1400,7 @@ Use the existing MIO0 implementation if it exposes the consumed compressed lengt
 from `fs/proto/mk64fs.ts`. Reuse `decodeVadpcm`, `RESAMPLE_LUT` and the loop-state convention from `music/libultra.ts`,
 but do not parameterize `sf64.ts`: *Reuse verdict* lists engine differences that would put Star Fox's verified output at risk.
 
-#### Mapping onto the viewer: Contract additions and approximations
+#### Contract additions and approximations
 
 The relevant renderer additions and deferred features are:
 
@@ -1443,7 +1415,7 @@ screen-space split. Clouds/stars are omitted, and animated textures use a static
 not fixed to the start camera. The framebuffer-fed screens on Luigi Raceway and Wario Stadium necessarily show their
 ROM texture in an offline viewer.
 
-#### Mapping onto the viewer: Implementation outcome and remaining risk
+#### Implementation outcome and remaining risk
 
 The USA implementation passes all-level hashes, transfer and layer audits, all 21 offline renders, report-camera
 regressions and browser integration checks. It uses no shared display-list special case. Remaining fidelity risk is
@@ -1456,15 +1428,13 @@ decoder correction. Supporting Japanese revisions remains a separate task; PAL s
 
 ### 7.2 Supported features
 
-The Technical summary states the supported releases and principal decoded features.
-
 ### 7.3 Approximations and omissions
-
-Viewer approximations are distinguished from facts about the game formats.
 
 ## 8. Verification and remaining work
 
 ### 8.1 Verification evidence
+
+### 8.2 Known unknowns
 
 #### Open questions and hypotheses
 
@@ -1494,10 +1464,4 @@ The following gaps do not block a useful US viewer implementation:
   legitimate reverb presets which the mixed capture cannot distinguish; use preset 5 for the standalone viewer track.
   (**Open where stated.**)
 
-### 8.2 Known unknowns
-
-Unresolved semantics are labelled **Hypothesis** or **Open question** where they occur.
-
 ### 8.3 References
-
-External documentation, decompositions, and source archives are cited inline where used.

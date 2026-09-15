@@ -42,23 +42,15 @@ segmented, VROM, and file-relative addresses are named at each use.
 
 ### 2.1 Boot and executable layout
 
-No additional executable-layout information is required by the viewer.
-
 ### 2.2 Memory and address mapping
-
-Address conversions and load destinations are specified with the executable and file tables above.
 
 ### 2.3 ROM map and asset organization
 
-See the executable, archive, and file-table descriptions in this section.
-
 ### 2.4 Compression formats
-
-Compression framing and decoding rules are specified with each stored resource above.
 
 ### 2.5 Loading process
 
-#### Level list and stage loading: Loading a stage in the emulator (verified; `notes/warp.md`)
+#### Loading a stage in the emulator (verified; `notes/warp.md`)
 
 From any front-end screen or any running stage, with the debugger core:
 `write 0x80048384 w {difficulty}` (optional), then `write 0x800242FC w {stage id}`. For multiplayer maps also write
@@ -70,13 +62,11 @@ opens with its intro fly-by. Ids without a text-bank case (all unused ids, inclu
 
 ### 2.6 Revision differences
 
-Revision-specific addresses and data differences are stated in the relevant tables.
-
 ## 3. Level data
 
 ### 3.1 Level catalog and identifiers
 
-#### Level list and stage loading: Stages (verified from the tables; names from the title text bank)
+#### Stages (verified from the tables; names from the title text bank)
 
 | id | code | BG file | stan | solo setup | MP setup | in-game |
 |---|---|---|---|---|---|---|
@@ -126,7 +116,7 @@ Arkangelsk" …), then the multiplayer-only maps (Temple, Complex, Caves, Librar
 Library's BG and differ only in setup, so list them only if the viewer shows setup objects), then Cuba (credits)
 and the Citadel under "Unused".
 
-#### Level list and stage loading: How the game selects and loads a stage (verified: disassembly and breakpoints)
+#### How the game selects and loads a stage (verified: disassembly and breakpoints)
 
 - Globals: `0x800241A8` current stage; `0x800242FC` requested stage (−1 = none); `0x8002A8F4` stage chosen in the
   menu; `0x80048384` difficulty (0 Agent … 3 007); `0x8002A8F0` mode (1 = multiplayer); `0x8002B520` MP player
@@ -148,7 +138,7 @@ and the Citadel under "Unused".
   7. `UsetupdamZ`, `LdamE`, then the characters, heads, props and weapons the setup names;
   8. once play starts: animation reads, Bond's body, head and weapon, and code-page faults.
 
-#### Mapping onto the viewer: Detection, game object, level list
+#### Detection, game object, level list
 
 - `src/rom/index.ts` `openRom()`: `case 'NGEE'` on the game code at 0x3B, after `normalizeByteOrder()`.
 - `src/rom/types.ts`: extend `Game.id` with `'goldeneye'`. Existing `LevelKind`s suffice: `'campaign'` for missions
@@ -157,7 +147,7 @@ and the Citadel under "Unused".
 - `LevelInfo.name` = in-game name from the title text bank (*Stages (verified from the tables; names from the title text bank)*); `Level.id` = internal code (`dam`, `ark` …).
   Order as suggested in *Stages (verified from the tables; names from the title text bank)*.
 
-#### Verification evidence and open questions: ROM, codec, files, levels
+#### ROM, codec, files, levels
 
 | check | method | result | evidence |
 |---|---|---|---|
@@ -173,7 +163,7 @@ and the Citadel under "Unused".
 
 ### 3.2 Level container
 
-#### Level list and stage loading: Tables (verified: data segment; generator `fs/levels/levels.py` → `fs/levels/levels.tsv`)
+#### Tables (verified: data segment; generator `fs/levels/levels.py` → `fs/levels/levels.tsv`)
 
 | table | address | layout |
 |---|---|---|
@@ -184,7 +174,7 @@ and the Citadel under "Unused".
 | solo mission folders | `0x8002ABE4`, 28 bytes | `{char* label; u16 nameText; u16 altText; s32 stage; s32 mission; s32 isHeader; s32 partIndex; char* briefFile}`, header rows have stage −1, label 0 ends |
 | multiplayer maps | `0x8002B074`, 12 × 24 bytes | `{u16 name; u16 nameCaps; s32 photo; s32 stage; s32 unlockAfterPart; s32 one; s32 maxPlayers}`, in menu order |
 
-#### Level geometry: Portals and visibility (verified format; semantics partly hypothesis)
+#### Portals and visibility (verified format; semantics partly hypothesis)
 
 - **Portals:** 8-byte entries `{ptr polygon; u8 roomA; u8 roomB; u16 flags}`, ended by a zero pointer. Polygon =
   `{u8 n; 3 pad; n × f32 x, y, z}` in absolute BG space (e.g. Dam portal 0 joins rooms 134/133 with 4 points).
@@ -194,7 +184,7 @@ and the Citadel under "Unused".
   Semantics not decoded (hypothesis: scripted visibility overrides). **A viewer draws every room** and can ignore
   portals and visibility.
 
-#### Mapping onto the viewer: Level assembly (`loadLevel`)
+#### Level assembly (`loadLevel`)
 
 1. **Tables:** inflate the data segment once per ROM; read the stage tables (*Tables (verified: data segment; generator `fs/levels/levels.py` → `fs/levels/levels.tsv`)*), the environment tables (*Environment: fog, clear colour, sky (verified: disassembly and 12 captured frames)*), the
    texture table (*Textures (verified unless marked)*), the prop, character and item tables (*Model tables (verified: ROM data and code references)*).
@@ -217,7 +207,7 @@ and the Citadel under "Unused".
 
 ### 3.3 Geometry
 
-#### Level geometry: BG file (verified on all 25 non-empty files: ROM data and the loader `0x7F0B4124`)
+#### BG file (verified on all 25 non-empty files: ROM data and the loader `0x7F0B4124`)
 
 - `bg/bg_{code}_all_p.seg` is stored raw. Every pointer in it is **segment 0x0F, file-relative** (`0x0F000014` =
   offset 0x14). The loader reads the 0x40-byte header, relocates with `ptr + load − 0x0F000000`
@@ -239,7 +229,7 @@ and the Citadel under "Unused".
   inflated stream); +8 expanded primary DL; +C secondary DL; +10..+18 compressed sizes; +1C inflated vertex size;
   +38 f32 min xyz, max xyz`. The game resolves segment 0x0E to the room's vertices (`0x7F0BB694`).
 
-#### Level geometry: Building meshes, renders and comparisons
+#### Building meshes, renders and comparisons
 
 **Mesh building** (prototype `bg/lib/gebg.ts`, with the patched `bg/lib/displaylist.ts`, `bg/lib/getex.ts` and
 `bg/lib/sky.ts`):
@@ -312,7 +302,7 @@ files: `bg/renders/bg_{code}_{name}_overview.png` / `_top.png`. With objects and
 
 1,013 distinct texture numbers are used by BG files.
 
-#### Level geometry: Pitfalls
+#### Pitfalls
 
 1. The last room-table entry is a sentinel, and entry 0 is empty.
 2. Vertices are room-relative; without the room position every room piles up at the origin.
@@ -329,7 +319,7 @@ files: `bg/renders/bg_{code}_{name}_overview.png` / `_top.png`. With objects and
 
 ### 3.4 Display lists and render state
 
-#### Level geometry: Display-list microcode (verified: opcode histogram over every stored list, disassembly, frame DLs)
+#### Display-list microcode (verified: opcode histogram over every stored list, disassembly, frame DLs)
 
 The graphics microcode is **Fast3D 2.0G** (*Identification (verified: ROM bytes)*), not F3DEX. Stored room lists use only these commands (counts over
 all rooms): `04` G_VTX 24,103 · `B1` (Rare) 56,836 · `BF` G_TRI1 2,115 · `B6`/`B7` geometry mode 686/2,285 · `B8`
@@ -352,7 +342,7 @@ The expander also patches the `BB` level counts and adds fog to the stored rende
 
 `B7 0x60000` (LIGHTING | TEXTURE_GEN, environment mapping) occurs three times over all BG files; not modelled.
 
-#### Level geometry: Frame structure (verified: captured frames, `runtime/captures/*/dl.txt`)
+#### Frame structure (verified: captured frames, `runtime/captures/*/dl.txt`)
 
 One Fast3D task per frame (OSTask at `0x8004EA00`/`0x8004EA60`, loaded by `osSpTaskLoad` `0x7000E60C`; ucode text
 `0x80020E60`). Draw order:
@@ -377,7 +367,7 @@ tile 7, LOADTLUT, TLUT mode and six `SETTILE`/`SETTILESIZE` levels (32×32 down,
 surfaces (three `B7 0x60000` cases; drawable with plain UVs); an animated handler for texture 1508 (`0x7F0CE5F0`;
 frame 0 is fine); multiplayer split-screen viewports.
 
-#### Objects and props: Model file format (verified: all 503 P/C/G files parse and every display list decodes; RAM on Dam)
+#### Model file format (verified: all 503 P/C/G files parse and every display list decodes; RAM on Dam)
 
 - The **ModelFileHeader** is in the data segment, not the file (0x20 bytes): `+00 root node*; +04 skeleton*;
   +08 switches*; +0C s16 numSwitches; +0E s16 numMatrices; +10 f32 radius; +16 s16 numTextures; +18 texture list*;
@@ -417,7 +407,7 @@ frame 0 is fine); multiplayer split-screen viewports.
 
 ### 3.5 Textures and materials
 
-#### Level geometry: Textures (verified unless marked)
+#### Textures (verified unless marked)
 
 - **Table** at data `0x80049300`: 8-byte records `{u8 flags; u24 size; u32 0}`, 2,698 textures + a terminator (low 24
   bits `0xFFFF`). In ROM the u24 is the entry's **size**; boot code (`0x7F000BD0`) rewrites it to the running offset.
@@ -442,7 +432,7 @@ frame 0 is fine); multiplayer split-screen viewports.
 - Wrap and clamp come from C0; a viewer uses level 0. Contact sheets of all 2,698 textures:
   `bg/renders/tex_sheet_000.png`..`tex_sheet_010.png`. 1,013 distinct texture numbers are used by BG files.
 
-#### Verification evidence and open questions: Level geometry and textures
+#### Level geometry and textures
 
 | check | method | result | evidence |
 |---|---|---|---|
@@ -458,11 +448,9 @@ frame 0 is fine); multiplayer split-screen viewports.
 
 ### 3.6 Collision
 
-Collision storage and interpretation are described with the corresponding level records above.
-
 ### 3.7 Environment, sky, fog, and lighting
 
-#### Level geometry: Environment: fog, clear colour, sky (verified: disassembly and 12 captured frames)
+#### fog, clear colour, sky (verified: disassembly and 12 captured frames)
 
 **Selection** (`0x7F0BAA64(stage, flag)`):
 1. If flag ≠ 0: find id + 900 in table A. Only Dam and Surface 2 have one; they are alternate environments that
@@ -558,7 +546,7 @@ fading from the cloud RGB overhead to the record colour at the horizon (the comb
 is the clear colour; for Frigate add the water quad at −150. Draw it first without depth or fog, shifted up by the
 horizon offset. A faithful version needs small renderer additions (*Additions to `src/rom/types.ts` and the renderer*).
 
-#### Verification evidence and open questions: Runtime rendering and environment
+#### Runtime rendering and environment
 
 | check | method | result | evidence |
 |---|---|---|---|
@@ -573,7 +561,7 @@ horizon offset. A faithful version needs small renderer additions (*Additions to
 
 ### 3.8 Cameras and paths
 
-#### Level geometry: Render state (verified: frame DLs of 13 captures and game-camera composites)
+#### Render state (verified: frame DLs of 13 captures and game-camera composites)
 
 - The game calls every visible room's **primary** list, then the **secondary** lists after all primaries.
 - Before each room: `G_MTX` projection load (combined view × projection), fog colour + fog factor, `B7` G_FOG, `G_MTX`
@@ -601,7 +589,7 @@ horizon offset. A faithful version needs small renderer additions (*Additions to
   pool (secondary list, `FB …7F`) is opaque without this rule and translucent like the screenshot with it.
 - Fog, sky and clear colour are set by code (*Environment: fog, clear colour, sky (verified: disassembly and 12 captured frames)*).
 
-#### Level geometry: Units, scale, handedness, camera (verified)
+#### Units, scale, handedness, camera (verified)
 
 - **BG stage table** `0x8004448C`: `{u32 stage; char* bg; char* stan; f32 f0C; f32 f10; f32 f14}`, e.g. Dam 0.23364 /
   0.2 / 100, Facility 1.20648 / 1.0 / 64.1, Surface 1 0.45446 / 0.2 / 22.6.
@@ -629,7 +617,7 @@ horizon offset. A faithful version needs small renderer additions (*Additions to
   from the stan file (*Clipping ("stan") files and floor height (verified: all 26 regular non-empty files; RAM on 14 captures; code)*, *Spawn camera (verified on 12 stages)*). Stages with several spawn records (Dam 3, Facility 4, Silo 3): which one the
   game picks was not traced; use the first. Frames also show a constant ~3.9° downward pitch (hypothesis: head bob/aim).
 
-#### Objects and props: Spawn camera (verified on 12 stages)
+#### Spawn camera (verified on 12 stages)
 
 Eye = the stan floor under the spawn pad + **167.28 world units** (`167.28 × f0C` BG units), looking along the pad's
 look vector, fovY 60. Against the 12 runtime captures' eye positions (`obj/out/stan_verify.txt`): 0.02–0.12 BG units on
@@ -641,7 +629,7 @@ matched in Facility and Streets.
 
 ### 4.1 Placement records
 
-#### Objects and props: Placement (verified against RAM on 8 stages, 1,299 objects)
+#### Placement (verified against RAM on 8 stages, 1,299 objects)
 
 Work in world units (÷ level scale f0C) and multiply by f0C for BG units, or work in BG units throughout.
 
@@ -695,7 +683,7 @@ Contact sheets: `sheet_props.png` (340), `sheet_chrs.png`, `sheet_chrs_posed.png
 
 ### 4.2 Object and model formats
 
-#### Objects and props: Setup files (verified: all 21 solo and 13 multiplayer setups parse; RAM on 8 stages)
+#### Setup files (verified: all 21 solo and 13 multiplayer setups parse; RAM on 8 stages)
 
 `Usetup{code}Z` (solo) and `Ump_setup{code}Z` (multiplayer) are 1172 streams. The header is 10 `u32` **file
 offsets** (no segment or base); the loader stores `base + offset` in the globals `0x80075D00..0x80075D24` (base in
@@ -713,7 +701,7 @@ offsets** (no segment or base); the loader stores `base + offset` in the globals
 | 0x1C | bound pads | |
 | 0x20 / 0x24 | pad names / bound pad names | 0 in most files |
 
-#### Objects and props: Pads (verified: ROM data of all files; RAM Dam)
+#### Pads (verified: ROM data of all files; RAM Dam)
 
 - **Pad**, 0x2C bytes: `+00 f32 pos[3]; +0C f32 up[3]; +18 f32 look[3]; +24 u32 name (file offset of a C string, e.g.
   "p1988e"); +28 u32 stan (0 in the file)`.
@@ -725,7 +713,7 @@ offsets** (no segment or base); the loader stores `base + offset` in the globals
 - Pad numbers in records: `≥ 10000` = bound pad `n − 10000` (`0x7F001FF0`); **doors store the bound-pad index
   directly** (`0x7F0034C0`); guards and spawns use normal pads.
 
-#### Objects and props: Object list (record sizes verified; field names partly hypothesis)
+#### Object list (record sizes verified; field names partly hypothesis)
 
 Records are variable-sized; the type is the byte at +3, and the size comes from `0x7F0568F4` (jump table
 `0x80053490`). The list ends at type 0x30. Every setup file walks exactly to its intro block (verified).
@@ -784,7 +772,7 @@ deceleration …), `+98` portal flags, `+9A u16` door type (4/8 slide along look
 **Guard**, 0x1C bytes (`0x7F02370C`): `+04 s16 character id; +06 s16 pad; +08 s16 body (−1 random); +0A u16 AI list;
 +0C s16 path; +10/+12 s16 (typically 1000/100); +14 u16 flags; +16 s16 head (−1 random)`.
 
-#### Objects and props: Intro block (verified: walker `0x7F0057C4`)
+#### Intro block (verified: walker `0x7F0057C4`)
 
 | type | words | meaning |
 |---|---|---|
@@ -802,7 +790,7 @@ deceleration …), `+98` portal flags, `+9A u16` door type (4/8 slide along look
 Spawn (verified in RAM): in Facility and Streets the idle player sits exactly on the first set-0 spawn pad (x, z ÷
 level scale) and faces its look vector; multiplayer setups have 8 set-0 spawns. The start camera is in *Units, scale, handedness, camera (verified)*.
 
-#### Objects and props: Model tables (verified: ROM data and code references)
+#### Model tables (verified: ROM data and code references)
 
 - **Props** `0x8003A228`: 340 × `{ModelFileHeader* hdr; char* file; f32 scale}`. Scale is 0.1 for most props and 1.0
   for doors and a few others. All 340 files exist.
@@ -812,7 +800,7 @@ level scale) and faces its look vector; multiplayer setups have 8 set-0 spawns. 
   `0x8003246C`. `GdynamiteZ`, `GexplosivepenZ`, `GextinguisherZ`, `GfingergunZ`, `GwristdartZ` are named only in the
   file table and have no model header (*Unused props, characters, models and textures*).
 
-#### Objects and props: Clipping ("stan") files and floor height (verified: all 26 regular non-empty files; RAM on 14 captures; code)
+#### Clipping ("stan") files and floor height (verified: all 26 regular non-empty files; RAM on 14 captures; code)
 
 `Tbg_{code}_all_p_stanZ` (1172 stream, named by the stage table) holds the walkable floor as convex polygon tiles.
 Coordinates are **s16 BG units**.
@@ -866,7 +854,7 @@ end: an all-zero 8-byte record, then 24-36 bytes of padding to the file end
   end: 8 zero bytes, 32 bytes holding the string "unstric" (unknown), then the name table (485 × 8 bytes), 8 zero bytes
   ```
 
-#### Verification evidence and open questions: Objects and setups
+#### Objects and setups
 
 | check | method | result | evidence |
 |---|---|---|---|
@@ -881,7 +869,7 @@ end: an all-zero 8-byte record, then 24-36 bytes of padding to the file end
 
 ### 4.3 Skeletons and animation
 
-#### Objects and props: Skeleton and rest pose
+#### Skeleton and rest pose
 
 - Position nodes are relative to the enclosing position node (`0x7F05892C`); the matrix slot is rodata +0x0E.
 - **The root position node's translation is not applied** (verified on the Dam frame: three window instances give one
@@ -894,17 +882,13 @@ end: an all-zero 8-byte record, then 24-36 bytes of padding to the file end
 
 ### 4.4 Behaviors, triggers, and scripted objects
 
-Behavioral records are documented only where they affect level extraction or presentation.
-
 ## 5. Audio
 
 ### 5.1 Audio storage and banks
 
-Audio storage is described with the sequence and bank tables below.
-
 ### 5.2 Sequence format and driver
 
-#### Music: Engine (verified by disassembly, RAM and audio capture)
+#### Engine (verified by disassembly, RAM and audio capture)
 
 GoldenEye uses **stock libultra audio**: `ALBankFile` banks with VADPCM samples, the **compressed-MIDI sequence
 player `alCSPlayer`**, and the standard synthesizer. The viewer's `src/rom/music/libultra.ts` parses the bank and
@@ -941,7 +925,7 @@ renders the sequences **unchanged**; only the sequence container and the loop ha
 - Front end (stage 0x5A) songs come from code constants: 44 at power-on (Nintendo/Rare logos), 2 at the gun-barrel
   intro, 23 in the menus (all three verified at runtime).
 
-#### Music: Data (verified: ROM data and the init code)
+#### Data (verified: ROM data and the init code)
 
 | item | ROM | notes |
 |---|---|---|
@@ -959,7 +943,7 @@ a varlen duration, `FF 51` tempo, `FF 2F` end of track, `FF 2E` loop start, `FF 
 (count 0xFF = forever). The 59 non-stub songs use only note-on, CC 7 / 10 / 91, pitch bend and program change
 (verified by parsing). Every song sends CC 91, so music is reverberated in game.
 
-#### Music: Loops (verified from the sequence data; loop period checked on a capture)
+#### Loops (verified from the sequence data; loop period checked on a capture)
 
 - Loops come only from `FF 2E` / `FF 2D` markers with count 0xFF, **per track**; the game never restarts a song.
   Songs whose tracks all end play once (1, 38, 51, 60, 61, 62).
@@ -976,7 +960,7 @@ a varlen duration, `FF 51` tempo, `FF 2F` end of track, `FF 2E` loop start, `FF 
   rendered), from libultra's per-callback rounding (reproduced by simulation, `music/ts/drift.ts`). Inaudible; use the
   render's loop points.
 
-#### Music: Offline rendering
+#### Offline rendering
 
 Prototype: `music/ts/gemusic.ts` + `render_all.ts` (imports `src/rom/music/libultra.ts` unchanged; all 63 songs in
 26 s, 0.3–1.2 s each).
@@ -989,8 +973,6 @@ Prototype: `music/ts/gemusic.ts` + `render_all.ts` (imports `src/rom/music/libul
 
 Not modelled: the custom reverb, alCSPlayer voice stealing (up to 27 dropped notes per song), the 0.05% rounding.
 
-#### Verification evidence and open questions: Music
-
 | check | method | result | evidence |
 |---|---|---|---|
 | sequences | inflate all 63; sizes vs table | all match | `fs/music/seq_NN.bin` |
@@ -1000,7 +982,7 @@ Not modelled: the custom reverb, alCSPlayer voice stealing (up to 27 dropped not
 | output rate | AI_DACRATE in the capture log | 2207 → 22047 Hz | `music/cap/cap1.raw.log` |
 | rendered audio | envelope NCC, stretch, chroma, loudness vs 240 s capture | NCC 0.81–0.88, stretch 1.00, chroma 0.96–0.98 at 0 semitones; render gain ×0.936 | *Verification against captured game audio (verified)*, `music/cap/cap_*.wav`, `music/wav/` |
 
-#### Unused and hidden content: Music and sound
+#### Music and sound
 
 | item | evidence | confidence |
 |---|---|---|
@@ -1013,11 +995,9 @@ Not modelled: the custom reverb, alCSPlayer voice stealing (up to 27 dropped not
 
 ### 5.3 Instruments and sample encoding
 
-Instrument banks, envelopes, loops, and sample encoding are described above.
-
 ### 5.4 Music catalog and loop points
 
-#### Music: Song list (verified: data tables; [rt] = also observed at runtime)
+#### Song list (verified: data tables; [rt] = also observed at runtime)
 
 GoldenEye has no jukebox, so names describe where each song plays. "X" is the stage's alternate track (*Engine (verified by disassembly, RAM and audio capture)*). Loops are
 in samples of the render at 22047 Hz (`music/wav/index.json`); "once" = the tracks end and the song stops; "≈" = a
@@ -1097,12 +1077,10 @@ picked song 34).
 
 ### 6.1 Unreferenced assets
 
-#### Verification evidence and open questions: Unused content
+#### Unused content
 
 See *Unused and hidden content*: each item names its evidence. The emulator tests (Citadel hang, stage 0x15 breakpoint, Cuba load, debug menu
 opened by a RAM poke) are in `unused/shots/` and `unused/*_dbg.txt`.
-
-#### Unused and hidden content
 
 Every item gives its evidence and a confidence rating. **Verified** items were checked against this ROM's data or
 code, or seen in the emulator; the rest are marked hypothesis. Paths are relative to `ge/`
@@ -1110,7 +1088,7 @@ code, or seen in the emulator; the rest are marked hypothesis. Paths are relativ
 a thing found "unreferenced" may still be reached by an address computed at run time, and that is reflected in the
 confidence.
 
-#### Unused and hidden content: Cut and unfinished stages
+#### Cut and unfinished stages
 
 | item | evidence | confidence |
 |---|---|---|
@@ -1127,7 +1105,7 @@ confidence.
 | Memory-config entries for stage ids **0x5B** and **0x63**, which have no setup, BG or text | table `0x800241BC` | verified; meaning unknown |
 | **Not cut: Cuba (0x36, `len`)** is the ending stage after Antenna Cradle (the debrief requests 0x36 when the completed mission index is 17); it loads in the emulator with the jungle ending dialogue | `0x7F0168E0`; `unused/shots/cuba_0x36_warp_1.png` | verified, high |
 
-#### Unused and hidden content: Debug features
+#### Debug features
 
 | item | evidence | confidence |
 |---|---|---|
@@ -1141,7 +1119,7 @@ confidence.
 | `*_c_debug` markers (`deb boss memp mema vi joy stan bg ob dyn lv rsp game`), each loaded by one module-init instruction; a profiler overlay (`utz/rsp/tex %2.0f%%`, `%2d hz`); libultra assertion strings | xref | verified; purpose hypothesis |
 | **Attract demos are present and used** (not unused, but hidden data): 14 controller recordings with a 232-byte header (stage +0x10, difficulty +0x14, random seeds, options) and checksummed frames of stick/button samples, filling ROM `0x2BF2D0..0x2E63F0` exactly. Stages: Dam ×2, Facility ×3, Runway ×2, Bunker 1 ×2, Silo ×2, Frigate ×2, Train; all are in the title-idle random pool | table `0x800483F0`, picker `0x7F0C0970` | verified (static), high |
 
-#### Unused and hidden content: ZX Spectrum emulator
+#### ZX Spectrum emulator
 
 | item | evidence | confidence |
 |---|---|---|
@@ -1150,7 +1128,7 @@ confidence.
 | **Launcher = front-end menu 25**, which picks a game from controller 3's buttons (`0x7F01A39C`). No code ever calls `setMenu(25)` | call-site scan of `setMenu` | verified (static), medium-high |
 | **No Spectrum data in the ROM:** no `em/` files in the file table, and a signature search of the raw ROM and every DEFLATE stream (48K ROM start `F3 AF 11 FF FF C3 CB 11`, "1982 Sinclair Research", BASIC tokens, font bytes, titles) finds only the file-name strings | `unused/zxscan.py` | verified, high |
 
-#### Unused and hidden content: Cheats
+#### Cheats
 
 - **Table** `0x8003F80C`: 74 × 16 bytes `{u8 id; u8 codeLength (0/10); u16; u16* code; u16 nameText; u16; u32 flags}`
   (flags: 0x01 front end, 0x02 solo, 0x04 multiplayer, 0x10 one-shot, 0x20 all players). A 10-press button code is
@@ -1167,7 +1145,7 @@ confidence.
 | **Names with no cheat:** "Bond Phase" (`0xB005`) with orphaned "bond phase on/off" messages; "Super x2 Health", "Super x2 Armor", "Super x10 Health" names exist, but cheats 8/9/16 use "NO NAME" | text reference scan | verified, high |
 | Unreferenced animation-speed messages "slowest/very slow/normal/very fast/fastest motion" and "radar on" (only "slow" and "fast" motion are used): a cut stepped speed control (hypothesis) | text reference scan | strings verified, high; meaning medium |
 
-#### Unused and hidden content: Unused props, characters, models and textures
+#### Unused props, characters, models and textures
 
 | item | evidence | confidence |
 |---|---|---|
@@ -1180,7 +1158,7 @@ confidence.
 | **Two corrupt textures** #2246 and #2260 (64×32 I8): the only entries whose decode doesn't consume exactly their ROM size; they decode as noise and nothing references them | `bg/lib/getex.ts`; texture reference scan | verified, high (corrupt or placeholder: medium) |
 | No leftover data after any compressed file: all 681 end in zero padding after the DEFLATE stream | tail scan | verified, high |
 
-#### Unused and hidden content: Text
+#### Text
 
 Every English text bank and briefing was dumped (`unused/text/L*E.txt`) and each string id searched in code
 immediates, the data segment, briefings and setups (`unused/text/text_refs.tsv`). Unreferenced strings (verified by the
@@ -1204,21 +1182,15 @@ scan; confidence medium, since the loose scans over-report and ids built at run 
 
 ### 6.2 Cut or inaccessible levels
 
-Candidate levels are distinguished from alternate, debug, and intentionally hidden retail content above.
-
 ### 6.3 Debug features
 
-Shipped debug strings and executable features are listed only when supported by a code or data reference.
-
 ### 6.4 Prototype or revision-specific content
-
-Source-archive and prototype material is explicitly distinguished from shipped retail data.
 
 ## 7. nviewer implementation
 
 ### 7.1 Module mapping
 
-#### Objects and props: What the viewer should show
+#### What the viewer should show
 
 - **Meshes:** standard objects, doors (closed), glass and tinted glass (blend), monitors, alarms, CCTV, autoguns, safes,
   vehicles, aircraft and tanks (at their setup pads), ammo boxes, body armour, keys, magazines, and weapons and hats
@@ -1234,7 +1206,7 @@ Source-archive and prototype material is explicitly distinguished from shipped r
   weapon models by the chosen weapon set, which the viewer can ignore). Basement and Stack differ from Library only
   in setup.
 
-#### Mapping onto the viewer: Reusable modules
+#### Reusable modules
 
 | existing module | reuse for GoldenEye | changes needed |
 |---|---|---|
@@ -1244,7 +1216,7 @@ Source-archive and prototype material is explicitly distinguished from shipped r
 | `music/libultra.ts` `parseBank`, `renderSequence` | all music | none (verified by the prototype); a new per-track sequence parser (*Music mapping*) |
 | `util.ts` `pruneUnused`, `emptyBounds` | level assembly | – |
 
-#### Mapping onto the viewer: `displaylist.ts`: the `'f3d'` ucode (exact patch: `bg/lib/displaylist.diff`, 91 lines)
+#### `displaylist.ts`: the `'f3d'` ucode (exact patch: `bg/lib/displaylist.diff`, 91 lines)
 
 - `Ucode = 'f3dex' | 'f3dex2' | 'f3d'`; `G_CULL_BACK.f3d = 0x2000`.
 - New context options: `rareTexture?(w0, w1) → {texture, width, height, uls, ult} | null` (resolves C0) and
@@ -1261,7 +1233,7 @@ Source-archive and prototype material is explicitly distinguished from shipped r
 - GPU bilinear filtering: use `uls = ult = 0`. The game's half-texel tile offset compensates for the RDP's sampling
   position, which OpenGL already samples at texel centres.
 
-#### Mapping onto the viewer: New modules (suggested names)
+#### New modules (suggested names)
 
 | file | contents | difficulty |
 |---|---|---|
@@ -1271,7 +1243,7 @@ Source-archive and prototype material is explicitly distinguished from shipped r
 | `src/rom/goldeneye/music.ts` | sequence table, song volumes, per-track compressed-MIDI parser with GoldenEye loop rules, names; renders through `libultra.ts` | low |
 | `src/rom/goldeneye/goldeneye.ts` | `Game`: level list, `loadLevel` (BG + environment + setup objects), `music`/`decodeMusic` | medium |
 
-#### Mapping onto the viewer: Music mapping
+#### Music mapping
 
 - `Game.music`: 59 tracks, every sequence except the silent stubs 0, 20, 30, 39, in sequence order, named `NN Name`
   as in *Song list (verified: data tables; [rt] = also observed at runtime)* (e.g. `09 Dam`, `53 Dam / Surface 1 (X), Surface 2 ambience`).
@@ -1283,7 +1255,7 @@ Source-archive and prototype material is explicitly distinguished from shipped r
 - Cost 0.3–1.2 s per song in Node: render on demand in the worker. Risks: no reverb (drier than the game), note drops
   where libultra would steal voices, approximate loops for the seven polymetric songs.
 
-#### Mapping onto the viewer: Additions to `src/rom/types.ts` and the renderer
+#### Additions to `src/rom/types.ts` and the renderer
 
 | addition | why | suggested shape |
 |---|---|---|
@@ -1295,7 +1267,7 @@ Source-archive and prototype material is explicitly distinguished from shipped r
 
 No other type changes: `Fog`, `clearColor`, `CameraView`, `Marker` and `LevelLayer` already cover GoldenEye.
 
-#### Mapping onto the viewer: Suggested modules (continued from *New modules (suggested names)*)
+#### Suggested modules (continued from *New modules (suggested names)*)
 
 | file | contents | difficulty |
 |---|---|---|
@@ -1305,7 +1277,7 @@ No other type changes: `Fog`, `clearColor`, `CameraView`, `Marker` and `LevelLay
 | `src/rom/goldeneye/stan.ts` | clipping-file floor lookup for object and camera Y (*Clipping ("stan") files and floor height (verified: all 26 regular non-empty files; RAM on 14 captures; code)*) | low (port `obj/lib/stan.ts`: tile parse + plane height + grid) |
 | `src/rom/goldeneye/environment.ts` | tables A/B → `Fog`, `clearColor`, sky plane | low |
 
-#### Mapping onto the viewer: Difficulty summary
+#### Difficulty summary
 
 | part | difficulty | notes |
 |---|---|---|
@@ -1318,7 +1290,7 @@ No other type changes: `Fog`, `clearColor`, `CameraView`, `Marker` and `LevelLay
 | guards | medium–high | no animation decoding; a sampled standing pose works for all bodies |
 | music | low | `libultra.ts` unchanged; per-track loop parser |
 
-#### Mapping onto the viewer: Known gaps to list in the README (proposed)
+#### Known gaps to list in the README (proposed)
 
 - GoldenEye: animated textures and the water ripple are static; environment-mapped surfaces use plain UVs; guards
   stand in one sampled pose; objects spawned by AI scripts and objective logic are not shown; the visibility commands
@@ -1326,17 +1298,13 @@ No other type changes: `Fog`, `clearColor`, `CameraView`, `Marker` and `LevelLay
 
 ### 7.2 Supported features
 
-The Technical summary states the supported releases and principal decoded features.
-
 ### 7.3 Approximations and omissions
-
-Viewer approximations are distinguished from facts about the game formats.
 
 ## 8. Verification and remaining work
 
 ### 8.1 Verification evidence
 
-#### Music: Verification against captured game audio (verified)
+#### Verification against captured game audio (verified)
 
 240 s of one boot (logos → menus → Dam → watch menu → Facility) captured with the audio-dump plugin
 (`music/cap/cap1.raw`), compared with renders by 50 ms RMS-envelope NCC with an offset and time-stretch search, dBFS,
@@ -1357,7 +1325,9 @@ and 12-bin chroma (`music/ts/compare.ts`). The play calls were logged with break
 - RAM (Facility): player 1's buffer `0x802D1E10` holds exactly the 4,078 inflated bytes of sequence 7.
 - Renders are drier than the game (no reverb).
 
-#### Verification evidence and open questions: Open questions (all hypothesis or unverified)
+### 8.2 Known unknowns
+
+#### Open questions (all hypothesis or unverified)
 
 ROM and files:
 - Formats of the region-0 tables at `0x117940` / `0x123040` (probably Japanese glyphs), `0x28E980` (animation index?),
@@ -1394,10 +1364,4 @@ Unused content:
 - Why the debug menu draws nothing under Glide64; the meaning of cheats 55–74; 54 sound effects with no reference found
   (medium-low); whether the unreferenced Cradle/Jungle taunts are picked by AI scripts.
 
-### 8.2 Known unknowns
-
-Unresolved semantics are labelled **Hypothesis** or **Open question** where they occur.
-
 ### 8.3 References
-
-External documentation, decompositions, and source archives are cited inline where used.

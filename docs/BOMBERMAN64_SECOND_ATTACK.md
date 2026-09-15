@@ -50,7 +50,7 @@ TLB-mapped virtual address and passes `t0 = (table << 8) | function`; the stub l
 a table of tables. None of this matters for asset extraction except that code addresses in overlays are
 position-dependent.
 
-#### Boot and code: Bomberman 64: The Second Attack! (verified: disassembly + RDRAM dump compare)
+#### Bomberman 64: The Second Attack! (verified: disassembly + RDRAM dump compare)
 
 | ROM | VRAM | Contents |
 |---|---|---|
@@ -72,15 +72,11 @@ position-dependent.
 
 ### 2.2 Memory and address mapping
 
-Address conversions and load destinations are specified with the executable and file tables above.
-
 ### 2.3 ROM map and asset organization
-
-See the executable, archive, and file-table descriptions in this section.
 
 ### 2.4 Compression formats
 
-#### Filesystem and compression: File payloads
+#### File payloads
 
 | Game | Payload | Codec selection |
 |---|---|---|
@@ -95,7 +91,7 @@ resource 2 is 64 KB of zeros; 46 resources (2527–2540, 2562–2573, 2595–260
 For BM64 there is no codec flag: the extractor detects raw files as those where LZSS decoding does not
 consume exactly the entry (0 or 1 byte of padding allowed). A viewer only needs the indices above.
 
-#### Filesystem and compression: LZSS, 1,024-byte ring (identical in BM64 and SA)
+#### LZSS, 1,024-byte ring (identical in BM64 and SA)
 
 Decoders: BM64 `0x80292BD0(stream, dst, size)`, SA `decode 0x80002730(handle, dst, size)`.
 Okumura-style LZSS with N = 1024, F = 66, threshold 2, **absolute** ring positions:
@@ -126,7 +122,7 @@ Verification: BM64: 125 decompressions (10 overlays, 115 assets) dumped from RDR
 Adventure-mode intro cutscenes (overlays 0x1A and 0x19), all byte-identical to the Python decoder. SA: resource 3044 and overlay 0x1A
 dumped from RDRAM at decoder exit, byte-identical.
 
-#### Filesystem and compression: Yay0 (SA only)
+#### Yay0 (SA only)
 
 Standard Nintendo Yay0, decoder `slidstart 0x80073F10`:
 
@@ -142,7 +138,7 @@ stop when decompressedSize bytes have been written
 Offsets are relative to the `Yay0` magic (i.e. SA file offset 4). Verified: resource 13 dumped from
 RDRAM, byte-identical.
 
-#### Filesystem and compression: Extracting everything
+#### Extracting everything
 
 Reference extractors (Python 3, no dependencies):
 - Hero: `bm/herofs/extract.py` → `files/` (chain files, overlays, raw blobs), `files/index.txt` with static references per file
@@ -151,17 +147,13 @@ Reference extractors (Python 3, no dependencies):
 
 ### 2.5 Loading process
 
-Level and asset selection is described by the tables and loader call paths above.
-
 ### 2.6 Revision differences
-
-Revision-specific addresses and data differences are stated in the relevant tables.
 
 ## 3. Level data
 
 ### 3.1 Level catalog and identifiers
 
-#### Levels: Bomberman 64: The Second Attack!
+#### Bomberman 64: The Second Attack!
 
 On-screen menus (verified): Story Mode / Battle Mode / Custom Bomberman / Options / Tutorial. Battle type
 select has 5 panels (only Survival unlocked on a new save).
@@ -242,7 +234,7 @@ listed in file order, which is not necessarily play order; areas are connected b
 
 ### 3.2 Level container
 
-#### Filesystem and compression: Archive format (Bomberman 64 and The Second Attack share the design)
+#### Archive format (Bomberman 64 and The Second Attack share the design)
 
 An archive sits at a ROM offset on a 0x800 boundary:
 
@@ -271,7 +263,7 @@ and stage overlays.
 0x180000, 0x1E0000, 0x220000, 0x240000, 0x250000, and the **resource block at 0x2A0000** (3,134 files,
 0–3133 contiguous). `0x80002F88 gameresAlloc(resno)` loads resource `resno` = slot index.
 
-#### Level format: Common conclusions
+#### Common conclusions
 
 - **Vertex scale 1 and no X mirroring** (right-handed, Y up) in Hero and SA. Both were verified by rendering
   at the game's own camera and comparing with emulator frames, and by camera matrices with positive determinant.
@@ -284,7 +276,7 @@ and stage overlays.
 - **Textures** are uploaded with the RDP tile commands (SETTIMG / SETTILE / LOADBLOCK / SETTILESIZE), exactly
   as in the Rush games; `texture.ts` reproduces them unchanged.
 
-#### Level format: Bomberman 64: The Second Attack! (NIFF)
+#### Bomberman 64: The Second Attack! (NIFF)
 
 Source: `notes/sa_niff.md`; annotated disassembly of the model library (0x8000C540–0x80016BE0) in
 `sa_niff/nd.dis`; TypeScript decoder `sa_niff/niff.ts` + `dl_bm.ts`.
@@ -684,51 +676,31 @@ polygon (52 bytes):
 
 ### 3.3 Geometry
 
-Geometry representation is described with the level container above.
-
 ### 3.4 Display lists and render state
-
-Display-list commands and game-supplied render state are described with geometry above.
 
 ### 3.5 Textures and materials
 
-Texture storage and material binding are described with geometry above.
-
 ### 3.6 Collision
-
-Collision storage and interpretation are described with the corresponding level records above.
 
 ### 3.7 Environment, sky, fog, and lighting
 
-Environment records and runtime render state are described with the level data above.
-
 ### 3.8 Cameras and paths
-
-Camera defaults and path data are described with the level data where known.
 
 ## 4. Objects
 
 ### 4.1 Placement records
 
-Placement records are structurally coupled to the level format and are described in Level data.
-
 ### 4.2 Object and model formats
-
-Object geometry uses the model and display-list formats described above unless stated otherwise.
 
 ### 4.3 Skeletons and animation
 
-Static-pose or animation support and remaining omissions are stated in the object description.
-
 ### 4.4 Behaviors, triggers, and scripted objects
-
-Behavioral records are documented only where they affect level extraction or presentation.
 
 ## 5. Audio
 
 ### 5.1 Audio storage and banks
 
-#### Music (shared system, all three games): Where the data is (verified)
+#### Where the data is (verified)
 
 One contiguous blob per game: `S2 song table | .ctl | .tbl | sequences`. All offsets inside the
 S2 table are relative to the S2 header.
@@ -746,15 +718,13 @@ Sound effects are a separate blob (BM64 asset 33 "T2" at 0x407978, Hero "T1" 0x2
 
 ### 5.2 Sequence format and driver
 
-#### Music (shared system, all three games)
-
 All three games use **standard Nintendo libultra audio**: the compressed-MIDI sequence player
 (alCSPlayer), ALBankFile instrument banks ("B1") with VADPCM samples, and the common RSP audio microcode
 (aspMain, ABI1). Hudson wraps it in the SDK sample audio manager (SA function names: `amMusPlay`,
 `musSeqHRomCopy`, `initOsc/updateOsc/stopOsc`, `__amMain`, ...). There is no custom audio microcode
 and no MusyX. Music data is **uncompressed** and read in place from ROM.
 
-#### Music (shared system, all three games): S2 song table (verified)
+#### S2 song table (verified)
 
 ```
 +0          u16 'S2' (0x5332)           libultra ALSeqFile uses 'S1'; the loader accepts both
@@ -775,7 +745,7 @@ SA's loader (0x800249A8–0x80024BB4) reads `bank`, `ctlOffset`, `ctlSize`, `tbl
   Verified from RAM on four screens (intro song 3/bank 3, main menu 1/1, character select 5/5, battle 42/28)
   and by rendering song 3 with bank 3 against captured game audio.
 
-#### Music (shared system, all three games): Sequence format: libultra compressed MIDI (verified: all 155 songs parse to the end)
+#### Sequence format: libultra compressed MIDI (verified: all 155 songs parse to the end)
 
 ```
 header: s32 trackOffset[16] (from sequence start; 0 = unused), s32 division (480 in every song)
@@ -798,7 +768,7 @@ events:
 Only controllers 7 (volume), 10 (pan) and 91 (effects/reverb send) occur, plus program change and
 pitch bend. BM64 has some finite loops (`cnt = 3`); Hero and SA loop forever.
 
-#### Music (shared system, all three games): Rendering to PCM
+#### Rendering to PCM
 
 - Output rate: **32006 Hz** (AI_DACRATE 1520, read from all three games in the emulator); the bank rate
   is 32000. Pitch ratio of a voice = `2^(((key − keyBase)·100 + detune + bend·bendRange/8192) / 1200)`
@@ -872,7 +842,7 @@ VADPCM decoder, sequence parser including back-references and loops, simple samp
 
 ### 5.3 Instruments and sample encoding
 
-#### Music (shared system, all three games): Instrument bank (.ctl) (verified: all pointers resolve in all three games)
+#### Instrument bank (.ctl) (verified: all pointers resolve in all three games)
 
 Standard libultra ALBankFile, big-endian, offsets relative to the .ctl start (relocated by adding the
 base, as `alBnkfNew` does):
@@ -896,7 +866,7 @@ ALADPCMBook  { s32 order (2); s32 npredictors (4); s16 book[order · npredictors
 
 All wave tables in all three games are type 0 (VADPCM), order 2, 4 predictors.
 
-#### Music (shared system, all three games): VADPCM decoding (verified bit-exact)
+#### VADPCM decoding (verified bit-exact)
 
 9-byte frames of 16 samples: header byte `scale << 4 | predictorIndex`, then 8 bytes = 16 signed 4-bit
 residuals, `r = signExtend4(nibble) << scale`. With `cb = book[predictorIndex]` (16 s16: `b1 = cb[0..7]`,
@@ -916,39 +886,10 @@ SA 105/113 exact; the rest are near misses, likely loop-state rounding in the to
 
 ### 5.4 Music catalog and loop points
 
-#### Music (shared system, all three games): Song lists
+#### Song lists
 
 Evidence levels: **obs** = observed in RAM or captured audio; **code** = constant or table in code (the
 screen it belongs to may still be inferred); **name** = in-game Sound Test; **H** = hypothesis.
-
-##### Bomberman 64: 47 songs, no in-game names (no sound test)
-
-Stage music: seg2 `0x8023C84C` plays song `W + 3` for world W (u32 at 0x802AC5E8, stage at 0x802AC5EC). If
-flag `0x802AC5D0 & 8` is set (H: boss stage), world 0 → 14, worlds 1–3 → 11, world 4 → 12 or 13, world 5 →
-15 or 16. Overlays play music through ZeroJump id 0x2B02 (0x2B01 stops, 0x2B03 fades).
-
-| Song | Use |
-|---|---|
-| 1 | Adventure intro town cutscene, overlay 0x1A (obs + code) |
-| 2 | World/Stage Select (overlay 0x21, code) |
-| 3–8 | adventure stage theme for world 0–5 (code): Green Garden, Blue Resort, Red Mountain, White Glacier (world indices verified), Black Fortress, Rainbow Palace (by elimination) |
-| 10, then 18 | Stage 2 bosses: Friend or Foe? (0x31), VS Artemis (0x3E), VS Orion (0x56), VS Regulus (0x62) (code; 18 is presumably the victory cue) |
-| 11 / 12, 13 / 14 / 15, 16 | boss music: worlds 1–3 / world 4 / world 0 / world 5 (code; "boss" is H) |
-| 19 | short cue after 42 in the boss arenas 0x88–0x8D (code) |
-| 20, 24, 28, 33, 45, 46 | seg2 constant calls (code; screens unidentified) |
-| 21 | seg2 0x802400A8, alternative to 45 by a flag (code) |
-| 22 | story cutscene overlay 0x1C (code) |
-| 26 | attract intro, title, main menu (obs) |
-| 27 | battle match (obs; seg2 0x8023C41C) |
-| 29 | Battle menu (obs; overlays 0x23 battle menu, 0x25 Custom) |
-| 31, 32 | battle menu overlay 0x22 (code) |
-| 35 | VS Altair (0x74) and Final Battle! (0x7E) (code) |
-| 42 | boss arenas 0x88–0x8D: Winged Guardian, Sewer Savage, Hot Avenger, Cold Killers, High-Tech Harvester, Spellmaker (14-second cue; code) |
-| 44, 13 | VS Altair (0x74) (code) |
-| 16 | Final Battle! (0x7E) (code; also a world-5 boss song) |
-| 0, 9, 23, 25, 34, 36, 37, 41, 43 | identical 1-track 0xB8-byte cues, no reference found: unused candidates (section 10) |
-| 17, 39, 40 | three near-identical variants of one full looping song, no reference found: unused candidates (section 10) |
-| 30, 38 | short cues, no reference found: weak unused candidates |
 
 ##### The Second Attack: 76 songs, no in-game names (no sound test)
 
@@ -972,24 +913,18 @@ flag `0x802AC5D0 & 8` is set (H: boss stage), world 0 → 14, worlds 1–3 → 1
 
 World indices 0–7 of the story table are named in section 4.2 (0 Lost Planet Alcatraz … 7 Warship Noah).
 
-Rendered samples (Python prototype): `bm/audio/wav/` holds `bmhero_seq02_bank0.wav`
-(Action Scene A), `bmhero_seq24_bank0.wav` (Bomberman Hero), `bm64_seq01_bank0.wav` (adventure intro),
-`bm64_seq26_bank0.wav` (title), `bm64_seq27_bank0.wav` (battle), `bm64_seq03_bank0.wav` (world 0 stage theme),
-`bm64_seq42_bank0.wav`, `bm64sa_seq01_bank1.wav` (main menu), `bm64sa_seq03_bank3.wav` (intro),
-`bm64sa_seq42_bank28.wav` (Survival battle).
+Rendered samples (Python prototype): `bm/audio/wav/` contains `bm64sa_seq01_bank1.wav` (main menu), `bm64sa_seq03_bank3.wav` (intro), and `bm64sa_seq42_bank28.wav` (Survival battle).
 
 ## 6. Unused and hidden content
 
 ### 6.1 Unreferenced assets
-
-#### Unused and hidden content
 
 Source: `notes/unused.md` (tools and string dumps in `bm/unused/`). "Static" means
 disassembly and cross-references: `xref.py` resolves jal targets, lui/addiu pairs and data words over main code
 and every overlay. Indices computed at run time (base + k, SA event scripts) are not resolved, so
 file-level results are **candidates** unless marked high confidence.
 
-#### Unused and hidden content: Bomberman 64: The Second Attack!
+#### Bomberman 64: The Second Attack!
 
 | Finding | Where | Evidence | Confidence |
 |---|---|---|---|
@@ -1005,21 +940,15 @@ event-script parsing.
 
 ### 6.2 Cut or inaccessible levels
 
-Candidate levels are distinguished from alternate, debug, and intentionally hidden retail content above.
-
 ### 6.3 Debug features
 
-Shipped debug strings and executable features are listed only when supported by a code or data reference.
-
 ### 6.4 Prototype or revision-specific content
-
-Source-archive and prototype material is explicitly distinguished from shipped retail data.
 
 ## 7. nviewer implementation
 
 ### 7.1 Module mapping
 
-#### Mapping onto the viewer: Detection and plumbing (straightforward)
+#### Detection and plumbing (straightforward)
 
 - `src/rom/index.ts openRom()`: add cases `NBME` → `openBomberman64`, `NBVE` → `openBomberman64SA`,
   `NBDE` → `openBombermanHero`. Byte-order normalisation is already there.
@@ -1036,7 +965,7 @@ Source-archive and prototype material is explicitly distinguished from shipped r
   beyond implementing them. `romCache.ts` keys by game id.
 - `APP_NAME = 'Rush Level Viewer'` in Sidebar.tsx will need renaming once non-Rush games are supported.
 
-#### Mapping onto the viewer: New and reused modules
+#### New and reused modules
 
 | Piece | Reuse | New module (suggested name) |
 |---|---|---|
@@ -1055,7 +984,7 @@ Source-archive and prototype material is explicitly distinguished from shipped r
 | Level loaders | pattern of `rush1.ts` | `bm64.ts`, `bm64sa.ts`, `bmhero.ts` |
 | Music (all three: S2 + B1 ctl + VADPCM tbl + compressed MIDI) | nothing in the repo yet | `src/rom/music/libultra/{s2.ts, bank.ts, vadpcm.ts, cseq.ts, synth.ts}`, shared by all three games; per-game offsets and song names in the game loaders |
 
-#### Mapping onto the viewer: Extensions to `displaylist.ts` (all backwards compatible with the Rush loaders)
+#### Extensions to `displaylist.ts` (all backwards compatible with the Rush loaders)
 
 Implemented and tested in three research copies: `bm64_model/displaylist_bm64.ts` (F3DEX, BM64),
 `hero_level/herodl.ts` (F3DEX, Hero) and `sa_niff/dl_bm.ts` (F3DEX2, SA).
@@ -1073,7 +1002,7 @@ Implemented and tested in three research copies: `bm64_model/displaylist_bm64.ts
 | Track SETPRIMCOLOR (0xFA), SETENVCOLOR (0xFB) and the 16 SETCOMBINE fields; fold the combiner into vertex colour/alpha with TEXEL0 = 1 (5.3.3) | 15% of SA triangles use PRIM/ENV; texture-only lists must ignore shade | SA (BM64 translucent effects too) |
 | Texture cache key must include the file (the existing `keyPrefix`) | texture offsets repeat across files | all |
 
-#### Mapping onto the viewer: Difficulty and risks (preliminary)
+#### Difficulty and risks (preliminary)
 
 - Filesystem and codecs: low. They are fully specified above and verified byte-exact against RAM.
 - Music: medium. The formats are standard and fully specified, and a Python renderer already matches game
@@ -1099,22 +1028,16 @@ Implemented and tested in three research copies: `bm64_model/displaylist_bm64.ts
 
 ### 7.2 Supported features
 
-The Technical summary states the supported releases and principal decoded features.
-
 ### 7.3 Approximations and omissions
-
-Viewer approximations are distinguished from facts about the game formats.
 
 ## 8. Verification and remaining work
 
 ### 8.1 Verification evidence
 
-#### Verification evidence
-
 All paths are under `bm/`. Emulator: headless mupen64plus (glide64mk2 software
 rendering, HLE RSP). Its `--debug` core was used for breakpoints and RDRAM dumps.
 
-#### Verification evidence: Reference screenshots of the real games
+#### Reference screenshots of the real games
 
 | Game | Directory | Contents |
 |---|---|---|
@@ -1127,7 +1050,7 @@ rendering, HLE RSP). Its `--debug` core was used for breakpoints and RDRAM dumps
 | BM64 | `bm64_stage/shots/` (32), `bm64_model/shot_*_at_dump.png` | Green Garden 1, White Glacier 1, Field of Grass, UP and Down, Pyramid, Greedy TraP, Top Rules |
 | Hero / SA | `verify/shots/hero_s18_fogroute.png`, `verify/shots/sa_2101_aquanet.png` | fogged stages used to verify the fog formulas |
 
-#### Verification evidence: What was checked against the running game or the ROM
+#### What was checked against the running game or the ROM
 
 | Claim | Method | Result |
 |---|---|---|
@@ -1171,7 +1094,7 @@ rendering, HLE RSP). Its `--debug` core was used for breakpoints and RDRAM dumps
 | BM64 attribute grid | RAM grids (4 dumps) vs file; `groundHeight` port vs object heights; floors, slopes and walls vs map geometry (`bmcol/bm64/run.out`, `align.out`) | equal except runtime edits; 85 of 101 objects; 91–100% floors |
 | SA fog formula | warp to area 2101 at `gamesceneSetup`; frame lists from RDRAM (`verify/sa/`) | DB08 fm 3282 / fo −3026 and colour 000F2E as predicted; fog render modes active; objects fogged |
 
-#### Verification evidence: Sample extractions
+#### Sample extractions
 
 - **Texture sheets:**
   - `bm64_model/renders/gg1_decode_textures.png`, `rockgarden_decode_textures.png`, `intro315_textures.png`, `sheet_bomber_banks_74_77.png`
@@ -1185,6 +1108,8 @@ rendering, HLE RSP). Its `--debug` core was used for breakpoints and RDRAM dumps
   - `sa_niff/renders/area2057_models_overview.png`, `test_17_top.png`
 - **Songs:** `audio/wav/`: 10 WAVs (section 6.7).
 - **Extracted files:** `bm64fs/files/`, `bm64safs/files/`, `herofs/files/`, each with an `index.txt`.
+
+### 8.2 Known unknowns
 
 #### Open questions and hypotheses
 
@@ -1243,10 +1168,4 @@ Everything here is **unverified**. Verified facts are in sections 1–8 and 10.
 - Names of BM64 and SA songs (no sound test); screens of several code-referenced songs.
 - SA event scripts (`evexecAudio`) that also start songs; the unused-song lists depend on them.
 
-### 8.2 Known unknowns
-
-Unresolved semantics are labelled **Hypothesis** or **Open question** where they occur.
-
 ### 8.3 References
-
-External documentation, decompositions, and source archives are cited inline where used.

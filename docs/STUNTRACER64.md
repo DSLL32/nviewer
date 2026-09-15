@@ -10,7 +10,7 @@ interpretations are labelled hypotheses.
 
 | Property | Value |
 |---|---|
-| Asset organization | Boss chunked-zlib container: independent RFC 1950/DEFLATE streams producing at most 16,000 bytes each; 2,211 strict containers indexed |
+| Asset organization | Thirteen map archives, eight secondary-file catalogs, and separate vehicle and model catalogs; 2,211 containers indexed. |
 | Compression | Boss chunked-zlib: independent RFC 1950/DEFLATE streams decoding to at most 16,000 bytes each. |
 | Graphics microcode | Custom RSP graphics task, CRC `844B55B5`; GLideN64 supports it. |
 | Geometry | primary pointer-rich map blob plus eight tables containing 1,808 exact secondary archives |
@@ -69,15 +69,11 @@ structures directly. [evidence: emulator observation, ROM bytes]
 
 ### 2.2 Memory and address mapping
 
-Address conversions and load destinations are specified with the executable and file tables above.
-
 ### 2.3 ROM map and asset organization
-
-See the executable, archive, and file-table descriptions in this section.
 
 ### 2.4 Compression formats
 
-#### Filesystem and compression: Chunked-zlib container
+#### Chunked-zlib container
 
 General compressed assets use zlib 1.0.4; the linked image contains Mark Adler's
 `inflate 1.0.4` identification at ROM `0xBE010`. Retail routine `0x80001BF0`
@@ -106,7 +102,7 @@ No second general level-geometry codec was identified. Raw texture/palette and a
 pools coexist with the zlib containers, so absence of zlib framing does not imply
 padding. [evidence: ROM bytes, disassembly]
 
-#### Filesystem and compression: Map bundles
+#### Map bundles
 
 Thirteen complete map bundles tile ROM `0x1775C0–0x7B36D0` without a gap. Each begins
 with its primary map container. Retail loader `0x800494E0` computes the secondary
@@ -137,7 +133,7 @@ Some bundles place a raw high-entropy prefix between the primary map and the fir
 table-listed file. These are map-resident image/palette resources addressed by
 display-list pointers, not filesystem holes. [evidence: ROM bytes, disassembly]
 
-#### Music and sound: Sample palettes and codec
+#### Sample palettes and codec
 
 There are three complete sample/instrument palettes. Runtime loads a base bank then a
 sparse overlay; overlay flag `0x80` means retain that base slot and supplies no sample.
@@ -164,17 +160,13 @@ the sequencing/bank layer must be new. [evidence: nviewer source, viewer design]
 
 ### 2.5 Loading process
 
-Level and asset selection is described by the tables and loader call paths above.
-
 ### 2.6 Revision differences
-
-Revision-specific addresses and data differences are stated in the relevant tables.
 
 ## 3. Level data
 
 ### 3.1 Level catalog and identifiers
 
-#### Filesystem and compression: Other catalogs and ROM tail
+#### Other catalogs and ROM tail
 
 The 33-entry vehicle catalog is at ROM `0xACCC0`, stride `0x3C`; *Objects, placement and paths* describes it.
 A 27-entry raw lookup table at `0xA8300` selects five 256-byte resources from
@@ -186,7 +178,7 @@ After removing the map primary files, 1,808 map subfiles, and 66 vehicle contain
 their bounded reachability audit is in *Unused and hidden content*. The ROM remains nonzero through
 `0xBCD31A`, then has `0x32CE5` zero bytes to the 12 MiB boundary. [evidence: deterministic decoding, ROM bytes]
 
-#### Complete course catalog: Internal map table
+#### Internal map table
 
 The internal table is at ROM `0xBBDA0`, runtime `0x800BB1A0`, with 13 records of
 `0x5C` bytes. Code at `0x800495E8` selects `index * 0x5C` and calls loader
@@ -218,7 +210,7 @@ The internal table is at ROM `0xBBDA0`, runtime `0x800BB1A0`, with 13 records of
 All counts, spans, pointer targets, and archive outputs were exhaustively validated.
 [evidence: deterministic decoding]
 
-#### Objects, placement and paths: Separately cataloged shared models
+#### Separately cataloged shared models
 
 Exactly 33 of the directly referenced non-map/non-vehicle containers validate as
 standalone `GeometryMeta` model containers. Pointer table `0xC2204` has 30 entries
@@ -231,7 +223,7 @@ geometry/material pointers are wholly contained in their primary maps. Keep the 
 models out of course views; they may become a separate named catalog after their
 semantics are identified. [evidence: deterministic decoding, viewer design]
 
-#### Unused and hidden content: Bounded uncataloged-container audit
+#### Bounded uncataloged-container audit
 
 Of the 324 zlib containers left after the map and vehicle catalogs, 225 have their
 exact ROM start stored as an aligned word, mainly in master arrays around `0xC1DA0`,
@@ -287,7 +279,7 @@ Across all maps the eight secondary tables contain: [evidence: deterministic dec
 | path 3 | `0DC` | `0EC` | 0 |
 | other path | `0F4` | `100` | 194 |
 
-#### Objects, placement and paths: Map-resident scenery
+#### Map-resident scenery
 
 Each primary-map scenery record is 0x28 bytes: [evidence: disassembly, deterministic decoding]
 
@@ -314,7 +306,7 @@ flag bits at `+0x10`. Routine `0x8004899C` caches the header whose `+0x18` trans
 matches the root. Base geometry and translation are enough for an initial viewer;
 keyframe/channel interpolation is a separate medium-high task. [evidence: disassembly, viewer design]
 
-#### Music and sound: Song and pattern formats
+#### Song and pattern formats
 
 Every song metadata object is exactly `0x710` bytes: [evidence: ROM bytes, disassembly, deterministic decoding]
 
@@ -342,7 +334,7 @@ are present. The loader subtracts `0x10` from the volume column. Tick duration f
 the tracker rule `sampleRate * 5 / (2 * tempo)` samples; speed is ticks per row.
 [evidence: disassembly]
 
-#### Unused and hidden content: No orphan course
+#### No orphan course
 
 All 13 internal records resolve to valid, non-overlapping bundles, and those bundles
 exactly tile `0x1775C0–0x7B36D0`. The public selector accounts for all 13 archives.
@@ -355,7 +347,7 @@ The header retains a complete fourth path-file channel, but its count is zero in
 
 ### 3.3 Geometry
 
-#### Geometry, materials and collision: Track meshes
+#### Track meshes
 
 A mesh secondary record's metadata offset points to: [evidence: deterministic decoding]
 
@@ -408,11 +400,9 @@ viewer convention, not a stored field. [evidence: deterministic decoding, upstre
 
 ### 3.4 Display lists and render state
 
-Display-list commands and game-supplied render state are described with geometry above.
-
 ### 3.5 Textures and materials
 
-#### Geometry, materials and collision: Material bundle and texture loads
+#### Material bundle and texture loads
 
 Header `+0x11C` points to a 0x28-byte bundle relocated by retail routine
 `0x800476A0`: [evidence: ROM bytes, disassembly]
@@ -465,8 +455,6 @@ be reused after material-local TMEM reconstruction. [evidence: deterministic dec
 
 ### 3.6 Collision
 
-#### Geometry, materials and collision: Collision
-
 Collision secondary metadata is: [evidence: deterministic decoding]
 
 ```text
@@ -491,7 +479,7 @@ them in a hidden-by-default `collision` layer. [evidence: deterministic decoding
 
 ### 3.7 Environment, sky, fog, and lighting
 
-#### Geometry, materials and collision: Skydome geometry
+#### Skydome geometry
 
 Map `+0x00C` uses the same `GeometryMeta` and face/material lookup. Across all maps
 it has 989 vertices and 1,222 source faces. The construction/draw call chain proves
@@ -499,7 +487,7 @@ that it is a camera-relative backdrop, not unknown ordinary geometry (*Sky const
 in a separate `background` layer or `Level.skies`, never in the main track batch.
 [evidence: disassembly, deterministic decoding, viewer design]
 
-#### Environment, sky and camera: Sky construction and drawing
+#### Sky construction and drawing
 
 Retail code proves the backdrop role: main view code calls “Calc sky” at
 `0x8001E080`, `0x80034DF0` transforms the map `+0x00C` geometry camera-relatively,
@@ -518,7 +506,7 @@ There are no normals in this geometry. The sky uses stored RGBA vertex colors,
 textures and primitive-color modulation, not an N64 light structure. Treat it as
 prelit/unlit. [evidence: ROM bytes, disassembly]
 
-#### Unused and hidden content: Compiled environment controls
+#### Compiled environment controls
 
 Command cases `0x8000CC64..0x8000CD3C` set, decrement, increment, or byte-set
 `fogBaseLevel`, clamp it, and print `fogBaseLevel = %d`. Case `0x8000BECC` controls
@@ -532,7 +520,7 @@ consumer is unresolved. They are possible environment-mode names only. [evidence
 
 ### 3.8 Cameras and paths
 
-#### Objects, placement and paths: Vehicles
+#### Vehicles
 
 The vehicle catalog at ROM `0xACCC0` has 33 records of 0x3C bytes. `+0x00` is a
 name pointer and `+0x04..+0x2B` holds five ROM start/end pairs. The entries are A/B
@@ -568,7 +556,7 @@ desired, as a standalone 33-model catalog with palette variants 0–2; do not in
 per-course placements. A static preview is medium difficulty, while exact packed
 corner attributes and special-submesh transforms are high/optional. [evidence: deterministic decoding, viewer design]
 
-#### Objects, placement and paths: Other map arrays
+#### Other map arrays
 
 The following layouts validate across every map. Their gameplay labels are strong
 hypotheses inherited from spatial appearance and the historical viewer: [evidence: deterministic decoding, hypothesis]
@@ -586,7 +574,7 @@ hypotheses inherited from spatial appearance and the historical viewer: [evidenc
 All float positions use `*32` to reach mesh units. Paths/coins/boosters should be
 markers or separate toggleable layers, not unlayered geometry. [viewer design]
 
-#### Environment, sky and camera: Spatial atmosphere map
+#### Spatial atmosphere map
 
 The environment block is embedded in the primary map: [evidence: ROM bytes, disassembly]
 
@@ -633,7 +621,7 @@ eight maps have
 structured masks; Soda Fountain is spatially constant but uses value `0xF2`.
 [evidence: deterministic decoding]
 
-#### Environment, sky and camera: Projection and camera
+#### Projection and camera
 
 Projection builder `0x8001EF04` passes camera `+0x68` times
 `114.591552734375` to the libultra perspective function at
@@ -650,11 +638,9 @@ mark the camera placement as viewer-derived. [evidence: open question, viewer de
 
 ### 4.1 Placement records
 
-Placement records are structurally coupled to the level format and are described in Level data.
-
 ### 4.2 Object and model formats
 
-#### Unused and hidden content: Two strong omitted model assets
+#### Two strong omitted model assets
 
 The strongest unused candidates immediately precede the model catalog whose first
 entry is ROM `0x914EE0`: [evidence: ROM bytes, deterministic decoding]
@@ -672,21 +658,15 @@ two structurally valid model-format assets omitted from the adjacent catalog.
 
 ### 4.3 Skeletons and animation
 
-Static-pose or animation support and remaining omissions are stated in the object description.
-
 ### 4.4 Behaviors, triggers, and scripted objects
-
-Behavioral records are documented only where they affect level extraction or presentation.
 
 ## 5. Audio
 
 ### 5.1 Audio storage and banks
 
-Audio storage is described with the sequence and bank tables below.
-
 ### 5.2 Sequence format and driver
 
-#### Music and sound: Driver and tables
+#### Driver and tables
 
 This is a custom six-channel XM-like tracker, not Nintendo sequence data, MusyX,
 libmus or libmus64. `0x800550C8` initializes it; `0x80055040` requests a 21,998 Hz
@@ -708,7 +688,7 @@ was validated by the table-driven analyzer. The owned audio allocation is nearly
 from `0x92DDC0` through `0xBCD31C` (2,749,788 bytes, 2.622 MiB), with 161 bytes of
 alignment gaps. [evidence: ROM bytes, deterministic decoding]
 
-#### Music and sound: Race music palettes and player design
+#### Race music palettes and player design
 
 The 13 rows at `0xC39E0` provide up to six ordered `(song, bankMode)` choices. All 18
 combinations of race songs 0–5 and modes 0–2 occur; duplicates deliberately affect
@@ -742,7 +722,7 @@ Render at least the intro plus two loop passes. Record the output-sample positio
 first entry to `restartOrder`; return that as `DecodedMusic.loopStart`, with the end
 of the second pass as `loopEnd`. Cap to ten voices for exact stealing. [viewer design]
 
-#### Music and sound: Sound effects
+#### Sound effects
 
 The separate 85-entry table assigns IDs 60–144. Sorted extents exactly tile
 `0x92DDC0–0xA7E330`. A resource has a 128-byte predictor book before encoded data at
@@ -752,11 +732,9 @@ SFX are not hidden music/stingers and need not be exposed in the music player.
 
 ### 5.3 Instruments and sample encoding
 
-Instrument banks, envelopes, loops, and sample encoding are described above.
-
 ### 5.4 Music catalog and loop points
 
-#### Music and sound: Complete song list and loops
+#### Complete song list and loops
 
 The ROM contains no authored song titles or sound test. Credits name Zack Ohren, so
 the player must use code-proven roles and numeric labels rather than invented titles.
@@ -800,29 +778,21 @@ to the `OPPONENTS` racer-profile formatter; slot 13 is tied to the `MIDWAY STAFF
 
 ### 6.1 Unreferenced assets
 
-#### Unused and hidden content
-
 This section follows the completed core spec as required. “Unreferenced” below is
 always scoped to the stated test; absence of an absolute pointer alone is not proof
 of runtime impossibility.
 
 ### 6.2 Cut or inaccessible levels
 
-Candidate levels are distinguished from alternate, debug, and intentionally hidden retail content above.
-
 ### 6.3 Debug features
 
-Shipped debug strings and executable features are listed only when supported by a code or data reference.
-
 ### 6.4 Prototype or revision-specific content
-
-Source-archive and prototype material is explicitly distinguished from shipped retail data.
 
 ## 7. nviewer implementation
 
 ### 7.1 Module mapping
 
-#### Complete course catalog: Public names and viewer list
+#### Public names and viewer list
 
 Fourteen public label pointers begin at ROM `0xC1788`; strings begin at `0xC824C`.
 The corresponding internal IDs are the 14 words at `0xC1F24`: [evidence: ROM bytes]
@@ -901,17 +871,13 @@ enough. [viewer design]
 
 ### 7.2 Supported features
 
-The Technical summary states the supported releases and principal decoded features.
-
 ### 7.3 Approximations and omissions
-
-Viewer approximations are distinguished from facts about the game formats.
 
 ## 8. Verification and remaining work
 
 ### 8.1 Verification evidence
 
-#### Verification evidence and open questions: Reproducible evidence
+#### Reproducible evidence
 
 | artifact | coverage |
 |---|---|
@@ -931,7 +897,7 @@ tables. Re-running the environment and orphan tools produced byte-identical outp
 all specialist analyzers completed with bounds/index invariants intact.
 [evidence: deterministic decoding]
 
-#### Verification evidence and open questions: Emulator evidence and limitation
+#### Emulator evidence and limitation
 
 The first fresh session booted far enough for Glide64mk2 to reject custom graphics
 ucode CRC `844B55B5`; it produced no screenshot. A second fresh session using the
@@ -956,7 +922,9 @@ rendering only; it does **not** dynamically validate public course ordering/name
 skydomes, atmosphere, camera, FOV, RAM map loads or audio. Those claims remain based
 on retail bytes, code and exhaustive decoded-structure checks. [evidence: emulator observation, open question]
 
-#### Verification evidence and open questions: Open questions
+### 8.2 Known unknowns
+
+#### Open questions
 
 - Resolve face words `+0/+2` and bytes `+5..+7` beyond their verified non-padding
   status.
@@ -978,10 +946,4 @@ on retail bytes, code and exhaustive decoded-structure checks. [evidence: emulat
   supports one.
 - Obtain in-race runtime or hardware captures for final course/environment comparison.
 
-### 8.2 Known unknowns
-
-Unresolved semantics are labelled **Hypothesis** or **Open question** where they occur.
-
 ### 8.3 References
-
-External documentation, decompositions, and source archives are cited inline where used.

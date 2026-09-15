@@ -16,9 +16,9 @@ interpretations are labelled hypotheses.
 | Geometry | 0x118-byte world record + one scene + 12-byte actor records `{castId, serial, x, y}` in world pixels (*Level format*) |
 | Textures | **2D tile layers**: 16 × 16 CI8 tiles, RGBA5551 palette, 256 px blocks, 1 to 3 layers per world. Composed on the CPU into 336 × 256 buffers and drawn with S2DEX `G_BG_1CYC` (*Layers*, *How the game builds a frame*) |
 | Collision | per-unit u16 map on the main layer: kind/attr bits plus one of 128 16 × 16 shape masks (*Tile maps and collision (verified pixel-exact against the game's BG buffers)*) |
-| Music driver | EAD "Nas" driver (SM64/OoT family): 62 sequences (61 music and jingles), 62 banks, 2 VADPCM sample banks, 32 kHz; a TypeScript renderer matches captures (*Music*) |
+| Music driver | Nintendo EAD “Nas” sequence engine; 62 sequences and 62 banks at 32 kHz. |
 | Audio microcode | `aspMain`, identified by rsp-hle as `nead_ys`. |
-| Sample encoding | EAD "Nas" driver (SM64/OoT family): 62 sequences (61 music and jingles), 62 banks, 2 VADPCM sample banks, 32 kHz; a TypeScript renderer matches captures (*Music*) |
+| Sample encoding | Nintendo VADPCM in two sample banks. |
 | Levels | **world** (one room); 143 worlds; 24 courses on 6 pages, with sub-areas linked by 227 exits (*Levels*) |
 | Memory requirement | Base 4 MiB. |
 | Viewer support | layer planes at the game's depths under the game's 40° camera: a side view with panning, plus free fly (*Mapping onto the viewer*) |
@@ -46,7 +46,7 @@ segmented, VROM, and file-relative addresses are named at each use.
 
 ### 2.1 Boot and executable layout
 
-#### Boot and code: Entry and code segment (verified)
+#### Entry and code segment (verified)
 
 - **Entry stub** at 0x80000400 (ROM 0x1000): clears bss 0x800B9B90–0x801172C0 (size 0x5D730), sets
   sp = 0x801011C8 and jumps to `boot` at 0x80065D4C. `boot` runs `osInitialize` and starts the idle and main
@@ -76,7 +76,7 @@ segmented, VROM, and file-relative addresses are named at each use.
   Around the page fields, J offsets are the leak's plus 8: `page` at +0x3EC, `newPage` at +0x3F0,
   `birthEntry.entryCnt` at +0x992 (verified by disassembling `change_gamePage` at 0x80066E48).
 
-#### Boot and code: Overlays (verified)
+#### Overlays (verified)
 
 308 relocatable modules sit back to back from ROM 0xB35EF0 to 0xE67FD0, in the order of the leak's `yoshi.spec`.
 They hold enemy and object code (`actor_*`), level gimmicks (`*Master`), the story-book pages (`bkpg_*`, `bookpg_*`:
@@ -115,7 +115,7 @@ source).
 
 ### 2.2 Memory and address mapping
 
-#### Filesystem and compression: Segment tables and addressing (verified)
+#### Segment tables and addressing (verified)
 
 - **`SegmentRomStart[]`** is at RAM 0x800AB4E4 (ROM 0xAC0E4) and holds `{0x1060, 0, 0, 0x528430, 0xB16170, 0}`.
   The indexes follow the leak's `SRC_GWY/yoshi_spec.h`: 0 code, 1 STATIC, 2 DYNAMIC, 3 CASTDATA, 4 WORLDDATABASE,
@@ -134,7 +134,7 @@ source).
 
 ### 2.3 ROM map and asset organization
 
-#### Filesystem and compression: ROM map (verified; covers every byte)
+#### ROM map (verified; covers every byte)
 
 | ROM start | ROM end | Name | Addressed as |
 |---|---|---|---|
@@ -156,7 +156,7 @@ source).
 
 ### 2.4 Compression formats
 
-#### Filesystem and compression: Compression: `CMPR` + `SMSR00` slide-LZ (verified bit-exact)
+#### Compression: `CMPR` + `SMSR00` slide-LZ (verified bit-exact)
 
 - **Inventory:**
   - This is the only codec in the ROM: 702 records, all 4-byte aligned, all inside unitData
@@ -219,7 +219,7 @@ There is no end marker; decoding stops when the output reaches the size.
 - For the viewer, a new `src/rom/yoshi/slide.ts` can copy `layout/slide.ts` almost verbatim. The existing
   `lzss.ts` doesn't apply: it has a different token layout and no separate literal stream.
 
-#### Filesystem and compression: Extraction
+#### Extraction
 
 `python3 layout/extract.py [rom] [outdir]` splits the whole ROM in about 2 s:
 - output: 1,037 files plus the 702 raw CMPR records; `manifest.tsv` gives path, ROM start and size, kind,
@@ -231,7 +231,7 @@ There is no end marker; decoding stops when the output reaches the size.
   `seg3_castData/` (per-object files and `cmpr/{rom}_{unit}.bin`), `seg4_worldDatabase/`,
   `overlays/NNN_{name}.bin`.
 
-#### Verification evidence: ROM identification, boot, codec, filesystem
+#### ROM identification, boot, codec, filesystem
 
 | # | Check | Result | Files |
 |---|---|---|---|
@@ -249,17 +249,13 @@ There is no end marker; decoding stops when the output reaches the size.
 
 ### 2.5 Loading process
 
-Level and asset selection is described by the tables and loader call paths above.
-
 ### 2.6 Revision differences
-
-Revision-specific addresses and data differences are stated in the relevant tables.
 
 ## 3. Level data
 
 ### 3.1 Level catalog and identifiers
 
-#### Levels: Terms (verified)
+#### Terms (verified)
 
 - **World.** One playable room: a course's main area, a sub-area behind a pipe or door, a boss arena, a menu
   screen. A world has one scene, a list of placed actors and its background layers. The J ROM has **143
@@ -272,7 +268,7 @@ Revision-specific addresses and data differences are stated in the relevant tabl
 - **Page themes** (from the leak's `SOUND_GWY/yoshi_sound.h` page events): 1 grassland (SOGEN), 2 cave/lava (MAGMA),
   3 mountain/sky (MOUNTAIN), 4 jungle (JUNGLE), 5 sea (WATER), 6 castle (CASTLE).
 
-#### Levels: Tables (verified)
+#### Tables (verified)
 
 | Table | ROM | RAM | Layout |
 |---|---|---|---|
@@ -286,7 +282,7 @@ Revision-specific addresses and data differences are stated in the relevant tabl
 `worldTester`: IDs 33, 38, 41, 42, 44, 45, 47–50, 53–65, 67–74 and 77. Slot 80 is an alias of 4 (`worldPanorama`). The viewer
 should list each distinct world struct once.
 
-#### Levels: How the game selects and loads a world (verified with breakpoints and RDRAM)
+#### How the game selects and loads a world (verified with breakpoints and RDRAM)
 
 1. `nextTo_newScene(a0, u8 gameMode, u8 worldId)` at 0x8006C6E0 stores the mode in `__Game+1` (0x800FC0B1) and
    the world ID in 0x800FC648. It then schedules `setAll_restart(deconst_sceneInfo, const_sceneInfo,
@@ -331,7 +327,7 @@ should list each distinct world struct once.
 - At the break, restore `27BDFFD8 AFBF0014 C4840008` at 0x8006AE68–70, remove the breakpoint and run.
 - `viewProc` runs every frame, so one call becomes `nextTo_newScene(?, 7, WORLD)`.
 
-#### Levels: Course list (verified; titles from the leak's `messageData.c` (J) and `E_messageData.c` (US))
+#### Course list (verified; titles from the leak's `messageData.c` (J) and `E_messageData.c` (US))
 
 The Japanese titles are valid for this ROM: J's message data matches the leak's Japanese `messageDatac.o` at 99.4% (*The leak: which build it is, and what it contains*). The US titles are leak-only.
 
@@ -375,7 +371,7 @@ a world that no warp row or exit record reaches (entered by code, or unused).
 | 79 | `worldClearDemo` | ending demo (collision-only `damybg`) |
 | 11, 36, 37, 39, 66 | `worldTester`, `worldHashi`, `worldDrum`, `worldBosstest`, `worldKumo_boss_enkei` | test worlds, unreachable in normal play (*Cut and test levels*) |
 
-#### Verification evidence: Levels
+#### Levels
 
 | # | Check | Result | Files |
 |---|---|---|---|
@@ -393,7 +389,7 @@ a world that no warp row or exit record reaches (entered by code, or unused).
 | 12 | Layer anchor formula reproduced by the lead from ROM data only (world start frame + the s16 pair before each BG attribute) | 1-1 enkei/chukan c_y = +86.70 / −208.70; 6-2 enkei P at (816, 768) = (496, 528) = r·cam + (−11.874, 49.976) as in RAM | `lead/layer_anchors.csv` |
 | 13 | Viewer placement (*Coordinates (world pixels → viewer units, 1 px = 1 unit)*) simulated against the game formula: perspective camera at distance K, planes at −(floor(z) − 500), anchors X0/Y0, 20 random cameras × 300 placements | max screen error 4e-12 px; with the 0.1 · frac(z) order offset ≤ 0.017 px | – |
 
-#### Unused and hidden content: Cut and test levels
+#### Cut and test levels
 
 | Item | Where | Evidence | Conf. |
 |---|---|---|---|
@@ -408,7 +404,7 @@ a world that no warp row or exit record reaches (entered by code, or unused).
 
 ### 3.2 Level container
 
-#### Filesystem and compression: Level loading (verified with the emulator: Story mode, page 1, course 1)
+#### Level loading (verified with the emulator: Story mode, page 1, course 1)
 
 Levels aren't loaded in one block. Tracing `dmacopy_bg`, `LoadFragment2` and `slidec` from the Yoshi Select A
 press into gameplay recorded 1,867 reads:
@@ -438,7 +434,7 @@ press into gameplay recorded 1,867 reads:
 All values are big-endian. `0x04xxxxxx` → ROM `0xB16170 + x` and `0x03xxxxxx` → ROM `0x528430 + x` (*Segment tables and addressing (verified)*); code
 pointers are J RAM addresses. **A parser needs no relocation.**
 
-#### Level format: World struct (0x118 bytes, segment 4)
+#### World struct (0x118 bytes, segment 4)
 
 The layout is verified: all 143 worlds parse, and the RAM copies are byte-identical apart from +0x5C. Meanings are
 leak-only unless marked.
@@ -461,7 +457,7 @@ leak-only unless marked.
 | 0x110 | s16 | course number 1–24 (page = (n−1)/4+1, course = (n−1)%4+1), 25 Bowser, 26 test, 0 none (**verified**) |
 | 0x112, 0x114 | u16, u32 | unknown |
 
-#### Level format: Scene table, scene and actor records (verified)
+#### Scene table, scene and actor records (verified)
 
 - **Scene table:** `u32 scene[w·h]`, then a 0. In ROM, a world's records are ordered actorData, scene, scene
   table, world struct.
@@ -477,7 +473,7 @@ leak-only unless marked.
 - **Totals:** 7,150 actor records in 143 worlds (6,850 objects and 300 layer placements). RAM equals ROM for 1-1
   (100 records), 2-1 (112) and 6-2 (84).
 
-#### Level format: Casts: castdt, data records, attributes (segment 3; verified layout)
+#### Casts: castdt, data records, attributes (segment 3; verified layout)
 
 **BG castdt (0x64 bytes)**
 
@@ -508,7 +504,7 @@ to `size` (*Compression: `CMPR` + `SMSR00` slide-LZ (verified bit-exact)*); othe
 | +0x14 | f32[3] | scale |
 | +0x30, +0x34 | u32, u32 | size of and pointer to an extra block `{u32 len, u32 0, payload}`; for exits the payload is an EXITIF |
 
-#### Level format: Layers
+#### Layers
 
 ##### What a course layer is (verified)
 
@@ -597,7 +593,7 @@ to `size` (*Compression: `CMPR` + `SMSR00` slide-LZ (verified bit-exact)*); othe
   palette. They carry only maps and collision.
 - Those arenas' visuals are drawn separately. In the Bowser room (world 78) it is an F3DEX textured mesh of CI8 64 × 32 tiles, plus a far layer drawn through a 496 × 384 ring buffer (verified from frame `render/f_078a`; *Other meshes*). `boss_majin` and `damybg` were not captured.
 
-#### Level format: Exits (EXITIF, 24 bytes; verified)
+#### Exits (EXITIF, 24 bytes; verified)
 
 `{u32 uniqueName (u16 destActorId, u16 param); u8 destWorld, pad[3]; f32 x; f32 y; f32 z (500); u8 gameMode; u8 effect; u16 exitType}`
 
@@ -605,7 +601,7 @@ to `size` (*Compression: `CMPR` + `SMSR00` slide-LZ (verified bit-exact)*); othe
 - The arrival actor is usually 0x44CA `cyberGate`.
 - All 227 links are in `level/worlds_J.json` (`links`); the reachability closure is in `level/reachability.json`.
 
-#### Music: Formats
+#### Formats
 
 **Sequence scripts** (all addresses are u16 offsets from the sequence start; relative forms add a signed offset to the
 address after the argument):
@@ -678,7 +674,7 @@ Envelope:          s16 pairs (delay, arg): delay > 0 ramps to (arg/32767)² over
 - **Loops:** playback restarts from the frame that contains loopStart, with the loop's `state` as history. The
   decoded frames match the stored loop states for 590 of 595 looped samples; the other 5 differ by at most ±1.
 
-#### Open questions and hypotheses: Levels and data
+#### Levels and data
 
 1. **Collision semantics.** What the `crUtID` kind bits (`v >> 11`: 2, 5, 6, 7, 12–14, 31) and attr bits
    (`(v >> 8) & 7`) mean as surface types (one-way, water, lava, spikes, ice…). Structure and shapes are verified.
@@ -701,7 +697,7 @@ Envelope:          s16 pairs (delay, arg): delay > 0 ramps to (arg/32767)² over
 
 ### 3.3 Geometry
 
-#### How the game builds a frame: Layers at run time, and the real 3D geometry
+#### Layers at run time, and the real 3D geometry
 
 **Layers** (full format and formulas in *Tile maps and collision (verified pixel-exact against the game's BG buffers)*–5.5):
 - **Command:** each layer is one S2DEX `G_BG_1CYC` (`01000000 <uObjScaleBg*>`) of a **336 × 256 CI8 ring buffer** in
@@ -756,7 +752,7 @@ Envelope:          s16 pairs (delay, arg): delay > 0 ramps to (arg/32767)² over
 - **Consequence for the viewer:** the game's 3D camera and its 2D parallax are the same projection, so one perspective
   camera serves layers, sprites and meshes (*Mapping onto the viewer*).
 
-#### Mapping onto the viewer: Building the meshes (level loader)
+#### Building the meshes (level loader)
 
 For each BG cast placed in the world (*Scene table, scene and actor records (verified)*, IDs 0x8xxx), in descending z:
 1. Read the castdt slots (*Casts: castdt, data records, attributes (segment 3; verified layout)*). `bii` gives worldW × worldH, `utIdBk` the block layout, `utID` the unit map.
@@ -809,7 +805,7 @@ Everything here is verified against the running game unless marked: RSP task bre
 - `f_511a`: 5-1;
 - `r621a`: 6-2.
 
-#### How the game builds a frame: Tasks, microcode and segments
+#### Tasks, microcode and segments
 
 **Tasks and microcode**
 - **One graphics task per frame**, submitted by the libbg RCP manager (0x80070F64) through `osSpTaskLoad`
@@ -850,7 +846,7 @@ Everything here is verified against the running game unless marked: RSP task bre
 - Sprites point segments 11 (TLUT base) and 12 (texture base) at their data before each draw.
 - F3DEX meshes use segment 3 for their animation blob.
 
-#### How the game builds a frame: Draw order of a gameplay frame
+#### Draw order of a gameplay frame
 
 Course 1-1, frame `f_111c`, camera (359.1, 272): 810 commands in 7 microcode runs.
 
@@ -881,7 +877,7 @@ Course 1-1, frame `f_111c`, camera (359.1, 272): 810 commands in 7 microcode run
 - The microcode is switched as needed.
 - There is no depth buffer in courses, so the order is the occlusion.
 
-#### How the game builds a frame: Presentation options (render agent's assessment)
+#### Presentation options (render agent's assessment)
 
 Summary of `notes/render.md` section 8. The lead's recommendation in *Recommended presentation: the game's own camera over depth-placed layer planes* follows it.
 
@@ -900,7 +896,7 @@ Summary of `notes/render.md` section 8. The lead's recommendation in *Recommende
 
 ### 3.5 Textures and materials
 
-#### How the game builds a frame: Palettes, texture formats and run-time tricks
+#### Palettes, texture formats and run-time tricks
 
 Details are in `notes/render.md` section 5.
 
@@ -941,7 +937,7 @@ Details are in `notes/render.md` section 5.
 
 ### 3.6 Collision
 
-#### Level format: Tile maps and collision (verified pixel-exact against the game's BG buffers)
+#### Tile maps and collision (verified pixel-exact against the game's BG buffers)
 
 A layer is a grid of **units** (16 × 16 px) grouped into **blocks** of 16 × 16 units (256 × 256 px).
 
@@ -980,11 +976,9 @@ for by in 0..worldH/256-1, bx in 0..worldW/256-1:
 
 ### 3.7 Environment, sky, fog, and lighting
 
-Environment records and runtime render state are described with the level data above.
-
 ### 3.8 Cameras and paths
 
-#### How the game builds a frame: Camera and projection summary
+#### Camera and projection summary
 
 | Quantity | Value | Where |
 |---|---|---|
@@ -996,7 +990,7 @@ Environment records and runtime render state are described with the level data a
 | Layer parallax | `r = K / (floor(z) − 500 + K)`; `P = r·cam + floor16(r·cam0 − a) − r·cam0` | *Parallax and scrolling* |
 | Zoomed arenas | `bossZoom_projection` (0x8006B560) and larger layer buffers (the Bowser room uses a 496 × 384 ring with frame (−80, −64, 480 × 368)) | zoom behaviour not captured (*Rendering*) |
 
-#### Mapping onto the viewer: Recommended presentation: the game's own camera over depth-placed layer planes
+#### Recommended presentation: the game's own camera over depth-placed layer planes
 
 **Key fact (derived from the verified formula).** The game's parallax is an exact perspective projection:
 - The per-layer factor `r = K / (floor(z) − 500 + K)` with `K = 120 / tan(20°) = 329.70` (*Parallax and scrolling*) is what a
@@ -1040,7 +1034,7 @@ viewed with the game's lens.
 
 ### 4.1 Placement records
 
-#### Level format: Object placement
+#### Object placement
 
 - Every actor record whose ID is not 0x8xxx is an object. Cast IDs map to leak names through the cast table
   relocations (`level/castnames_J.json`).
@@ -1062,7 +1056,7 @@ viewed with the game's lens.
 
 ### 4.2 Object and model formats
 
-#### Filesystem and compression: Inside castData (segment 3; boundaries from leak objects matched byte for byte)
+#### Inside castData (segment 3; boundaries from leak objects matched byte for byte)
 
 | Seg-3 offset | ROM | Leak object | Contents |
 |---|---|---|---|
@@ -1081,7 +1075,7 @@ viewed with the game's lens.
 
 ### 4.3 Skeletons and animation
 
-#### How the game builds a frame: Sprites, cells and animation
+#### Sprites, cells and animation
 
 Verified against the running game unless marked; details in `notes/render.md` section 4.
 
@@ -1190,23 +1184,17 @@ About `uObjMtx`:
 
 ### 4.4 Behaviors, triggers, and scripted objects
 
-Behavioral records are documented only where they affect level extraction or presentation.
-
 ## 5. Audio
 
 ### 5.1 Audio storage and banks
 
-Audio storage is described with the sequence and bank tables below.
-
 ### 5.2 Sequence format and driver
-
-#### Music
 
 Everything here is verified unless marked. The sources are the J code (the script interpreters are the leak's
 `SOUND_GWY/audio.o` functions with only relocations changed), the ROM data, RDRAM dumps and audio captures. Details,
 opcode tables and tools are in `notes/music.md` and `music/`.
 
-#### Music: Engine
+#### Engine
 
 | Item | Value |
 |---|---|
@@ -1218,7 +1206,7 @@ opcode tables and tools are in `notes/music.md` and `music/`.
 | Update rate | 544 samples per video frame (varied 528–560 to stay in sync), **3 updates per frame** (≈180 per second) |
 | Tempo | `DD bpm` sets tempo = bpm × 48. Each update: `acc += tempo + tempoChange`; if `acc ≥ 10770`: `acc −= 10770` and run one tick. The constant comes from J rodata: `trunc(3 × 2880000 / 48 / 16.713)`. So there are 48 ticks per beat at bpm × 1.0028, and at most one tick per update |
 
-#### Music: Data locations (J ROM)
+#### Data locations (J ROM)
 
 | Table (in code `.data`) | ROM | RAM | Entries |
 |---|---|---|---|
@@ -1251,7 +1239,7 @@ The entries tile each segment exactly, with no gaps.
 - Music sample bank 1 is identical, but SFX sample bank 0 differs.
 - The leak's `audio.*.cart` files are an older SFX sequence, bank and sample set, not J data.
 
-#### Music: Rendering a song offline to PCM
+#### Rendering a song offline to PCM
 
 This follows `music/render.ts` (a self-contained TypeScript prototype, about 2 s per 160 s song), whose semantics
 were read from the J/leak code.
@@ -1303,8 +1291,6 @@ were read from the J/leak code.
 9. **Not modelled:** the 24-voice limit and voice stealing, headset/wide/mono pan modes, and portamento, filters
    and random variance (J music doesn't use them).
 
-#### Verification evidence: Music
-
 | # | Check | Result | Files |
 |---|---|---|---|
 | 1 | Leak interpreter functions vs J code (relocations masked) | 0 differences in six interpreters; `Nas_SubSeq` differs only in struct offsets | `music/codediff.py`, `music/leak/codematch.txt` |
@@ -1316,8 +1302,6 @@ were read from the J/leak code.
 | 7 | Audio captures vs renders | seq 11: NCC 0.813, chroma 0.959; seq 1: NCC 0.918, chroma 0.826; stretch 1.000 | `music/cap/run2.raw`, `music/out/` |
 | 8 | Lead re-render of seq 12 | byte-identical WAV | `music/out/seq12.wav` |
 | 9 | Lead check of seq 1's loop from its script (123 BPM, 7,536-tick backward jump) | 76.37 s = the scanned loop length | – |
-
-#### Open questions and hypotheses: Music
 
 1. **Reverb.** The algorithm and parameters (`NA_DELAY_NORMAL` fields, `Nas_Synth_Delay`), the ENVMIXER ramp
    shape and the master output level.
@@ -1331,7 +1315,7 @@ were read from the J/leak code.
 6. **Sample flag.** Bit 25 of the sample flags (265 music samples).
 7. **Voice limit.** The effect of the 24-voice limit on dense songs.
 
-#### Unused and hidden content: Music and sound
+#### Music and sound
 
 | Item | Evidence | Conf. |
 |---|---|---|
@@ -1347,11 +1331,9 @@ were read from the J/leak code.
 
 ### 5.3 Instruments and sample encoding
 
-Instrument banks, envelopes, loops, and sample encoding are described above.
-
 ### 5.4 Music catalog and loop points
 
-#### Music: Song list
+#### Song list
 
 Songs are chosen three ways:
 - **World scene id:** the world's scene id (world +0x100, first u32) is passed to `Na_SceneChange` →
@@ -1444,7 +1426,7 @@ its script: `DD 7B` sets 123 BPM, i.e. 98.67 ticks per second, and the backward 
 
 ### 6.1 Unreferenced assets
 
-#### Verification evidence: Leak and hidden content
+#### Leak and hidden content
 
 | # | Check | Result | Files |
 |---|---|---|---|
@@ -1455,14 +1437,12 @@ its script: `DD 7B` sets 123 BPM, i.e. 98.67 ticks per second, and the backward 
 | 5 | Crash-screen test on a patched copy (checksum recomputed with `leak/n64crc.py`) | crash reproduced; screen not observed (inconclusive) | `leak/ys_crash_World_to_Unit.z64`, `leak/crash_lastframe.png` |
 | 6 | Full ROM string scans | *Messages and strings* | `leak/rom_ascii.txt`, `leak/rom_eucjp.txt` |
 
-#### Unused and hidden content
-
 This section combines the ROM and the leak. **Evidence** says how each item was established, and **Conf.** gives
 the confidence (high, medium or low). "Present in J" means the bytes were found in the Japanese ROM. "Unused"
 claims based on the leak rest on the leak's relocations and symbol references, not on a trace of the J game.
 Details are in `notes/leak.md`; the byte matches are in `leak/obj_match.tsv` and `leak/world_match.json`.
 
-#### Unused and hidden content: The leak: which build it is, and what it contains
+#### The leak: which build it is, and what it contains
 
 **Verdict** (high confidence): the leak is **not** the Japanese build.
 - It is an internal **North American product-ROM build**: `make rompro` with `AMERICA=1`, `SYS_ROMCASSETTE=1`,
@@ -1514,7 +1494,7 @@ Details are in `notes/leak.md`; the byte matches are in `leak/obj_match.tsv` and
 **Missing relative to `files.txt`:** 2,507 `.c`, 1,564 `.h`, all 230 `.wdt` world sources, 17 `.doc` files (`world.doc`,
 `forUSA.doc`, `actor.doc`, …). Nothing can be recompiled. The leak's own relink attempt failed (`test1.log`).
 
-#### Unused and hidden content: Debug features
+#### Debug features
 
 | Feature | In J? | How to reach it | Evidence | Conf. |
 |---|---|---|---|---|
@@ -1527,7 +1507,7 @@ Details are in `notes/leak.md`; the byte matches are in `leak/obj_match.tsv` and
 | Other build variants: CM (TV-commercial) ROM with a debug controller and BGM off; map-tool ROM; Gateway 64 kiosk freeze; editor frame advance (`FOR_EDITOR`) | not in J | – | leak `Makefile_h.mk`, `main.c` | leak-only, high |
 | CIC-6104 check (`cic6104.o`) | present but disabled (`USE_CIC6104=0`); J boots on 6106 | – | 100% byte match | medium |
 
-#### Unused and hidden content: Unused graphics and actors
+#### Unused graphics and actors
 
 | Item | J ROM | Evidence | Conf. |
 |---|---|---|---|
@@ -1540,7 +1520,7 @@ Details are in `notes/leak.md`; the byte matches are in `leak/obj_match.tsv` and
 | Overlays in the leak but not in the spec: `actor_cpackBackBoard`, `actor_cpackMenu` (Controller Pak menu), `actor_hata` (flag), `actor_sfwall`. Actors that exist only as source files: `actor_viewer`, `actor_mihon` ("sample"), `actor_hiraDbg`, `actor_panoramaDebug*`, `eff_tester` | leak | `files.txt`, `.spc` | leak-only, high |
 | Test casts that exist only as source files: `castdt_bg_waterTest`, `castdt_jungle_test`, `castdt_teppomizu_test`, `castdt_viewer` | leak | `files.txt` | leak-only, high |
 
-#### Unused and hidden content: Messages and strings
+#### Messages and strings
 
 | Item | J ROM | Evidence | Conf. |
 |---|---|---|---|
@@ -1552,21 +1532,15 @@ Details are in `notes/leak.md`; the byte matches are in `leak/obj_match.tsv` and
 
 ### 6.2 Cut or inaccessible levels
 
-Candidate levels are distinguished from alternate, debug, and intentionally hidden retail content above.
-
 ### 6.3 Debug features
 
-Shipped debug strings and executable features are listed only when supported by a code or data reference.
-
 ### 6.4 Prototype or revision-specific content
-
-Source-archive and prototype material is explicitly distinguished from shipped retail data.
 
 ## 7. nviewer implementation
 
 ### 7.1 Module mapping
 
-#### Levels: Proposed viewer list
+#### Proposed viewer list
 
 - **Kind `'adventure'`, grouped by page.** Use the group title "Page N – theme" and a level name "1-1 Treasure Hunt ·
   area 2 (world_1_1_2)". Within a course, order the worlds as: start world, the other `_P_C_n` worlds, the
@@ -1580,7 +1554,7 @@ Source-archive and prototype material is explicitly distinguished from shipped r
   the level name suffix. The J ROM stores its own titles as custom-encoded text (*Messages and strings*), so a loader should
   hard-code the two title lists above.
 
-#### Mapping onto the viewer: Coordinates (world pixels → viewer units, 1 px = 1 unit)
+#### Coordinates (world pixels → viewer units, 1 px = 1 unit)
 
 - **Main plane:** `X = x`, `Y = −y` (the game's y points down), `Z = 0`.
 - **Layer with depth z and anchor a** (*Parallax and scrolling*):
@@ -1609,7 +1583,7 @@ Source-archive and prototype material is explicitly distinguished from shipped r
   `x − w/2 … x + w/2` and `y − h … y`, in y-down px, before the Y flip (*Building the meshes (level loader)* step 7).
 - **No X mirroring** (unlike Rush). Front faces wind counter-clockwise as built; culling is off.
 
-#### Mapping onto the viewer: Additions to `src/rom/types.ts`
+#### Additions to `src/rom/types.ts`
 
 ```ts
 export interface Game {
@@ -1658,7 +1632,7 @@ export interface Level {
 - `fog`, `skies` and `backdrop` are unused; the far layer is the sky.
 - `clearColor` = the layer palette's index 0 colour of the farthest layer, or black.
 
-#### Mapping onto the viewer: Renderer and UI changes
+#### Renderer and UI changes
 
 | Change | Where | Why |
 |---|---|---|
@@ -1674,7 +1648,7 @@ Everything else (log depth, cutout discard, blending, culling off) already works
 needed for courses**, since layers and sprites are built directly from data. F3DEX is needed only if 3D pieces are
 added later (*How the game builds a frame*).
 
-#### Mapping onto the viewer: Modules
+#### Modules
 
 | File | Contents |
 |---|---|
@@ -1689,7 +1663,7 @@ added later (*How the game builds a frame*).
 | `src/rom/yoshi/music.ts` | table addresses (*Data locations (J ROM)*), song list with names (*Song list*) → `Game.music` (seqs 1–61, e.g. "01 MAIN · Treasure Hunt"), `decodeMusic(i)` → `{sampleRate: 32000, channels: [L, R], loopStart, loopEnd}` |
 | `src/rom/index.ts` | `case 'NYSJ': return openYoshiStory(rom);` |
 
-#### Mapping onto the viewer: Difficulty
+#### Difficulty
 
 - **Filesystem and codec: low.** Fully specified and verified bit-exact; about 60 lines of TypeScript exist.
 - **Tile layers, parallax and level list: low to medium.** The formats are verified pixel-exact against the game's
@@ -1704,17 +1678,13 @@ added later (*How the game builds a frame*).
 
 ### 7.2 Supported features
 
-The Technical summary states the supported releases and principal decoded features.
-
 ### 7.3 Approximations and omissions
-
-Viewer approximations are distinguished from facts about the game formats.
 
 ## 8. Verification and remaining work
 
 ### 8.1 Verification evidence
 
-#### Music: Verification against the game
+#### Verification against the game
 
 Captures used the audio-dump plugin (32,006 Hz AI stream) with RDRAM dumps to identify the loaded sequence.
 Comparisons are a 50 ms loudness envelope with normalised cross-correlation (NCC) and 12-bin chroma at the best
@@ -1731,12 +1701,10 @@ The lead re-ran `render.ts --seq 12 --passes 2 --tail 3`. It produced a **byte-i
 loopStart 8,178 and loopEnd 774,044 samples, 0.57 s of render time). The renderer maps instrument value 127 to the
 drum kit (stored internally as instrument 0), as *Formats* states.
 
-#### Verification evidence
-
 Runtime verification used mupen64plus with glide64mk2, HLE RSP, debugger
 breakpoints, and RDRAM dumps.
 
-#### Verification evidence: Rendering
+#### Rendering
 
 | # | Check | Result | Files |
 |---|---|---|---|
@@ -1755,7 +1723,7 @@ breakpoints, and RDRAM dumps.
 | 13 | Bowser room frame | F3DEX floor mesh plus a 496×384 far-layer ring | `render/f_078a.*` |
 | 14 | Layer edges: J disassembly of `makeUtId_bgDraw`, `copynUnit` and `wColwRow_to_bColbRow`, equal to the leak with relocations masked; 1-1 chukan forced to P.x = 5127.5 past its 4608 px width | out-of-range units empty on both axes; ring 315/315 index 0 (wrap model 82/315); screenshot shows no mountain band | `edge/edge.md`, `edge/ring_chukan_over.png`, `edge/shot_over.png` |
 
-#### Verification evidence: Reference screenshots of the real game
+#### Reference screenshots of the real game
 
 All of these are 320 × 240 emulator screenshots (glide64). They may be up to about one emulated second older than the
 RAM read, so the frame dumps carry the exact state. `cam` = RAM 0x800FC52C/30.
@@ -1787,7 +1755,7 @@ RAM read, so the frame dumps carry the exact state. `cam` = RAM 0x800FC52C/30.
 - **Prototype renders to compare against:** `level/out/{id}_{name}/`, with the screenshot-vs-render strips
   `level/cmp_111b.png`, `cmp_211a.png`, `cmp_621a.png`.
 
-#### Open questions and hypotheses: Rendering
+#### Rendering
 
 1. **Unidentified 3D actors.** The 5-vertex F3DEX fans in 1-1 and the 70-vertex and 28-vertex meshes in 2-1 and
    6-2: which actors, and which data (sfim? polygon actors?).
@@ -1804,7 +1772,7 @@ RAM read, so the frame dumps carry the exact state. `cam` = RAM 0x800FC52C/30.
    (harmless for captures).
 8. **CPU-sync display-list splits** (libbg `bgfuncx_sync_draw`) were never observed.
 
-#### Open questions and hypotheses: ROM layout and leak
+#### ROM layout and leak
 
 1. **Audio segment ends.** They are inferred from contiguity; no RomEnd constants are in the code.
 2. **Unlocated objects.** 17 of the leak's 525 unit objects were not located in J; 14 overlay names come only from
@@ -1818,8 +1786,4 @@ RAM read, so the frame dumps carry the exact state. `cam` = RAM 0x800FC52C/30.
 
 ### 8.2 Known unknowns
 
-Unresolved semantics are labelled **Hypothesis** or **Open question** where they occur.
-
 ### 8.3 References
-
-External documentation, decompositions, and source archives are cited inline where used.

@@ -65,30 +65,9 @@ object files. No part of the code is compressed; nothing needs to be decompresse
 
 ### 2.2 Memory and address mapping
 
-Address conversions and load destinations are specified with the executable and file tables above.
-
 ### 2.3 ROM map and asset organization
 
-#### Filesystem and compression: ROM maps
-
-**Gex 64** (16 MiB, all regions accounted for):
-
-| ROM | contents |
-|---|---|
-| `0x000000-0x001000` | header, IPL3 (CIC-6102) |
-| `0x001000-0x07FF40` | main code + data (level table `0x708E0`, object table `0x745F0`, info table `0x78EA8`) |
-| `0x07FF40-0x0ED0F0` | 18 level code overlays |
-| `0x0ED0F0-0x0EF120` | inflate overlay |
-| `0x0EF120-0x102A90` | audio pointer bank "N64 PtrTablesV2" (read to `0x800D1820`) |
-| `0x102A90-0x386450` | audio wave data (streamed from ROM; base stored at `0x800C5914`) |
-| `0x386450-0x49A200` | music: 8 pointer/wave bank pairs, DEFLATE level songs stored after their banks, EXTRAS bank and 4 raw jingles `0x497E00..0x49A200` (level audio table `0x8006F5A8`, *Gex 64 locations and tables (verified)*) |
-| `0x49A200-0x49B600` | 5 attract-demo controller recordings (0x400 each) |
-| `0x49B600-0x49BA00` | zero / unused 6th demo slot (*Unused or hidden content*) |
-| `0x49BA00-0x49D870` | table read to `0x800E6010` during audio init (first byte = count); not music data, purpose unknown |
-| `0x49D870-0x4B5750` | common blob: Gex player model + animations (DEFLATE, relocatable) |
-| `0x4B5750-0xC495B0` | 31 level data files (DEFLATE) |
-| `0xC495B0-0xF821C0` | 735 object files (DEFLATE, relocatable) |
-| `0xF821C0-0x1000000` | zero padding |
+#### ROM maps
 
 **Gex 3** (32 MiB):
 
@@ -113,7 +92,7 @@ Address conversions and load destinations are specified with the executable and 
 
 ### 2.4 Compression formats
 
-#### Filesystem and compression: Compression: raw DEFLATE (both games, verified)
+#### Compression: raw DEFLATE (both games, verified)
 
 Every compressed file in both ROMs is a **raw RFC 1951 DEFLATE stream**: no zlib/gzip header, no
 stored size, no checksum. The decompressor is zlib's `inflate_blocks` in the inflate overlay. The
@@ -144,7 +123,7 @@ loads were compared byte-for-byte against RDRAM right after the in-game inflate 
 opening1 (15,288 bytes) and fly77 (729,776 bytes) identical; Gex 64 map5 1,064,000/1,064,000 bytes
 identical outside the two tables the loader patches (see *Verification evidence*).
 
-#### Filesystem and compression: Extracting every file
+#### Extracting every file
 
 1. Normalise byte order (existing `normalizeByteOrder`).
 2. Level files: iterate the level table (*Level tables*); inflate `[start, end)` (Gex 64 `+0/+4`, Gex 3 `+0x1C/+0x20`).
@@ -158,7 +137,7 @@ Reference extractors (Python, stdlib only): `g64fs/g64extract.py [ROM] [OUTDIR]`
 `--selftest`, which cross-checks a pure-Python inflater against zlib) and `g3fs/g3extract.py [ROM]
 [OUTDIR]` (1,079 files). Both write an index (`index.json` / `index.tsv`) with ROM ranges and sizes.
 
-#### Verification evidence: Filesystem and codec
+#### Filesystem and codec
 
 | check | method | result | evidence |
 |---|---|---|---|
@@ -173,17 +152,13 @@ Reference extractors (Python, stdlib only): `g64fs/g64extract.py [ROM] [OUTDIR]`
 
 ### 2.5 Loading process
 
-Level and asset selection is described by the tables and loader call paths above.
-
 ### 2.6 Revision differences
-
-Revision-specific addresses and data differences are stated in the relevant tables.
 
 ## 3. Level data
 
 ### 3.1 Level catalog and identifiers
 
-#### Level lists: Gex 3: Deep Cover Gecko (30 table entries; names from the string table, verified)
+#### Gex 3: Deep Cover Gecko (30 table entries; names from the string table, verified)
 
 Boot flow (verified): 28 `opening1` (intro) → 27 `fly77` (title screen) → START → 29 `opening3`
 (story intro) → 23 `gexcave6` Mission Control. The hub is split into four level files that warp to
@@ -232,7 +207,7 @@ the retail level-select page (*Unused or hidden content*) is ids 0..26.
 
 ### 3.2 Level container
 
-#### Filesystem and compression: Relocatable file format (objects and the player model; both games, verified)
+#### Relocatable file format (objects and the player model; both games, verified)
 
 ```
 u32 n
@@ -245,25 +220,7 @@ header, and treat each relocated word as an offset into `DATA`. Verified against
 persistent objects match 171,645/171,664 bytes (only `DATA+4..5` is a runtime field set to 0xFFFF);
 Gex 3: 20 of 25 relocated objects byte-exact, the rest differ in a few runtime bytes.
 
-#### Filesystem and compression: Level tables
-
-**Gex 64** — ROM `0x708E0` (vaddr `0x8006FCE0`), 31 records of 32 bytes (verified):
-```
-+0x00 u32 dataRomStart     ; raw DEFLATE, inflated to 0x8024B000
-+0x04 u32 dataRomEnd       ; padded end (see 3.1)
-+0x08 u32 overlayRomStart  ; uncompressed MIPS, copied to 0x80159720
-+0x0C u32 overlayRomEnd
-+0x10 u32 overlayRamEnd    ; zero-fill up to here (BSS); stored in [0x800E8184]
-+0x14 char name[12]        ; NUL-terminated internal name
-```
-A parallel 24-byte menu/info table at `0x800782A8` (ROM `0x78EA8`) gives the in-game names:
-```
-+0x00 char* internalName   +0x04 char* titleLine1   +0x08 char* titleLine2 (or 0)
-+0x0C char* categoryLine1  +0x10 char* categoryLine2
-+0x14 u16 redRemotes       +0x16 u16 tvLogo (index into object lvltv___)
-```
-Levels are selected by name (`0x8004B520` NameToLevelIndex over this table); hub warp gates build the
-name with `sprintf("%s%d", prefix, number)`; EXIT LEVEL uses `"map5"`.
+#### Level tables
 
 **Gex 3** — ROM `0x8013C` (vaddr `0x8007F53C`), 30 records of 0x54 bytes, index = level id (verified
 unless marked):
@@ -285,7 +242,7 @@ unless marked):
 String table: `char*[242]` at `0x80080110` (getter `0x800260A0`). Level lookup by name: `0x8004FF54`.
 Pointers in the table are main-image addresses (convert with ROM = vaddr − `0x7FFFF400`).
 
-#### Level format: Shared structure (both games)
+#### Shared structure (both games)
 
 - A level file is **one flat image linked at `0x8024B000`**. Every pointer in it is an absolute
   address: `fileOffset = ptr − 0x8024B000`.
@@ -315,7 +272,7 @@ Pointers in the table are main-image addresses (convert with ROM = vaddr − `0x
   camera-relative display lists: both games put the sky
   vertex pool in segment 4 (header +0x28).
 
-#### Level format: Gex 3 level file (verified on gexcave6, anime1, snow96, endboss1 unless marked)
+#### Gex 3 level file (verified on gexcave6, anime1, snow96, endboss1 unless marked)
 
 The design is the same as Gex 64 (*Shared structure (both games)*). The layouts differ, and world geometry is stored as
 *fragments* that the game copies into the frame, not as callable display lists.
@@ -500,7 +457,7 @@ layers, shown as before. The overlay is appended after `buildLevel`, so bounds a
 
 ### 3.3 Geometry
 
-#### Verification evidence: Level geometry (Gex 3)
+#### Level geometry (Gex 3)
 
 Method: the same as Gex 64. The level pass took an RDRAM dump and an in-game frame from the same
 moment. It read the view and projection matrices (`DA38…` commands) from the frame DL in RAM, and
@@ -525,7 +482,7 @@ Texture contact sheets: `g3lvl/renders/sheet_{gexcave6,anime1,snow96,endboss1}.p
 
 ### 3.4 Display lists and render state
 
-#### Mapping to the viewer: Display lists and coordinates (summary; details from the level passes in *Level format*)
+#### Display lists and coordinates (summary; details from the level passes in *Level format*)
 
 - **Addressing:**
   - Both games point RSP segments 1/2/3 at the level's vertex pool, material display lists and
@@ -565,11 +522,7 @@ Texture contact sheets: `g3lvl/renders/sheet_{gexcave6,anime1,snow96,endboss1}.p
 
 ### 3.5 Textures and materials
 
-Texture storage and material binding are described with geometry above.
-
 ### 3.6 Collision
-
-#### Verification evidence: Collision (both games)
 
 No emulator was used. All checks are static (disassembly of the main images and the extracted level files) or run
 through the viewer's loaders. Scratch scripts are in `gexcoll/`.
@@ -587,21 +540,15 @@ through the viewer's loaders. Scratch scripts are in `gexcoll/`.
 
 ### 3.7 Environment, sky, fog, and lighting
 
-Environment records and runtime render state are described with the level data above.
-
 ### 3.8 Cameras and paths
-
-Camera defaults and path data are described with the level data where known.
 
 ## 4. Objects
 
 ### 4.1 Placement records
 
-Placement records are structurally coupled to the level format and are described in Level data.
-
 ### 4.2 Object and model formats
 
-#### Filesystem and compression: Object tables (both games, same record layout, verified)
+#### Object tables (both games, same record layout, verified)
 
 16-byte records `{char name[8]; u32 romStart; u32 romEnd}`, sorted by name; names are 8 characters
 padded with `_` and **not** NUL-terminated (e.g. `gexeyes_`, `10tons__`). Lookup compares the two name
@@ -618,7 +565,7 @@ words and stops at a record whose first byte is 0. Each file is DEFLATE of a *Re
 Full per-object ROM ranges, sizes and reloc counts: `g64fs/files/index.json`, `g64fs/objtable.txt`,
 `g3fs/files/index.tsv` and the file tables in the *Verification evidence* sections of `notes/g64_fs.md` and `notes/g3_fs.md`.
 
-#### Mapping to the viewer: Detection and game objects
+#### Detection and game objects
 
 - `src/rom/index.ts` `openRom()`: add `case 'NX2E'` (Gex 64) and `case 'NX3E'` (Gex 3) on the game
   code at ROM 0x3B, after `normalizeByteOrder()`.
@@ -633,21 +580,15 @@ Full per-object ROM ranges, sizes and reloc counts: `g64fs/files/index.json`, `g
 
 ### 4.3 Skeletons and animation
 
-Static-pose or animation support and remaining omissions are stated in the object description.
-
 ### 4.4 Behaviors, triggers, and scripted objects
-
-Behavioral records are documented only where they affect level extraction or presentation.
 
 ## 5. Audio
 
 ### 5.1 Audio storage and banks
 
-Audio storage is described with the sequence and bank tables below.
-
 ### 5.2 Sequence format and driver
 
-#### Boot and code: Level load sequence
+#### Level load sequence
 
 Gex 64 (loader thread `0x8003BFB8`, verified):
 1. heap pointer `[0x800EB7F4] = 0x8024B000`; load inflate overlay (`0x8003B54C`);
@@ -663,7 +604,7 @@ the objects listed at level header `+0x44`, `0x800316F4` loads the player object
 `0x800318BC` loads the per-level 0x820 block, and the audio loaders read the audio fields of the
 level record (*Music*).
 
-#### Music: Engine (both games: libmus, verified)
+#### Engine (both games: libmus, verified)
 
 Both games use **libmus**, the N64 SDK "MUS" music driver by Software Creations. Its pointer bank
 starts with the signature `N64 PtrTablesV2` and its wave bank with `N64 WaveTables`. It runs on top of
@@ -687,7 +628,7 @@ RAM exactly (*Verification evidence*). So everything below reproduces the game's
 *control*. The final PCM mix (libultra envmixer and resampler rounding, reverb) is an approximation
 that could not be compared by ear: the headless emulator has no audio output.
 
-#### Music: Rendering offline to PCM (both games)
+#### Rendering offline to PCM (both games)
 
 1. Parse the pointer bank (*Sample banks (both games)*) and the song (*Song format: Gex 64 revision and Gex 3 differences*). Inflate level songs first.
 2. Run the channel player once per frame. Each frame is 367 output samples: 22050/60 rounded, and 367
@@ -705,7 +646,7 @@ unexported loop preparation and voice mixer were copied into them. Its MIDI/`alS
 code does not apply. Reference implementations: `g64audio/gex64music.ts` (render all 27 songs in ~20
 s: `npx tsx render.ts all`) and `g3audio/gex3music.ts`.
 
-#### Music: Gex 3 specifics (verified by disassembly and RDRAM unless marked)
+#### Gex 3 specifics (verified by disassembly and RDRAM unless marked)
 
 **Loading** (`0x8005AAE8(level)`, on every level load), from the level record (*Level tables*):
 
@@ -799,7 +740,7 @@ from the unconditional loader `0x8005AAE8(current level)`. Song 2's use on bonus
 levels was **not** observed at runtime. Reference renderer: `g3audio/gex3music.ts` (`list | render
 {i|all} | samples`); verifier `g3audio/verify_ram.ts`; song listings in `g3audio/songs/`.
 
-#### Mapping to the viewer: Difficulty and risks (music; level parts in *Level format*)
+#### Difficulty and risks (music; level parts in *Level format*)
 
 - **Music:** medium. Reference TypeScript implementations already exist (`g64audio/gex64music.ts`,
   `g3audio/gex3music.ts`) and match the game's player state exactly. Rendering a full looping song
@@ -807,8 +748,6 @@ levels was **not** observed at runtime. Reference renderer: `g3audio/gex3music.t
 - **Risks:** reverb isn't rendered, so songs sound drier than in game. PCM loudness and rounding
   differences can't be checked by ear. Gex 64 levels with several songs (Toon TV, Circuit Central,
   Gecques Cousteau) switch between songs by area triggers, so list each song separately.
-
-#### Verification evidence: Music (Gex 3)
 
 | check | method | result |
 |---|---|---|
@@ -820,7 +759,7 @@ levels was **not** observed at runtime. Reference renderer: `g3audio/gex3music.t
 
 ### 5.3 Instruments and sample encoding
 
-#### Music: Sample banks (both games)
+#### Sample banks (both games)
 
 **Pointer bank** (`.ptr`; offsets relative to the bank start, relocated at init by
 `MusPtrBankInitialize`):
@@ -849,64 +788,39 @@ decoder state.
 
 ### 5.4 Music catalog and loop points
 
-The complete known song catalog and loop policy are included above.
-
 ## 6. Unused and hidden content
 
 ### 6.1 Unreferenced assets
-
-#### Unused or hidden content
 
 Findings from the filesystem, level and music passes (evidence column says how each was established):
 
 | game | what | where | evidence it is unused / hidden |
 |---|---|---|---|
-| Gex 64 | 6th attract-demo slot | demo pointer table `0x8006CF68` has 6 pointers (6th = ROM `0x49B600`); demo level table `0x8006CF98` has a 6th value 26 (`intro1`) | the demo counter wraps at 5 (`0x8001A898: sltiu v0,5`), so slot 6 is never played; ROM `0x49B600-0x49BA00` is zero or small data |
-| Gex 64 | no debug menu or cheats found | main code, overlays, strings (`g64fs/strings_all.txt`) | string and button-mask table scans found nothing. There is a password system (strings "see password", "PASSWORD IS" in the map5 overlay). Codes built from combined input logic were not traced |
-| Gex 64 | every table level is reachable | hub file `map5` offset `0x13C60..0x13D80` | the hub holds one warp record for each of the 25 playable levels (0..24); intro and logos are entered from code |
 | Gex 3 | *(not unused)* ROM `0x1A92090-0x1D3B030`, 2.7 MiB | Agent Xtra talking-head video, 1,341 frames x 0x820 bytes (64x64 CI4 + palette) | the filesystem pass flagged it as unreferenced (no table points to it, not read during boot/intro/title/anime1). The level pass found the Mission Control overlay reads it as base + frame x 0x820, with clips starting at frames 0, 402, 644, 900 and 1158. Sheet: `g3lvl/renders/unknown_region_CI4_frames_every16.png` |
 | Gex 3 | **debug level select in retail** | pause, hold R, press B A B Z C-left C-right C-up Z (button table `0x800809D0`, checker `0x8002B360`) | opens pause-menu page 28 "select level" (handler `0x800370FC`, ids 0..26). **Confirmed in the emulator** by the level pass. Page 29, the "sound effects" / "level specific effects" test (`0x8003728C`), is opened from the pause options/stats/save-game menu (`0x80036E80`), so it is probably a normal menu page (not fully traced). Screenshot: `g3lvl/shots/cheat_select_level_page_endboss1.png` |
 | Gex 3 | invulnerability code | pause, hold R, press C-up C-left B A C-down C-right C-up Z (table `0x800809E0`) | sets bit 0x400 in `0x800A55C4`; `0x8003F328` then skips the damage. Static analysis only |
 | Gex 3 | debug font and camera | object `dbgfont_` (loaded in every level), string `dbg_cam_`, "start key, tween: %d, %d" | debug assets and strings left in retail |
 | Gex 3 | skipped category slot | level record `+0x0C` runs 5..0x10 over the 11 TV levels with 0x0D missing | hypothesis: a cut 12th TV level slot |
 | Gex 3 | no orphan files | all 30 level records, 29 audio banks and 963 objects | every object name occurs in at least one level file, overlay or main code (711 are used by exactly one level) |
-| Gex 64 | **unreferenced song** | ROM `0x47B670-0x47CCB0` (DEFLATE → 10,173 bytes; 17 channels, 140 BPM, 123.5 s loop) | not referenced by the level audio table, the jingle table or any code/data constant; `0x47B670` occurs only as the *end* of the Pre-History song. It sits between the Pre-History song and REZOP.WBK. Bank hypothesis prehismx.wbk: 0 notes exceed the pitch cap with it (8..15 with any other bank), and it uses 6 prehismx waves (2, 6, 13, 14, 15, 18) no referenced song uses. Likely a cut second Pre-History Channel track. Rendered: `g64audio/wav/47b670_UNUSED_prehistory_b.wav` |
-| Gex 64 | unused sample waves | orchestr.wbk 1 2 4 6 11 14 17 18 41 44 45 46 47 52 70 72; CIRCUIT.WBK 0 10; KungFu.wbk 16 17; NYPD.wbk 0 1 3 6 13; prehismx.wbk 1 4 8 17; REZOP.WBK 11-15; EXTRAS.WBK 4 5 7; gexsfx.wbk 69 74 78 82 85 88 95 100 122 215 218 221 229 233 254 255 261 304 | static scan: no song's `0x81` command and none of the 512 sound effects select them |
-| Gex 64 | unterminated music trigger list | rta1 trigger list `0x8006F4B0` | no terminator, so the scan runs into the song-range data at `0x8006F4C8` (latent bug) |
-| Gex 64 | unused libmus features | `MusBankStartEffect(2)`, `MusHandleSetPan`, `SetFreqOffset`, `SetTempo`; song commands 83 84 86 88 89 8C 8E 91-94 98 9D 9E A0 A1 A3-A7 | no callers / not used by any song |
 | Gex 3 | unused music samples | music pointer-bank indices 61, 64, 160, 178, 179, 203, 219, 268, 274, 276, 287 (36,828 of 1,366,974 wave bytes) | referenced by no song `waveTable`, and no song uses drum maps. Exported: `g3audio/wav/unused/music_sample_NNN_romXXXXXX.wav` |
 | Gex 3 | SFX pointer-bank entries missing from their fx bank | global 53; snow96 38; war01 18, 26; myth64 30; anime1 44; gexcave7 17 | not in the fx bank's `waveTable`, so no effect can play them (static scan) |
 | Gex 3 | ignored effects change in a song | the Egypt song (song 7) master track contains `AA 02` | `MusSetSongFxChange` is never called, so the command does nothing |
 | Gex 3 | unused libmus features | `MusStartSongFromMarker`, `MusStartEffect`, `MusHandleSetPan/SetFreqOffset/SetTempo/SetReverb/Pause`, `MusSetMarkerCallback`, `MusSetSongFxChange`; song commands 80 83 84 88-8A 8C 8E 8F 91-94 97 98 9A 9B 9D-A1 A3-A7 A9 AB | no callers or occurrences |
-| both | no orphan songs or banks in Gex 3 | every PtrTables/WaveTables pair and all 15 songs are referenced | static scan (Gex 64's orphan song is listed above) |
-| Gex 64 | **12 objects never referenced** | `bridgex_ bubsnd__ mwfly___ sprkshr_ zblockb_ zfisha__ zjumpb__ zmylot__ zweed___ zweeda__ zweedb__ zweedc__` (object table ROM `0x745F0`) | named in no level's object list (hdr+0x40) and nowhere in main code, overlays, other objects or the common blob (`g64lvl/object_refs.json`) |
-| Gex 64 | **debug camera object** `dbg_cam_` | object file in the table (has face-list geometry) | in no level list and placed by no instance; only reference is its name string in main data at ROM `0x7E2B0` |
-| Gex 64 | 8 object names with no file | `shadow3_ archmon_ colc____ sphere__ box_____ xing____ newfaces dbgfont_` in level name lists (e.g. `dbgfont_` in logo4, `newfaces` in rezop3) | the loader finds no table entry and silently skips them: removed debug/test assets |
-| Gex 64 | loaded but never placed | 168 objects in level name lists with no instance | mostly spawned by code (remotes, effects, HUD); not necessarily unused (`g64lvl/object_placements.json`) |
-| Gex 64 | unreferenced world materials | 29 of 3,001: horror4 3, scifi14 8, kungfu1 10, horror6 2, spy2 1, circuit0 5 | referenced by no chunk, sky DL or flipbook table |
-| Gex 64 | no cheat input found (second search) | – | the level pass also searched pad-bit tests in code: only HUD/menu uses of L and Z, plus the password screen (map5 overlay, button table `0x80161160`). hypothesis: any cheats are special passwords |
 | Gex 3 | **540 unreferenced material entries** | 540 of 4,529 material-table entries in 27 levels, e.g. clue1 53, gtown2 55, hub 43; none in war01, push44, wwgex1 (`g3lvl/unused_materials.txt`) | referenced by no fragment, sky DL, special record or animation record. **Caveat:** per-level overlay code was not scanned, so some of these textures may still be drawn by code |
 | Gex 3 | placed but hidden objects | hub (gexcave6) instances such as a purple paw box, a black cube and a red paw icon | render in the placement render (`g3lvl/renders/gexcave6_gamecam_with_objects.png`) but are absent from the game frame (`g3lvl/shots/hub_gexcave6_game_frame_of_ramdump.png`). hypothesis: shown only in certain game states or missions (instance +0x0E) |
 | Gex 3 | logic-only instances | 331 instances with name index −1 | no object; hypothesis: triggers, cameras, spawn points |
-| both | no orphan level or object files | every Gex 3 table object is named somewhere; Gex 64 has the 12 orphans listed above | static reference scans |
 
 ### 6.2 Cut or inaccessible levels
 
-Candidate levels are distinguished from alternate, debug, and intentionally hidden retail content above.
-
 ### 6.3 Debug features
 
-Shipped debug strings and executable features are listed only when supported by a code or data reference.
-
 ### 6.4 Prototype or revision-specific content
-
-Source-archive and prototype material is explicitly distinguished from shipped retail data.
 
 ## 7. nviewer implementation
 
 ### 7.1 Module mapping
 
-#### Mapping to the viewer: Reusable modules
+#### Reusable modules
 
 | existing module | reuse for Gex | changes needed |
 |---|---|---|
@@ -917,7 +831,7 @@ Source-archive and prototype material is explicitly distinguished from shipped r
 | `util.ts` `pruneUnused`, `emptyBounds` | level assembly | – |
 | `music/rush1.ts` `decodeVadpcm`, `RESAMPLE_LUT` | libmus voices (*Rendering offline to PCM (both games)*) | export or move the loop preparation and voice mixer so they can be shared |
 
-#### Mapping to the viewer: New modules (suggested names)
+#### New modules (suggested names)
 
 | file | contents |
 |---|---|
@@ -935,15 +849,13 @@ Jingles and one-shot songs have no loop.
 
 ### 7.2 Supported features
 
-The Technical summary states the supported releases and principal decoded features.
-
 ### 7.3 Approximations and omissions
-
-Viewer approximations are distinguished from facts about the game formats.
 
 ## 8. Verification and remaining work
 
 ### 8.1 Verification evidence
+
+### 8.2 Known unknowns
 
 #### Open questions and unknowns
 
@@ -993,10 +905,4 @@ Music:
   volume-squaring, ramp shape and Gex 3 dry-gain factor follow libultra behaviour rather than the games'
   own mixer code. PAL (50 Hz) timing is untested.
 
-### 8.2 Known unknowns
-
-Unresolved semantics are labelled **Hypothesis** or **Open question** where they occur.
-
 ### 8.3 References
-
-External documentation, decompositions, and source archives are cited inline where used.

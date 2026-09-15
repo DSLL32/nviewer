@@ -17,8 +17,8 @@ interpretations are labelled hypotheses.
 | Textures | RDP textures and raw RGBA16 prerendered backgrounds. |
 | Collision | Early scene collision with 12-byte water boxes. |
 | Music driver | No prototype audio data is present. |
-| Audio microcode | Not present in the recovered prototype data. |
-| Sample encoding | Not present in the recovered prototype data. |
+| Audio microcode | No audio task is present in the recovered data. |
+| Sample encoding | No sample data is present in the recovered data. |
 | Levels | 52 prototype scenes. |
 | Memory requirement | Not executable as a standalone game image. |
 | Viewer support | Detected by the complete development-cartridge SHA-1. |
@@ -59,8 +59,6 @@ segmented, VROM, and file-relative addresses are named at each use.
 
 ### 2.2 Memory and address mapping
 
-Address conversions and load destinations are specified with the executable and file tables above.
-
 ### 2.3 ROM map and asset organization
 
 #### ROM map of the upper half
@@ -86,15 +84,9 @@ Not present: `code`, overlays, `gameplay_keep`/`field_keep`/`dangeon_keep` and a
 
 ### 2.4 Compression formats
 
-Compression framing and decoding rules are specified with each stored resource above.
-
 ### 2.5 Loading process
 
-Level and asset selection is described by the tables and loader call paths above.
-
 ### 2.6 Revision differences
-
-Revision-specific addresses and data differences are stated in the relevant tables.
 
 ## 3. Level data
 
@@ -257,8 +249,6 @@ Some outdoor scenes have zero light directions in setting 0 (0x0B, 0x0C, 0x0F, 0
 
 ### 3.3 Geometry
 
-Geometry representation is described with the level container above.
-
 ### 3.4 Display lists and render state
 
 #### Rendering
@@ -283,55 +273,31 @@ Geometry representation is described with the level container above.
 
 ### 3.5 Textures and materials
 
-Texture storage and material binding are described with geometry above.
-
 ### 3.6 Collision
-
-Collision storage and interpretation are described with the corresponding level records above.
 
 ### 3.7 Environment, sky, fog, and lighting
 
-Environment records and runtime render state are described with the level data above.
-
 ### 3.8 Cameras and paths
-
-Camera defaults and path data are described with the level data where known.
 
 ## 4. Objects
 
 ### 4.1 Placement records
 
-Placement records are structurally coupled to the level format and are described in Level data.
-
 ### 4.2 Object and model formats
-
-Object geometry uses the model and display-list formats described above unless stated otherwise.
 
 ### 4.3 Skeletons and animation
 
-Static-pose or animation support and remaining omissions are stated in the object description.
-
 ### 4.4 Behaviors, triggers, and scripted objects
-
-Behavioral records are documented only where they affect level extraction or presentation.
 
 ## 5. Audio
 
 ### 5.1 Audio storage and banks
 
-Audio storage is described with the sequence and bank tables below.
-
 ### 5.2 Sequence format and driver
-
-Sequence bytecode and playback behavior are described below.
 
 ### 5.3 Instruments and sample encoding
 
-Instrument banks, envelopes, loops, and sample encoding are described above.
-
 ### 5.4 Music catalog and loop points
-
-The complete known song catalog and loop policy are included above.
 
 ## 6. Unused and hidden content
 
@@ -354,15 +320,9 @@ The metrics are Col= and Tex= from *Level list*; "layout" judgements are from th
 
 ### 6.2 Cut or inaccessible levels
 
-Candidate levels are distinguished from alternate, debug, and intentionally hidden retail content above.
-
 ### 6.3 Debug features
 
-Shipped debug strings and executable features are listed only when supported by a code or data reference.
-
 ### 6.4 Prototype or revision-specific content
-
-Source-archive and prototype material is explicitly distinguished from shipped retail data.
 
 ## 7. nviewer implementation
 
@@ -392,11 +352,7 @@ Source-archive and prototype material is explicitly distinguished from shipped r
 
 ### 7.2 Supported features
 
-The Technical summary states the supported releases and principal decoded features.
-
 ### 7.3 Approximations and omissions
-
-Viewer approximations are distinguished from facts about the game formats.
 
 ## 8. Verification and remaining work
 
@@ -408,8 +364,6 @@ No emulator request (`alpha/EMU-REQUESTS.md` not written). The upper half has no
 - building it needs the MQ debug ROM, IDO recompilers and ZAPD;
 - the prebuilt patch sits on mega.nz, which is not scriptable here;
 - it runs a retail-based engine with recreated actors and prerenders, so its screenshots would not show original rendering.
-
-#### Verification evidence
 
 | claim | method |
 |---|---|
@@ -431,6 +385,8 @@ No emulator request (`alpha/EMU-REQUESTS.md` not written). The upper half has no
 | sw97 baserom = overdump files | `v2/sw97diff.py`: 185 identical, 10 differ in one byte, 2 absent (gerudo_valley) |
 | leak correspondences | 32-byte window matching of leak `.o` data (`leakcmp/`), symbol names via `mips-linux-gnu-nm` |
 
+### 8.2 Known unknowns
+
 #### Open questions
 
 1. Exact build/date: nothing in the ROM. sw97 and press say Spaceworld 1997 (Nov 1997); only the Hyrule Field alt/day setup ties it to the demo.
@@ -442,10 +398,4 @@ No emulator request (`alpha/EMU-REQUESTS.md` not written). The upper half has no
 7. Why the repo module's tile-memory emulation mis-decodes 5 32x32 textures (a stale texture-memory cache is suspected, not traced); relevant to retail OoT too.
 8. No comparison with Spaceworld 97 footage yet (TCRF not reachable from here; screenshots not fetched).
 
-### 8.2 Known unknowns
-
-Unresolved semantics are labelled **Hypothesis** or **Open question** where they occur.
-
 ### 8.3 References
-
-External documentation, decompositions, and source archives are cited inline where used.

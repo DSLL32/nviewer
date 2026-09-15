@@ -16,9 +16,9 @@ interpretations are labelled hypotheses.
 | Geometry | BG file of rarezip sections: rooms (tree of blocks with display lists, 12-byte vertices, RGBA colour arrays), portals, visibility commands, lights, bounding boxes (*Level geometry*) |
 | Textures | global store of 3,503 textures by number, two decoders (zlib paletted; bitstream Huffman/RLE/lookup/blur), texels identical to RDRAM (*Global textures (verified: disassembly, all 3,502 non-empty textures decode, texels identical to RDRAM)*); plus embedded tiles in model files |
 | Collision | Per-stage tile polygons plus pad records in named `_tilesZ` and `_padsZ` files. |
-| Music driver | libultra **n_audio** compressed-MIDI player, ALBank + VADPCM, 22018 Hz, 119 sequences, a stage-music table with primary/ambient/X tracks; renders match captured game audio in tempo, pitch and level with gain 1.0 (*Music*) |
+| Music driver | libultra `n_audio` / `n_alCSPlayer` compressed-MIDI engine; 119 sequences and a stage table with primary, ambient, and X tracks. |
 | Audio microcode | Rare's `naudio_mp3` task. |
-| Sample encoding | libultra **n_audio** compressed-MIDI player, ALBank + VADPCM, 22018 Hz, 119 sequences, a stage-music table with primary/ambient/X tracks; renders match captured game audio in tempo, pitch and level with gain 1.0 (*Music*) |
+| Sample encoding | Nintendo VADPCM for music and sound effects; MP3 for voice clips. |
 | Levels | stage: one stage-table record = BG + tiles + pads + solo setup + MP setup (61 records; *Levels*). 17 solo missions, 4 special assignments, Carrington Institute, 16 Combat Simulator arenas; several stages share a BG |
 | Memory requirement | Expansion Pak; a separate reduced-memory menu path exists. |
 | Viewer support | USA and European retail data; stages, objects, collision, environment, characters, and music. |
@@ -52,11 +52,9 @@ segmented, VROM, and file-relative addresses are named at each use.
 
 ### 2.1 Boot and executable layout
 
-No additional executable-layout information is required by the viewer.
-
 ### 2.2 Memory and address mapping
 
-#### Filesystem and compression: Addressing of loaded data (verified: disassembly and trace)
+#### Addressing of loaded data (verified: disassembly and trace)
 
 | Data | Pointer convention |
 |---|---|
@@ -69,7 +67,7 @@ No additional executable-layout information is required by the viewer.
 
 ### 2.3 ROM map and asset organization
 
-#### Filesystem and compression: ROM map (verified; 41 regions cover every byte, `fs/rommap.tsv`)
+#### ROM map (verified; 41 regions cover every byte, `fs/rommap.tsv`)
 
 | ROM | Contents |
 |---|---|
@@ -101,7 +99,7 @@ No additional executable-layout information is required by the viewer.
 
 ### 2.4 Compression formats
 
-#### Filesystem and compression: Compression: rarezip "1173" (verified bit-exact against the game)
+#### Compression: rarezip "1173" (verified bit-exact against the game)
 
 ```
 u8  0x11
@@ -124,7 +122,7 @@ u24 size        big-endian decompressed size (exact)
 - **The viewer's decoder works unchanged:** `src/rom/inflate.ts` `inflateRaw(rom, off + 5, size)` equals zlib on all
   1,403 compressed files plus lib and data (`fs/scripts/inflate_check.ts`, about 0.8 s in total).
 
-#### Filesystem and compression: File table (verified: ROM, RAM, loader disassembly, load trace)
+#### File table (verified: ROM, RAM, loader disassembly, load trace)
 
 ```
 data + 0x28080 = vaddr 0x80082060: u32 romOffset[2015]    absolute ROM offsets
@@ -155,7 +153,7 @@ fields. A viewer can rely on the names for lookup, because they are stable withi
 
 The file layer never relocates; format code converts pointers afterwards (*Addressing of loaded data (verified: disassembly and trace)*).
 
-#### Verification evidence: ROM, boot, codec, files
+#### ROM, boot, codec, files
 
 | Check | Method | Result | Evidence |
 |---|---|---|---|
@@ -169,11 +167,9 @@ The file layer never relocates; format code converts pointers afterwards (*Addre
 
 ### 2.5 Loading process
 
-Level and asset selection is described by the tables and loader call paths above.
-
 ### 2.6 Revision differences
 
-#### Unused and hidden content: ROM leftovers and revision-only content
+#### ROM leftovers and revision-only content
 
 | Item | Evidence | Confidence |
 |---|---|---|
@@ -189,7 +185,7 @@ Level and asset selection is described by the tables and loader call paths above
 
 ### 3.1 Level catalog and identifiers
 
-#### Levels: Tables (verified: ROM data plus disassembly of the users; `stages/stagetable.py`, `stages/menus.py`)
+#### Tables (verified: ROM data plus disassembly of the users; `stages/stagetable.py`, `stages/menus.py`)
 
 | Table | vaddr (data offset) | Layout | Users |
 |---|---|---|---|
@@ -227,7 +223,7 @@ Level and asset selection is described by the tables and loader call paths above
 | 0x80099FC0 | `g_Vars`; +0x4B4 holds the stage number again |
 | 0x8007FC00 | stage-table index |
 
-#### Levels: How a stage loads (verified: disassembly; order confirmed with file-load breakpoints for stages 0x30 and 0x32)
+#### How a stage loads (verified: disassembly; order confirmed with file-load breakpoints for stages 0x30 and 0x32)
 
 1. `mainChangeToStage(s)` stores the pending stage; the lib main loop moves it to 0x8005D9B4 and applies the
    stage's memory arguments.
@@ -248,7 +244,7 @@ Level and asset selection is described by the tables and loader call paths above
 A viewer loads a stage from the table in the same way: BG + tiles + pads + (solo or MP) setup, with names from the
 text files (*Text files (verified: all 476 parse; `langGet` 0x7F16E584)*).
 
-#### Levels: Stage list
+#### Stage list
 
 **Solo missions** (menu order; names from Loptions, verified):
 
@@ -311,7 +307,7 @@ disassembly).
 
 These appear in the unused-content catalogue in *Unused and hidden content*.
 
-#### Levels: Text files (verified: all 476 parse; `langGet` 0x7F16E584)
+#### Text files (verified: all 476 parse; `langGet` 0x7F16E584)
 
 - **Naming:** 68 topics × 7 language slots. The slots are `L{topic}E`, `J`, `P`, `_str_gZ`, `_str_fZ`, `_str_sZ`
   and `_str_iZ`.
@@ -335,7 +331,7 @@ These appear in the unused-content catalogue in *Unused and hidden content*.
 
 ### 3.2 Level container
 
-#### Level geometry: Room gfx data (one stream per room; pointers relative to the room pointer)
+#### Room gfx data (one stream per room; pointers relative to the room pointer)
 
 Header (0x18; verified in RDRAM: Defection room 2 loaded at 0x80161470 with `base + (ptr − roomPtr)`):
 `ptr vertices; ptr colours; ptr opaqueBlocks; ptr xluBlocks (0 = none); s16 lightsIndex; s16 numLights; s16 numVtx
@@ -355,7 +351,7 @@ Header (0x18; verified in RDRAM: Defection room 2 loaded at 0x80161470 with `bas
   every BG; RDRAM vertex bytes identical; renders).
 - **Colours:** u32 RGBA baked vertex colours. **verified** (RAM colour buffer = file for Defection room 2).
 
-#### Mapping onto the viewer: Level assembly (`loadLevel`)
+#### Level assembly (`loadLevel`)
 
 1. Stage record (*Tables (verified: ROM data plus disassembly of the users; `stages/stagetable.py`, `stages/menus.py`)*) → BG, pads, setup (solo +0x0E or MP +0x10) file ids.
 2. BG (*Level geometry*): one `Mesh` per room (room-local positions), `Instance` = `translate(room.pos)`; sky rooms → `Level.skies`;
@@ -374,7 +370,7 @@ Header (0x18; verified in RDRAM: Defection room 2 loaded at 0x80161470 with `bas
 The public n64decomp/perfect_dark decompilation was used only as a lead: claims that rest on it alone are marked
 hypothesis.
 
-#### Level geometry: At a glance
+#### At a glance
 
 | | Perfect Dark |
 |---|---|
@@ -388,7 +384,7 @@ hypothesis.
 | lighting | baked vertex colours (prelit); environment-mapped surfaces store normals and are lit by room lights at run time |
 | totals | 31 non-stub BG files (29 are 0x200-byte stubs); e.g. lue 270 rooms / 36,350 triangles, mp15 32 rooms / 1,562 |
 
-#### Level geometry: BG file container (verified: all 31 non-stub BGs parse exactly to the file end; disassembly of `bgReset` 0x7F15B304..0x7F15B6C4)
+#### BG file container (verified: all 31 non-stub BGs parse exactly to the file end; disassembly of `bgReset` 0x7F15B304..0x7F15B6C4)
 
 | Offset | Type | Field |
 |---|---|---|
@@ -405,7 +401,7 @@ The game reads the file in parts (`fileLoadPart`): the 0x40-byte header, the pri
 room streams on demand as rooms become visible (*How a stage loads (verified: disassembly; order confirmed with file-load breakpoints for stages 0x30 and 0x32)*). **Stubs:** 0x200-byte files (one trivial room);
 `bg_ash.seg` (0x660, stage 0x2E) holds a single room of 40 triangles.
 
-#### Level geometry: Primary data (inflated; pointers are `0x0F000000 + offset`)
+#### Primary data (inflated; pointers are `0x0F000000 + offset`)
 
 Header (verified: the loader adds `base − 0x0F000000` to words 1..5):
 
@@ -433,7 +429,7 @@ Header (verified: the loader adds `base − 0x0F000000` to words 1..5):
   have lights (all solo stages, MP Ruins). They describe light fixtures used for dynamic effects (shooting lights
   out); the baked look doesn't need them.
 
-#### Level geometry: Coordinates, units, culling (verified)
+#### Coordinates, units, culling (verified)
 
 - Right-handed, **+Y up**, game units; **no X mirroring** (the game's own matrices reproduce the screenshot with the
   file geometry, sign orientation intact). A viewer uses `mirrorX: false`, `vertexScale: 1`.
@@ -449,7 +445,7 @@ Header (verified: the loader adds `base − 0x0F000000` to words 1..5):
 
 ### 3.4 Display lists and render state
 
-#### Level geometry: Display lists (verified: opcode histogram of all 4,367 leaf lists; decoded identically by the frame-DL walker; renders)
+#### Display lists (verified: opcode histogram of all 4,367 leaf lists; decoded identically by the frame-DL walker; renders)
 
 | Op | Count | Meaning (PD encoding) |
 |---|---|---|
@@ -506,7 +502,7 @@ approach for the combiner fold).
 
 ### 3.5 Textures and materials
 
-#### Level geometry: Global textures (verified: disassembly, all 3,502 non-empty textures decode, texels identical to RDRAM)
+#### Global textures (verified: disassembly, all 3,502 non-empty textures decode, texels identical to RDRAM)
 
 - **List:** ROM 0x1FF7CA0, 3,504 × `{u32 w0; u32 w1}`: w0 bits 0–23 = data offset (unaligned), bits 24–27 surface
   type, 28–31 sound type (names hypothesis); w1 = detail-tile nibbles (hypothesis). Data `ROM 0x1D65F40 + offset[n] ..
@@ -530,7 +526,7 @@ approach for the combiner fold).
 - **Wrap/filter:** wrap from the `C0` macro (wrap/clamp/mirror → `Texture.wrapS/T`), bilinear filtering; mip-maps can
   be approximated from LOD 0. Contact sheets: `bg/renders/textures/{arec,ame,dam,pete,dish,lue}_sec2.png`.
 
-#### Verification evidence: Level geometry, textures and environment
+#### Level geometry, textures and environment
 
 | Check | Method | Result | Evidence |
 |---|---|---|---|
@@ -549,7 +545,7 @@ approach for the combiner fold).
 | sky planes and colours | CPU-rasterised RDP triangles decoded from 5 frames vs the model from `skyRender` | W·depth constant per plane; vertex colours within ~2/255; horizon = sky colour | `runtime/tools/rdptri.py`, `skymodel.py`, `runtime/captures/*/sky_compare.png` |
 | world-space camera | player struct `+0x1BB0` vs frame eye in 10 stages | `campos − eye/scale` = the constant draw offset per stage, equal to the offsets solved from BG calls | `notes/runtime.md` *How a stage loads (verified: disassembly; order confirmed with file-load breakpoints for stages 0x30 and 0x32)*, `obj/dumps/capture_offsets.json` |
 
-#### Unused and hidden content: Textures
+#### Textures
 
 - **Coverage:** 3,188 of the 3,503 global textures are referenced by BG and model files. Code tables in the global
   display-list block and code constants add most of the rest.
@@ -569,7 +565,7 @@ approach for the combiner fold).
 
 ### 3.6 Collision
 
-#### Level geometry: Tiles (collision) and pads (verified: all 60 tiles files parse exactly)
+#### Tiles (collision) and pads (verified: all 60 tiles files parse exactly)
 
 - **Tiles** (`bg_{code}_tilesZ`, 1173-compressed): `u32 roomCount` (BG rooms + 1), `u32 offset[roomCount + 1]`
   (file-relative; room r's records span `offset[r]..offset[r+1]`), then per room records `{u8 type; u8 numVertices;
@@ -605,7 +601,7 @@ approach for the combiner fold).
 
 ### 3.7 Environment, sky, fog, and lighting
 
-#### Level geometry: How the game draws a frame, environment, fog and sky (verified: RDRAM captures with frame display lists, disassembly)
+#### How the game draws a frame, environment, fog and sky (verified: RDRAM captures with frame display lists, disassembly)
 
 Captures (`runtime/captures/{name}/`: screenshots, 8 MiB RDRAM, walked display lists, `cam.json`, `manifest.json`):
 
@@ -748,7 +744,7 @@ Villa, Crash Site and Air Force One (`runtime/tools/rdptri.py`, `skymodel.py`):
   - A mirrored disc at `waterHeight` when water is enabled.
   - Sky rooms (Defection moon, Skedar Ruins gradient, Attack Ship) are extra entries in `Level.skies`.
 
-#### Level geometry: Lighting at run time (verified: RAM colour arrays vs BG file in 9 stages)
+#### Lighting at run time (verified: RAM colour arrays vs BG file in 9 stages)
 
 | Capture | Room VTX runs | Colour arrays identical to the file | Modified in RAM |
 |---|---|---|---|
@@ -774,13 +770,11 @@ Villa, Crash Site and Air Force One (`runtime/tools/rdptri.py`, `skymodel.py`):
 
 ### 3.8 Cameras and paths
 
-Camera defaults and path data are described with the level data where known.
-
 ## 4. Objects
 
 ### 4.1 Placement records
 
-#### Objects and props: Placement (verified against RAM: rotations 238/285, positions 257/285; doors 45/46 and 44/46)
+#### Placement (verified against RAM: rotations 238/285, positions 257/285; doors 45/46 and 44/46)
 
 Mismatches are all expected: chr-held weapons/shields, lifts and hovercars (moved at run time), 4 consoles and 2
 stacked crates (floor raycast finds a different floor).
@@ -825,7 +819,7 @@ the frame's matrices): the sculpture, helipad markings, towers and light beams l
 Placement was checked against the 285 placed objects in the
 Defection RDRAM capture (`obj/scripts/compare_ram.ts`).
 
-#### Objects and props: Where things are (verified: disassembly, data, RAM)
+#### Where things are (verified: disassembly, data, RAM)
 
 | Thing | Address / file |
 |---|---|
@@ -842,7 +836,7 @@ Defection RDRAM capture (`obj/scripts/compare_ram.ts`).
 | model loader | 0x7F1A7604(fileId) → 0x7F1A7554: load, skeleton fix-up, relocate from 0x05000000 (0x70022A24), texture rewrite (0x7F175480) |
 | animations | ROM 0x1A15C0..0x7CD1A0 + table 0x7CD1A0..0x7D0A40 (*Animations and standing characters (verified: lib `anim.c` disassembly, all 1,207 table records, joint matrices vs RAM)*) |
 
-#### Objects and props: Pads file `bgdata/bg_<code>_padsZ` (verified: `padUnpack` 0x7F115A30 disassembly field by field; all 37 populated pads files parse)
+#### Pads file `bgdata/bg_<code>_padsZ` (verified: `padUnpack` 0x7F115A30 disassembly field by field; all 37 populated pads files parse)
 
 ```
 +0x00 s32 numPads   +0x04 s32 numCovers   +0x08 s32 waypointsOffset   +0x0C s32 waygroupsOffset   +0x10 s32 coversOffset
@@ -859,7 +853,7 @@ waypoint (hypothesis layout): {s32 padnum; s32 neighboursOffset; s32 groupnum; s
 ```
 Pad positions are world coordinates (verified by RAM object positions).
 
-#### Objects and props: Setup files `Usetup<code>Z`, `Ump_setup<code>Z` (verified)
+#### Setup files `Usetup<code>Z`, `Ump_setup<code>Z` (verified)
 
 ```
 +0x00..+0x08  0 (waypoints/waygroups/covers, filled from the pads file)
@@ -938,7 +932,7 @@ accel, `+0x68` decel, `+0x6C` maxspeed, `+0x70` doorflags, `+0x72` doortype (4/8
 `1 WEAPON`, `2 AMMO`, `5 OUTFIT`, `7 watch time`, `8 credits data`, `9/10/11` MP case/respawn/hill pads, `12 END`
 (lengths verified; names of 1, 2, 5, 9–11 hypothesis).
 
-#### Mapping onto the viewer: Detection and game object
+#### Detection and game object
 
 - `src/rom/index.ts` `openRom()`: add `case 'NPDE'` (after `normalizeByteOrder()`), accepting `rom[0x3F] === 0`
   (V1.0; addresses in this spec). V1.1 (`rom[0x3F] === 1`), `NPDP` and `NPDJ` need their own address maps (*Revisions (verified: `fs/scripts/revs.py`, `revcode.py`, `fs/revs.txt`)*);
@@ -948,7 +942,7 @@ accel, `+0x68` decel, `+0x6C` maxspeed, `+0x70` doorflags, `+0x72` doortype (4/8
   Institute), `battle` (groups "Combat Simulator – Dark", "Combat Simulator – Classic") and `other` (group "Unused": 0x14
   silo, 0x1B sevb). `LevelInfo.name` = menu name (*Stage list*); `Level.id` = e.g. `ame-30`.
 
-#### Verification evidence: Objects
+#### Objects
 
 | Check | Method | Result | Evidence |
 |---|---|---|---|
@@ -961,7 +955,7 @@ accel, `+0x68` decel, `+0x6C` maxspeed, `+0x70` doorflags, `+0x72` doortype (4/8
 | animation decoder | port of lib anim.c/model.c vs `model->matrices` in RAM (runtime dumps; breakpoints at 0x7F0241E0 in Chicago and the Defection intro) | 28/28 joints, 4/4 elbow/knee, 2/2 roots; max element error 5.7e−7 | `anim/scripts/verify_ram.ts`, `verify_hits.ts`, `anim/dumps/verify_*.txt` |
 | standing characters | stand animation frame 0 per body type | natural standing poses; root height = lowest vertex within 1% | `anim/renders/chars_standing.png`, `defection_posed_chr12.png` |
 
-#### Unused and hidden content: Models and props
+#### Models and props
 
 The object agent's first pass found 105 of the 441 model numbers never placed by any setup (*Objects and props*). Part 3 then split
 them by code references, checked in the ROM through slot cross-references and data tables:
@@ -981,7 +975,7 @@ them by code references, checked in the ROM through slot cross-references and da
 
 ### 4.3 Skeletons and animation
 
-#### Objects and props: Animations and standing characters (verified: lib `anim.c` disassembly, all 1,207 table records, joint matrices vs RAM)
+#### Animations and standing characters (verified: lib `anim.c` disassembly, all 1,207 table records, joint matrices vs RAM)
 
 **Table** (ROM 0x7CD1A0, read whole by `animsInit` 0x700233C0): `u32 count = 1207`, then 12-byte records:
 ```
@@ -1055,17 +1049,13 @@ Renders: `anim/renders/chars_standing.png` (the ten characters of `obj/renders/c
 
 ### 4.4 Behaviors, triggers, and scripted objects
 
-Behavioral records are documented only where they affect level extraction or presentation.
-
 ## 5. Audio
 
 ### 5.1 Audio storage and banks
 
-Audio storage is described with the sequence and bank tables below.
-
 ### 5.2 Sequence format and driver
 
-#### Music: Engine (verified: code, RAM, captured audio)
+#### Engine (verified: code, RAM, captured audio)
 
 | Item | Value |
 |---|---|
@@ -1078,7 +1068,7 @@ Audio storage is described with the sequence and bank tables below.
 | **voice volume** | **linear**: the envelope mixer volume is the sequence player's voice volume itself, **not squared** as in libultra ABI1 and the viewer's `libultra.ts`. Verified: in RAM, a menu voice's computed volume 16744 equals `em_volume` 16744 (squared would be 8555). Squared renders are 4–16 dB too quiet against captures |
 | reverb | per-voice dry/wet sends from the channel FX mix; the FX parameters are not decoded, and reverb is not rendered |
 
-#### Music: Data (ROM, outside the file table; referenced only from lib code)
+#### Data (ROM, outside the file table; referenced only from lib code)
 
 | ROM | Contents |
 |---|---|
@@ -1100,7 +1090,7 @@ Audio storage is described with the sequence and bank tables below.
 - **Playback** (lib `seqPlay` 0x7000FC48): copy `compressedLen` bytes from ROM, inflate (0x700074F0),
   `n_alCSeqNew`, `alCSPSetSeq`, set the volume (0x7000FD9C), `alCSPPlay`.
 
-#### Music: Where music plays (verified: data tables and disassembly; RAM where marked)
+#### Where music plays (verified: data tables and disassembly; RAM where marked)
 
 - **Stage music table** at 0x80084500: 24 × `{s16 stage, s16 primary, s16 ambient, s16 xTrack}`, terminated by stage
   0; −1 = none.
@@ -1137,7 +1127,7 @@ Audio storage is described with the sequence and bank tables below.
   - Seq 1 is a medium-confidence case: the decompilation says the title screen starts it, but no ROM constant was found. See *Unused and hidden content*.
   - The credits play seq 88.
 
-#### Music: Rendering offline (prototype verified against game audio)
+#### Rendering offline (prototype verified against game audio)
 
 1. Read sequence `n` from the table and inflate it; parse it with a per-track loop parser (`src/rom/music/cseq.ts`
    `parseCompressedSequence`, shared with GoldenEye). **Correction (implementation):** the prototype used Bomberman's
@@ -1172,8 +1162,6 @@ Audio storage is described with the sequence and bank tables below.
 - **Not modelled:** reverb (about 1–2 dB and the room sound) and the 184-sample
   event quantisation.
 
-#### Verification evidence: Music
-
 | Check | Method | Result | Evidence |
 |---|---|---|---|
 | engine parameters | RDRAM (synth struct, players) and AI dacrate | 22018 Hz, 184-sample updates, 3 players, linear voice volume | `music/ram/*.bin`, `music/cap/boot.log` |
@@ -1182,7 +1170,7 @@ Audio storage is described with the sequence and bank tables below.
 | AI music commands | walk of all 1,610 setup and 46 global AI lists with the game's length table | 0 errors; Defection intro starts 34/11 | `unused3/scripts/aiwalk.py` |
 | rendered audio | 5 captures (audio-dump plugin) vs renders: loudness envelope, onset/loop timing, chroma | tempo exact, pitch correct, level −3.0..+2.7 dB | `music/tools/cmp2.py`, `music/cap/` |
 
-#### Unused and hidden content: Music and sound
+#### Music and sound
 
 | Item | Evidence | Confidence | Reachable |
 |---|---|---|---|
@@ -1201,11 +1189,9 @@ Audio storage is described with the sequence and bank tables below.
 
 ### 5.3 Instruments and sample encoding
 
-Instrument banks, envelopes, loops, and sample encoding are described above.
-
 ### 5.4 Music catalog and loop points
 
-#### Music: Song list
+#### Song list
 
 Names: Combat Simulator Soundtrack names where they exist; otherwise the proposed name in the "use" column. Loop
 start–end are in seconds of song time. "one-shot" means there is no infinite loop. The WAV loop points in samples are
@@ -1337,7 +1323,7 @@ in `music/wav/index.json`.
 
 ### 6.1 Unreferenced assets
 
-#### Verification evidence: Unused content
+#### Unused content
 
 | Check | Method | Evidence |
 |---|---|---|
@@ -1346,15 +1332,13 @@ in `music/wav/index.json`.
 | cut stages | pending-stage write (control: 0x26 loads) for 0x1B (twice), 0x14, 0x2E, 0x36, 0x4E, 0x5C | 0x1B and 0x14 crash, 0x2E/0x36/0x4E hang, 0x5C shows the credits: `unused2/shots/warp_*` |
 | reference scans | code immediates, lui/addiu pairs, data words, setup bytes, AI lists, BG and model texture references | `unused/strings_code.txt`, `unused2/dumps/textrefs_*.tsv`, `unused3/dumps/*.json` |
 
-#### Unused and hidden content
-
 Each item has its location, the evidence behind it, a confidence rating (high, medium or low) for the claim that it is
 unused or hidden, and whether retail play can reach it. The sources are four catalogues: `notes/unused_debug.md` (part 1),
 `notes/unused_text_stages.md` (part 2), `notes/unused_assets.md` (part 3) and `notes/music.md` *Music*. "Unreferenced" is
 always relative to a reference scan, and the limits of each scan are noted with it. The public decompilation was used
 only to find tables and names; anything that rests on it alone is marked "decomp only".
 
-#### Unused and hidden content: Cut, test and unfinished stages
+#### Cut, test and unfinished stages
 
 Stage-table entries with no menu entry (verified: stage table, file table, md5 grouping of stub files; the table and all
 these files are byte-identical in U, E and J):
@@ -1385,7 +1369,7 @@ these files are byte-identical in U, E and J):
   - 12 stub BG/tiles/pads files are referenced by no stage record.
   - All high.
 
-#### Unused and hidden content: Debug features left in the retail code
+#### Debug features left in the retail code
 
 | Item | Where | Evidence | Confidence | Reachable |
 |---|---|---|---|---|
@@ -1397,7 +1381,7 @@ these files are byte-identical in U, E and J):
 | anti-tamper checksum in the cheat-menu handler (corrupts boot code if modified) | 0x7F107970 | disassembly (not tested) | medium-high | yes, silently |
 | searched for and **not** found: a GoldenEye-style debug menu, level select, free camera, collision/portal overlay, profiler | full string dump and joypad-mask scan | – | high (strings), medium (computed button masks) | – |
 
-#### Unused and hidden content: Cheats
+#### Cheats
 
 - **Cheat table:** 0x80073A90, 42 × `{u16 nameText; u16 time; u8 soloIndex; u8 difficulty; u8 flags}`. All 42
   entries are named and unlockable. Unlock conditions for each are in `unused/cheats_table.md`: target times,
@@ -1410,7 +1394,7 @@ these files are byte-identical in U, E and J):
   FAILED - abort mission.", "Guard Greeting", "What's that gun?"). No code immediate or table references them. High;
   not reachable.
 
-#### Unused and hidden content: Characters and heads
+#### Characters and heads
 
 | Item | Evidence | Confidence | Reachable |
 |---|---|---|---|
@@ -1421,7 +1405,7 @@ these files are byte-identical in U, E and J):
 | `CheadthekingZ` (Elvis-style head), used only by a code head swap | decomp only | medium | code |
 | every developer ("Perfect Head" staff) head is used in the 75-entry MP head table; the Bond bodies (Connery, Dalton, Moore, Brosnan tuxedos) are MP bodies | code tables located by byte match | high | yes |
 
-#### Unused and hidden content: Weapons and items (weapon table 0x8006FF18)
+#### Weapons and items (weapon table 0x8006FF18)
 
 | Item | Evidence | Confidence | Reachable |
 |---|---|---|---|
@@ -1431,7 +1415,7 @@ these files are byte-identical in U, E and J):
 | weapons 0x59 and 0x5A with empty names (decompilation names CHOPPERGUN and WATCHLASER) | no reference | medium | no |
 | the classic guns CC13 … RC-P45 (GoldenEye gun models) appear in no setup, AI list or MP table; they are reachable only through the Classic Guns cheats | usage scan; the code path is decomp only | medium | yes (cheats) |
 
-#### Unused and hidden content: Setup data
+#### Setup data
 
 - **19 object types never used in any of the 121 setups**, though the setup loop still handles them: ALARM, HANGINGMONITORS,
   HAT, GRENADEPROB, OBJECTIVE_DESTROYOBJ, OBJECTIVE_THROWOBJ, OBJECTIVE_ENTERROOM, OBJECTIVE_THROWINROOM, GASBOTTLE,
@@ -1456,7 +1440,7 @@ these files are byte-identical in U, E and J):
   searched), and the Dam text is an earlier draft than GoldenEye's retail text ("arkhangelsk dam", "destroyed without
   prejudice", a different bungee paragraph). High.
 
-#### Unused and hidden content: Text and strings
+#### Text and strings
 
 Text files (all three ROMs dumped: `unused2/text/{U,E,J}/`; reference scan `unused2/scripts/textrefs.py` over code
 immediates, data u16/u32 and every byte offset of every setup. A string is "NONE" when no id reference was found: 303
@@ -1498,21 +1482,15 @@ Code and data segment strings (`unused/strings_code.txt`, 1,992 runs):
 
 ### 6.2 Cut or inaccessible levels
 
-Candidate levels are distinguished from alternate, debug, and intentionally hidden retail content above.
-
 ### 6.3 Debug features
 
-Shipped debug strings and executable features are listed only when supported by a code or data reference.
-
 ### 6.4 Prototype or revision-specific content
-
-Source-archive and prototype material is explicitly distinguished from shipped retail data.
 
 ## 7. nviewer implementation
 
 ### 7.1 Module mapping
 
-#### Levels: Proposed viewer level list
+#### Proposed viewer level list
 
 - **Groups:**
   - "Mission 1" … "Mission 9", then "Special Assignments": 21 levels, each with its own pads and setup even when the
@@ -1525,7 +1503,7 @@ Source-archive and prototype material is explicitly distinguished from shipped r
 - **Setup:** the solo setup for missions, the hub and special assignments; the multiplayer setup for arenas.
 - **Counts:** 41 table entries over 31 distinct BG files have real geometry. 38 of them are reachable from menus.
 
-#### Level geometry: Building viewer meshes
+#### Building viewer meshes
 
 - One `Mesh` per room (room-local positions, opaque and translucent blocks in the same mesh, batches carry `blend`),
   one `Instance` per room with `matrix = translate(room.pos)` and `info = {room, fileOffset}`. Mesh radius and
@@ -1600,7 +1578,7 @@ city backdrop boxes).
   triangles dropped, and losing cross-room copies moved behind.
 - 25 triangles remain: 6 opposite-facing, 11 same-room, 5 cross-room and 3 translucent.
 
-#### Objects and props: What's practical in the viewer
+#### What's practical in the viewer
 
 | Content | Practicality |
 |---|---|
@@ -1623,7 +1601,7 @@ bbox fit uses the model-state scale before extraScale and normalises by the maxi
 setups in RAM are live objects (parse the ROM files); links are relative indices; flag 0x4000 objects use the pad
 field as a chr number.
 
-#### Mapping onto the viewer: Reusable modules
+#### Reusable modules
 
 | Existing module | Reuse for PD | Changes |
 |---|---|---|
@@ -1634,7 +1612,7 @@ field as a chr number.
 | `src/rom/music/cseq.ts` `parseCompressedSequence` (per-track loops) | all 119 sequences | none; Bomberman's `parseCompressedMidi` loop rule is wrong for Perfect Dark (*Rendering offline (prototype verified against game audio)*) |
 | `util.ts` `pruneUnused`, `emptyBounds` | level assembly | none |
 
-#### Mapping onto the viewer: New modules (suggested)
+#### New modules (suggested)
 
 | File | Contents | Source prototype | Size |
 |---|---|---|---|
@@ -1647,7 +1625,7 @@ field as a chr number.
 | `src/rom/perfectdark/perfectdark.ts` | `Game`: level list (*Proposed viewer level list*), `loadLevel` (BG + setup + env), music list | – | ~250 lines |
 | `src/rom/perfectdark/music.ts` | sequence table, song names (*Song list*), `decodeMusic` | `music/render.ts` | ~120 lines |
 
-#### Mapping onto the viewer: Additions to `types.ts` (proposals)
+#### Additions to `types.ts` (proposals)
 
 - None required for a first version (Mesh/Instance/Sky/Fog/LevelLayer/Marker/CameraView cover it).
 - Optional: `Level.cameras?: CameraView[]` for CAMERAPOS cutscene cameras and MP spawn pads; a per-level
@@ -1655,7 +1633,7 @@ field as a chr number.
 - `Batch` needs no new fields: environment-mapped surfaces can be approximated by treating their colour entries as
   white, or supported with a `textureGen` normal channel later.
 
-#### Mapping onto the viewer: Environment and sky in the viewer
+#### Environment and sky in the viewer
 
 - `Level.clearColor` = environment sky colour (*Environment table (verified: disassembly 0x7F165D40/0x7F16574C/0x7F165A0C, ROM data, RAM live struct = record in every capture)*): fog record if the stage has one, else no-fog record, else the
   default record −1.
@@ -1673,7 +1651,7 @@ field as a chr number.
 - The player struct's camera at `[0x8009A244] + 0x1BB0` gives world-space eye positions when capturing new reference
   views.
 
-#### Mapping onto the viewer: Difficulty
+#### Difficulty
 
 | Part | Difficulty | Notes |
 |---|---|---|
@@ -1686,7 +1664,7 @@ field as a chr number.
 | music | low | existing libultra renderer + one volume option; verified against game audio |
 | animated textures, env-mapped chrome, portals, dynamic lights | not planned | cosmetic; see *Open questions* |
 
-#### Mapping onto the viewer: Corrections found during implementation
+#### Corrections found during implementation
 
 0. **Envelopes:** n_audio ramps voice volume linearly (`n_env.c` `_getRate`), starting a note's attack at volume 1;
    the viewer renders with `linearRamps` (verified: capture correlation improves on the pause menu, seq 3, and the
@@ -1711,17 +1689,13 @@ Found while implementing objects and characters (checked against the research RA
 
 ### 7.2 Supported features
 
-The Technical summary states the supported releases and principal decoded features.
-
 ### 7.3 Approximations and omissions
-
-Viewer approximations are distinguished from facts about the game formats.
 
 ## 8. Verification and remaining work
 
 ### 8.1 Verification evidence
 
-#### Objects and props: Model files `P*Z`, `C*Z`, `G*Z` (verified: loader and relocation disassembly; all 686 models parse with 0 unknown opcodes and 0 missing textures)
+#### Model files `P*Z`, `C*Z`, `G*Z` (verified: loader and relocation disassembly; all 686 models parse with 0 unknown opcodes and 0 missing textures)
 
 ```
 pointers = 0x05000000 + file offset (the display lists also use segment 5 = file start)
@@ -1758,7 +1732,7 @@ bodies are authored in a **"splits" bind pose** (arms and legs along ±X; `obj/r
 models look natural in it. Heads are separate models (`Chead*`) attached at the body's HEADSPOT joint; body scale
 `0.1 × body.scale`. Standing poses come from an animation frame (*Animations and standing characters (verified: lib `anim.c` disassembly, all 1,207 table records, joint matrices vs RAM)*).
 
-#### Verification evidence: Stages and text
+#### Stages and text
 
 | Check | Method | Result | Evidence |
 |---|---|---|---|
@@ -1766,6 +1740,8 @@ models look natural in it. Heads are separate models (`Chead*`) attached at the 
 | stage ids in RAM | RAM reads and warps to 9 stages | current stage 0x8005D9B4, pending 0x8005DD54 | `notes/warp.md` |
 | text container and ids | disassembly of `langGet`; all 476 files of U, E and J parse | – | `unused2/text/{U,E,J}/` |
 | Japanese glyphs | J disassembly + renders | stage names render correctly | `unused2/font/j_stage_names.png` |
+
+### 8.2 Known unknowns
 
 #### Open questions
 
@@ -1809,10 +1785,4 @@ Everything here is unverified.
 - Whether any PerfectHead code path is reachable.
 - The effects of the `-d`/`-s` boot arguments and of the Controller Pak debug actions.
 
-### 8.2 Known unknowns
-
-Unresolved semantics are labelled **Hypothesis** or **Open question** where they occur.
-
 ### 8.3 References
-
-External documentation, decompositions, and source archives are cited inline where used.

@@ -16,9 +16,9 @@ interpretations are labelled hypotheses.
 | Geometry | model shell + recursive native render bank, transposed F3DEX2 vertices and compact display-list tokens; object-shell and TRG placement |
 | Textures | 2,582 global records, mostly CI4; RGBA16, I, IA and auxiliary-plane formats; authored wrap and alpha/render class |
 | Collision | A geometry group is the strongest collision candidate; its gameplay query remains unverified. |
-| Music driver | Nintendo Sound Tools sample/effect engine at 22,047 Hz; adaptive level schedules select prerecorded ADPCM fragments rather than conventional MIDI-like sequence files |
+| Music driver | Nintendo Sound Tools adaptive sample/effect engine at 22,047 Hz; level schedules select prerecorded fragments. |
 | Audio microcode | ABI1-compatible Nintendo audio task; exact binary revision is not identified. |
-| Sample encoding | Nintendo Sound Tools sample/effect engine at 22,047 Hz; adaptive level schedules select prerecorded ADPCM fragments rather than conventional MIDI-like sequence files |
+| Sample encoding | ABI1 ADPCM, order 2 with four predictors; 996 waves. |
 | Levels | 34 campaign areas; 22 additional geometry-bearing choices (Bank Approach alternate, 17 training arenas, Dem1–4), with a second Dem1 setup; 2 incomplete stale TRGs excluded |
 | Memory requirement | **Unknown** |
 | Viewer support | medium-high: compression and base geometry are bounded; faithful placement overlays, camera/background behavior and adaptive music scheduling are the main work |
@@ -45,15 +45,11 @@ segmented, VROM, and file-relative addresses are named at each use.
 
 ### 2.1 Boot and executable layout
 
-No additional executable-layout information is required by the viewer.
-
 ### 2.2 Memory and address mapping
-
-Address conversions and load destinations are specified with the executable and file tables above.
 
 ### 2.3 ROM map and asset organization
 
-#### Boot, executable layout, filesystem and compression: ROM map and byte accounting
+#### ROM map and byte accounting
 
 `fs/extracted/rom_ranges.csv` expands every table, leaf, pad and overlay. Its
 adjacency check has zero gaps and zero overlaps across the entire ROM.
@@ -89,7 +85,7 @@ The resulting image's SHA-256 is
 `1d3ed3384f45ada2ebf6cb0666ddc7fec4c4ffdb6fdb993b8d566aa3cd4f3867`;
 control transfers to its main entry `0x800C16CC`.
 
-#### Boot, executable layout, filesystem and compression: Table grammar and master directory
+#### Table grammar and master directory
 
 The common table is a BE `u32 count` followed by `count+1` relative BE `u32`
 offsets. Offsets are nondecreasing; equal neighbors are authored empty slots.
@@ -115,7 +111,7 @@ Main-image paging is at `0x800BB2A4..0x800BB7DC`.
 miss; `0x800BB3A0` copies arbitrary ranges across page boundaries.
 **Verified—disassembly.**
 
-#### Boot, executable layout, filesystem and compression: Overlays
+#### Overlays
 
 Thirty overlay records at main-image offset `0xE0030` / RAM `0x800F6B10`
 name code and relocation payloads for JPEG, front-end data, bosses/actors,
@@ -131,11 +127,9 @@ the 60 code/relocation slices tile `0x1D52456..0x1DEC8A2`. This corrects a
 
 ### 2.5 Loading process
 
-Level and asset selection is described by the tables and loader call paths above.
-
 ### 2.6 Revision differences
 
-#### Boot, executable layout, filesystem and compression: ERZ version 2
+#### ERZ version 2
 
 All compressed data uses ERZ version 2. **Verified—ROM/disassembly:** all
 1,584 streams decode to the sizes in their headers using a state-machine
@@ -161,8 +155,6 @@ compress profitably.
 ## 3. Level data
 
 ### 3.1 Level catalog and identifiers
-
-The level catalog is not independently indexed in the available data.
 
 ### 3.2 Level container
 
@@ -211,7 +203,7 @@ and L5A7/L8A3/L8A5/L8A6 occupy slots 31–34.
 | 32 | `L8A5_T` | Spidey vs. Carnage! |
 | 33 | `L8A6_T` | Spidey vs. Monster-Ock! |
 
-#### Levels and loading: Extra, alternate and incomplete stages
+#### Extra, alternate and incomplete stages
 
 Group 1 has 59 nonempty TRGs. **Verified—ROM.** In addition to the campaign:
 
@@ -241,7 +233,7 @@ training arenas, and Dem1–4. Give Dem1's second TRG as a setup variant, making
 loader cannot obtain their model families. `levels/stages.csv` is the exact
 TRG/G/L/O association and per-stage census.
 
-#### Levels and loading: Stage composition
+#### Stage composition
 
 Most level families have three model bundles: `*_G` contains world geometry,
 `*_L` is an authored-empty shell, and `*_O` contains static/scripted props.
@@ -257,7 +249,7 @@ The unique main-image table at offset `0xD3A08` has 298 stride-8
 
 ### 3.3 Geometry
 
-#### Environment and camera: Mesh backdrops
+#### Mesh backdrops
 
 Skylines/backgrounds are ordinary model objects, not group-4 full-screen
 images. TRG opcode `0xAB` reads a model checksum and three angular velocities,
@@ -282,11 +274,9 @@ indoor/training stages use black/no sky and issue BackgroundOff.
 
 ### 3.4 Display lists and render state
 
-Display-list commands and game-supplied render state are described with geometry above.
-
 ### 3.5 Textures and materials
 
-#### Geometry, textures and collision: Geometry groups and materials
+#### Geometry groups and materials
 
 Descriptor word 0 is the global texture slot. Kind bit 0 enables texturing;
 `0x0400` is active-low lighting; `0x8000` is non-display-list data; `0x0800`
@@ -299,7 +289,7 @@ The native renderer uses F3DEX.NoN FIFO 2.08 (ID string at main-image
 `0xE4398`, RAM `0x800FAE78`); L3DEX FIFO 2.08 is also present. Ordinary model
 drawing begins at `0x800D1CE8`. **Verified—ROM/disassembly.**
 
-#### Geometry, textures and collision: Texture dictionary
+#### Texture dictionary
 
 Group 3 contains 2,594 slots, of which 2,582 are nonempty. **Verified—ROM.**
 Each record begins:
@@ -329,7 +319,7 @@ normal data in those bytes.
 
 ### 3.6 Collision
 
-#### Geometry, textures and collision: Collision candidate
+#### Collision candidate
 
 Kind-`0x0800` groups contain valid private display lists but the normal model
 renderer skips them. Decoding without advancing the visible group's cache
@@ -343,7 +333,7 @@ without claiming every triangle is physical collision. `bounds.bin` is only a
 
 ### 3.7 Environment, sky, fog, and lighting
 
-#### Environment and camera: Lighting and model render state
+#### Lighting and model render state
 
 The static setup display list at `0x800FF408` points to a Lights1 body at
 `0x800FF360`: ambient `(70,70,70)` and directional `(105,105,105)`, vector
@@ -359,7 +349,7 @@ mode `0x0C184B50`. Special kind `0x10000` selects `0x0F0A4000`, or
 `0x80105084..87`, and textured/untextured combiners
 `FC127E05 FFFFF2F8` / `FC527E1F FFFFF2F8`. **Verified—disassembly.**
 
-#### Environment and camera: Sky, fade and fog
+#### Sky, fade and fog
 
 TRG opcode `0xCA` (`0x800A7244`) packs sky RGB as R in the first operand's low
 byte and G/B in the second operand's high/low bytes. `0x800598C8` stores the
@@ -399,7 +389,7 @@ LIGHT/OFFLIGHT nodes. **Verified—ROM/tool** (`environment/scan_environment.py`
 `trg_environment.json`). Multiple restarts can carry different state; a loader
 must not collapse a stage to one unconditional environment tuple.
 
-#### Environment and camera: Spawn and camera
+#### Spawn and camera
 
 Restart records contain BE signed positions, three signed 16-bit angles where
 4096 is one turn, a NUL name and command list. Convert positions by `/2.25`
@@ -413,7 +403,7 @@ angle (`0x82`), XZ/Y distance (`0x87/0x8F`), XYZ offsets (`0x90..92`), mode
 (`0xBB`). Reproducing that state machine is unnecessary for an initial viewer;
 one static restart view is an honest starting camera.
 
-#### Environment and camera: L1A1 runtime reference
+#### L1A1 runtime reference
 
 A serialized clean New Game path captured the L1A1 opening, then paused and
 dumped 8 MiB RDRAM 0.052 seconds after the reference frame. Frame SHA-256 is
@@ -441,7 +431,7 @@ capture rather than relying on ad hoc debugger transcription.
 
 ### 4.1 Placement records
 
-#### Geometry, textures and collision: Model bundles and placement
+#### Model bundles and placement
 
 A group-0 file is a four-child relative-offset table containing object records,
 bounds, a big-endian PSX-v4-style model shell (`0x00020004`), and a BE group-2
@@ -485,8 +475,6 @@ viewer axes   = (x, -y, -z)
 
 ### 4.2 Object and model formats
 
-Object geometry uses the model and display-list formats described above unless stated otherwise.
-
 ### 4.3 Skeletons and animation
 
 #### Objects, placements and animation
@@ -519,13 +507,9 @@ animation cadence and per-clip loop/clamp behavior remain open.
 
 ### 4.4 Behaviors, triggers, and scripted objects
 
-Behavioral records are documented only where they affect level extraction or presentation.
-
 ## 5. Audio
 
 ### 5.1 Audio storage and banks
-
-Audio storage is described with the sequence and bank tables below.
 
 ### 5.2 Sequence format and driver
 
@@ -538,7 +522,7 @@ Nintendo Sound Tools/Software Creations effect engine on libultra's synth.
 fixed scheduler and adaptive selector use 79 of them. Effect 988 is the
 separate title/menu loop.
 
-#### Music player: Bank and driver
+#### Bank and driver
 
 | role | extracted file | bytes | SHA-256 |
 |---|---|---:|---|
@@ -574,7 +558,7 @@ Music stems have net pitch -11 semitones. Sound Tools' single-precision
 polynomial gives ratio `0.529734075...` and effective source rate
 `11679.047...` Hz, not exactly ideal `2^(-11/12)`. **Verified—disassembly/tool.**
 
-#### Music player: Production music list
+#### Production music list
 
 Expose 36 production entries: title/menu, 26 fixed arrangements, and nine
 adaptive profiles. Shared rows are genuinely shared compiled schedules, not
@@ -630,7 +614,7 @@ Title/menu effect 988 is a 15.264-second sample with decoded loop
 `0x80031708` were also **verified—runtime**: breakpoint entry saw effect 988,
 caller return `0x80031764`.
 
-#### Music player: Decode, scheduling and loops
+#### Decode, scheduling and loops
 
 Implementation order:
 
@@ -654,23 +638,17 @@ optional capture-fidelity question.
 
 ### 5.3 Instruments and sample encoding
 
-Instrument banks, envelopes, loops, and sample encoding are described above.
-
 ### 5.4 Music catalog and loop points
-
-The complete known song catalog and loop policy are included above.
 
 ## 6. Unused and hidden content
 
 ### 6.1 Unreferenced assets
 
-#### Unused and hidden content
-
 This section deliberately separates incomplete/unreferenced material from live,
 gated features. Evidence comes from `hidden/audit_hidden.py`, complete
 filename/TRG/model/texture reference censuses, and overlay disassembly.
 
-#### Unused and hidden content: Incomplete alternate L3A1 section
+#### Incomplete alternate L3A1 section
 
 Group-1 slot 59 is a complete 5,342-byte TRG with 110 nodes and requests
 `L3A1a_G`, `L3A1a_L`, `L3A1a_O`, `expgrnd` and `CHOPPER`. Retail L3A1 itself
@@ -685,7 +663,7 @@ Therefore the transition and authored trigger survived but the unique model
 family was stripped. **Inference:** removed/obsolete alternate section. It is
 not a playable hidden level and should not appear as a viewer level.
 
-#### Unused and hidden content: Declaratively unreferenced recording studio
+#### Declaratively unreferenced recording studio
 
 Group-0 slot 262 is the only substantive model bundle absent from the model
 filename registry. Its shell has 21 objects, render bank 252, 291 visible
@@ -704,7 +682,7 @@ has no TRG and is a model scene rather than a complete playable stage.
 Evidence images: `levels/renders/0262_studio.png` and
 `hidden/studio-textures.png`.
 
-#### Unused and hidden content: Dangling L8A2 background
+#### Dangling L8A2 background
 
 L8A2 creates backgrounds with three checksums. Two resolve in its O bank;
 `0x37FAF2CD` occurs once in that TRG and nowhere in any group-0 object table.
@@ -715,7 +693,7 @@ removed backdrop, whose image cannot be recovered from this ROM.
 The same TRG contains unique text `Cheat Code!: STRUDL`. It does not match any
 row in the 24-entry Special/Cheats table; its activation/meaning remains open.
 
-#### Unused and hidden content: Candidate unused music stems
+#### Candidate unused music stems
 
 Twenty-nine valid looped effects inside the homogeneous music range are absent
 from both production music selectors:
@@ -733,7 +711,7 @@ candidate-unused production stems, not globally unreachable: the developer All
 Sound Menu can audition arbitrary effects 0–993. Effect 363 is excluded because
 ordinary alias 154 uses it as a looping SFX.
 
-#### Unused and hidden content: Live cheats, debug and easter eggs
+#### Live cheats, debug and easter eggs
 
 These are shipped, referenced facilities and are not unused content. The
 24-row table and checker at `0x80042074` verify, among others:
@@ -761,7 +739,7 @@ disassembly.** It is an input easter egg, not dead strings. Rostered
 `sm_epanelinfo` also contains developer/gag captions; their precise menu route
 was not exhaustively proved.
 
-#### Unused and hidden content: Negative audit results
+#### Negative audit results
 
 - Demo1 and L3A1a are the only complete TRGs whose requested model families
   are absent; only L3A1a is omitted from the executable TRG registry.
@@ -778,15 +756,9 @@ was not exhaustively proved.
 
 ### 6.2 Cut or inaccessible levels
 
-Candidate levels are distinguished from alternate, debug, and intentionally hidden retail content above.
-
 ### 6.3 Debug features
 
-Shipped debug strings and executable features are listed only when supported by a code or data reference.
-
 ### 6.4 Prototype or revision-specific content
-
-Source-archive and prototype material is explicitly distinguished from shipped retail data.
 
 ## 7. nviewer implementation
 
@@ -799,7 +771,7 @@ Use the existing `Level`, `LevelLayer`, `Mesh`, `Batch`, `Instance`, `Marker`,
 `Texture`, `CameraView`, `MusicTrack` and `DecodedMusic` types. Add game id
 `spiderman` in the shared type/index only under main-session ownership.
 
-#### Mapping onto `src/rom/`: Implemented viewer coverage
+#### Implemented viewer coverage
 
 The implementation exposes 57 sidebar entries: the recommended 56 complete
 stage families plus the coherent slot-262 recording studio as an explicitly
@@ -858,17 +830,11 @@ profiles are honest initial behavior.
 
 ### 7.2 Supported features
 
-The Technical summary states the supported releases and principal decoded features.
-
 ### 7.3 Approximations and omissions
-
-Viewer approximations are distinguished from facts about the game formats.
 
 ## 8. Verification and remaining work
 
 ### 8.1 Verification evidence
-
-#### Verification evidence
 
 | claim | evidence / reproducer |
 |---|---|
@@ -890,6 +856,8 @@ All research scripts are standard-library Python or direct disassembly helpers,
 hash-pin their critical input where appropriate, use bounded table traversal,
 and write only beneath this research directory.
 
+### 8.2 Known unknowns
+
 #### Open questions
 
 1. Do kind-`0x0800` triangles feed the gameplay collision query, or are some a
@@ -906,10 +874,4 @@ and write only beneath this research directory.
 6. Which complete training/demo stages are ordinary-save unlock/parade content
    versus developer-only? Geometry/loading does not depend on that answer.
 
-### 8.2 Known unknowns
-
-Unresolved semantics are labelled **Hypothesis** or **Open question** where they occur.
-
 ### 8.3 References
-
-External documentation, decompositions, and source archives are cited inline where used.

@@ -42,7 +42,7 @@ segmented, VROM, and file-relative addresses are named at each use.
 
 ### 2.1 Boot and executable layout
 
-#### Boot and code: Shared
+#### Shared
 
 - IPL3 copies ROM 0x1000.. to the entry point 0x80071000, so for the main image **RAM = ROM + 0x80070000**.
 - The entry stub sets `sp`, zeroes BSS with a word loop, then `jal main`:
@@ -53,7 +53,7 @@ segmented, VROM, and file-relative addresses are named at each use.
 | BSS cleared | 0x80147040..0x803D8880 | 0x80127E30..0x803B17B0 |
 | main | 0x800779CC | 0x8009ED9C |
 
-#### Boot and code: BTX1
+#### BTX1
 
 **Main code is not compressed.** The linked image is ROM 0x1000..0xD7040, which maps to RAM 0x80071000..0x80147040. The boundaries below come from disassembly, not from a symbol table.
 
@@ -82,11 +82,9 @@ libultra and I/O functions:
 
 ### 2.2 Memory and address mapping
 
-Address conversions and load destinations are specified with the executable and file tables above.
-
 ### 2.3 ROM map and asset organization
 
-#### Filesystem: BTX1
+#### BTX1
 
 **All reads** go through `romread` 0x80077930 (see 2.3).
 
@@ -171,7 +169,7 @@ Verified by static references, plus a dynamic check: 2500 `romread` calls logged
 
 ### 2.4 Compression formats
 
-#### Mapping to the viewer: Codec (shared)
+#### Codec (shared)
 
 - **New module `src/rom/lzari.ts`:** one function `lzariDecode(src: Uint8Array, offset: number): Uint8Array`, used by both games.
   - Port it directly from `btx/fs2/lzari.py`, about 120 lines of TypeScript; the algorithm is specified in section 3.1.2.
@@ -184,7 +182,7 @@ Verified by static references, plus a dynamic check: 2500 `romread` calls logged
   - A whole GA level (common + two world files) loads in under 1 s, including display-list interpretation.
   - Decode in the worker; this cost is acceptable.
 
-#### Verification evidence: Filesystem and codec
+#### Filesystem and codec
 
 | Check | Method | Result |
 |---|---|---|
@@ -202,17 +200,13 @@ Scripts and logs:
 
 ### 2.5 Loading process
 
-Level and asset selection is described by the tables and loader call paths above.
-
 ### 2.6 Revision differences
-
-Revision-specific addresses and data differences are stated in the relevant tables.
 
 ## 3. Level data
 
 ### 3.1 Level catalog and identifiers
 
-#### Levels: BTX1
+#### BTX1
 
 ##### Two level numberings (verified)
 BTX1 numbers its levels in two ways, and they are easy to confuse. (fs1's `levels.csv` names are wrong for this reason: it took names from the menu-order table.)
@@ -366,7 +360,7 @@ Verified in the emulator unless marked otherwise. Screenshots are in `btx/ref1/s
 
 ### 3.2 Level container
 
-#### Level format: Level data format
+#### Level data format
 
 ##### Shared engine structure (both games)
 Both games use the same 3DO engine design.
@@ -582,7 +576,7 @@ BTX1 stores **no collision mesh, heightfield or collision section**. At load, th
 
 ### 3.3 Geometry
 
-#### Verification evidence: Level geometry decoded from level data
+#### Level geometry decoded from level data
 
 **GA** (prototype `lvl2/run.ts`, renders in `btx/lvl2/renders/`)
 
@@ -632,7 +626,7 @@ Level renders use the exact PROJECTION matrices from RAM dumps: `ref1/queens1b.b
 
 ### 3.4 Display lists and render state
 
-#### Level format: Runtime render state (both games; verified from RAM dumps of the running games)
+#### Runtime render state (both games; verified from RAM dumps of the running games)
 
 This section covers state the game code sets, not the level files. It was captured by breaking on osSpTaskStartGo, dumping RDRAM, and walking the frame display list with the game's own segment table.
 
@@ -674,7 +668,7 @@ What this means for level data (derived from the rows above):
 
 ### 3.5 Textures and materials
 
-#### Mapping to the viewer: Levels, textures, placement, sky, fog
+#### Levels, textures, placement, sky, fog
 
 Requirements from the verified runtime state in 5.0:
 - **No X mirror and no 1/16 vertex scale.**
@@ -778,25 +772,17 @@ Requirements from the verified runtime state in 5.0:
 
 ### 3.6 Collision
 
-Collision storage and interpretation are described with the corresponding level records above.
-
 ### 3.7 Environment, sky, fog, and lighting
 
-Environment records and runtime render state are described with the level data above.
-
 ### 3.8 Cameras and paths
-
-Camera defaults and path data are described with the level data where known.
 
 ## 4. Objects
 
 ### 4.1 Placement records
 
-Placement records are structurally coupled to the level format and are described in Level data.
-
 ### 4.2 Object and model formats
 
-#### Mapping to the viewer: Game detection and the model (both games)
+#### Game detection and the model (both games)
 
 - **`src/rom/index.ts`:** add `case 'NBXE'` and `case 'NBQE'` next to NRUE/NSFE. `normalizeByteOrder` already handles v64/n64.
 - **`src/rom/types.ts`:**
@@ -807,21 +793,15 @@ Placement records are structurally coupled to the level format and are described
 
 ### 4.3 Skeletons and animation
 
-Static-pose or animation support and remaining omissions are stated in the object description.
-
 ### 4.4 Behaviors, triggers, and scripted objects
-
-Behavioral records are documented only where they affect level extraction or presentation.
 
 ## 5. Audio
 
 ### 5.1 Audio storage and banks
 
-Audio storage is described with the sequence and bank tables below.
-
 ### 5.2 Sequence format and driver
 
-#### Music: BTX1: libultra alSeqPlayer + Standard MIDI files
+#### BTX1: libultra alSeqPlayer + Standard MIDI files
 
 Everything here is stock libultra 2.0 behaviour. Section 6.0 describes VADPCM.
 
@@ -954,8 +934,6 @@ There are **no in-game song names**: no jukebox, and "Music Volume" is the only 
 - **Output:** `mus1/wav/song00.wav`..`song18.wav`, 22047 Hz stereo, with a `smpl` loop chunk. Each file is pass 0 plus the opening of pass 1, until pass 0's release tails end; `loopStart = length - passLength` and `loopEnd = length`.
 - **DecodedMusic:** `{sampleRate: 22047, loopStart, loopEnd}` from the table.
 
-#### Mapping to the viewer: Music
-
 **GA** (spec in 6.1; working prototype `mus2/render.ts` + `mus2/libmus.ts`):
 - **Suggested modules:**
   - `src/rom/music/vadpcm.ts`: VADPCM frame decoder (6.0), shared with BTX1.
@@ -983,7 +961,7 @@ There are **no in-game song names**: no jukebox, and "Music Volume" is the only 
 - **Cost:** about 0.8 s per song.
 - **Risks:** a 16-sample-per-pass loop drift, and a missing ECHO reverb. Both are inaudible here, since music has no fx send.
 
-#### Verification evidence: Music, BTX1
+#### Music, BTX1
 
 - **Capture method:** the same audio-dump plugin as for GA (a copy in `mus1/tools/`). The log shows a DAC rate of 2207 (22047 Hz).
 - **Breakpoint log:** breakpoints on 0x80079C20 (play) and 0x8007D2A0 (level music) were logged to `mus1/cap/songlog.txt`.
@@ -1011,7 +989,7 @@ There are **no in-game song names**: no jukebox, and "Music Volume" is the only 
 
 ### 5.3 Instruments and sample encoding
 
-#### Music: Shared: VADPCM sample decoding
+#### Shared: VADPCM sample decoding
 
 Both games play N64 VADPCM samples through libultra's synth and the RSP "audio" microcode. In GA every sample is VADPCM (6.1). BTX1 uses libultra ALBank files (6.2), whose waves are VADPCM or RAW16.
 
@@ -1032,17 +1010,13 @@ Both games play N64 VADPCM samples through libultra's synth and the RSP "audio" 
 
 ### 5.4 Music catalog and loop points
 
-The complete known song catalog and loop policy are included above.
-
 ## 6. Unused and hidden content
 
 ### 6.1 Unreferenced assets
 
-#### Unused or hidden content
-
 Everything found in both ROMs: levels, level variants, pool data, images, music, cheats and leftovers. The evidence for each item is given with it, and remaining uncertainties are marked **Hypothesis**.
 
-#### Unused or hidden content: BTX1
+#### BTX1
 
 Level numbers here are **internal ids** (4.2.1).
 
@@ -1113,25 +1087,17 @@ Level numbers here are **internal ids** (4.2.1).
 
 ### 6.2 Cut or inaccessible levels
 
-Candidate levels are distinguished from alternate, debug, and intentionally hidden retail content above.
-
 ### 6.3 Debug features
 
-Shipped debug strings and executable features are listed only when supported by a code or data reference.
-
 ### 6.4 Prototype or revision-specific content
-
-Source-archive and prototype material is explicitly distinguished from shipped retail data.
 
 ## 7. nviewer implementation
 
 ### 7.1 Module mapping
 
-#### Mapping to the viewer: File access
+#### File access
 
-- **Neither game needs a runtime file table.** Transcribe the ranges in sections 3 and 4 as constants, as `rush1.ts` does for its tables. Alternatively, read the BTX1 tables from the uncompressed main image at `ROM = RAM - 0x80070000`.
-  - BTX1 level records at 0x80125A68 are **filled at runtime** by 0x800865E0, so they are not present in ROM. Transcribe the table in 4.2.
-  - GA's level files come from a code switch, not data. Transcribe the table in 4.1.
+- **BattleTanx has no runtime file table.** Read the static tables from the uncompressed main image with `ROM = RAM - 0x80070000`. The level records at `0x80125A68` are filled at run time by `0x800865E0`, so transcribe the recovered table.
 - **Pool chunks** hold chunk-relative addresses: G_VTX in GEO chunks, G_SETTIMG in TEX chunks.
   - The viewer doesn't need to patch them.
   - Give `runDisplayList` a `resolve` that adds the current chunk's base in the buffer: `addr => base + addr` when `addr < chunkSize`.
@@ -1139,17 +1105,13 @@ Source-archive and prototype material is explicitly distinguished from shipped r
 
 ### 7.2 Supported features
 
-The Technical summary states the supported releases and principal decoded features.
-
 ### 7.3 Approximations and omissions
-
-Viewer approximations are distinguished from facts about the game formats.
 
 ## 8. Verification and remaining work
 
 ### 8.1 Verification evidence
 
-#### Verification evidence: Runtime captures (reference screenshots and RAM dumps)
+#### Runtime captures (reference screenshots and RAM dumps)
 
 **BTX1**, in `btx/ref1/`:
 - **Screenshots** (`shots/`):
@@ -1170,58 +1132,6 @@ Viewer approximations are distinguished from facts about the game formats.
   - `catchgfx.sh` (break on a graphics task and dump)
   - `goto_queens.sh` (power-on to Queens)
 
-**GA**, in `btx/ref2/`:
-- **Screenshots** (`shots/`):
-  - `00_title.png`, `02_game_setup.png`, `03_mode_*.png` (all 8 modes), `04_options.png`, `06_usa_map_levelselect.png`, `08_deathmatch_usa_map.png`, `08_deathmatch_europe_map.png`
-  - `10_whitehouse_start.png`, `11_*`, `12_whitehouse_fog_*` (White House, fog)
-  - `20_dm_champs_elysee_*`, `21_*` (Champs Elysee, night)
-  - `31_sf_airport_dump_frame.png`, `40_sf_breakout_dump_frame.png`, `50_dm_sf_panhandle_start.png`, `51_dm_sf_panhandle_dump_frame.png`
-- **RDRAM dumps** (listings `*_dl.txt`, summaries `*_summary.txt`, wireframes `*_wire.png`):
-  - `air1.bin`: SF Airport, DL 0x80157F80
-  - `air2.bin`: SF Airport, a later frame; its task type is unverified
-  - `brk1.bin` / `brk2.bin`: SF Breakout, DL 0x80157F80 / 0x80157E80; a DEFEAT box overlays the level
-  - `pan1.bin` / `pan2.bin`: SF Panhandle, DL 0x80157F80 / 0x80157E80
-- **Tools:**
-  - `dldump.py` (F3DEX2 walker; `--render` draws a wireframe)
-  - `goto.sh` (menu driving)
-
-#### Open questions and unknowns
-
-Every item in this section is a **hypothesis** or an open question, not a verified fact.
-
-#### Open questions and unknowns: BTX1
-
-- **Attract demo files:** setup mode 8 is the attract demo (verified runtime mode values: 5 Campaign, 0 Battlelord, 7 code-loaded bonus, 8 attract). The 11 raw world/scenario files may be recorded demo or cutscene data, with body size `([+4]*12 + 48) * [+0] + [+0xC]*12`. **Hypothesis:** Test2..Test4 are story-cutscene sets, since story/front-end code sets world indices 7 and 9 via 0x800EC380 at 0x800BFF28 and 0x800C4D98, each followed by a read of the RUN STORY cheat flag 0x80135770. Static evidence only.
-- **Level B** may be an AI navigation triangle mesh.
-  - Layout: +8 u16 nNodes, +10 u16 nRecords; nodes of 8 B {f32 x, z} (node 0 a dummy); 12-byte records = 3 x {u16 node index, u16 value}; a byte table of nRecords + 7; a 256-byte table with values 0..3, identical in both levels checked.
-  - Support: drawn as triangles, the records tile streets and open areas and avoid buildings (`lvl1/renders/levelb_1.png`).
-  - Against a simpler reading: the u16 values are not node distances.
-- **img40 trailing u8 x 8:** may be the pixel positions of the four Battlelord bases (kinds 11-14). The order and orientation match in 7 levels, but the pixel scale is inconsistent.
-- **hdr0 spawn groups:** probably per-team spawn sets, with the high nibble of the kind-25 param = team.
-- **Palette animation rate:** the frame counter 0x801B4AA0 is assumed to advance once per rendered frame.
-- **Draw passes 1, 3, 4, 5:** probably dynamic objects and effects; not identified.
-- **Kinds 11-17, 20, 26, 30, 31:** treated as static by the dispatcher but never seen in view. Their behaviour (e.g. bases for 11-14) is unknown. Verified: their collision registration (5.1.3): 11-14, 20 and 31 are destructible entities, 26 and 30 static entries, 15 a non-blocking one.
-- **Queens white kerb edge:** unexplained difference in the render comparison (8.5).
-- **0x801191E0:** probably osPiRawReadIo.
-- **Campaign order:** internal ids 1..17 (4.2.4). Only level 1 was verified; the mission titles come from briefing texts.
-- **Other mode lists:** Deathmatch, Family Mode, the multi-player "Annihilation" mode, and 2+ player territory lists were not checked. Presumably they draw from the same 28-entry menu-order table.
-- **Far-plane animation (BTX1).** Verified: at level start the current far value (0x80125858) and the fog colour animate towards the table values, and at steady state (Times Square) both equal the table. Not identified: the animating code, and whether far also adapts to load (the Arena far dropped from 4949 to 4800 between two dumps).
-- **Scaled matrices:** some per-frame BTX1 modelview matrices (0x802Fxxxx) carry a uniform scale of about 24-65 and sit behind the camera. Perhaps particles, sprites or a radar.
-- **Cinematic (id 0):** the attract mode loads it (verified by the emulator read log, 8.1). No RAM dump confirms that it is the city fly-by shown after the title.
-- **Music: song 15.** The "THE FALL" crawl of a new campaign did not start song 15 (song 6 continued). Song 15 may belong to "AFTERMATH" (the ending). The purpose of song 13 is unknown.
-- **Music: unexercised play calls.** The screens 0x800AC2E8, 0x800C54F0 and 0x800CA980 have no direct callers, and the variants of the story-screen play calls were not exercised.
-- **Music: volume option.** Range assumed 0..7; the code writing option 0x80125794 was not found.
-- **Music: loop drift.** The -16 samples per pass on the menu is probably the unmodelled phase of the 16000 µs poll event.
-- **Music: not modelled.** Voice stealing by SFX, and the ECHO fx bus. The music has no fx send, so neither should be audible.
-
-#### Open questions and unknowns: Shared
-
-- **Envmixer ramp shape.** The GA renderer uses linear per-8-sample ramps (libultra's own computation). The BTX1 renderer uses exponential ramps (as mupen64plus HLE interprets them). Both match captures within measurement, because the ramps last only ~16 ms. Which one the real RSP microcode uses was not checked against LLE.
-
 ### 8.2 Known unknowns
 
-Unresolved semantics are labelled **Hypothesis** or **Open question** where they occur.
-
 ### 8.3 References
-
-External documentation, decompositions, and source archives are cited inline where used.

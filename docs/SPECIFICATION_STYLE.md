@@ -87,6 +87,12 @@ Additional subsections are allowed below the appropriate parent. Put very long
 level catalogs, song catalogs, opcode lists, and revision matrices in appendices
 when that keeps the main format description easier to follow.
 
+Do not repeat a parent heading as its only child. For example, put the content
+directly under `### 5.2 Sequence format and driver` instead of adding
+`#### Music` or `#### Sequence format`. Do not carry a former section name into
+every child (`#### Music: Driver`, `#### Music: Song list`); use the distinguishing
+terms (`#### Driver`, `#### Song list`).
+
 ## Overview tables
 
 `1.1 Technical summary` begins with a two-column table. Use these properties in
@@ -109,6 +115,10 @@ this order, omitting only genuinely inapplicable rows:
 
 Do not include byte order. N64 CPU data is big-endian; local exceptions belong
 beside the affected format.
+
+Each summary row answers only its named property. In particular, distinguish the
+software sequence or sample driver, the RSP audio microcode, and the stored
+sample encoding. Do not copy the same combined audio description into two rows.
 
 `1.2 ROM identification` begins with one row per known image:
 

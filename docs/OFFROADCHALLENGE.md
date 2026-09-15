@@ -16,9 +16,9 @@ interpretations are labelled hypotheses.
 | Geometry | Custom float-vertex models with 24-byte polygon records, converted at run time to F3DEX.NoN 1.21 display lists. |
 | Textures | Packed-CI4 atlases with 16-entry RGBA16 TLUT windows. |
 | Collision | Two placement categories reuse visible model geometry for collision; exact physics semantics remain partly unresolved. |
-| Music driver | Williams WESS: `SN64` v2 bank, `SSEQ` v2 with 12 music + 153 SFX sequences, 196 VADPCM waves at 22,050 Hz; six named radio songs and six other music sequences [evidence: ROM bytes, disassembly, deterministic decoding] |
+| Music driver | Williams WESS using `SSEQ` v2 sequences; 12 music and 153 sound-effect sequences. |
 | Audio microcode | Standard `aspMain` ABI; exact SDK revision is not identified. |
-| Sample encoding | Williams WESS: `SN64` v2 bank, `SSEQ` v2 with 12 music + 153 SFX sequences, 196 VADPCM waves at 22,050 Hz; six named radio songs and six other music sequences [evidence: ROM bytes, disassembly, deterministic decoding] |
+| Sample encoding | Nintendo 4-bit VADPCM; 196 waves at 22,050 Hz in the `SN64` v2 bank. |
 | Levels | nine complete tracks: six ordinarily visible plus Flagstaff, El Cajon and Guadalupe as retail unlockables; each has one main file, while the three hidden tracks share an auxiliary file with their corresponding visible track [evidence: ROM bytes, disassembly, captured frames] |
 | Memory requirement | **Unknown** |
 | Viewer support | USA and European releases; all nine tracks, environments, object layers, collision diagnostics, and 12 music sequences. |
@@ -62,11 +62,9 @@ The graphics microcode identifies itself as `RSP Gfx ucode F3DEX.NoN     1.21 Yo
 
 ### 2.2 Memory and address mapping
 
-Address conversions and load destinations are specified with the executable and file tables above.
-
 ### 2.3 ROM map and asset organization
 
-#### Filesystem and loading: Physical ROM map
+#### Physical ROM map
 
 | ROM range | role | bytes |
 |---|---|---:|
@@ -83,11 +81,9 @@ The main/file boundary is verified by both direct mapping and table continuity. 
 
 ### 2.4 Compression formats
 
-Compression framing and decoding rules are specified with each stored resource above.
-
 ### 2.5 Loading process
 
-#### Filesystem and loading: Asset table
+#### Asset table
 
 Startup passes RAM `0x8006D710` (US ROM `0x6E310`) and count 41 to the table setter at `0x8004DFD0`. Records are big-endian: [evidence: ROM bytes, disassembly]
 
@@ -102,7 +98,7 @@ struct AssetFile {
 
 All 41 flags are zero. Sorted by `romStart`, their ranges partition `0x88BC0–0xC75030` exactly, without overlaps or gaps. Table order is logical ID order rather than physical order; alternatives reuse common destination arenas. The authoritative inventory is `fs/file_table.tsv`. [evidence: ROM bytes, deterministic decoding]
 
-#### Filesystem and loading: Raw loader
+#### Raw loader
 
 `loadAssetFile` at `0x8004DFE8` indexes `id * 16`, chooses a nonzero caller destination or the record's `defaultDest`, calculates `romEnd-romStart`, and calls `0x8004EBF0` when `flags & 1` is clear. Every retail record follows that raw path. [evidence: disassembly]
 
@@ -139,8 +135,6 @@ The PAL build uses 50 rather than 60 as its audio frame/task cadence and buffer-
 
 ### 3.1 Level catalog and identifiers
 
-The level catalog is not independently indexed in the available data.
-
 ### 3.2 Level container
 
 #### Tracks and track loading
@@ -167,7 +161,7 @@ The retail instructions unlock/directly access each extra track by a controller 
 
 Track files do not contain ready-made RSP display lists. They contain absolute RAM pointers to custom mesh, sector, placement, palette and texture structures; the runtime converts them to temporary `Vtx` arrays and F3DEX 1.21 commands. [evidence: ROM bytes, disassembly] Resolve every pointer relative to its file table record's default destination.
 
-#### Level format: Track root and sectors
+#### Track root and sectors
 
 The per-track root has these established fields: [evidence: ROM bytes, disassembly, deterministic decoding]
 
@@ -199,7 +193,7 @@ The ordinal equals the array index. Flags `1`, `8` and `0x80000000` each occur o
 
 Each sector payload begins with a `0x44`-byte header. Five `u32` counts at `+0x28…+0x38` partition the placement array; `+0x3C` is skipped/reserved, `+0x40` is total count, and `+0x44` begins `count` records of `0x24` bytes. Repeated payload boundaries equal `0x44 + count*0x24`, and collision routines select category slices by summing the five counts. [evidence: ROM bytes, disassembly, deterministic decoding]
 
-#### Level format: Whole-ROM structural counts
+#### Whole-ROM structural counts
 
 The prototype `levels/analyze_orc.py` validates pointer bounds, vertices and face indices on all nine tracks. Counts below are sector-placement references, not unique models. [evidence: deterministic decoding]
 
@@ -215,7 +209,7 @@ The prototype `levels/analyze_orc.py` validates pointer bounds, vertices and fac
 | El Cajon | 63 | 3,814 | 3,796 | 407 | 49,084 | 31,785 | 36 | 837 |
 | Guadalupe | 81 | 4,370 | 4,318 | 508 | 58,694 | 35,302 | 36 | 733 |
 
-#### Music and music-player design: SSEQ format
+#### SSEQ format
 
 The SSEQ header declares version 2, 165 uncompressed sequences and a `0xA50`-byte table. Each 16-byte record is `{u16 trackCount,u16 compression,u32 payloadSize,u32 payloadRelativeOffset,u32 loadedPointer}`; payload offsets are relative to `0xC84DB0`, and on-ROM loaded pointers are zero. [evidence: ROM bytes, deterministic decoding]
 
@@ -223,7 +217,7 @@ Each payload contains one or more track headers, label offsets and event bytes. 
 
 Sequences 0–11 are sound class 1 music; 12–164 are class 0 SFX. Thus the archive contains 12 music sequences and 153 SFX sequences. [evidence: ROM bytes, deterministic decoding]
 
-#### Mapping onto `src/rom/`: Level assembly and layers
+#### Level assembly and layers
 
 Expose all nine tracks in internal order with `kind: 'race'`; identify Flagstaff, El Cajon and Guadalupe as unlockable in their display names or group. For one selected track: load its optional file when present, open its main file, resolve the root, walk every sector/category and root auxiliary record, intern each distinct model/texture, and emit one transformed instance per placement. Reflect the source world on X, consume the full 32-bit binary angle, and preserve the retail triangle order above. Preserve source file/record/polygon offsets in `DebugInfo`. [evidence: viewer design, deterministic decoding]
 
@@ -240,7 +234,7 @@ Do not move a visibly rendered record exclusively into collision merely because 
 
 The `PanoramaSky` branch of `Level.skies` represents the verified camera-dependent compositor while preserving the existing selector shared with mesh skies. No hardware `Fog` should be synthesized from screenshots alone. [evidence: nviewer source, viewer design]
 
-#### Unused and hidden content: Internal level data
+#### Internal level data
 
 The track format has no general model/texture directory from which a complete “defined versus referenced” orphan census can be made. Sector and root auxiliary placement pointers are the authoritative graph. All nine roots and every bounded placement/model reference parse successfully, but that establishes coverage of referenced material—not the absence of an accidental unreferenced structure elsewhere in a loaded file. A loose aligned model-signature scan produced many false positives inside known headers and is not evidence. [evidence: ROM bytes, deterministic decoding]
 
@@ -250,7 +244,7 @@ No tenth track name, tenth track-table slot, extra top-level course file or obvi
 
 ### 3.3 Geometry
 
-#### Level format: Meshes and polygons
+#### Meshes and polygons
 
 A model record exposes: [evidence: ROM bytes, disassembly]
 
@@ -277,11 +271,7 @@ The runtime transforms float vertices to temporary N64 vertices and emits `gSPVe
 
 ### 3.4 Display lists and render state
 
-Display-list commands and game-supplied render state are described with geometry above.
-
 ### 3.5 Textures and materials
-
-#### Level format: Textures and materials
 
 For all nine tracks, root `+0x04` resolves a sole resource descriptor: [evidence: ROM bytes, disassembly, deterministic decoding]
 
@@ -296,15 +286,13 @@ The terrain builder describes the source as a 128-wide CI8 image for loading byt
 
 ### 3.6 Collision
 
-#### Level format: Collision
-
 Collision-active records are categories within each sector's ordinary placement array, not a separate triangle file. Routine `0x8000B570` sums counts 0–2 and processes exactly category 3; `0x8000AB34` sums counts 0–3 and processes exactly category 4. Both use placement positions, model pointers and bounds. [evidence: disassembly] Whether their polygons are exact driveable surfaces or object-level collision proxies remains open. [open question]
 
 [viewer design] The loader should always provide a hidden-by-default `collision` layer. If runtime collision reuses visible render meshes, make separate diagnostic instances for the collision layer rather than moving visible objects out of their main/object layers.
 
 ### 3.7 Environment, sky, fog, and lighting
 
-#### Environment, camera and graphics state: Track environments
+#### Track environments
 
 Each of the nine IDs loads a separate large main asset; the hidden tracks are not route flags over ordinary maps. [evidence: ROM bytes, disassembly] Retained frames establish the following ordinary-track presentation:
 
@@ -314,7 +302,7 @@ Each of the nine IDs loads a separate large main asset; the hidden tracks are no
 
 The US manual further describes Mojave construction zones/overpass traffic, El Paso ghost-town/graveyard/falling-aircraft events, Vegas's silver mine and city finish, Pikes Peak's snow and steep ascent/descent, Ol' South's ditches/dense trees, and Baja's dunes/tractors/shallow coastal water. **[game manual]** The hidden tracks' specialized object/art semantics remain unverified and must not be inferred merely from their paired auxiliary files. [open question]
 
-#### Environment, camera and graphics state: Fog, lighting and colors
+#### Fog, lighting and colors
 
 Three fixed full-/split-screen display-list initializers at ROM `0x83470`, `0x83540` and `0x83610` clear geometry-mode mask `0x001F3204` (including `G_FOG` and `G_LIGHTING`), then enable shade with `0x00000004`. They set fog color to white but do not set a fog multiplier/offset. An aligned whole-ROM command scan and executable construction audit found no plausible fog-factor command. [evidence: ROM bytes, disassembly, deterministic decoding]
 
@@ -322,7 +310,7 @@ The leading implementation model is therefore unlit F3DEX shading from vertex co
 
 ### 3.8 Cameras and paths
 
-#### Environment, camera and graphics state: Skies
+#### Skies
 
 The Features menu offers `RANDOM`, `BLUE`, `STORMY` and `DUSK`; default is Random. [evidence: ROM bytes] Independent El Paso starts under Random produced different blue and storm-cloud art, proving that Random resolves per race. [evidence: captured frames]
 
@@ -330,7 +318,7 @@ Routine `0x800175C0` selects one of twelve raw sky files: IDs `22,13,32,6,30,2,2
 
 The viewer implements this as a screen-space panorama rather than a perspective sky mesh. It stitches the three upper slabs into a repeating 480×154 turn, repeats the 160×105 lower slab, and reproduces the eight quantized panels, tint, yaw scroll, pitch displacement and conditional black top fill. It exposes the twelve deterministic pictures as `Blue 1…3`, `Stormy 1…2`, `Dusk 1…4`, and the three Mode-5 variants. Random remains a game selection policy rather than a thirteenth picture. [evidence: nviewer source, deterministic decoding]
 
-#### Environment, camera and graphics state: Viewports and projection
+#### Viewports and projection
 
 Viewport records at ROM `0x83440` encode one 320×240 full-screen viewport and two 320×120 split-screen viewports. [evidence: ROM bytes]
 
@@ -342,7 +330,7 @@ Gameplay frames show a perspective third-person chase camera above and behind th
 
 ### 4.1 Placement records
 
-#### Level format: Placements and auxiliary objects
+#### Placements and auxiliary objects
 
 The shared 36-byte placement schema is: [evidence: ROM bytes, disassembly]
 
@@ -364,25 +352,17 @@ The angle feeds a sin/cos transform. Routine `0x8004239C` consumes the full unsi
 
 ### 4.2 Object and model formats
 
-Object geometry uses the model and display-list formats described above unless stated otherwise.
-
 ### 4.3 Skeletons and animation
 
-Static-pose or animation support and remaining omissions are stated in the object description.
-
 ### 4.4 Behaviors, triggers, and scripted objects
-
-Behavioral records are documented only where they affect level extraction or presentation.
 
 ## 5. Audio
 
 ### 5.1 Audio storage and banks
 
-Audio storage is described with the sequence and bank tables below.
-
 ### 5.2 Sequence format and driver
 
-#### Music and music-player design: Driver, rate and archive
+#### Driver, rate and archive
 
 The game uses Williams Entertainment Sound System (WESS): an `SN64` v2 module/bank and `SSEQ` v2 sequences driving Nintendo libaudio and the standard `aspMain` ABI. The exact SDK revision of `aspMain` is not identified. Uncommon diagnostics and imports correlate with the unstripped WESS object from the published *Mortal Kombat Trilogy* source and reconstructed WESS sources, but all addresses and format claims below are independently established in the Off Road Challenge ROM. **[ROM bytes/disassembly/source archive]**
 
@@ -398,7 +378,7 @@ Initialization at `0x8004FFA4` requests 22,050-Hz output and a 4,096-byte maximu
 
 Runtime `0x80050038–0x80050044` explicitly stores `0xC871C0` in `WessConfig` and WESS passes it to `N64_wdd_location`. A diagnostic decode succeeds at that base and encounters invalid predictors at the earlier SSEQ endpoint, independently checking the alignment. [evidence: disassembly, deterministic decoding]
 
-#### Music and music-player design: SN64/WMD bank
+#### SN64/WMD bank
 
 The 32-byte module header says version 2 and `data_size=0xF2D8`. Its 24-byte patch-group header at `0xC75050` has load flags `0x1F`, 196 patches (4 bytes), 196 patch maps (20 bytes), 196 wave records (24 bytes), no drum maps and `extra_size=0xCE18`. [evidence: ROM bytes, deterministic decoding]
 
@@ -415,7 +395,7 @@ A patch map holds priority, volume, pan, reverb, root/fine tuning, note and pitc
 
 Pitch ratio is `2^((wavePitch + pitchControl + (key-rootKey)*100 - fineAdj)/1200)`. A diagnostic extraction of patch 31 decodes 103,648 PCM frames at effective 11,025 Hz, lasting 9.401 s against sequence 0's 9.404-s NoteOff. This verifies the WDD base, predictor-book index, frame format, tuning and event timing, but it is not a mixed-song/audio-capture comparison. [evidence: deterministic decoding]
 
-#### Music and music-player design: Complete music list, routing and loops
+#### Complete music list, routing and loops
 
 Game sound IDs are not SSEQ IDs. The common wrapper divides a sound ID by three and indexes the 470×8 descriptor table at ROM `0x82450`; its first `s16` is the WESS sequence. The radio UI's six names are at `0x82368`, and its sound-ID table routes to sequences 6–11. [evidence: ROM bytes, disassembly]
 
@@ -455,7 +435,7 @@ These are calculated event positions, not full-song render measurements: `frame 
 
 Race setup reads the global radio selection and starts the corresponding sound ID. There is no fixed course-to-song mapping: any named radio song can accompany any track, and `RADIO OFF` selects silence. [evidence: disassembly]
 
-#### Music and music-player design: Player scope
+#### Player scope
 
 Expose all 12 class-1 sequences, including the explicitly labelled unreferenced sequence 3. A production decoder should: [viewer design]
 
@@ -468,13 +448,13 @@ Expose all 12 class-1 sequences, including the explicitly labelled unreferenced 
 
 The container/parser work is bounded and moderate; exact WESS voice/envelope behavior is the main fidelity risk. A minimal first pass is unusually tractable because the music primarily plays long pre-rendered chunks around note 60 with simple patch switching, but implementing the scheduler is still preferable to concatenating samples—sequence 3 has an intro and the two-track songs alternate chunks for seamless playback. [evidence: ROM bytes, deterministic decoding, viewer design]
 
-#### Mapping onto `src/rom/`: Music player
+#### Music player
 
 Implement the WESS/SN64 module as a bounded parser, keeping SSEQ event interpretation separate from N64 VADPCM bank/sample decode. Expose all 12 music sequences in sequence order using the six ROM titles and neutral labels from *Complete music list, routing and loops*; preserve sequence IDs in diagnostics. Decode on demand in the worker. Return exact authored loop points for the looping sequences and no loop for one-shots. [viewer design]
 
 The existing `DecodedMusic` interface is adequate. The driver is not the standard Nintendo compressed-MIDI format, so reusing `libultra.ts` should be limited to genuinely compatible synthesizer primitives rather than feeding WESS events into an unrelated sequence parser. Initial scope may omit WESS effects/reverb, but must preserve sample tuning, volume/pan, tempo, simultaneous-track timing and voice termination. [viewer design]
 
-#### Unused and hidden content: Statically unreferenced audio
+#### Statically unreferenced audio
 
 The game-level sound descriptor table has 470 eight-byte entries at ROM `0x82450` and names 158 of the 165 SSEQ IDs. The only IDs absent from every descriptor are music sequence 3 and SFX sequences 12 and 65–69. Direct calls to the WESS trigger API occur only inside descriptor-based wrapper paths; no direct bypass was found. These are therefore **statically unreferenced candidates**, not proof of impossibility under every indirect or corrupt state. [evidence: ROM bytes, disassembly, deterministic decoding]
 
@@ -492,29 +472,23 @@ Across all 165 sequences, 195 of 196 patches are used. Patch 131 is unused and m
 
 ### 5.3 Instruments and sample encoding
 
-Instrument banks, envelopes, loops, and sample encoding are described above.
-
 ### 5.4 Music catalog and loop points
-
-The complete known song catalog and loop policy are included above.
 
 ## 6. Unused and hidden content
 
 ### 6.1 Unreferenced assets
 
-#### Unused and hidden content
-
 The top-level reference graph divides all IDs 0–40 among two 12-entry active selector tables, five direct loader IDs, and track main/aux tables. The sets are disjoint and exhaustive; no top-level raw file is statically orphaned. [evidence: ROM bytes, disassembly, deterministic decoding]
 
 Flagstaff, El Cajon and Guadalupe are complete retail hidden/unlockable tracks, not unused. [evidence: ROM bytes, disassembly]
 
-#### Unused and hidden content: Arcade-port residue
+#### Arcade-port residue
 
 The ROM retains AAMA rating text plus `INSERT COINS`, `FREE PLAY`, `CREDITS`, `FREE RACE`, `JOIN NOW!`, multi-way join and placement UI. Several have direct code or pointer-table references. Two adjacent entry points at `0x80048408` and `0x80048410` are shipped as `jr ra; nop` stubs despite 15 and 25 direct callers respectively; the calls pass small event-like IDs. This is strong evidence of inert/removed interface behavior and likely arcade-port residue, but static analysis does not prove whether every surrounding N64 state path is unreachable. [evidence: ROM bytes, disassembly, hypothesis]
 
 `ARCADE AI: OFF`, `TROPHY GIRLS: OFF` and `SKY TYPE: RANDOM` appear with the ordinary features/options text and must not be called a debug menu merely because of their wording. Audio error labels and source basenames such as `synthesizer.c`, `env.c` and `reverb.c` are compiled-library diagnostics, not a user-facing debug facility. [evidence: ROM bytes]
 
-#### Unused and hidden content: End-of-ROM residue
+#### End-of-ROM residue
 
 The SSEQ event payload ends at `0xC871B8`, followed by eight bytes of alignment. Runtime initialization explicitly passes `0xC871C0` as the WDD/sample base. The final indexed wave ends at `0xF05654`; the following 12 bytes are unindexed and end exactly on the next 32-byte boundary at `0xF05660`: [evidence: ROM bytes, disassembly, deterministic decoding]
 
@@ -526,15 +500,9 @@ The remaining `0xFA9A0` bytes through the 16 MiB end are `FF`. The 12-byte place
 
 ### 6.2 Cut or inaccessible levels
 
-Candidate levels are distinguished from alternate, debug, and intentionally hidden retail content above.
-
 ### 6.3 Debug features
 
-Shipped debug strings and executable features are listed only when supported by a code or data reference.
-
 ### 6.4 Prototype or revision-specific content
-
-Source-archive and prototype material is explicitly distinguished from shipped retail data.
 
 ## 7. nviewer implementation
 
@@ -544,13 +512,13 @@ Source-archive and prototype material is explicitly distinguished from shipped r
 
 This is an implementation design, not repository work performed by this investigation. Current shared interfaces were inspected in the repository. [evidence: nviewer source, viewer design]
 
-#### Mapping onto `src/rom/`: Detection and file access
+#### Detection and file access
 
 Add `'offroadchallenge'` to `Game.id`, detect `NOFE` and `NOFP` in `src/rom/index.ts`, and reject unsupported revisions or malformed tables before following any pointer. Normalize byte order before detection. Use a regional descriptor containing the main-image end, table offsets and audio base, then derive file extents and RAM pointer resolution from the ROM table itself. [viewer design]
 
 Do not extract files at runtime. An `OffroadRom.file(id)` view over the normalized ROM can validate `romStart <= romEnd <= rom.length`, zero flags, and the expected destination interval, then return a subarray. Cache only immutable parse products that are shared by repeated level loads; the raw files are already views and need no copied-file cache. [viewer design]
 
-#### Mapping onto `src/rom/`: Proposed modules
+#### Proposed modules
 
 | module | responsibility | starting evidence | difficulty |
 |---|---|---|---|
@@ -564,7 +532,7 @@ Do not extract files at runtime. An `OffroadRom.file(id)` view over the normaliz
 Production code derives offsets from the selected revision's tables and enforces
 the bounds and invariants documented here. [viewer design]
 
-#### Mapping onto `src/rom/`: Difficulty summary
+#### Difficulty summary
 
 | area | difficulty | principal risk |
 |---|---|---|
@@ -577,17 +545,13 @@ the bounds and invariants documented here. [viewer design]
 
 ### 7.2 Supported features
 
-The Technical summary states the supported releases and principal decoded features.
-
 ### 7.3 Approximations and omissions
-
-Viewer approximations are distinguished from facts about the game formats.
 
 ## 8. Verification and remaining work
 
 ### 8.1 Verification evidence
 
-#### Verification plan and evidence: Research evidence
+#### Research evidence
 
 | subject | method/result | artifact |
 |---|---|---|
@@ -601,7 +565,7 @@ Viewer approximations are distinguished from facts about the game formats.
 | music | archive/tables/events/bank parsed and all music sequences classified | `music/NOTES.md`, `music/tables/` |
 | references | exhaustive top-level loader graph plus bounded internal audits | `unused/NOTES.md`, `unused/reference_graph.tsv` |
 
-#### Verification plan and evidence: Required implementation gates
+#### Required implementation gates
 
 An implementation should pass the repository's normal gates. [evidence: nviewer source, viewer design]
 
@@ -614,6 +578,8 @@ An implementation should pass the repository's normal gates. [evidence: nviewer 
 7. Enumerate and decode every exposed song; check duration, channel finiteness, sample range and exact loop endpoints. Render enough passes to prove the terminal jumps are seamless, then run soundtrack regressions for existing games if shared audio code changes.
 
 Structural US/EU equivalence supplies a strong cross-version oracle: after normalizing each pointer by its file's `defaultDest`, every one of the 40 same-length files should produce the same decoded semantic hash. [evidence: deterministic decoding, viewer design]
+
+### 8.2 Known unknowns
 
 #### Open questions
 
@@ -631,10 +597,4 @@ All items here are unresolved and must remain hypotheses until new evidence answ
 10. Whether any internally valid but unreferenced model, texture or arcade-mode resource is genuinely unreachable rather than an animation array, padding, dynamic spawn or indirect reference.
 11. The meaning, if any, of the 12 unindexed bytes after the final WDD wave.
 
-### 8.2 Known unknowns
-
-Unresolved semantics are labelled **Hypothesis** or **Open question** where they occur.
-
 ### 8.3 References
-
-External documentation, decompositions, and source archives are cited inline where used.

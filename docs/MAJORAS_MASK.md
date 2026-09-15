@@ -77,11 +77,7 @@ list: 12-byte records `{char* name; func; u32 entrance}` (OoT US: 118 entries, M
 
 ### 2.2 Memory and address mapping
 
-Address conversions and load destinations are specified with the executable and file tables above.
-
 ### 2.3 ROM map and asset organization
-
-See the executable, archive, and file-table descriptions in this section.
 
 ### 2.4 Compression formats
 
@@ -115,17 +111,13 @@ equal to the true names for 1011 (OoT US), 1020 (MQ debug) and 1183 (MM US) file
 
 ### 2.5 Loading process
 
-Level and asset selection is described by the tables and loader call paths above.
-
 ### 2.6 Revision differences
-
-Revision-specific addresses and data differences are stated in the relevant tables.
 
 ## 3. Level data
 
 ### 3.1 Level catalog and identifiers
 
-#### Levels: Alternate headers (layers)
+#### Alternate headers (layers)
 
 - A scene or room header may contain command 0x18: a list of segment pointers to alternate headers; slot `k` is used for
   layer `k + 1`, layer 0 is the main header. Room files have their own 0x18 lists that follow the same layer number.
@@ -144,7 +136,7 @@ Revision-specific addresses and data differences are stated in the relevant tabl
   Swamp (poisoned 0x45 / cleared 0x00), Mountain Village (0x50 / 0x5A), Goron Village (0x4D / 0x48), Twin Islands (0x5D / 0x5E),
   Stone Tower (0x58 / 0x59), Stone Tower Temple (0x16 / 0x18).
 
-#### Levels: Proposed sidebar
+#### Proposed sidebar
 
 `LevelInfo.kind` / `group` as in the tables: `hub` for overworld regions (grouped by region), `adventure` for dungeons,
 `boss` for boss rooms, `other` for interiors, grottos, cutscene and test maps. One entry per scene; layer variants as
@@ -154,7 +146,7 @@ one. The test maps (MQ debug 0x65-0x6D) and the MM debug placeholder scene only 
 The full tables follow (generated from ROM data by `lead/leveltables.py`; group assignment and the English names
 without a ROM title are the lead's proposal / **doc**).
 
-#### Mapping onto the viewer: Filesystem, tables and level list
+#### Filesystem, tables and level list
 
 - `src/rom/zelda/fs.ts`: byte order normalisation, `zelda@` + dmadata detection, Yaz0 decoder, file access by VROM.
 - `src/rom/zelda/tables.ts`: `code` detection, `code` VRAM, scene/object/actor/entrance tables by structure.
@@ -163,7 +155,7 @@ without a ROM title are the lead's proposal / **doc**).
 - `src/rom/zelda/zelda.ts`: `Game` with levels = scenes (+ layer variants); `Game.id` gains `'oot'` and `'mm'` (and the alpha).
 - Difficulty: low (well-defined structures, all found generically and verified in four ROMs).
 
-#### Verification evidence: Identification, filesystem, tables, levels
+#### Identification, filesystem, tables, levels
 
 | claim | method |
 |---|---|
@@ -181,7 +173,7 @@ without a ROM title are the lead's proposal / **doc**).
 | layer meanings and fallback | doc (z_scene.c); layer 0 matches the reference captures (sidecars: sceneLayer 0) |
 | sidebar grouping, English names of untitled scenes | doc / proposal |
 
-#### Open questions and hypotheses: Filesystem and levels
+#### Filesystem and levels
 
 - MM debug PAL English message table layout (only needed if names should come from that ROM itself).
 - OoT English names could be shown as the title-card textures (US ROM, `g_pn_*` files) instead of decomp names; format not
@@ -190,7 +182,7 @@ without a ROM title are the lead's proposal / **doc**).
 
 ### 3.2 Level container
 
-#### Levels: Scene list and names
+#### Scene list and names
 
 A level is a scene: a scene file plus the room files listed by its command 0x04 (8-byte RomFile records). **Verified**
 (`fs/scenes.py`): OoT US 1.0 101 scenes / 388 rooms; OoT MQ debug 110 scenes / 401 rooms; MM US 102 scenes (11 unset ids) /
@@ -211,7 +203,7 @@ Names from the game's own data:
   English names come from the decomp's scene enum (**doc**).
 - Map select names exist for MM too (Japanese). The tables below list all three.
 
-#### Levels: Scene tables
+#### Scene tables
 
 ##### Majora's Mask: scenes (MM US and MM debug PAL, ids 0x00-0x70)
 
@@ -323,7 +315,7 @@ Title = the area name message the scene table points to, decoded from the US ROM
 | other / Cutscene maps | 0x65 | Z2_LOST_WOODS | Lost Woods (intro) |  | まよい の もり | 3 | setup 0 + 3 cutscene |
 | other / Debug (debug PAL only) | 0x01-0x06, 0x09, 0x0E, 0x0F, 0x31, 0x3A | dmadata 1559 | one placeholder scene all unset ids point to | | | 1 | setup 0 + 9 |
 
-#### Levels: Rooms
+#### Rooms
 
 Rooms are world-space (room vertices are not offset per room) and all rooms of a scene are drawn together for a level view;
 in game only the current and previous room are drawn. Per-room `LevelLayer`s (e.g. "room 3") are useful toggles for
@@ -346,7 +338,7 @@ dungeons with overlapping rooms. **Doc** (z_room.c); **verified** by the scene r
   Field (*Scenes, display lists, environment*). Environment values computed from scene data (lights, fog, zFar, sky indices/colours) equal the RAM values
   in every capture. Renders with placed static actors are in *Verification by render*.
 
-#### Scene and room format: Scene and room headers
+#### Scene and room headers
 
 ##### Scene table (how the loader finds scenes)
 
@@ -419,7 +411,7 @@ header ends at 0x14 (loader: at most 64 commands; no other terminator). Layouts 
   variants; label OoT 1-3 as child night / adult day / adult night and 4+ as "cutscene n"; MM 1+ as "setup n". *Alternate headers (layers)* gives
   the recommended list (many cutscene layers only change actors).
 
-#### Scene and room format: Units and coordinates
+#### Units and coordinates
 
 - 1 vertex unit = 1 world unit; right-handed, Y up; the N64 look-at/perspective are the standard GL-like ones.
   **Verified**: renders with `mirrorX: false`, `vertexScale: 1` reproduce every screenshot (ladder left / vines right on the
@@ -431,7 +423,7 @@ header ends at 0x14 (loader: at most 64 commands; no other terminator). Layouts 
 - Angles: s16 binary angles (0x8000 = 180°); collision normals s16/0x7FFF; world coordinates up to ±32 760
   (BGCHECK_XYZ_ABSMAX); OoT room vertices span x −11 048..11 320, y −4 055..5 701, z −11 491..17 911 (US census).
 
-#### Scene and room format: Per-version differences (scenes and rooms)
+#### Per-version differences (scenes and rooms)
 
 ##### MM US vs debug PAL
 
@@ -454,7 +446,7 @@ target to the next)
   exactly the RAM values, while US layer 5 has config 0 (RAM 0/0/0). PAL runs time at 3 units/frame (sceneTimeSpeed 3)
   instead of 5; sky rotation read from RAM (−0.066 / −0.1017 rad) as on US.
 
-#### Actors and objects: Census: what kinds of actors the levels use
+#### Census: what kinds of actors the levels use
 
 Instances = entries over all unique room actor lists of all setups plus transition actors (`actors/counts_{rom}.tsv`, ROM
 bytes). Draw class from the decomp source of each actor (`lead/actorclass.py`): `dl` = draws fixed display lists,
@@ -487,7 +479,7 @@ moon (En_Fall).
 
 ### 3.3 Geometry
 
-#### Scene and room format: Mesh headers (command 0x0A)
+#### Mesh headers (command 0x0A)
 
 Layouts **doc** (`oot-decomp/include/room.h`, `mm-decomp/include/z64scene.h`), parser **verified** on every rendered
 room (`scenes/zscene.ts parseMesh`).
@@ -509,9 +501,7 @@ type 2 (no type 0/1 in retail rooms).
 
 ### 3.4 Display lists and render state
 
-#### Scene and room format: Display lists and render state
-
-##### Microcode and opcodes
+#### Microcode and opcodes
 
 F3DZEX2 (F3DEX2 opcodes). Opcodes reached from room lists (**verified**, `scene-oot/census-oot-us10.txt`,
 `scene-mm/report-mm-us.txt`):
@@ -537,7 +527,7 @@ field keep). G_DL targets: segment 3 and 8-0xD (and 6 in MM).
 - **G_MTX** in OoT rooms (101 × segment 0 load, 101 × segment 3 load, 101 × segment 0xD multiply): segment 0xD is Jabu-
   Jabu's pulsing-wall scale matrix from the draw config (*OoT: per-scene draw config functions*); the segment 0/3 loads are open questions.
 
-##### State when rooms are drawn
+#### State when rooms are drawn
 
 `Play_Draw` (**doc**): segments 2 = scene, 4 = gameplay_keep, 5 = sub keep; fog (*Fog, clear colour, draw distance*); projection
 `guPerspective(fovy, 4:3, zNear, lightCtx.zFar)` with the look-at folded into the projection; Scene_Draw (draw config,
@@ -566,7 +556,7 @@ State found at triangles (**verified**, OoT US census; MM similar in `report-mm-
   1 985 + 539; `PRIM` 503; `TEXEL0·PRIM` 374. MM has many more two-texture blends (`FC20AC04 FF0F93FF`,
   `FC272C04 1F0C93FF`, ~1 300 render-tile-1 uses). PRIM_LOD_FRAC is the low byte of `G_SETPRIMCOLOR` w0.
 
-##### Textures and palettes
+#### Textures and palettes
 
 Load sequence as stored (**verified**, `scenes/dldump.py oot-us10 1026 0x2790`):
 ```
@@ -602,7 +592,7 @@ The existing 4 KB tile-memory emulation truncates: OoT US has 1 649 G_LOADBLOCKs
 removed the seam and lowered the error on every capture (MAE KF 11.5 → 8.9, HF US 17.7 → 14.8, HF MQ 20.1 → 17.1, Deku
 Tree 12.2 → 10.6). Viewer: add 0.5/size to u and v (or sample with a half-texel shift) for Zelda batches.
 
-##### Lighting
+#### Lighting
 
 Rooms are lit by the RSP: vertex colour bytes are a normal when G_LIGHTING is set; colour = ambient + Σ light colour ·
 max(0, N·L) (clamped), alpha from the vertex. The bound lights are the scene's two directional lights (*Lights used for rooms*) in world
@@ -611,7 +601,7 @@ renders use `runDisplayList`'s existing `lighting` option with these two lights 
 Point lights (room command 0x0C, actor glows) are not bound for rooms in OoT (`Lights_BindAll(…, vec = NULL)` skips
 point lights, **doc**); MM rooms bind them when ROOM_BEHAVIOR bit 11 is set (**doc**, not rendered).
 
-##### Changes `displaylist.ts` needs
+#### Changes `displaylist.ts` needs
 
 Implemented and exercised in the research copy `scenes/dl/displaylist.ts` (diff against `scenes/dl/displaylist.orig.ts`,
 the HEAD copy; every change marked `ZELDA:`; 322 changed lines):
@@ -633,7 +623,7 @@ into vertex colours for single-texture materials).
 
 ### 3.5 Textures and materials
 
-#### Scene and room format: Draw configs and animated materials
+#### Draw configs and animated materials
 
 ##### MM: draw configs and animated materials
 
@@ -666,7 +656,7 @@ last condition.
 
 ### 3.6 Collision
 
-#### Scene and room format: Collision and waterboxes
+#### Collision and waterboxes
 
 Same layout in both games (**doc** `bgcheck.h`, MM `z64bgcheck.h`; **verified** parser `scenes/zscene.ts parseCollision`,
 `scenes/camcheck.ts`; overlay render below):
@@ -700,7 +690,7 @@ exactly with the room geometry. Dynamic collision (actors) is not in the scene f
 
 ### 3.7 Environment, sky, fog, and lighting
 
-#### Environment: Skyboxes: MM
+#### Skyboxes: MM
 
 - `skyboxId = byte & 3`: 1 normal sky (d2 skybox), 2/3 special (not used by the rendered scenes), 5 cutscene map.
 - Files (**verified**, structure scan in `render.ts`): `sNormalSkyFiles = {d2_fine_static, 0}, {d2_cloud_static, 0}` in
@@ -719,7 +709,7 @@ exactly with the room geometry. Dynamic collision (actors) is not in the scene f
 - The MM sky rotates: `skyboxCtx.rot.y −= R_TIME_SPEED·1e-4` per frame (**doc**); captured rot.y −0.2365 / −0.5875 /
   −0.8295 rad (**verified** RAM `PlayState+0x46E0+0x208`). A viewer uses 0.
 
-#### Environment: Light settings (command 0x0F)
+#### Light settings (command 0x0F)
 
 `EnvLightSettings` (0x16 bytes, same in both games): `u8 ambient[3]; s8 light1Dir[3]; u8 light1Color[3]; s8 light2Dir[3];
 u8 light2Color[3]; u8 fogColor[3]; s16 blendRate<<10 | fogNear (10 bits); s16 zFar`. **Verified**: `env/zenv.py`'s layout
@@ -752,14 +742,14 @@ Dusk and Night settings for `lightMode` 0 scenes, or the stored Setting 1…N re
 uses full-bright shade colour. This control changes lighting only; fog, sky and other time-dependent scene state remain
 those of the loaded level variant.
 
-#### Environment: Lights used for rooms
+#### Lights used for rooms
 
 `dirLight1` = light 1 (sun) direction/colour, `dirLight2` = light 2 (moon), ambient = settings ambient (+ adjustments,
 0 by default). Both are bound as directional lights for room drawing (*Lighting*). Viewer: `DlLighting {ambient, lights: [{color:
 l1Color, dir: normalize(l1Dir)}, {color: l2Color, dir: normalize(l2Dir)}]}`; the direction points toward the light (a
 floor facing up is lit by the noon sun (0,120,20)) (**verified** by render).
 
-#### Environment: Fog, clear colour, draw distance
+#### Fog, clear colour, draw distance
 
 - OoT `Play_SetFog` = `Gfx_SetFog(fogColor, near = fogNear, far = 1000)`; MM far = max(1000, trunc(zFar·5/64)) with
   `Gfx_SetFogWithSync`. `near ≥ 1000`: no fog; `near > 996`: factors (0x7FFF, −0x7F00); else gSPFogPosition(near, far):
@@ -773,7 +763,7 @@ floor facing up is lit by the noon sun (0,120,20)) (**verified** by render).
 - Draw distance: zFar per light setting (4000 Deku Tree, 5800 Kokiri Forest, 12800 fields); room type 2 entries beyond
   zFar are culled by the game. Viewer: use zFar as the far plane default or ignore.
 
-#### Environment: Time of day, sun, default view
+#### Time of day, sun, default view
 
 - Default time: noon (0x8000) for lightMode 0 (outdoor) scenes: nightFlag 0 (day textures and draw-config day lists),
   light entry 1, sky fine1 (OoT) / MM config colours. lightMode 1 scenes ignore time. Fixed-time rooms (command 0x10 hour
@@ -789,7 +779,7 @@ floor facing up is lit by the noon sun (0,120,20)) (**verified** by render).
   Recommended `CameraView`: spawn 0 position; if its floor bg cam has data, eye = data pos, target = player + (0,40,0),
   fov 60; otherwise the normal-camera offset above (MM: same rule is a **hypothesis**).
 
-#### Mapping onto the viewer: Scenes, rooms, display lists and environment
+#### Scenes, rooms, display lists and environment
 
 | item | proposal | difficulty |
 |---|---|---|
@@ -817,7 +807,7 @@ floor facing up is lit by the noon sun (0,120,20)) (**verified** by render).
    `backdrop` (existing, prerendered rooms).
 6. Lights: baked through `runDisplayList`'s `lighting` (rooms are static and in world space, so baking is exact).
 
-#### Verification evidence: Scenes, display lists, environment
+#### Scenes, display lists, environment
 
 ##### Offline renders compared with screenshots
 
@@ -902,7 +892,7 @@ combiners in the census (~21 000 OoT US triangles and ~1 300 MM tile-1 uses).
 | OoT US vs MQ differences | `scenes/ootcmp.py`, `ootroomdiff.py`, `ootroomhdr.py` |
 | MM US vs debug PAL differences | `scene-mm/compare2.py`, `scenes/mmdiff.py`, pixel-identical SCT render |
 
-#### Open questions and hypotheses: Scenes and environment
+#### Scenes and environment
 
 1. OoT room lists with `G_MTX` on segments 0 and 3 (101 each, US census): which scenes and what they load.
 2. Night-only display lists of SDC 1/14 (Hyrule Field, Death Mountain Trail): addresses are in code instructions; confirm
@@ -925,13 +915,9 @@ combiners in the census (~21 000 OoT US triangles and ~1 300 MM tile-1 uses).
 
 ### 3.8 Cameras and paths
 
-Camera defaults and path data are described with the level data where known.
-
 ## 4. Objects
 
 ### 4.1 Placement records
-
-Placement records are structurally coupled to the level format and are described in Level data.
 
 ### 4.2 Object and model formats
 
@@ -943,7 +929,7 @@ object offsets and checked against the ROM), `lead/drawfuncs.py` -> `lead/drawfu
 draw function source of the 40 most used static actors), `actors/zdata.py`, `actors/count.py` -> `actors/counts_{rom}.tsv`
 (usage counts over all unique room actor lists of all setups), `fs/tables.py` (overlay/object tables).
 
-#### Actors and objects: Where actors come from
+#### Where actors come from
 
 | data | command / table | record | notes |
 |---|---|---|---|
@@ -996,7 +982,7 @@ Record layouts: **doc** (`oot-decomp/include/scene.h`, `mm-decomp/include/z64sce
 - For a level view, spawn 0 (player entry referenced by entrance list entry 0) is the natural start marker; OoT and MM
   also start Link there when a scene is entered from the map select. **Doc** (z_select.c).
 
-#### Actors and objects: How the game draws an actor
+#### How the game draws an actor
 
 `Actor_Draw` (**doc**: `oot-decomp/src/code/z_actor.c`, same in MM):
 
@@ -1011,28 +997,7 @@ Record layouts: **doc** (`oot-decomp/include/scene.h`, `mm-decomp/include/z64sce
 - Draw functions call `Gfx_SetupDL_25Opa` / `_25Xlu` (the same setup display list as rooms), then one or more display
   lists, often with extra matrices, primitive/environment colours or texture scroll segments 8/9.
 
-#### Mapping onto the viewer: bbgames source-object mode
-
-The viewer additionally supports a deliberately bounded first wave of historical and hidden source objects from a
-user-selected `bbgames` root. It prefers `z_ocarina2` when both trees exist and otherwise accepts `z_ocarina`.
-`showDirectoryPicker()` supplies a real directory handle; the frontend reads exactly 124 allowlisted object paths,
-without recursively enumerating, uploading, persisting, or caching the selected tree. **Verified** (repository code;
-`npm run check:zelda-source -- {bbgames-root}`).
-
-The 21 entries are the complete discarded `.GOMI/Ddanh_noanime` scene, 15 complete build-unreferenced top-level
-scene sets, the older `K_Home5.oo` scene, the sparse `zelda_tool_rom` historical payload, and the `Bdan_dd`,
-`Hidan_dd`, and `Mizusin_dd` tool-geometry fragments. The loader accepts `tool_data.o` or the linked
-`zelda_tool_rom.o` for the sparse payload. It parses bounded big-endian ELF32 MIPS relocatable objects and applies
-only `R_MIPS_32`, then adapts the resulting scene/room data to the shared Zelda renderer. **Verified** (object bytes,
-ELF relocation fixture, and two fresh loads of every entry: 54,028 total triangles).
-
-This is source-map support, not reconstruction of a complete game build. Available room geometry, textures,
-collision, lights, spawns, transitions, and actor placements are exposed; absent common objects, actor code,
-skies, and music are not guessed. Actor placements whose model data is unavailable remain markers, tool fragments
-show geometry only, and the sparse historical payload currently exposes its validated collision body. **Verified**
-(source objects and repository checker); fuller presentation is future work.
-
-#### Mapping onto the viewer: Actors
+#### Actors
 
 - `src/rom/zelda/actors.ts`: parse actor/transition/spawn/entrance/object lists (OoT and MM encodings); read category and
   objectId from the overlay table's profiles; static name tables per game; a recipe table (actor name -> object, display
@@ -1046,7 +1011,7 @@ show geometry only, and the sparse historical payload currently exposes its vali
 - Difficulty: lists and markers low; 40 static recipes per game medium (each needs its params rule); skeletal bind pose
   medium; flex-skinned NPCs high (not needed for a first version).
 
-#### Verification evidence: Actors
+#### Actors
 
 | claim | method |
 |---|---|
@@ -1063,7 +1028,7 @@ show geometry only, and the sparse historical payload currently exposes its vali
 | static actors make up visible set pieces | render vs screenshots (*Verification by render*): tent, windmill, night torches |
 | MM degree rotations | ROM bytes + doc; render only with near-symmetric actors (weak test) |
 
-#### Open questions and hypotheses: Actors
+#### Actors
 
 - MM degree rotations need a render check with an asymmetric static actor in view; pots, crates, bushes and rocks were
   drawn in Kakariko but hidden from the capture camera (placement unverified by render).
@@ -1074,21 +1039,13 @@ show geometry only, and the sparse historical payload currently exposes its vali
 
 ### 4.3 Skeletons and animation
 
-Static-pose or animation support and remaining omissions are stated in the object description.
-
 ### 4.4 Behaviors, triggers, and scripted objects
-
-Behavioral records are documented only where they affect level extraction or presentation.
 
 ## 5. Audio
 
 ### 5.1 Audio storage and banks
 
-Audio storage is described with the sequence and bank tables below.
-
 ### 5.2 Sequence format and driver
-
-#### Music
 
 Work dir: `zelda/music/`. Paths below are relative to it unless absolute.
 
@@ -1115,7 +1072,7 @@ Work dir: `zelda/music/`. Paths below are relative to it unless absolute.
 - **Viewer.** A new module `src/rom/music/zelda64.ts` (≈1300 lines, derived from `sf64.ts`) is better than
   extending `sf64.ts` or `nas.ts`; difficulty medium (*Extend `sf64.ts` / `nas.ts`, or a new module?*, *Music*).
 
-#### Music: Audio data
+#### Audio data
 
 ##### Files (verified: `scripts/tables.py` → `out/tables_summary.txt`; `render/probe.ts`)
 
@@ -1253,7 +1210,7 @@ u16 mixReverbStrength; s16 lowPassCutoffLeft; s16 lowPassCutoffRight`.
   select / fairy fountain), MM 64–66 = OoT 64–66, MM 25 = OoT 59, MM 37 = OoT 108 (**verified**, md5 of every
   sequence).
 
-#### Music: Driver: differences from Star Fox 64 (`sf64.ts`) and Yoshi's Story (`nas.ts`)
+#### Driver: differences from Star Fox 64 (`sf64.ts`) and Yoshi's Story (`nas.ts`)
 
 Sources: OoT `src/audio/internal/{seqplayer,playback,effects,heap,load,synthesis}.c`, MM `src/audio/lib/*.c`
 (doc); rsp-hle `alist_nead.c`/`alist.c` (doc for the emulated RSP); `sf64.ts` and `nas.ts` as ported in the viewer.
@@ -1351,7 +1308,7 @@ reverb return; spec-dependent reverbs with low-pass, leak and downsample 2; MM t
 unk_0A bits, loop count 2, startSamplePos. **Difficulty: medium** (≈1.5–2× the `sf64.ts` port; the research code is
 the reference).
 
-#### Music: Research renderer
+#### Research renderer
 
 Files (`render/`, TypeScript, run with `TMPDIR=$PWD the repository/node_modules/.bin/tsx`; nothing is written
 into the repo; it imports only `RESAMPLE_LUT` from `the repository/src/rom/music/libultra.ts`):
@@ -1403,9 +1360,7 @@ into the repo; it imports only `RESAMPLE_LUT` from `the repository/src/rom/music
 | MM | `wav/mm-us-002-termina-field.wav` | 2 / 1 | 198.2 s, loop 66.017 s from 66.167 s |
 | MM | `wav/mm-us-028-woodfall-temple.wav` | 28 / 3 | 215.4 s, loop 67.817 s from 79.783 s |
 
-#### Mapping onto the viewer: Music
-
-##### Module
+#### Module
 
 `src/rom/music/zelda64.ts`, one module for both games (a `game: 'oot' | 'mm'` flag selects the MM variants of *Driver: differences from Star Fox 64 (`sf64.ts`) and Yoshi's Story (`nas.ts`)*),
 ported from `render/zdata.ts` + `zengine.ts` + `zsynth.ts`:
@@ -1425,7 +1380,7 @@ export function zelda64Music(files: { code: Uint8Array; audiobank: Uint8Array; a
 - Reuse from `sf64.ts` (copy or factor out): the linked-list note pool, ADSR, ENVMIXER ramps, resampler loop, ring
   reverb; from `libultra.ts`: `RESAMPLE_LUT`.
 
-##### `types.ts`
+#### `types.ts`
 
 No change is required for a flat list. Two optional additions help a 100+ song soundtrack:
 - `MusicTrack.group?: string` (e.g. "Areas", "Dungeons", "Bosses and battles", "Menus and title", "Cutscenes",
@@ -1433,7 +1388,7 @@ No change is required for a flat list. Two optional additions help a 100+ song s
 - `LevelInfo.music?: number` (a track index) so the player can start the song of the selected level (scene header
   seqId, *Special sequences and game IO (doc: OoT `src/audio/game/general.c`, MM `src/audio/code_8019AF00.c`; renders verified where stated)*).
 
-##### Track list and level association (recommendation)
+#### Track list and level association (recommendation)
 
 - **Show:** every sequence of kind *music* (OoT 47, MM 61, aliases once), the title and menu pieces,
   cutscene/credits pieces that play to their end (OoT 77, 94, 103–106; MM 30, 112, 116, 118, 124, 126, 127) and,
@@ -1448,7 +1403,7 @@ No change is required for a flat list. Two optional additions help a 100+ song s
   only nature ambience `natureAmbienceId`), per header (child/adult day/night and cutscene headers differ, *Special sequences and game IO (doc: OoT `src/audio/game/general.c`, MM `src/audio/code_8019AF00.c`; renders verified where stated)*).
   The viewer's level for a scene header should point at that track; for 0x7F show no song or the ambience note.
 
-##### Difficulty
+#### Difficulty
 
 | part | effort | notes |
 |---|---|---|
@@ -1458,8 +1413,6 @@ No change is required for a flat list. Two optional additions help a 100+ song s
 | track metadata (names, groups, specs, IO, scene links) | small-medium | generated tables in `out/songlist_*.tsv` |
 | IO-driven pieces (field logic, Clock Town days, Ganon's Tower) | medium | optional; fixed presets are enough for a player |
 | CPU/memory | as `sf64.ts` | render in the worker, one track on demand |
-
-#### Verification evidence: Music
 
 | claim | method / evidence |
 |---|---|
@@ -1479,8 +1432,6 @@ No change is required for a flat list. Two optional additions help a 100+ song s
 | OoT US 1.0 BGM player at RAM 0x80128B60, per-scene tempo/fade/volume scale/IO | lead RAM dumps `runs/lead-ootus-1/{dt1,kv1,lh3,me1,lk1}.bin` decoded with the decomp `SequencePlayer` layout (python snippet in this session) |
 | Market Entrance BGM volume scale 90/127 explains −6 dB | render with `--volscale 0.708661` vs capture (*Verification against captured game audio*) |
 | menus use spec 10; title OoT spec 10 (Hyrule Field header alt 7), MM title Clock Tower alt 1 spec 0 | doc (`z_file_choose.c`), scene sound table, captures |
-
-#### Open questions and hypotheses: Music
 
 1. **MM Termina Field** layers: the first-cycle layer 5 header plays the ambience sequence instead of field music (first capture); layer 0 plays sequence 2, verified in the second capture (*Verification against captured game audio*). Which setups play which sequence is in *Majora's Mask (US; debug PAL identical except 0 and 43)*.
 2. **MM boot audio 8–27 s** before the title theme matches no sequence; possibly sound effects of the boot/opening
@@ -1505,11 +1456,9 @@ No change is required for a flat list. Two optional additions help a 100+ song s
 
 ### 5.3 Instruments and sample encoding
 
-Instrument banks, envelopes, loops, and sample encoding are described above.
-
 ### 5.4 Music catalog and loop points
 
-#### Music: Song list
+#### Song list
 
 ##### How the tables were made
 
@@ -1669,25 +1618,17 @@ MQ debug and MM debug PAL use the same ids and names; their only different seque
 
 ### 6.1 Unreferenced assets
 
-No separate unreferenced-asset finding is recorded.
-
 ### 6.2 Cut or inaccessible levels
-
-Candidate levels are distinguished from alternate, debug, and intentionally hidden retail content above.
 
 ### 6.3 Debug features
 
-Shipped debug strings and executable features are listed only when supported by a code or data reference.
-
 ### 6.4 Prototype or revision-specific content
-
-Source-archive and prototype material is explicitly distinguished from shipped retail data.
 
 ## 7. nviewer implementation
 
 ### 7.1 Module mapping
 
-#### Actors and objects: Recommendation for the viewer
+#### Recommendation for the viewer
 
 1. **Static scenery, drawn by default:** props and background actors with fixed display lists (a recipe table, below).
    Several set pieces are actors, not room geometry: e.g. MM South Clock Town's clock face, gears, stairs and scaffold
@@ -1800,7 +1741,7 @@ whose object is chosen at run time (Obj_Tsubo: profile object gameplay_keep, dra
 object_tsubo) need the scan against the other candidate objects. The scan gives candidates, not the params rule, so a
 hand-written recipe table keyed by actor name remains necessary; the scan can supply per-version offsets for its entries.
 
-#### Mapping onto the viewer: Summary and module plan
+#### Summary and module plan
 
 One loader family, `src/rom/zelda/`, serves the four retail/debug ROMs through structure-based detection; the alpha is a
 variant selected by hash. The existing viewer types cover almost everything; the display-list interpreter and the
@@ -1834,17 +1775,13 @@ actors and markers; music; prerendered backgrounds; the alpha.
 
 ### 7.2 Supported features
 
-The Technical summary states the supported releases and principal decoded features.
-
 ### 7.3 Approximations and omissions
-
-Viewer approximations are distinguished from facts about the game formats.
 
 ## 8. Verification and remaining work
 
 ### 8.1 Verification evidence
 
-#### Actors and objects: Verification by render
+#### Verification by render
 
 Method: `scenes/actors.ts` reads room actor lists (per layer) and transition actors, decodes MM ids/rotations and the
 half-day mask; `scenes/inview.ts` lists the actors that project into a capture's view; `scenes/actordraw.ts` holds draw
@@ -1890,7 +1827,7 @@ but hidden behind the gate walls from the capture camera (they produce geometry;
 Viewer notes: actors are instances with the formula above; lists that only set material state must be concatenated with
 the lists they prepare; half-day filtering (MM) is required or night-only torches and later-day tent tiers appear.
 
-#### Music: Verification against captured game audio
+#### Verification against captured game audio
 
 **Captures** (made by the lead): mupen64plus with rsp-hle and the audio-dump plugin, AI at 32006 Hz, stereo
 big-endian PCM plus per-buffer log and a timestamped segment log: `cap/mm-us/` (boot, title, file select, new-game
@@ -1956,7 +1893,7 @@ reverb return and the spec 10 low-pass reverb with rsp-hle's coefficient averagi
 0.64–0.94 shows sample-level agreement is close but not exact (the game's AI buffer lengths vary 510–544 samples per
 task, which shifts note starts by up to one update relative to the render).
 
-#### Verification evidence: Runtime captures
+#### Runtime captures
 
 All sessions used the headless mupen64plus described in `EMULATOR.md` (debug core for RAM access,
 rsp-hle, software rendering), one run directory each. Each reference capture is a 320x240 screenshot plus a sidecar with
@@ -1972,6 +1909,8 @@ sidecar records the time at the dump, not the poked time.
 | lead-mmus-1 | MM US | south-clock-town-day-1, south-clock-town-night-1, termina-field-1 (layer 5), woodfall-temple-1 | `mm-us/`: boot, title, file select, intro, South Clock Town day/night, Termina Field (no field music), Woodfall Temple; 138.9 MB at 32006 Hz with segment log | PlayState 0x803E6B20, SaveContext 0x801EF670 |
 | lead-mmdbg-1 | MM debug PAL | south-clock-town-day-1 (same spawn, camera and lights as US), termina-field-1 (layer 0; different spawn/camera settle) | - | PlayState 0x80448700, SaveContext 0x8023F790; field offsets as US |
 | lead-mmus-2 | MM US | - | `mm-us-tf/`: walked from South Clock Town (day 1, 09:00) through the south gate into Termina Field (layer 0; the guard flag and the ocarina in the inventory are needed, otherwise the first-cycle layer 5 without field music loads); 44.1 MB with segment log; RAM dump `tfm.bin` | as lead-mmus-1 |
+
+### 8.2 Known unknowns
 
 #### Open questions and hypotheses
 
@@ -1989,10 +1928,4 @@ Cross-area items first, then the open questions of each area.
   decomps; night/dusk captures exist only where *Verification evidence* lists them.
 - **Alpha:** no comparison with Spaceworld 1997 footage; several scene names are the sw97 project's guesses (*Open questions*).
 
-### 8.2 Known unknowns
-
-Unresolved semantics are labelled **Hypothesis** or **Open question** where they occur.
-
 ### 8.3 References
-
-External documentation, decompositions, and source archives are cited inline where used.

@@ -53,7 +53,7 @@ segmented, VROM, and file-relative addresses are named at each use.
 
 ### 2.1 Boot and executable layout
 
-#### Boot and code: Boot, main, microcode
+#### Boot, main, microcode
 
 - **ROM 0x1000 = vram 0x80000400:** the entry stub zeroes bss 0x80045670 (size 0x55250), sets sp 0x80045870 and jumps to `game_main` 0x80000870 (**verified** by disassembly).
 - **main** is ROM 0x1000-0x46270 at vram 0x80000400 (`vram = rom + 0x7FFFF400`), with bss to 0x8009A8C0. It holds libultra, the RSP ucodes and HAL's `sys` library (object manager, renderer, audio, DMA).
@@ -63,7 +63,7 @@ segmented, VROM, and file-relative addresses are named at each use.
 - The gtl ucode table in main .data holds the F3DEX2 text/data pair {0x8003E7A0, 0x80044E60} at ROM 0x4190C and the L3DEX2 pair at 0x4193C (**verified**). Level display lists are therefore **F3DEX2** (`displaylist.ts` ucode `'f3dex2'`).
 - **Build string** `HAL_SNAP_V1.0-1` is at ROM 0x5EF80 in more_funcs (**verified**). There is no libultra version string. The release word 0x1449 suggests libultra 2.0I (hypothesis; the decomp builds with `VERSION_I`).
 
-#### Boot and code: Overlays
+#### Overlays
 
 Everything outside main is loaded from fixed ROM ranges. There is **no file table and no filesystem**: the ranges are hard-coded as `Overlay` structs or as constants in loader code.
 
@@ -85,7 +85,7 @@ invariants: textStart == vram; textEnd == dataStart; dataEnd == bssStart; dataEn
 
 ### 2.2 Memory and address mapping
 
-#### Boot and code: Position dependence and address resolution
+#### Position dependence and address resolution
 
 **Asset data is position-dependent** (**verified**). Level asset segments hold absolute KSEG0 pointers linked at their vram: beach_assets has 2813 self-pointer words, which move exactly with each dump's vram delta. Assets also point:
 - into app_render and world code;
@@ -101,7 +101,7 @@ Different scenes reuse the same vram (splat `exclusive_ram_id`): 0x800F5D90 is m
 
 ### 2.3 ROM map and asset organization
 
-#### ROM map and levels: ROM map (US)
+#### ROM map (US)
 
 "ref" says how the game finds a range (**verified** from ROM bytes): ovl = Overlay struct, rd = `dmaReadRom` constant, pair = lui/addiu ROM constant in code, tbl = the audio ROM-offset table in main (ROM 0x42FF8), sbk = offsets inside the sequence bank.
 
@@ -175,7 +175,7 @@ token bit 1: back-reference
 ```
 The viewer does not need VPK0 for levels. It needs it only for menu or title images.
 
-#### Verification evidence: ROM, code, overlays, codec
+#### ROM, code, overlays, codec
 
 | claim | evidence |
 |---|---|
@@ -190,11 +190,9 @@ The viewer does not need VPK0 for levels. It needs it only for menu or title ima
 
 ### 2.5 Loading process
 
-Level and asset selection is described by the tables and loader call paths above.
-
 ### 2.6 Revision differences
 
-#### Mapping onto the viewer: Out of scope for a first version
+#### Out of scope for a first version
 
 The opening's 3D model/material package (inventoried in *Negative result: no retained cut course*) could be ported as a viewer pseudo-level; the credits and photo scenes also remain out of scope. The Pokémon Lab is 2D only (*Level list*).
 
@@ -202,13 +200,13 @@ The opening's 3D model/material package (inventoried in *Negative result: no ret
 
 ### 3.1 Level catalog and identifiers
 
-#### ROM map and levels: Names
+#### Names
 
 `gLevelNames[7]` (pointer table at vram 0x800AC0C4, right after `gLevelID`; strings at ROM 0x5AD90): **`Beach, Tunnel, Volcano, River, Cave, Valley, Rainbow`** (**verified** ROM bytes, lead re-checked). Camera check, photo check, album and report use it, next to a `%s Course` format string (ROM 0x8A62EC, 0x9A59E8) (**decomp** use sites).
 
 Dialogue calls the secret course **"Rainbow Cloud"** (ROM 0x98BA68: "Rainbow Cloud, floating in the sky, is the secret course!") and the hub **"Pokémon Lab"** (ROM 0x7C6427; é is the two-byte code A6 C5) (**verified** strings). No "Oak's Lab" string exists.
 
-#### ROM map and levels: Level list
+#### Level list
 
 Only the seven courses have 3D worlds of their own (**verified**: all seven WorldSetups decode, *WorldSetup*). The photo scenes (camera check, album, report, Gallery and dead scene 24) re-render a course's world through `loadLevelView` and `createWorld`, with no geometry of their own (**decomp**). The **Pokémon Lab draws no triangles at all**: its screens are texture rectangles from `oaks_lab` and `window` (**verified**, frame display lists). The **opening's 3D landscape** (1970 triangles in 148 lists, fog 989/1000 colour (120,120,150), fovy 29.9) is drawn from display lists inside the decompressed `main_menu_vpk0` buffer at 0x802B5000 (**verified**, frame display list); the title screen after START is 2D. The credits and the intro were not captured.
 
@@ -226,7 +224,7 @@ Suggested viewer names: the table names, with "Rainbow Cloud" taken from dialogu
 
 ### 3.2 Level container
 
-#### Boot and code: Scenes
+#### Scenes
 
 `start_scene_manager` (0x8009B49C) first loads more_funcs (rom 0x5BF20-0x5F050 → 0x800BF080, persistent). It then runs the intro (`intro_code` + a VPK0 buffer) and sets scene 8 (main menu). **Verified** from ROM bytes (`fs/callsites.py`).
 
@@ -276,7 +274,7 @@ Scene table (US; **verified** load lists from `fs/callsites.txt` and the indepen
 
 Source notes: `notes/levels.md`. Prototype: `lv/proto/` (`rom.ts`, `anim.ts`, `gfx.ts`, `heightmap.ts`, `course.ts`, `main.ts`; `npx tsx main.ts [course]`, about 2 s per course). Renders: `lv/renders/`.
 
-#### Level format: WorldSetup
+#### WorldSetup
 
 Each course's code or asset segment holds one WorldSetup; the level entry passes it to `createWorld` (0x800E2F38).
 
@@ -313,7 +311,7 @@ struct WorldSetup {
 | valley | 2.0 | 996/1000 | 96,91,99 | 97,105,162 |
 | rainbow | 1.0 | 996/1000 | 0,0,0 | 0,0,0 |
 
-#### Level format: World blocks
+#### World blocks
 
 **Verified** layout by decoding every block of all seven courses; semantics **decomp**.
 ```c
@@ -364,14 +362,14 @@ Per-block addresses (descriptor, gfx, gfxData, textures, animations, road) are i
 - `id & 0xF000` adds extra matrix kinds.
 - Materials attach to nodes in array order.
 
-#### Level format: Units, axes, projection
+#### Units, axes, projection
 
 - Right-handed, Y up. Vertex units are game units; block units × 100 are game units, used by collision and spawns (**decomp**; **verified** by the ground check in *Ground check* and by renders: the Beach start shows the terraced cliff left of the rails and a palm on the right, as in the game's opening straight).
 - At view yaw 0 the camera looks along +Z.
 - **Projection** (**verified**: RAM camera and the frame's projection matrix on every course): fovy **55** during play (the fixed-point matrix decodes to 54.88), aspect 4/3, near 10, far 25600, perspNorm 5. `createMainCameras` initialises fovy 60, which only Rainbow Cloud's intro camera keeps. The viewport is the full 320×240; the (14,12)-(304,232) border appears only during Rainbow Cloud's intro.
 - **View** (**verified**): the look-at matrix decomposes to eye = RAM `CameraEyePos`, with right = −X when looking along +Z: right-handed, Y up, no mirroring. Prototype renders from the RAM camera line up with the screenshots (`rt/cmp/{course}.png`).
 
-#### Objects: Model format
+#### Model format
 
 **DObj tree** (`UnkEC64Arg3`, 0x2C: `{s32 id; void* payload; Vec3f pos, rot, scale}`, terminated by id 18; **decomp**, **verified**: all 238 models decode):
 - **Hierarchy:** `id & 0xFFF` is the depth; a node at depth d > 0 is a child of the latest node at depth d − 1. Node 0 is an empty root.
@@ -412,7 +410,7 @@ Per-block addresses (descriptor, gfx, gfxData, textures, animations, road) are i
 
 **Pose:** use **frame 0 of `animations[0]`** (what the game plays at spawn), falling back to the rest TRS when frame 0 hides everything. Frame 0 differs from the stored rest pose in 16 play models (**verified** renders). Tunnel props 1012/1013 are fully hidden at frame 0 and are shown as markers.
 
-#### Music: Formats
+#### Formats
 
 **Verified**: ROM bytes, and every table parses with the repo's unchanged modules.
 
@@ -426,7 +424,7 @@ Per-block addresses (descriptor, gfx, gfxData, textures, animations, road) are i
   - Only instrument 78 has an oscillator: sine vibrato, ±10 cents at 6.9 Hz after 164 ms.
 - **Effect bank** (ctl 0xBA6C20, tbl 0xBB6940): one instrument with 400 sounds (`auPlaySound(id)`) and 298 waves. It is not music.
 
-#### Mapping onto the viewer: Level assembly
+#### Level assembly
 
 - **Meshes:** one per block (model and scenery blocks), one per static-model prop, one sky mesh.
 - **Instances:** blocks at translate(worldPos × 100); props at `(worldPos + pos)·100` with the RPY matrix (*Static models*); spawns per *Objects*.
@@ -441,12 +439,12 @@ Per-block addresses (descriptor, gfx, gfxData, textures, animations, road) are i
 - **Bounds:** from instances. Courses span up to about 20000 units.
 - **Sky opacity:** the viewer's `Sky` draws blended with no culling. The game draws skies opaque (G_RM_AA_OPA_SURF). The single-layer domes look the same, but Rainbow Cloud's layered I4 sky needs opaque drawing: `Sky.opaque?: boolean`, or draw that course's sky as its only main-layer block without depth.
 
-#### Open questions and hypotheses: ROM, code, scenes
+#### ROM, code, scenes
 
 - The credits branches are mapped (scene 19/song 36 for progress bit 0x40; scene 18/song 11 for 0x40000 alone; scene 17/song 11 for 0x80000 with `PFID_14`), but the story meaning of those flags remains a hypothesis.
 - The credits and the boot intro were not captured. The opening's five VPK0 model trees are inventoried, but only its visible landscape was compared with a frame.
 
-#### Unused and hidden content: Negative result: no retained cut course
+#### Negative result: no retained cut course
 
 - All seven course `*_assets`/`*_extra` pairs were scanned: 1,574 manifest-delimited
   assets and an independent 1,130 plausible terminated F3DEX2 geometry streams. Every
@@ -469,7 +467,7 @@ Ekans definition (Pokédex id 23) nor an orphaned course world (**verified** for
 the retail ROM; the prerelease interpretation is external context, not evidence about
 retail bytes).
 
-#### Unused and hidden content: Course-asset and effect remnants
+#### Course-asset and effect remnants
 
 - Two unreferenced 32-byte Jynx eye palettes at US ROM 0x260F60 and 0x261190 are exact
   duplicates of the live palette at 0x260D30. The European builds remove both plus 16
@@ -493,11 +491,9 @@ retail bytes).
 
 ### 3.3 Geometry
 
-Geometry representation is described with the level container above.
-
 ### 3.4 Display lists and render state
 
-#### Level format: Display lists
+#### Display lists
 
 **Microcode: F3DEX2** (*Boot, main, microcode*). **Verified** by walking every course list, including sky and props, and following DE calls. The opcode histogram:
 ```
@@ -523,7 +519,7 @@ per material:  [E3 TEXTLUT] [FC combine] [FA prim] E8
 - **Texture formats** (**verified**, all course textures): CI4 with RGBA16 palettes 166 (mostly 64×64, 32×64, 32×32, 64×32, 32×128); CI8 4; I4 26 (all Rainbow Cloud; alpha = intensity); I8 4; RGBA16 16 (including the 64×32 skies). Palettes follow their images in the assets.
 - **No lighting.** Vertex colours are prelit; G_LIGHTING is set only around the bounding-box cull vertices.
 
-#### Level format: Render state set by game code
+#### Render state set by game code
 
 **Decomp**, with the fixed lists **verified** in ROM (lead re-checked the bytes). The frame starts from the `rdp_reset` list: G_ZBUFFER | G_SHADE | G_CULL_BACK | G_SHADING_SMOOTH, bilinear filtering, perspective correction, OPA_SURF. Each block is drawn as:
 1. `gSPDisplayList(DListRMFogOpaSet)` (ROM 0x5A430 = vram 0x800AEA80):
@@ -548,7 +544,7 @@ Render modes inside the course lists (**verified**, every E2 word):
 - **Combiners** (**verified** words): FC1217FF FFFFFE38 (TEXEL0·SHADE, the standard); FC272C04 1F0C93FF (lerp TEXEL0 → TEXEL1 by PRIM_LOD_FRAC, then ·SHADE: frame blending); FC121824 FF33FFFF (skies); FC127FFF FFFFF238; FCFFFFFF FFFE793C (G_CC_SHADE); FC1219FF FFFFFE38 and FC272C04 1F1093FF (Rainbow Cloud).
 - **Skies** (`drawSkyBox1Cycle`): pipe sync, 1-cycle, G_RM_AA_OPA_SURF without Z, clear G_ZBUFFER | G_FOG, draw, restore. `drawSkyBox2Cycle` is the 2-cycle version with a rotation (**decomp**). Both are opaque (**verified**, frame display lists: `00552048` with G_ZBUFFER and G_FOG cleared for the dome skies; `0C192048` G_RM_PASS | AA_OPA_SURF2 for Rainbow Cloud's sky and cloud disc).
 
-#### Mapping onto the viewer: Display lists
+#### Display lists
 
 **`runDisplayList` options:** `ucode: 'f3dex2'`, `vertexScale: 1`, `mirrorX: false`, `directImages: true`, geometry mode `G_ZBUFFER | G_SHADE | G_CULL_BACK | G_SHADING_SMOOTH | G_FOG`, render mode 0xC8112078, no lighting, `resolve` = the course's segment resolver plus a synthetic region for segment 0x0E.
 
@@ -578,7 +574,7 @@ For gap 4: either a `Batch.fog?: boolean` field (contract change by the main ses
 
 ### 3.5 Textures and materials
 
-#### Level format: Materials and the segment 0x0E lists
+#### Materials and the segment 0x0E lists
 
 Materials are 0x78-byte `Texture` records (copied into MObjs). **Verified** layout: Volcano block 0 material 0 decodes field for field like decomp `volcano/world/block0.c`.
 ```c
@@ -624,7 +620,7 @@ With halfS set, scaleS ×= 0.5 and offS = (offS − unk24 + 1 − unk28/2)/2 (**
 - Parameters: 13 imageIndex, 14 offS, 15 offT, 16 scaleS, 17 scaleT, 18 nextImageIndex, 19/20 aux offsets, 21 lodLevel, 22 paletteIndex; commands 18-21 set prim, env, blend and light colours.
 - Examples: Volcano's lava blends 4 frames through lodLevel 0 → 3 → 0; water scrolls offS/offT.
 
-#### Unused and hidden content: Debug and untranslated material
+#### Debug and untranslated material
 
 - The exception thread starts during normal boot. Its crash display is gated behind an
   undocumented multi-step controller sequence before showing thread/PC/SR/VA, registers,
@@ -641,11 +637,9 @@ With halfS set, scaleS ×= 0.5 and offS = (offS − unk24 + 1 − unk28/2)/2 (**
 
 ### 3.6 Collision
 
-#### Collision
-
 Collision serves Pokémon, items and the ground under spawns: the cart follows its rail, not the ground. **No separate terrain-wall collision structure was identified.** A height map gives the ground, a ceiling map exists in Tunnel and Cave, and static-object box/cylinder hitboxes can stop thrown items and act as obstacles.
 
-#### Collision: Height map and ceiling map
+#### Height map and ceiling map
 
 **Decomp** `world/ground_int.c`, `ground.c`; decode **verified** on all six courses. Rainbow Cloud has no height map (it never calls `setHeightMap`).
 ```c
@@ -677,7 +671,7 @@ The height maps live in the course code segments. The HeightMap struct pointers 
 
 Known defect: the outermost cells of Tunnel and Cave cover large areas outside the playfield. Clipping them to the block footprints would fix it.
 
-#### Collision: Surface types
+#### Surface types
 
 The 24-bit surface value doubles as a debug RGB colour, which the overlay can use directly. Behaviour is from `app_level/items.c` and course code (**decomp**); the values are **verified** present in the ROM data.
 
@@ -692,13 +686,11 @@ The 24-bit surface value doubles as a debug RGB colour, which the overlay can us
 | 00FF00, FF4C19 | volcano | lava: splash; a pester ball on 00FF00 triggers the lava event |
 | FF0000 | river | out of play: the item is deleted |
 
-#### Mapping onto the viewer: Collision
-
 Build the height map and ceiling map cells as meshes in 'collision' layers (*What the viewer should draw*), with per-vertex colours from the surface RGB and alpha ~170, blended, no depth write, no culling. Hitboxes can be simple primitive meshes.
 
 ### 3.7 Environment, sky, fog, and lighting
 
-#### Environment, rail path and camera: Fog and clear colour
+#### Fog and clear colour
 
 Fog is `gSPFogPosition(fogMin, fogMax)` with fog colour = WorldSetup fog RGB (*Render state set by game code*). With near 10 and far 25600, the viewer's `Fog` is `{color, multiplier: trunc(128000/(max−min)), offset: trunc((500−min)·256/(max−min)), near: 10, far: 25600}`:
 
@@ -710,7 +702,7 @@ Fog is `gSPFogPosition(fogMin, fogMax)` with fog colour = WorldSetup fog RGB (*R
 
 The fog lies close to the far plane and mainly hides pop-in near 25600 units. The clear colour is WorldSetup bg RGB. **Only Cave fills the colour buffer** (fill colour 0x0040, RGBA5551 of (5,8,4)); the other courses clear only Z and rely on the sky or geometry to cover the screen (**verified**, frame display lists). The fog words and colours in the frame lists equal the table on all six fogged courses, and the fog is clearly visible on distant terrain in the screenshots, so the viewer must keep it (**verified**). Rainbow Cloud's world is drawn without fog.
 
-#### Environment, rail path and camera: Sky
+#### Sky
 
 - `createSkyBox` draws `SkyBox.gfx` in its own GObj. `setSkyBoxFollowPlayer` copies the camera eye into the sky position every frame, so the sky is **camera-attached**: `Level.skies`, no depth, no fog (**decomp**; **verified** in frame display lists: the sky's modelview is a translation to the eye).
 - `GlobalTimer += animSpeed` per game update (60 per second), rounded to 1/1000 and taken mod 10000. The dome skies do not rotate: their modelview is a pure translation to the eye. `drawSkyBox2Cycle` (Rainbow Cloud) rotates `rotation.y = 2π·GlobalTimer/10000` (**verified** at four times in RAM and frame lists).
@@ -720,7 +712,7 @@ The fog lies close to the far plane and mainly hides pop-in near 25600 units. Th
   - Tunnel and Cave: no sky; the clear colour shows, and Tunnel has sky pieces inside its blocks.
 - The game draws skies **opaque**. The viewer's `Sky` forces alpha blending, which is wrong for Rainbow Cloud's layered sky (*Level assembly*).
 
-#### Open questions and hypotheses: Level format and environment
+#### Level format and environment
 
 - The Cave camera's extra +40 during the shaft drop (a shake or vibration term) was not identified.
 - Rainbow Cloud's intro camera animation (`D_8011B3E0`, 290 frames) was not decoded.
@@ -732,7 +724,7 @@ The fog lies close to the far plane and mainly hides pop-in near 25600 units. Th
 
 ### 3.8 Cameras and paths
 
-#### Environment, rail path and camera: Rail path
+#### Rail path
 
 **Decomp** semantics; decode **verified** on all courses (`lv/proto/anim.ts`, `lv/paths/{course}.json`).
 
@@ -793,20 +785,20 @@ The fog lies close to the far plane and mainly hides pop-in near 25600 units. Th
 
 **Cave.** Block 0's control-point path descends vertically at x = −700, from y 7396 through 5633 (start) to 1954, above ground at −1142. The raw InterpData points really hold these values. **Verified** in the emulator: movement starts at moveTime 0 at (−700, 5632.6, −772.1), the cart falls down the shaft (y 1355.5 at moveTime 0.622) and leaves it in block 1. The first frame shows the shaft wall, looking down (pitch 0.26), and the prototype render from the RAM camera matches (`rt/cmp/cave_start_cmp.png`).
 
-#### Environment, rail path and camera: Ground check
+#### Ground check
 
 Cart height minus the height-map ground along every rail sample (**verified**, `lv/dumps/ground_check.txt`): median 0.0 on Beach, 0.3 on Tunnel, 0.7 on Volcano, 0.0 on River and 2.8 on Valley, but **986 on Cave**, where the cart really falls through a shaft (*Rail path*). Five courses agree independently on the block placement, the animation and path decode, and the height-map conventions.
 
 **Block visibility** (**verified** at all 21 course captures): the blocks whose model GObj is visible, and the block lists drawn in the frame, equal the `visibility` mask of the path schedule at the current block time (`worldBlocks[]` at 0x800F5A08).
 
-#### Objects: Paths
+#### Paths
 
 - **In ROM:** 117 spawns have an `InterpData` path (*Rail path* format): Beach 25, Tunnel 14, Volcano 10, River 26, Cave 20, Valley 22. They are B-splines or linear, with 2-29 points.
 - **Coordinates** (**verified**, `obj/proto/pathcheck.ts`): the points are **absolute block units**, and for all 117, `path(0) == worldPos + translation` (within 0.0001).
 - **Viewer:** polyline = path(t)·100 in a hidden markers layer, and the instance stands at the spawn position with `animated: true`.
 - **In the game,** each species' state machine advances `pathParam` by `speed/duration` per update when it chooses to, so a path is a route, not a guaranteed motion (**decomp**).
 
-#### Verification evidence: Level format, environment, rail, collision
+#### Level format, environment, rail, collision
 
 | claim | evidence |
 |---|---|
@@ -819,7 +811,7 @@ Cart height minus the height-map ground along every rail sample (**verified**, `
 | Height map layout and tree shape | `lv/proto/heightmap.ts`, `lv/dumps/{course}.json → heightMap`; lead re-checked the Beach HeightMap pointers |
 | Offline renders | `lv/renders/{course}_{start,top,corner_*,heightmap_top,collision_*,textures}.png` (raster.ts); lead viewed the Beach start and Volcano overview |
 
-#### Unused and hidden content: Dead scene 24 and the Snap Station printer path
+#### Dead scene 24 and the Snap Station printer path
 
 Scene 24 (`unk_end_level_8`, ROM 0xA084B0–0xA08E30) is a standalone Japanese version of
 the four-best-Gallery-photo slideshow. It reconstructs each saved photo's course and
@@ -846,15 +838,13 @@ ranges). They contain no additional world data.
 
 ### 4.1 Placement records
 
-Placement records are structurally coupled to the level format and are described in Level data.
-
 ### 4.2 Object and model formats
 
 #### Objects
 
 Source notes: `notes/objects.md`. Prototype: `obj/proto/` (`npx tsx build_all.ts [course]`, then `npx tsx course_objects.ts [course]`). Tables: `obj/tables/` (`{course}_spawns.tsv`, `{course}_statics.tsv`, `id_models.tsv`, `hd_tables.json`). Renders: `obj/renders/models/_{course}_grid.png`, `obj/renders/courses/`.
 
-#### Objects: How objects are created
+#### How objects are created
 
 - **Block spawn lists** (**decomp**; decode **verified** for all 231 records):
   - `createWorld` gets the course's add, delete and block-change callbacks.
@@ -905,7 +895,7 @@ Which spawn function each species uses is in `id_models.tsv`. Beach Meowth and V
 
 Lead re-checked the Beach table in ROM: 16 records (ids 12, 84, 133, 115, 143, 131, 113, 52, 16, 123, 129, 25, 1003, 1004, 1005, 1001) and a zero record. The update functions are `pokemonChangeBlock` 0x80363DBC / `…OnGround` 0x80363EB4, and the kill function is `pokemonRemoveOne` 0x80364280.
 
-#### Objects: Id → model
+#### Id → model
 
 Almost every `init` is a 12-instruction stub that passes a `PokemonInitData*` as stack argument 6 to a spawn function. All 159 def records resolve to one each by constant propagation (**verified**, `obj/proto/defs.ts` → `defs.json`; 124 unique rows in `id_models.tsv`).
 ```c
@@ -933,7 +923,7 @@ struct AnimationHeader { f32 speed; f32 length; AnimCmd** modelAnims /* per node
 
   HD trees are in `{level}_extra` or `*_model_hd`, with about 1.5-2.5× the triangles (Pikachu 343 → 1422). Props reuse their play trees.
 
-#### Objects: Static models
+#### Static models
 
 `descriptor.staticModels` entries are looked up by id in `WorldSetup.staticModelTable` (**verified**: 0xC-byte entries `{id, handler, payload}`, though the decomp says 0x28). The handler attaches the payload to the block (**decomp**):
 - `func_800E30B0` attaches a Gfx child with RPY-TS at pos × 100;
@@ -941,7 +931,7 @@ struct AnimationHeader { f32 speed; f32 length; AnimCmd** modelAnims /* per node
 
 Tables exist only in Beach (1007 palm → Gfx 0x80138C80) and Tunnel (1015 computer → 0x8013AB90, 1016 → 0x8013B080, 1017 → 0x8013BA20), all Gfx (**verified**).
 
-#### Objects: Status of the prototype
+#### Status of the prototype
 
 - **Built** (**verified**): 231 models (124 play, 103 HD, 4 static props) with 0 unknown opcodes. All species read correctly in the model grids (textures, palettes, joints, flames), and course close-ups show Pokémon on the ground; the Beach start view shows the Pidgeys at the first bend.
 - **Viewer gaps:**
@@ -952,7 +942,7 @@ Tables exist only in Beach (1007 palm → Gfx 0x80138C80) and Tunnel (1015 compu
   - a fixed light direction (the game's follows the camera);
   - frame-0 animation only.
 
-#### Collision: Object hitboxes
+#### Object hitboxes
 
 **Decomp** `world/collision.c`; decode **verified**.
 ```c
@@ -974,14 +964,14 @@ struct StaticObject { s32 id; Vec3f pos, rot, scale; };              // 0x28; id
 | cave | 1001 | 1 |
 | valley | 1001, 1032 (16) | 2 |
 
-#### Mapping onto the viewer: Detection and game object
+#### Detection and game object
 
 - **`src/rom/index.ts`:** add `case 'NPFE'`, calling `openPokemonSnap(rom)`. The other dumps (`NPHE`, `NPFU`, `NPFP`, `NPFF`, `NPFD`, `NPFI`, `NPFS`, `NPFJ`) should throw "only Pokémon Snap (U) is supported", or be accepted later through `snapfs.ts`'s per-dump structure search (*Other dumps (detection level)*).
 - **`src/rom/types.ts`:** extend `Game.id` with `'pokemonsnap'`. The title is `Pokémon Snap`.
 - **Level list:** the seven courses of *Level list*. Use `LevelKind` `campaign` for Beach…Valley and `bonus` for Rainbow Cloud, or one group "Courses".
 - **Confirmation:** after matching the game code, confirm with the overlay-table structure at ROM 0x57580 (30 strict Overlay structs, *Overlays*) and throw on a mismatch.
 
-#### Verification evidence: Objects
+#### Objects
 
 | claim | evidence |
 |---|---|
@@ -994,14 +984,14 @@ struct StaticObject { s32 id; Vec3f pos, rot, scale; };              // 0x28; id
 | Paths absolute, start at spawns | `obj/proto/pathcheck.ts`, `pathstats.txt` (117 of 117) |
 | Rendering | `obj/renders/models/_{course}_grid.png`, `obj/renders/courses/*` (lead viewed the Volcano grid and the Beach start view with objects) |
 
-#### Open questions and hypotheses: Objects
+#### Objects
 
 - Decorative names for several generic props in 1008-1034 remain deliberately unresolved; the six Pokémon Signs, controllers, spawners and major effects are identified in *Object remnants*.
 - Billboard orientation and Snorlax's matrix type 54 are approximated.
 - Whether the viewer's Pokémon light should follow the camera, as the game's does.
 - Only Beach positions, Pikachu's node flags, the light direction and Rainbow Cloud's code objects were compared with RAM; a Butterfree's path over time and the visibility of Tunnel props 1012/1013 were not checked.
 
-#### Unused and hidden content: Object remnants
+#### Object remnants
 
 The complete course `PokemonDef`, `PokemonInitData`, spawn, model-tree and photo-HD tables
 contain no extra cut Pokémon species mesh: every nonempty species model is block-placed or
@@ -1043,25 +1033,17 @@ and decomp control flow).
 
 ### 4.3 Skeletons and animation
 
-Static-pose or animation support and remaining omissions are stated in the object description.
-
 ### 4.4 Behaviors, triggers, and scripted objects
-
-Behavioral records are documented only where they affect level extraction or presentation.
 
 ## 5. Audio
 
 ### 5.1 Audio storage and banks
 
-Audio storage is described with the sequence and bank tables below.
-
 ### 5.2 Sequence format and driver
-
-#### Music
 
 Source notes: `notes/music.md`. Work dir: `mus/`; prototype `mus/proto/snapmusic.ts`; renders `mus/wav/`; capture `mus/cap/`.
 
-#### Music: System
+#### System
 
 Pokémon Snap uses **classic libultra 2.0I audio**: the alSynNew synthesizer, ALEnvMixer, the **ALCSPlayer compressed-MIDI sequence player** and ALSndPlayer for effects. It is not n_audio (**decomp**: the linked ultralib audio objects have no `n_*` files).
 - The RSP audio ucode is **byte-identical to Super Mario 64 (U)'s aspMain** (standard ABI1): text 0xE20 bytes at ROM 0x3E580, data at 0x457A0 (**verified**, ROM bytes).
@@ -1091,7 +1073,7 @@ The same ROM offsets are repeated in a 7-word table at ROM 0x42FF8 (**verified**
 - **Reverb.** `AL_FX_CUSTOM` with `auCustomFXParams1` (ROM 0x42B50, **verified** bytes): 8 sections on a 10400-sample (325 ms) delay line. A 14-section preset exists, but nothing selects it (*Unused and hidden content*). Songs send CC 91 between 2 and 64. Cave, Tunnel and Rainbow Cloud add an extra player FX mix (20, 20, 25; **decomp**).
 - **"Sound quality".** The option is a stereo/mono switch: mono averages left and right (**decomp**). The default is stereo (**verified**, RAM 0x800423C0 = 1).
 
-#### Music: Rendering and reuse
+#### Rendering and reuse
 
 **Snap's volume patch** (**decomp**; effect **verified**):
 - Snap's `__vsVol` uses the player's `extraVol` in place of each sound's sampleVolume:
@@ -1124,16 +1106,12 @@ Not modelled: reverb, the instrument-78 vibrato (6 songs), voice stealing (the r
 - Level: mean ×0.99 with the adapter, so **no gain** is needed.
 - The Beach loop period was not reached in the capture.
 
-#### Mapping onto the viewer: Music
-
 `src/rom/pokemonsnap/music.ts`:
 - `parseBank(rom, 0xAFEEE0, 0xB04430, 0, null)`;
 - the sequence file at 0xAEFC10 (37 entries), each sequence through `parseCompressedSequence`;
 - `renderSequence(rom, bankWithVolumes(extraVol), seq, {rate: 32006, maxVoices: 16, seqVol: 0x7F00, loop})`, where `extraVol` is the song's first CC 21 (default 120).
 
 Track list: the 37 rows of *Song list*, `index` = song id, `name` = viewer name (with the id as a two-digit prefix, like GoldenEye). Loops follow the per-track loop markers. One-shot songs get no loop. **No changes to `src/rom/music/` are required.** An `extraVolume` option in `renderSequence` would replace the bank copy.
-
-#### Verification evidence: Music
 
 | claim | evidence |
 |---|---|
@@ -1144,8 +1122,6 @@ Track list: the 37 rows of *Song list*, `index` = song id, `name` = viewer name 
 | Song ids at runtime | RDRAM dumps `mus/cap/ram1..9.bin` (`auBGMSongId` 0x800943D0) |
 | Renders = game | `mus/cap/cap1.raw` + `cap1.log` (32006 Hz), `mus/compare.py` (table in *Rendering and reuse*); flute table ROM 0x5232D0 (lead re-checked) |
 
-#### Open questions and hypotheses: Music
-
 - Song names 15, 18, 19, 20, 21, 24 and 26 are context hypotheses. 26 (Course Select) was not heard at runtime.
 - Song 28 (Mew) loops only a 1.5 s tail by the per-track analysis; not checked by ear.
 - Song 22 has no CC 21 and inherits the previous song's extraVol.
@@ -1154,7 +1130,7 @@ Track list: the 37 rows of *Song list*, `index` = song id, `name` = viewer name 
 - Reverb and vibrato are not modelled.
 - SFX IDs 126 and 305 are unique, untriggered samples; their semantic identities have not been assigned by ear (*Audio remnants*).
 
-#### Unused and hidden content: Audio remnants
+#### Audio remnants
 
 All 37 music sequences are selected somewhere, and 86 unselected music-bank instrument
 slots contribute no exclusive sample: all 84 music wavetables are used by selected
@@ -1182,11 +1158,9 @@ ordinary retail calls and all declared animation sound-event tables.
 
 ### 5.3 Instruments and sample encoding
 
-Instrument banks, envelopes, loops, and sample encoding are described above.
-
 ### 5.4 Music catalog and loop points
 
-#### Music: Song list
+#### Song list
 
 "used by" is from decomp call sites. **[rom]** = the literal id is also found as a `jal auPlaySong` argument in ROM code; **[ram]** = the id was seen in `auBGMSongId` (0x800943D0) at runtime. Loop = song time of the repeating part (s), from `cseq.ts`; "once" = no forever loop. Names describe where the game plays the song. Community track lists agree with the names of songs 0, 4-9, 11, 13, 14, 16, 23, 26, 27, 29 and 34 (leads only; Pixelated Audio, khinsider).
 
@@ -1244,8 +1218,6 @@ Instrument banks, envelopes, loops, and sample encoding are described above.
 
 ### 6.1 Unreferenced assets
 
-#### Verification evidence: Unused and hidden content
-
 | claim | evidence |
 |---|---|
 | Scene 24 unreachable/obsolete; printer compositor; anti-piracy payload and save effect; opening trees | `un/scene/analyze_scene.py` → `analysis.json`; `SCENE_UNUSED.md`; decoded printer notice |
@@ -1255,15 +1227,13 @@ Instrument banks, envelopes, loops, and sample encoding are described above.
 | 342/400 triggered SFX, 56 aliases, unique ids 126/305 | `un/sfx/analyze_refs.py`, `scan_animation_ids.py`, `bank_inventory.ts`, `summarize.py`; JSON inventories; decoded WAVs |
 | Crash/debug/text/audio-bank remnants | `un/dbgcalls.py`, `strrefs.py`, `bankwaves.py`; `un/jp_strings.txt`; decomp call sites |
 
-#### Unused and hidden content
-
 This pass treats a byte pattern as unused only after following the game's loaded-segment
 set, direct and constructed code pointers, object/material tables and opaque animation
 records. A static reference means “possibly used”, not “seen during ordinary play”; this
 keeps the negative claims conservative. Detailed reports and machine-readable inventories
 are under `un/scene/`, `un/assets/`, `un/sfx/` and `un/objects/`.
 
-#### Unused and hidden content: Anti-piracy code and save sabotage
+#### Anti-piracy code and save sabotage
 
 The 0x50-byte output of the VPK0 stream at ROM 0xAAA610 is executable MIPS code, not
 printer data. It checks the boot-time SP IMEM/DMEM integrity results at
@@ -1283,7 +1253,7 @@ hold a photo. The deletion is persistently saved with a valid checksum, and the 
 not cleared (**verified** from decomp save/control flow; exact functions and calculation
 in `un/scene/SCENE_UNUSED.md`).
 
-#### Unused and hidden content: Preset photographs retained in the standard ROM
+#### Preset photographs retained in the standard ROM
 
 ROM 0xAE0510–0xAEFC10 is a complete preset save-photo block, not anonymous padding
 (**verified** by `un/photos2.py` → `un/photos.json`):
@@ -1309,7 +1279,7 @@ record interpretation. The prototype does not yet evaluate the stored animation 
 and fractional animation time, so the all-object image validates linkage and placement,
 not pixel-perfect Station output (`un/photos_render/REPORT.md`).
 
-#### Unused and hidden content: Regional leftovers
+#### Regional leftovers
 
 - J `cave_assets` differs meaningfully in only 53 aligned words: pointer motion around an
   inserted scale `(1,1,1)`, a duration 30→29 adjustment, a duration 0→1 adjustment, two
@@ -1326,28 +1296,22 @@ not pixel-perfect Station output (`un/photos_render/REPORT.md`).
 
 ### 6.2 Cut or inaccessible levels
 
-Candidate levels are distinguished from alternate, debug, and intentionally hidden retail content above.
-
 ### 6.3 Debug features
 
-Shipped debug strings and executable features are listed only when supported by a code or data reference.
-
 ### 6.4 Prototype or revision-specific content
-
-Source-archive and prototype material is explicitly distinguished from shipped retail data.
 
 ## 7. nviewer implementation
 
 ### 7.1 Module mapping
 
-#### Collision: What the viewer should draw
+#### What the viewer should draw
 
 Hidden-by-default collision layers:
 - "height map": surface-coloured BSP cells;
 - "ceiling map": Tunnel and Cave;
 - "hitboxes": boxes, cylinders and spheres of the static objects.
 
-#### Mapping onto the viewer: New modules (suggested)
+#### New modules (suggested)
 
 | file | contents | port from |
 |---|---|---|
@@ -1362,7 +1326,7 @@ Hidden-by-default collision layers:
 
 **Contamination warning:** the `lv/` prototype imports `buildLevel` and `fogPosition` from the repo's `src/rom/bomberman/common.ts`. The implementation should import `fogPosition` from wherever it ends up shared, or define its own.
 
-#### Mapping onto the viewer: Difficulty
+#### Difficulty
 
 | part | effort | notes |
 |---|---|---|
@@ -1377,17 +1341,13 @@ Hidden-by-default collision layers:
 
 ### 7.2 Supported features
 
-The Technical summary states the supported releases and principal decoded features.
-
 ### 7.3 Approximations and omissions
-
-Viewer approximations are distinguished from facts about the game formats.
 
 ## 8. Verification and remaining work
 
 ### 8.1 Verification evidence
 
-#### Verification evidence: Runtime (emulator)
+#### Runtime (emulator)
 
 All captures come from one headless debug-core emulator in `rt/run-rt` (notes `notes/runtime.md`; screenshots in `shots/`, described in `shots/index.md`): 7 courses × 3 moments, Rainbow Cloud's intro, 3 Lab frames and 3 menu frames, each with an RDRAM dump, the walked frame display list and a screenshot.
 
@@ -1405,8 +1365,4 @@ All captures come from one headless debug-core emulator in `rt/run-rt` (notes `n
 
 ### 8.2 Known unknowns
 
-Unresolved semantics are labelled **Hypothesis** or **Open question** where they occur.
-
 ### 8.3 References
-
-External documentation, decompositions, and source archives are cited inline where used.

@@ -62,15 +62,11 @@ Linked RSP identifiers include F3DEX 1.23 at ROM `0x86970` and F3DLX 1.23 at
 
 ### 2.2 Memory and address mapping
 
-Address conversions and load destinations are specified with the executable and file tables above.
-
 ### 2.3 ROM map and asset organization
-
-See the executable, archive, and file-table descriptions in this section.
 
 ### 2.4 Compression formats
 
-#### Filesystem and compression: Manifest
+#### Manifest
 
 [evidence: ROM bytes, deterministic decoding] The US manifest occupies `0xA89A0..0xABEC0`. Its 488
 variable-size records are:
@@ -92,7 +88,7 @@ case-insensitively while normalizing separators, walks records, and accumulates
 stored sizes rounded to eight. `0x8005DA54` is the PI-DMA wrapper and chunks
 transfers at 4096 bytes.
 
-#### Filesystem and compression: Compression
+#### Compression
 
 [evidence: ROM bytes, disassembly, deterministic decoding] `0x8005D560` checks `RNC` and the method byte, reads
 the unpacked size from header `+4`, and dispatches:
@@ -112,7 +108,7 @@ payload length equals the manifest's stored size.
 The archive needs no external allocation or checksum table: manifest, aligned
 payload sequence, and RNC headers are sufficient.
 
-#### Filesystem and compression: Regional locations
+#### Regional locations
 
 [evidence: deterministic decoding]
 
@@ -128,17 +124,13 @@ Compression choice varies by build; decompressed content is the stable API.
 
 ### 2.5 Loading process
 
-Level and asset selection is described by the tables and loader call paths above.
-
 ### 2.6 Revision differences
-
-Revision-specific addresses and data differences are stated in the relevant tables.
 
 ## 3. Level data
 
 ### 3.1 Level catalog and identifiers
 
-#### Levels: Complete selectable list
+#### Complete selectable list
 
 [evidence: ROM bytes, disassembly] Sixteen user-facing progression slots map through the BE
 `u32` table at ROM `0x80EC0`, terminated by `FFFFFFFF`. Bonus is a deliberate
@@ -167,7 +159,7 @@ special case: `0x80023218..0x80023220` selects internal ID 16 directly.
 The scan/map routine is `0x8001413C..0x800141B8`. Challenge objectives reuse
 the one package for their stage; no alternate 3-D setup file exists.
 
-#### Levels: Per-stage principal files
+#### Per-stage principal files
 
 [evidence: ROM bytes, deterministic decoding] Each package 01–17 has exactly one `level.dat`, one
 `terrain.all`, one `creat/creatNN.bin`, and one `envmaps/levelNN.tpg`.
@@ -192,7 +184,7 @@ the one package for their stage; no alternate 3-D setup file exists.
 | 16 | Bonus | `52B7E0..533A72` / `D8A8` | `533A78..543730` / `166D4` |
 | 17 | Training | `54BD90..557F70` / `17C78` | `557F70..5610E7` / `C584` |
 
-#### Levels: Non-gameplay namespaces
+#### Non-gameplay namespaces
 
 [evidence: ROM bytes] The only `level` roots are 00–17 and 96–99. There is no content
 under 18–95.
@@ -208,7 +200,7 @@ These are presentation packages, not hidden 3-D stages.
 
 ### 3.2 Level container
 
-#### Visible scene format: `level.dat` envelope and placements
+#### `level.dat` envelope and placements
 
 [evidence: disassembly, deterministic decoding] The file begins with an `s32 initialTableCount`, then
 variable tables. Each table begins `s16 n, s16 type`; its byte length is:
@@ -243,7 +235,7 @@ three signed words at `+0x00/+0x04/+0x08` are the runtime translation; the
 placement XYZ is its culling centre. Model halfwords `+0x0C/+0x0E/+0x10` are
 the three source angles.
 
-#### Visible scene format: Coordinates and transforms
+#### Coordinates and transforms
 
 [evidence: disassembly, deterministic decoding] Stored culling centres, model translations, and common-mesh
 vertices are signed integers. `0x8001554C` uses the low 12 bits of each model
@@ -257,7 +249,7 @@ viewer's Y-up frame. The viewer uses model-header XYZ as translation and
 applies `Y -> -Y` consistently to geometry, transforms, collision, culling
 centres, creature markers, and derived cameras.
 
-#### Mapping onto nviewer: Level assembly and layers
+#### Level assembly and layers
 
 For a selected internal ID the viewer:
 
@@ -277,7 +269,7 @@ setup variants, so do not create artificial duplicates in the level selector.
 
 ### 3.3 Geometry
 
-#### Visible scene format: Custom mesh stream
+#### Custom mesh stream
 
 [evidence: disassembly, deterministic decoding] The visible payload is not stored GBI. Renderer
 `0x8003C858` converts this stream to F3D-family commands:
@@ -317,11 +309,9 @@ valid engine variants, not corrupt data.
 
 ### 3.4 Display lists and render state
 
-Display-list commands and game-supplied render state are described with geometry above.
-
 ### 3.5 Textures and materials
 
-#### Textures and environment: `.tpg` pages
+#### `.tpg` pages
 
 [evidence: ROM bytes, disassembly, deterministic decoding] All 124 pages share this envelope. Sixteen BE `u32`
 slot descriptors occupy `+0x00..+0x40`. A shared color/palette region follows;
@@ -347,7 +337,7 @@ Bonus exercises descriptor 9 (CI8). Per-slot CI4 palettes and the shared CI8
 palette agree with focused renders, though their selection is less strongly
 proved than the format and payload sizes.
 
-#### Textures and environment: Envmap and parallax resources
+#### Envmap and parallax resources
 
 [evidence: ROM bytes, deterministic decoding] Every stage has `envmaps/levelNN.tpg`. All are `0xA40`
 bytes except level 09 (`0x8240`, one descriptor 10 plus fifteen descriptor-7
@@ -366,7 +356,7 @@ the game's exact screen-space strip and fill-band compositor.
 
 ### 3.6 Collision
 
-#### Collision and object containers: `.all` container
+#### `.all` container
 
 [evidence: ROM bytes, disassembly, deterministic decoding] `.all` is a generic group container used for terrain,
 characters, plants, and props. At `+0`, a `u32` gives the metadata offset in
@@ -387,7 +377,7 @@ Runtime routines `0x80030A70`/`0x80030FE8` advance data by `size * 2` and
 metadata by `0x4C`. A zero-size record reuses the preceding data pointer at a
 new position.
 
-#### Collision and object containers: `terrain.all` collision
+#### `terrain.all` collision
 
 [evidence: ROM bytes, disassembly] Every stage uses:
 
@@ -421,11 +411,9 @@ as ordinary triangles.
 
 ### 3.7 Environment, sky, fog, and lighting
 
-Environment records and runtime render state are described with the level data above.
-
 ### 3.8 Cameras and paths
 
-#### Textures and environment: Runtime camera, fog, and background
+#### Runtime camera, fog, and background
 
 [evidence: RAM, captured frames] Playable Training was captured at 320x240. Its viewport is
 the standard `(scale,translation)=(640,480,511,0)` quarter-pixel form. The root
@@ -449,11 +437,9 @@ normal free flight retains the viewer's standard lens.
 
 ### 4.1 Placement records
 
-Placement records are structurally coupled to the level format and are described in Level data.
-
 ### 4.2 Object and model formats
 
-#### Collision and object containers: Objects and creatures
+#### Objects and creatures
 
 [evidence: ROM bytes, disassembly] Object resources live under `chars*`, `creat`, `bits`,
 `plants*`, and related roots. `.anm` contains animation data, `.tpg` page
@@ -476,11 +462,9 @@ kinds are required before the viewer can promise every animated object.
 
 ### 4.3 Skeletons and animation
 
-Static-pose or animation support and remaining omissions are stated in the object description.
-
 ### 4.4 Behaviors, triggers, and scripted objects
 
-#### Music: Song storage and selector behavior
+#### Song storage and selector behavior
 
 [evidence: ROM bytes] All tune files are RNC1. Relevant archive extents are:
 
@@ -516,11 +500,9 @@ resolves Training. The context of `bugsb` remains [open question].
 
 ### 5.1 Audio storage and banks
 
-Audio storage is described with the sequence and bank tables below.
-
 ### 5.2 Sequence format and driver
 
-#### Music: Driver and banks
+#### Driver and banks
 
 [evidence: ROM bytes, disassembly, RAM, audio analysis] Audio is Software Creations Nintendo 64 Sound
 Tools `libmus`, song format `0x215`, running over standard Nintendo ABI1—not
@@ -552,7 +534,7 @@ sample bank starts at `0x8D1800` and its used range ends at `0xBAD860`
 (0–26, 205–270). Songs collectively map 173 other waves; songs may share
 samples with one another, but the aggregate song set is disjoint from SFX.
 
-#### Music: Complete music-player list and loops
+#### Complete music-player list and loops
 
 [evidence: ROM bytes, disassembly, deterministic decoding] Loop samples are in the 22,047-Hz renderer domain.
 All looped tracks wrap every stream; `dead` and `bugtoken` terminate.
@@ -583,7 +565,7 @@ All looped tracks wrap every stream; `dead` and `bugtoken` terminate.
 The 1–15 names follow the exact shared internal level ID space. The UI should
 list 20 unique files, not duplicate selector aliases 16 and 22.
 
-#### Unused and hidden content: Unreferenced audio waves
+#### Unreferenced audio waves
 
 [evidence: ROM bytes, deterministic decoding] Five valid VADPCM waves are referenced by neither any song
 nor the 93-entry BFX bank:
@@ -600,17 +582,13 @@ Their intended sounds cannot be named from static data alone.
 
 ### 5.3 Instruments and sample encoding
 
-Instrument banks, envelopes, loops, and sample encoding are described above.
-
 ### 5.4 Music catalog and loop points
-
-The complete known song catalog and loop policy are included above.
 
 ## 6. Unused and hidden content
 
 ### 6.1 Unreferenced assets
 
-#### Unused and hidden content: No hidden 3-D map
+#### No hidden 3-D map
 
 [evidence: ROM bytes, deterministic decoding] The complete manifest contains no extra level directory or
 additional `level.dat`/`terrain.all` pair. All 17 gameplay datasets correspond
@@ -621,7 +599,7 @@ exact full paths, basenames inside resource descriptors, or verified filename
 generators: level pairs, creature names, actor/plant stems, music numbers,
 story panels, or demo paths.
 
-#### Unused and hidden content: Likely-unused result bitmap
+#### Likely-unused result bitmap
 
 **[ROM bytes; hypothesis unused]** `level96/lose.pic` is manifest record 418,
 stored at `0x790940..0x79698E` and RNC1-decoded to `0x88E8`. It is the sole
@@ -633,7 +611,7 @@ coverage by a known filename generator. Challenge UI explicitly names
 A numeric-index load has not been disproved, so call it **likely unused**, not
 proven unreachable.
 
-#### Unused and hidden content: Demo recordings and development residue
+#### Demo recordings and development residue
 
 **[ROM bytes; hypothesis record semantics]** `pad/path01.bin`, `path04.bin`,
 `path10.bin`, and `path13.bin` decode to patterned four-byte records and are
@@ -654,21 +632,15 @@ collision-view, or free-camera label was found. `MOVING CAMERA` and
 
 ### 6.2 Cut or inaccessible levels
 
-Candidate levels are distinguished from alternate, debug, and intentionally hidden retail content above.
-
 ### 6.3 Debug features
 
-Shipped debug strings and executable features are listed only when supported by a code or data reference.
-
 ### 6.4 Prototype or revision-specific content
-
-Source-archive and prototype material is explicitly distinguished from shipped retail data.
 
 ## 7. nviewer implementation
 
 ### 7.1 Module mapping
 
-#### Music: Viewer renderer mapping
+#### Viewer renderer mapping
 
 [evidence: nviewer source, ROM bytes, disassembly, deterministic decoding] Reuse `parseLibmusBank` and `renderLibmusSong` from
 `src/rom/music/libmus.ts` with `{ masterVolume: 0x3FFF, reverb: true }`. This
@@ -682,7 +654,7 @@ caches the parsed pointer and sample bank per source ROM. Its temporary
 contiguous bank assembly costs roughly 2.91 MiB and avoids a broader shared
 renderer API change.
 
-#### Mapping onto nviewer: Implemented modules
+#### Implemented modules
 
 The implementation lives in:
 
@@ -702,7 +674,7 @@ src/rom/bugslife/
 contract was needed. `music/libmus.ts` accepts independently verified loop
 bounds, while callers that omit them retain its existing bytecode probe.
 
-#### Mapping onto nviewer: Remaining difficulty
+#### Remaining difficulty
 
 | Remaining piece | Difficulty | Main risk |
 |---|---|---|
@@ -713,17 +685,13 @@ bounds, while callers that omit them retain its existing bytecode probe.
 
 ### 7.2 Supported features
 
-The Technical summary states the supported releases and principal decoded features.
-
 ### 7.3 Approximations and omissions
-
-Viewer approximations are distinguished from facts about the game formats.
 
 ## 8. Verification and remaining work
 
 ### 8.1 Verification evidence
 
-#### Mapping onto nviewer: Implementation verification
+#### Implementation verification
 
 [evidence: deterministic decoding, nviewer source] The focused US audit reads all 488 manifest records and
 all 17 levels: 8,437 placements, 8,269 recognized common models, 333,678
@@ -742,7 +710,7 @@ Offline comparison covers Training and the parallax decode. Final in-app
 Chromium checks loaded Training and Tunnels, exercised sky and layers, started
 Title music, and produced no console, page, or request errors.
 
-#### Verification evidence and limitations: Static verification
+#### Static verification
 
 The extractors compile and reproduce all 488 records. All 17 `level.dat`
 placement envelopes and all `.all` containers reach their structural
@@ -751,7 +719,7 @@ placements. The song loop
 analyzer executes every channel/master stream and avoids a prior fixed-duration
 probe ceiling that would miss long introductions.
 
-#### Verification evidence and limitations: Runtime capture evidence
+#### Runtime capture evidence
 
 [evidence: RAM, captured frames] `emulator/NOTES.md` records the one authorized session.
 It reached playable Training and retained:
@@ -774,7 +742,9 @@ it was stopped rather than reset or relaunched. No full level-load DMA or
 additional stage was captured. The child and lead both verified that no
 `mupen64plus` or `headless-*.sh` process remained.
 
-#### Verification evidence and limitations: Open questions and explicit limitations
+### 8.2 Known unknowns
+
+#### Open questions and explicit limitations
 
 1. The 110 classified negative, non-common, or secondary model attempts are
    omitted; malformed data after recognition of a common mesh still fails.
@@ -791,10 +761,4 @@ additional stage was captured. The child and lead both verified that no
    direct runtime branch trace.
 7. The runtime context of `bugsb.bin` remains unidentified.
 
-### 8.2 Known unknowns
-
-Unresolved semantics are labelled **Hypothesis** or **Open question** where they occur.
-
 ### 8.3 References
-
-External documentation, decompositions, and source archives are cited inline where used.
