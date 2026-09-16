@@ -99,6 +99,8 @@ segmented, VROM, and file-relative addresses are named at each use.
 
 ### 2.4 Compression formats
 
+Reference codec: [Rare `1173` and raw DEFLATE](compression/raw-deflate.md).
+
 #### Compression: rarezip "1173" (verified bit-exact against the game)
 
 | Offset | Size | Type | Field | Description |

@@ -73,6 +73,8 @@ structures directly. [evidence: emulator observation, ROM bytes]
 
 ### 2.4 Compression formats
 
+Reference codec: [chunked zlib](compression/chunked-zlib.md).
+
 #### Chunked-zlib container
 
 General compressed assets use zlib 1.0.4; the linked image contains Mark Adler's

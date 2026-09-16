@@ -177,6 +177,8 @@ union of the section-6 entries across all levels.
 
 ### 2.4 Compression formats
 
+Reference codec: [LZARI](compression/lzari.md).
+
 #### Codec (shared)
 
 - **New module `src/rom/lzari.ts`:** one function `lzariDecode(src: Uint8Array, offset: number): Uint8Array`, used by both games.

@@ -111,6 +111,9 @@ Music occupies files 6–21 as described in section 5.
 
 ### 2.4 Compression formats
 
+Reference codecs: [Rush 2049 LZSS](compression/rush-lzss.md) and
+[raw DEFLATE](compression/raw-deflate.md).
+
 #### 2.4.1 LZSS
 
 Flag bytes are consumed least-significant bit first. A set bit encodes one

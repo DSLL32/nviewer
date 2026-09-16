@@ -89,6 +89,8 @@ object files. No part of the code is compressed; nothing needs to be decompresse
 
 ### 2.4 Compression formats
 
+Reference codec: [raw DEFLATE](compression/raw-deflate.md).
+
 #### Compression: raw DEFLATE (both games, verified)
 
 Every compressed file in both ROMs is a **raw RFC 1951 DEFLATE stream**: no zlib/gzip header, no

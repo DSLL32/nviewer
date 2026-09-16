@@ -186,6 +186,8 @@ source).
 
 ### 2.4 Compression formats
 
+Reference codec: [`CMPR`/`SMSR00` slide-LZ](compression/smsr.md).
+
 #### Compression: `CMPR` + `SMSR00` slide-LZ (verified bit-exact)
 
 - **Inventory:**

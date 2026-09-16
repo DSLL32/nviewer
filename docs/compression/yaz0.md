@@ -30,4 +30,8 @@ emits valid streams, not the original game's exact compressed bytes. Both
 functions return 0 on success or −1 for malformed input or insufficient space.
 The maintained source is [codecs/yaz0.c](https://github.com/DSLL32/nviewer/blob/master/codecs/yaz0.c).
 
+Verification: Ocarina of Time's ROM stream at `0x84FB10` decoded to 47,408
+bytes (FNV-1a `98CBB1A1`), matching the viewer. Sanitized encoder round trips
+passed on prefixes up to 8,192 bytes.
+
 <<< ../../codecs/yaz0.c

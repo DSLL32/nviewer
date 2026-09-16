@@ -66,6 +66,8 @@ Linked RSP identifiers include F3DEX 1.23 at ROM `0x86970` and F3DLX 1.23 at
 
 ### 2.4 Compression formats
 
+Reference codec: [RNC methods 1 and 2](compression/rnc.md).
+
 #### Manifest
 
 [evidence: ROM bytes, deterministic decoding] The US manifest occupies `0xA89A0..0xABEC0`. Its 488

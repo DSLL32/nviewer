@@ -30,4 +30,9 @@ The encoder writes the token stream but not either game's outer size word.
 Neither function allocates memory. The maintained source is
 [codecs/hudson_lzss.hpp](https://github.com/DSLL32/nviewer/blob/master/codecs/hudson_lzss.hpp).
 
+Verification: a Bomberman 64 1 KiB-ring asset at ROM `0x302008` decoded to
+2,928 bytes (FNV-1a `D2678A0F`); a Bomberman Hero 4 KiB-ring asset at
+`0x47A4E0` decoded to 39,136 bytes (`DA147BE3`). Both match the viewer, and
+sanitized encoder round trips passed on prefixes up to 8,192 bytes.
+
 <<< ../../codecs/hudson_lzss.hpp{cpp}

@@ -31,4 +31,8 @@ without the game's outer decoded-size word. Both functions return 0 on success
 or −1 for malformed input or insufficient space. The maintained source is
 [codecs/yay0.c](https://github.com/DSLL32/nviewer/blob/master/codecs/yay0.c).
 
+Verification: The Second Attack's ROM stream at `0x69B8CC` decoded to 2,196
+bytes (FNV-1a `8C1EB5F1`), matching the viewer. Sanitized encoder round trips
+passed on prefixes up to 8,192 bytes.
+
 <<< ../../codecs/yay0.c

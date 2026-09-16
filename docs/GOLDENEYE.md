@@ -48,6 +48,8 @@ segmented, VROM, and file-relative addresses are named at each use.
 
 ### 2.4 Compression formats
 
+Reference codec: [Rare `1172` and raw DEFLATE](compression/raw-deflate.md).
+
 ### 2.5 Loading process
 
 #### Loading a stage in the emulator (verified; `notes/warp.md`)

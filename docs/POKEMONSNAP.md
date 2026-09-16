@@ -149,6 +149,8 @@ Different scenes reuse the same vram (splat `exclusive_ram_id`): 0x800F5D90 is m
 
 ### 2.4 Compression formats
 
+Reference codec: [VPK0](compression/vpk0.md).
+
 #### Compression
 
 **VPK0 is the only compression codec used by the identified loaders, with three located streams** (**verified**):

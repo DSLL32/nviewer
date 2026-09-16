@@ -69,6 +69,8 @@ adjacency check has zero gaps and zero overlaps across the entire ROM.
 
 ### 2.4 Compression formats
 
+Reference codec: [ERZ version 2](compression/erz2.md).
+
 #### Boot, executable layout, filesystem and compression
 
 The cartridge has a small resident loader, a compressed main load image, a

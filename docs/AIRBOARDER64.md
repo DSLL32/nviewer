@@ -77,6 +77,8 @@ The ROM contains `RSP Gfx ucode F3DLX 1.21 Yoshitaka Yasumoto Nintendo.` at J `0
 
 ### 2.4 Compression formats
 
+Reference codec: [Air Boarder LH5-family stream](compression/airboarder-lh5.md).
+
 #### Resource groups
 
 | J IDs | Storage and established role |

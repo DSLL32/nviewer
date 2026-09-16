@@ -120,6 +120,8 @@ Fixed-offset music data lies outside these level tables:
 
 ### 2.4 Compression formats
 
+Reference codec: [Rush 1 LZSS](compression/rush-lzss.md).
+
 All table-addressed files and the main executable use the same token syntax,
 but matches refer to an absolute position in a 4096-byte history ring. The ring
 is initially zero-filled and its write position starts at 1.

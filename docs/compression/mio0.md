@@ -32,4 +32,8 @@ bytes; it does not aim for a bit-identical rebuild. Both functions accept caller
 buffers and return 0 on success or −1 for malformed input or insufficient space.
 The maintained source is [codecs/mio0.c](https://github.com/DSLL32/nviewer/blob/master/codecs/mio0.c).
 
+Verification: Mario Kart 64's ROM stream at `0x132B50` decoded to 184,664
+bytes (FNV-1a `43BFF052`), matching the viewer. Sanitized encoder round trips
+passed on prefixes up to 8,192 bytes.
+
 <<< ../../codecs/mio0.c
