@@ -24,7 +24,7 @@ const samples: Sample[] = [
   { codec: 'rnc1', game: "A Bug's Life", rom: "Bug's Life, A (U) [!].z64", offset: 0x1B1C68, retail: 179193, decoded: 268368, scope: 'five regional manifests' },
   { codec: 'rnc2', game: "A Bug's Life", rom: "Bug's Life, A (U) [!].z64", offset: 0x5617E8, retail: 22456, decoded: 33344, scope: 'five regional manifests' },
   { codec: 'lh5', game: 'Air Boarder 64 J', rom: 'Airboarder 64 (J) [!].z64', offset: 0x56A8F4, retail: 583156, decoded: 1271176, scope: 'J/P compressed archives' },
-  { codec: 'erz2', game: 'Spider-Man', rom: 'Spider-Man (U) [!].z64', offset: 0x63218, retail: 35516, decoded: 65536, scope: 'boot blocks and archive leaves' },
+  { codec: 'erz2', game: 'Spider-Man', rom: 'Spider-Man (U) [!].z64', offset: 0x63218, retail: 35513, decoded: 65536, scope: 'boot blocks and archive leaves' },
   { codec: 'vpk0', game: 'Pokémon Snap', rom: 'Pokemon Snap (U) [!].z64', offset: 0xA0F830, retail: 316438, decoded: 997232, scope: 'three verified streams' },
   { codec: 'rare1172', game: 'GoldenEye 007', rom: 'GoldenEye 007 (U) [!].z64', offset: 0x21990, retail: 71760, decoded: 247120, scope: 'valid ROM tags' },
   { codec: 'rare1173', game: 'Perfect Dark', rom: 'Perfect Dark (U) (V1.0) [!].z64', offset: 0x3050, retail: 178722, decoded: 356240, scope: 'valid ROM tags' },

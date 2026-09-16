@@ -1,8 +1,12 @@
-/* Spider-Man ERZ version 2. Bounded decoder and greedy reference encoder. */
+/* Spider-Man ERZ version 2. Bounded decoder and minimum-size encoder. */
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
-#include "common/match_finder.hpp"
+#include <algorithm>
+#include <array>
+#include <new>
+#include <stdexcept>
+#include <vector>
 
 extern "C" {
 
@@ -88,7 +92,7 @@ int erz2_decode(const uint8_t *src, size_t size, uint8_t *dst,
         } else if (state == 3) { /* overlapping match or repeat */
             t1 = (t1 & 0xff00u) | next(&e);
             size_t distance = (size_t)t1 + 1;
-            if (distance > e.out) return -1;
+            if (distance > e.out || (size_t)t0 > e.cap - e.out) return -1;
             size_t from = e.out - distance;
             unsigned odd = t0 & 1u;
             t0 >>= 1;
@@ -184,20 +188,67 @@ static void emit_literals(Writer *w, const uint8_t *src,
 
 
 int erz2_encode(const uint8_t *src, size_t size, uint8_t *dst,
-                size_t cap, size_t *written) {
+                size_t cap, size_t *written) try {
     if (!src || !dst || !written || size > UINT32_MAX || cap < 19) return -1;
+    constexpr uint32_t absent = UINT32_MAX;
+    std::array<uint32_t, 65536> head;
+    head.fill(absent);
+    std::vector<uint32_t> previous(size, absent);
+    for (size_t at = 0; at + 1 < size; at++) {
+        unsigned pair = unsigned(src[at]) << 8 | src[at + 1];
+        previous[at] = head[pair];
+        head[pair] = uint32_t(at);
+    }
+
+    struct Choice { uint16_t length, distance; };
+    std::vector<Choice> choice(size);
+    std::vector<uint64_t> suffix(size + 1);
+    // Raw bytes do not change the control-bit phase. Minimizing bits therefore
+    // also minimizes the final byte count, including its one partial byte.
+    for (size_t at = size; at-- > 0;) {
+        uint64_t best = suffix[at + 1] + 9;
+        Choice selected{1, 0};
+        for (unsigned run = 12; run <= 72 && run <= size - at; run += 4) {
+            uint64_t bits = suffix[at + run] + run * 8 + 9;
+            if (bits < best) { best = bits; selected = {uint16_t(run), 0}; }
+        }
+        unsigned limit = unsigned(std::min<size_t>(263, size - at));
+        unsigned longest = 1;
+        // A pair chain finds every legal match, including the cheap length-two
+        // token. Candidates get farther away, so their distance cost cannot
+        // improve: only newly reached lengths need to be considered.
+        for (uint32_t from = previous[at]; from != absent && at - from <= 4096;
+             from = previous[from]) {
+            unsigned distance = unsigned(at - from);
+            if (longest >= limit) break;
+            if (src[from + longest] != src[at + longest]) continue;
+            unsigned length = 2;
+            while (length < limit && src[from + length] == src[at + length]) length++;
+            unsigned high = (distance - 1) >> 8;
+            unsigned offset_bits = 8 + (!high ? 1 : high == 1 ? 3 : high < 4 ? 4 : high < 8 ? 5 : 6);
+            unsigned first = std::max(longest + 1, distance <= 256 ? 2u : 3u);
+            for (unsigned count = first; count <= length; count++) {
+                unsigned token_bits = count == 2 ? 11 : offset_bits +
+                                      (count <= 5 ? 4 : count <= 8 ? 5 : 12);
+                uint64_t bits = suffix[at + count] + token_bits;
+                if (bits < best) { best = bits; selected = {uint16_t(count), uint16_t(distance)}; }
+            }
+            longest = std::max(longest, length);
+        }
+        suffix[at] = best;
+        choice[at] = selected;
+    }
+
     /* The first control byte contributes only bits 5..0; its top bits are skipped. */
     Writer w = {dst, cap, 19, 18, 6, 0};
     dst[18] = 0;
-    MatchFinder<4096, 263, 8> finder;
-    size_t pending_at = 0, pending = 0;
     for (size_t i = 0; i < size && !w.bad;) {
-        auto match = finder.find(src, size, i);
-        size_t count = match.length, distance = match.distance;
-        if (count) {
-            emit_literals(&w, src, pending_at, pending);
-            pending = 0;
-            if (count >= 9) {
+        size_t count = choice[i].length, distance = choice[i].distance;
+        if (distance) {
+            if (count == 2) {
+                emit_bit(&w, 1); emit_bit(&w, 1); emit_bit(&w, 0);
+                emit_byte(&w, unsigned(distance - 1));
+            } else if (count >= 9) {
                 emit_bit(&w, 1); emit_bit(&w, 1);
                 emit_bit(&w, 1); emit_bit(&w, 1);
                 emit_byte(&w, (unsigned)(count - 8));
@@ -210,20 +261,10 @@ int erz2_encode(const uint8_t *src, size_t size, uint8_t *dst,
                 emit_bit(&w, count >= 6);
                 if (count >= 6) emit_bit(&w, count == 7);
             }
-            emit_distance(&w, distance);
-        } else {
-            count = 1;
-            if (!pending) pending_at = i;
-            pending++;
-            if (pending == 72) {
-                emit_literals(&w, src, pending_at, pending);
-                pending = 0;
-            }
-        }
-        finder.advance(src, size, i, count);
+            if (count != 2) emit_distance(&w, distance);
+        } else emit_literals(&w, src, i, count);
         i += count;
     }
-    emit_literals(&w, src, pending_at, pending);
     for (unsigned i = 0; i < 4; i++) emit_bit(&w, 1);
     emit_byte(&w, 0); emit_bit(&w, 0); /* end escape */
     if (w.bad || w.pos - 18 > UINT32_MAX) return -1;
@@ -236,6 +277,10 @@ int erz2_encode(const uint8_t *src, size_t size, uint8_t *dst,
     memset(dst + 12, 0, 6);
     *written = w.pos;
     return 0;
+} catch (const std::bad_alloc &) {
+    return -1;
+} catch (const std::length_error &) {
+    return -1;
 }
 
 } /* extern "C" */
