@@ -4,10 +4,10 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#include <array>
 #include <new>
 #include <stdexcept>
 #include <vector>
-#include "common/hash_chain.hpp"
 
 extern "C" {
 
@@ -51,15 +51,20 @@ int mio0_encode(const uint8_t *src, size_t src_len, uint8_t *dst,
                 size_t dst_cap, size_t *dst_len) try {
     if (!src || !dst || !dst_len || src_len > UINT32_MAX ||
         src_len > SIZE_MAX / sizeof(uint64_t) - 1) return -1;
-    HashChain<MultiplyHash3> index(src_len);
+    constexpr uint32_t absent = UINT32_MAX;
+    std::array<uint32_t, 65536> head;
+    head.fill(absent);
+    std::vector<uint32_t> prev(src_len, absent);
     std::vector<uint8_t> longest(src_len, 0);
     std::vector<uint16_t> distance(src_len, 0);
     for (size_t i = 0; i + 2 < src_len; i++) {
-        uint32_t candidate = index.first(src, i);
+        uint32_t bytes = (uint32_t(src[i]) << 16) | (uint32_t(src[i + 1]) << 8) | src[i + 2];
+        unsigned hash = (bytes * 0x1e35a7bdu) >> 16;
+        uint32_t candidate = head[hash];
         unsigned limit = unsigned(src_len - i < 18 ? src_len - i : 18);
         unsigned best = 0;
-        for (; candidate != index.absent && i - candidate <= 4096;
-             candidate = index.previous(candidate)) {
+        for (; candidate != absent && i - candidate <= 4096;
+             candidate = prev[candidate]) {
             unsigned length = 0;
             while (length < limit && src[candidate + length] == src[i + length]) length++;
             if (length > best) {
@@ -69,7 +74,8 @@ int mio0_encode(const uint8_t *src, size_t src_len, uint8_t *dst,
             }
         }
         longest[i] = best >= 3 ? best : 0;
-        index.insert(src, i);
+        prev[i] = head[hash];
+        head[hash] = uint32_t(i);
     }
 
     // A control bit costs 1/8 byte. Rounding the final control word changes

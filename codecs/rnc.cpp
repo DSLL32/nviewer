@@ -11,7 +11,6 @@
 #include <stdexcept>
 #include <utility>
 #include <vector>
-#include "common/hash_chain.hpp"
 
 namespace {
 
@@ -31,10 +30,15 @@ using Matches = std::array<Match, 16>;
 // have the same distance cost. History continues across method-1 blocks.
 struct MatchIndex {
     const uint8_t *src;
-    HashChain<PairHash2> chain;
+    std::vector<uint32_t> previous;
 
-    MatchIndex(const uint8_t *data, size_t size) : src(data), chain(size) {
-        chain.build(src, size);
+    MatchIndex(const uint8_t *data, size_t size) : src(data), previous(size, absent) {
+        std::array<uint32_t, 65536> head;
+        head.fill(absent);
+        for (size_t i = 0; size - i >= 2; i++) {
+            unsigned key = unsigned(src[i]) << 8 | src[i + 1];
+            previous[i] = head[key]; head[key] = uint32_t(i);
+        }
     }
 
     std::vector<Matches> find(size_t start, unsigned size, unsigned window,
@@ -48,9 +52,9 @@ struct MatchIndex {
             size_t at = start + p;
             unsigned limit = std::min(max_length, size - p);
             unsigned visited = 0;
-            for (uint32_t candidate = chain.previous(uint32_t(at)); candidate != chain.absent &&
+            for (uint32_t candidate = previous[at]; candidate != absent &&
                  at - candidate <= window && visited++ < depth;
-                 candidate = chain.previous(candidate)) {
+                 candidate = previous[candidate]) {
                 unsigned distance = unsigned(at - candidate);
                 unsigned c = category(distance - 1);
                 Match &best = result[p][c];

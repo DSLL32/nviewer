@@ -1,13 +1,12 @@
-# Shared match index
+# Shared match search
 
-The C++ encoders share a hash-chain index for candidate back-references. The
-template takes a two- or three-byte hash policy, an index type, and an optional
-power-of-two link ring. It supports incremental insertion; the full-input
-variant can also be prebuilt. Each codec still sets its legal window and search
-depth, compares match bytes, and chooses its own token sequence and bitstream.
+The C++ encoders use one bounded, stack-only search for repeated byte strings.
+`Window`, `MaxLength`, candidate `Depth`, and optional `MaxDistance` are compile-time
+parameters. `find` returns a length and backward distance; `advance` records bytes
+after each emitted token. Each format still decides its own minimum worthwhile
+match, token layout, bit order, and end condition.
 
-The full-input variant allocates one link per byte; ring-backed variants use a
-fixed array. The index does not perform entropy coding or inspect game-specific
-containers. Its source is [codecs/common/hash_chain.hpp](https://github.com/DSLL32/nviewer/blob/master/codecs/common/hash_chain.hpp).
+This helper does not allocate, perform entropy coding, or inspect game-specific
+containers. Its source is [codecs/common/match_finder.hpp](https://github.com/DSLL32/nviewer/blob/master/codecs/common/match_finder.hpp).
 
-<<< ../../codecs/common/hash_chain.hpp{cpp}
+<<< ../../codecs/common/match_finder.hpp{cpp}

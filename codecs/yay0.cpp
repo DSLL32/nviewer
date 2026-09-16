@@ -9,7 +9,6 @@
 #include <new>
 #include <stdexcept>
 #include <vector>
-#include "common/hash_chain.hpp"
 
 namespace {
 
@@ -110,16 +109,21 @@ int yay0_decode(const uint8_t *src, size_t src_len, uint8_t *dst,
 int yay0_encode(const uint8_t *src, size_t src_len, uint8_t *dst,
                 size_t dst_cap, size_t *dst_len) try {
     if (!src || !dst || !dst_len || src_len > UINT32_MAX || dst_cap < 16) return -1;
-    HashChain<MultiplyHash3> index(src_len);
+    constexpr uint32_t absent = UINT32_MAX;
+    std::array<uint32_t, 65536> head;
+    head.fill(absent);
+    std::vector<uint32_t> prev(src_len, absent);
     std::vector<uint16_t> longest(src_len, 0), distance(src_len, 0);
     for (size_t i = 0; src_len - i >= 3; i++) {
+        uint32_t bytes = uint32_t(src[i]) << 16 | uint32_t(src[i + 1]) << 8 | src[i + 2];
+        unsigned hash = (bytes * 0x1e35a7bdu) >> 16;
         unsigned limit = unsigned(std::min<size_t>(273, src_len - i));
         unsigned best = 0;
         // Search every matching hash in the legal window. Hash collisions
         // are compared normally; every prefix of the longest match is legal.
-        for (uint32_t candidate = index.first(src, i);
-             candidate != index.absent && i - candidate <= 4096;
-             candidate = index.previous(candidate)) {
+        for (uint32_t candidate = head[hash];
+             candidate != absent && i - candidate <= 4096;
+             candidate = prev[candidate]) {
             if (best && src[candidate + best] != src[i + best]) continue;
             unsigned length = 0;
             while (length < limit && src[candidate + length] == src[i + length]) length++;
@@ -130,7 +134,8 @@ int yay0_encode(const uint8_t *src, size_t src_len, uint8_t *dst,
             }
         }
         longest[i] = best >= 3 ? best : 0;
-        index.insert(src, i);
+        prev[i] = head[hash];
+        head[hash] = uint32_t(i);
     }
 
     // State is (input position, tokens used modulo 32). Opening a control
