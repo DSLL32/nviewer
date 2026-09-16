@@ -12,15 +12,25 @@ zero-filled, 4 KiB circular dictionary whose initial write index is one. Copy
 and dictionary writes happen one byte at a time, so matches can overlap.
 
 The [C++ reference codec](https://github.com/DSLL32/nviewer/blob/master/codecs/rush_lzss.cpp)
-has separate functions for each variant. Its encoder uses one recent
-three-byte match per hash bucket, with a 4 KiB search limit. It emits valid
-streams without attempting to reproduce retail match choices.
+has separate entry points for the two variants and a shared encoder. The
+encoder searches the complete legal 4 KiB history for matches of lengths
+2–17, including Rush 1's initially zero-filled ring, then uses dynamic
+programming to minimize the byte count, including one flag byte per eight
+tokens and the terminating token. It does not try to reproduce retail token
+choices; multiple equally short streams can represent the same bytes.
 
-Verification: Rush 1's main image at `0x7A7930` decoded to 509,264 bytes
-(FNV-1a `16337489`), matching the viewer; re-encoding took 350,895 bytes
-(0.689× decoded size). Rush 2049 file 6, 3,232 stored bytes, decoded to 6,856
-bytes (`EF06A70D`) and re-encoded to 3,518 bytes (0.513× decoded size).
-Both round trips passed under sanitizers.
+Verification: the largest indexed Rush 1 stream at `0x2354C0` consumed
+570,270 retail bytes and decoded to 1,052,128 bytes. The encoder produced
+550,972 bytes in 0.35 seconds (`g++ -O3`), 3.38% below retail. The largest
+indexed Rush 2049 LZSS stream at `0x399370` consumed 90,821 bytes (excluding
+11 archive-padding bytes) and decoded to 219,288; the encoder produced 88,856
+bytes in 0.30 seconds, 2.16% below retail. Both were checked byte-for-byte
+with the C++ and independent viewer decoders. Across the complete indexed
+corpora, all 69 unique Rush 1 streams (including the main image) improved,
+with aggregate bytes 6,333,101 → 6,095,212; all 48 Rush 2049 LZSS files
+improved, 619,752 → 602,530. An AddressSanitizer/UBSan run passed 1,600
+mixed-pattern round trips, including 4 KiB boundary cases and short-capacity
+checks.
 
 ## Reference source
 
