@@ -192,13 +192,13 @@ The viewer does not need VPK0 for levels. It needs it only for menu or title ima
 
 | claim | evidence |
 |---|---|
-| Headers, CRCs, CIC-6103, hashes of 9 dumps | `fs/romid.py` → `fs/romid.txt` (recomputes CRC1/CRC2) |
+| Headers, CRCs, CIC-6103, hashes of 9 dumps | ROM extraction → `fs/romid.txt` (recomputes CRC1/CRC2) |
 | Microcode strings, build string, gtl ucode table | ROM bytes (lead re-checked 0x45B98, 0x45FB8, 0x5EF80) |
-| 31 Overlay structs, invariants, per-dump layouts | `fs/ovlscan.py`, `fs/ovltables.py` → `fs/ovltables.txt`; lead re-checked the structs at 0x418C0 and 0x57580-0x575C8 |
-| Scene jump table, load lists, loader addresses | `fs/callsites.py` → `fs/callsites.txt` (const-propagated disassembly), `fs/disasm_scenemgr.txt`; independent parse `fs/proto/test_snapfs.ts` → `fs/snapfs_scenes.txt` (all 9 dumps). Lead re-checked the 25 table entries at ROM 0x57A08 (7/10/16 → loop head 0x8009B560; 11 = 13; 17-20 shared) |
-| Position dependence, vram → ROM rule | `fs/reloc.py` → `fs/reloc.txt` (relocation word-diff US vs Station/E/J); `test_snapfs.ts`: every self-pointer of every level's assets resolves back into its segment |
+| 31 Overlay structs, invariants, per-dump layouts | ROM extraction, ROM extraction → `fs/ovltables.txt`; lead re-checked the structs at 0x418C0 and 0x57580-0x575C8 |
+| Scene jump table, load lists, loader addresses | ROM extraction → `fs/callsites.txt` (const-propagated disassembly), `fs/disasm_scenemgr.txt`; independent parse `fs/proto/test_snapfs.ts` → `fs/snapfs_scenes.txt` (all 9 dumps). Lead re-checked the 25 table entries at ROM 0x57A08 (7/10/16 → loop head 0x8009B560; 11 = 13; 17-20 shared) |
+| Position dependence, vram → ROM rule | ROM extraction → `fs/reloc.txt` (relocation word-diff US vs Station/E/J); `test_snapfs.ts`: every self-pointer of every level's assets resolves back into its segment |
 | VPK0 streams and format | `fs/proto/test.ts`: ALL OK (sizes, consumed lengths, padding, md5 equal to the decomp's Python codec); lead re-ran it |
-| ROM map coverage, AE0510 unreferenced | `fs/romrefs.py` → `fs/romrefs.txt`, `fs/entropy.txt` |
+| ROM map coverage, AE0510 unreferenced | ROM extraction → `fs/romrefs.txt`, `fs/entropy.txt` |
 | Names | ROM strings (lead re-checked 0x5AD90 table, "Rainbow Cloud" 0x98BA68, "Pokémon Lab" 0x7C6427, `%s Course` 0x8A62EC and 0x9A59E8) |
 
 ### 2.5 Loading process
@@ -239,7 +239,7 @@ Suggested viewer names: the table names, with "Rainbow Cloud" taken from dialogu
 
 #### Scenes
 
-`start_scene_manager` (0x8009B49C) first loads more_funcs (rom 0x5BF20-0x5F050 → 0x800BF080, persistent). It then runs the intro (`intro_code` + a VPK0 buffer) and sets scene 8 (main menu). **Verified** from ROM bytes (`fs/callsites.py`).
+`start_scene_manager` (0x8009B49C) first loads more_funcs (rom 0x5BF20-0x5F050 → 0x800BF080, persistent). It then runs the intro (`intro_code` + a VPK0 buffer) and sets scene 8 (main menu). **Verified** from ROM bytes (ROM extraction).
 
 The loop dispatches the scene id through a **25-entry jump table at 0x800AC058 (ROM 0x57A08)**. Each case loads its overlays, calls the scene entry, and takes the return value as the next scene (**verified**). The level cases call `loadLevelPlay` 0x8009AE0C:
 1. `world`;
@@ -560,7 +560,7 @@ Lights1 at ROM 0x5A580 (VRAM 0x800AEBD0), known fields:
 - All seven course `*_assets`/`*_extra` pairs were scanned: 1,574 manifest-delimited
   assets and an independent 1,130 plausible terminated F3DEX2 geometry streams. Every
   geometry stream, vertex array and unique texture image has a pointer from the actual
-  loaded source set (**verified** by `un/assets/audit_assets.py` → `audit.json`). No
+  loaded source set (**verified** by ROM analysis → `audit.json`). No
   orphaned model or course-sized world was found.
 - The large 1,972-triangle forest/landscape in `main_menu_vpk0` is unique, but it is the
   visible opening cinematic, not a hidden course: scene 8 constructs and animates its five
@@ -973,9 +973,9 @@ Cart height minus the height-map ground along every rail sample (**verified**, `
 
 | claim | evidence |
 |---|---|
-| WorldSetup layout and per-course values | `lv/proto/rom.ts`, `lv/dumpworld.py`; lead re-checked all 7 records in ROM |
-| Blocks, render functions, placement ×100 | `lv/dumpblocks.py`, `lv/dumps/{course}.json`; path continuity across block joins (0.1 unit) in `lv/paths/*.json` |
-| Display-list structure, opcode histogram, render modes, combiners | `lv/dlscan.py` over every course list |
+| WorldSetup layout and per-course values | `lv/proto/rom.ts`, ROM extraction; lead re-checked all 7 records in ROM |
+| Blocks, render functions, placement ×100 | ROM extraction, `lv/dumps/{course}.json`; path continuity across block joins (0.1 unit) in `lv/paths/*.json` |
+| Display-list structure, opcode histogram, render modes, combiners | ROM scan over every course list |
 | Fog list bytes | ROM 0x5A430 (lead re-checked: `E7 \| DB080000 16BAEABB \| F8 3C6EB400 \| E3 \| E2 C8112078 \| D9 set G_FOG \| DF`) |
 | Material record layout | Volcano block 0 material 0 vs decomp `volcano/world/block0.c` |
 | AnimCmd and InterpData decode | `lv/proto/anim.ts` over all course scripts; ground check `lv/proto/check_ground.ts` → `lv/dumps/ground_check.txt` (5 of 6 courses at median ≤ 3 units) |
@@ -1338,7 +1338,7 @@ The same ROM offsets are repeated in a 7-word table at ROM 0x42FF8 (**verified**
 
 Not modelled: reverb, the instrument-78 vibrato (6 songs), voice stealing (the renderer drops 1-13 notes in songs 11, 16, 18, 23, 31 and 36; peak 18 voices), and the decay-phase recompute.
 
-**Checked against captured game audio** (**verified**, `mus/cap/cap1.raw`, `mus/compare.py`). One continuous headless capture ran from boot to the Beach course, with the song ids read from RAM:
+**Checked against captured game audio** (**verified**, `mus/cap/cap1.raw`, cross-check). One continuous headless capture ran from boot to the Beach course, with the song ids read from RAM:
 
 | piece | song | envelope NCC | waveform corr. | level game/render |
 |---|---|---|---|---|
@@ -1367,7 +1367,7 @@ Track list: the 37 rows of *Song list*, `index` = song id, `name` = viewer name 
 | All 37 sequences and both banks parse | `mus/survey.ts` → `mus/survey.json` with the repo's unchanged modules |
 | CC 21 values, loops, instruments | `mus/ccdump.ts`, `mus/chk_cc7.ts`, `mus/proto/stats.ts` |
 | Song ids at runtime | RDRAM dumps `mus/cap/ram1..9.bin` (`auBGMSongId` 0x800943D0) |
-| Renders = game | `mus/cap/cap1.raw` + `cap1.log` (32006 Hz), `mus/compare.py` (table in *Rendering and reuse*); flute table ROM 0x5232D0 (lead re-checked) |
+| Renders = game | `mus/cap/cap1.raw` + `cap1.log` (32006 Hz), cross-check (table in *Rendering and reuse*); flute table ROM 0x5232D0 (lead re-checked) |
 
 - Song names 15, 18, 19, 20, 21, 24 and 26 are context hypotheses. 26 (Course Select) was not heard at runtime.
 - Song 28 (Mew) loops only a 1.5 s tail by the per-track analysis; not checked by ear.
@@ -1382,7 +1382,7 @@ Track list: the 37 rows of *Song list*, `index` = song id, `name` = viewer name 
 All 37 music sequences are selected somewhere, and 86 unselected music-bank instrument
 slots contribute no exclusive sample: all 84 music wavetables are used by selected
 programs or percussion (**verified** by sequence/instrument parse;
-`un/bankwaves.py`). The second custom reverb preset is unreachable because the only
+audio analysis). The second custom reverb preset is unreachable because the only
 `auSetReverbType` call always selects type 6 (**verified** by call/constant scan; the
 preset's structure is decomp evidence).
 
@@ -1467,12 +1467,12 @@ ordinary retail calls and all declared animation sound-event tables.
 
 | claim | evidence |
 |---|---|
-| Scene 24 unreachable/obsolete; printer compositor; anti-piracy payload and save effect; opening trees | `un/scene/analyze_scene.py` → `analysis.json`; `SCENE_UNUSED.md`; decoded printer notice |
-| Preset photo block layout, regional identity and Station-only consumer | `un/photos2.py` → `photos.json`; independent `un/photos_render/analyze_presets.py` → `summary.json`; Station/US disassembly; reconstructed Doduo PNG |
-| No orphaned course geometry/images; Jynx palettes; render-state remnants; Beach FX sets; version identity | `un/assets/audit_assets.py` → `audit.json`; `REPORT.md`; decoded sprite sheets |
+| Scene 24 unreachable/obsolete; printer compositor; anti-piracy payload and save effect; opening trees | ROM analysis → `analysis.json`; `SCENE_UNUSED.md`; decoded printer notice |
+| Preset photo block layout, regional identity and Station-only consumer | ROM analysis → `photos.json`; independent render comparison → `summary.json`; Station/US disassembly; reconstructed Doduo PNG |
+| No orphaned course geometry/images; Jynx palettes; render-state remnants; Beach FX sets; version identity | ROM analysis → `audit.json`; `REPORT.md`; decoded sprite sheets |
 | Object-table negative, dormant controllers, Pikachu node flags, Signs and egg 601 | `un/objects/pikachu_audit.ts`, `pikachu_nodes.ts`; decoded renders; `OBJECT_ANIMATION_AUDIT.md` |
-| 342/400 triggered SFX, 56 aliases, unique ids 126/305 | `un/sfx/analyze_refs.py`, `scan_animation_ids.py`, `bank_inventory.ts`, `summarize.py`; JSON inventories; decoded WAVs |
-| Crash/debug/text/audio-bank remnants | `un/dbgcalls.py`, `strrefs.py`, `bankwaves.py`; `un/jp_strings.txt`; decomp call sites |
+| 342/400 triggered SFX, 56 aliases, unique ids 126/305 | ROM extraction, ROM scan, `bank_inventory.ts`, ROM analysis; JSON inventories; decoded WAVs |
+| Crash/debug/text/audio-bank remnants | ROM analysis, ROM extraction, audio analysis; `un/jp_strings.txt`; decomp call sites |
 
 This pass treats a byte pattern as unused only after following the game's loaded-segment
 set, direct and constructed code pointers, object/material tables and opaque animation
@@ -1503,7 +1503,7 @@ in `un/scene/SCENE_UNUSED.md`).
 #### Preset photographs retained in the standard ROM
 
 ROM 0xAE0510–0xAEFC10 is a complete preset save-photo block, not anonymous padding
-(**verified** by `un/photos2.py` → `un/photos.json`):
+(**verified** by ROM analysis → `un/photos.json`):
 
 - 4 × 0x3A0-byte Gallery `PhotoData` records;
 - 60 × 0x3E0-byte Album records (0x3A0 photo + 0x40 comment);
@@ -1600,14 +1600,14 @@ All captures come from one headless debug-core emulator in `rt/run-rt` (notes `n
 
 | claim | evidence |
 |---|---|
-| Warp to any scene | break at 0x8009B570 in the scene loop and write the id to `[sp+0x2C]` (`rt/cap.py warp`); courses 0-6 and the Lab load from boot with no save and no unlock |
+| Warp to any scene | break at 0x8009B570 in the scene loop and write the id to `[sp+0x2C]` (audio analysis); courses 0-6 and the Lab load from boot with no save and no unlock |
 | Load lists = *Scenes* | loader breakpoint log `rt/loads.txt` (116 calls: boot, 7 courses, Lab, menu); `createWorld` a0 = the *WorldSetup* WorldSetups |
-| RAM = ROM for drawn assets | `rt/segcmp.py` → `rt/dl/{label}_segcmp.txt`; the only differences are relocated height-map trees, filled hitbox matrices and variables |
-| Fog, clear, projection, viewport, render modes, combiners, sky modes, lights | 28 frame display lists captured at `osSpTaskStartGo` 0x80032E8C, walked by `rt/dlwalk2.py` → `rt/dl/*.txt` |
-| Rail start, path agreement, update rate, visibility | `gMovementState` (0x80366BA4) in `rt/d/*.bin`; `rt/ts/ramcam.ts`; `rt/vischeck.py` |
+| RAM = ROM for drawn assets | cross-check → `rt/dl/{label}_segcmp.txt`; the only differences are relocated height-map trees, filled hitbox matrices and variables |
+| Fog, clear, projection, viewport, render modes, combiners, sky modes, lights | 28 frame display lists captured at `osSpTaskStartGo` 0x80032E8C, walked by ROM analysis → `rt/dl/*.txt` |
+| Rail start, path agreement, update rate, visibility | `gMovementState` (0x80366BA4) in `rt/d/*.bin`; `rt/ts/ramcam.ts`; cross-check |
 | Renders = game | `rt/cmp/{course}.png` (screenshot, prototype from the RAM camera, difference). The lead viewed Beach: mean difference 17.4, from the HUD, animated material frames and the 1004 rock prop absent from the world-only render |
 | Material sub-lists | `rt/ts/matcmp.ts`: `lv/proto/gfx.ts` output equals the runtime segment 0x0E lists at the captured GlobalTimer |
-| Objects | `rt/objcheck.py` → `rt/obj/*.txt` (Beach positions, Pikachu node flags, light direction, Rainbow Cloud objects) |
+| Objects | cross-check → `rt/obj/*.txt` (Beach positions, Pikachu node flags, light direction, Rainbow Cloud objects) |
 | Lab 2D; opening landscape in the VPK0 buffer | `rt/dl/lab.txt`, `lab_b.txt`, `menu_a.txt`; `shots/lab_*.png`, `shots/menu_*.png` |
 
 ### 8.2 Known unknowns

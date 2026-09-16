@@ -242,7 +242,7 @@ There is no end marker; decoding stops when the output reaches the size.
 
 **Proof:**
 - At a breakpoint on `slidec`, the work buffer held ROM record 0x637C20. The 0x7E00-byte output in RDRAM equals
-  `layout/slide.py` and `layout/slide.ts` byte for byte.
+  ROM analysis and `layout/slide.ts` byte for byte.
 - All 702 records decode to exactly origsize.
 - The lead re-checked `slide.ts` (`slideDecode`, `readCmpr`, `dmaRead`) against the extracted files: 702 of 702
   are identical (`lead/slidecheck.ts`).
@@ -251,7 +251,7 @@ There is no end marker; decoding stops when the output reaches the size.
 
 #### Extraction
 
-`python3 layout/extract.py [rom] [outdir]` splits the whole ROM in about 2 s:
+ROM extraction splits the whole ROM in about 2 s:
 - output: 1,037 files plus the 702 raw CMPR records; `manifest.tsv` gives path, ROM start and size, kind,
   compression, output size, load address and segment.
 - checks: it asserts NYSJ revision 0, the `SegmentRomStart` values, the overlay chain, the padding, and gap-free
@@ -271,9 +271,9 @@ There is no end marker; decoding stops when the output reaches the size.
 | 4 | `SegmentRomStart[]` read at ROM 0xAC0E4; J `foregroundDMA` disassembly loads 0x800AB4E4 | {0x1060, 0, 0, 0x528430, 0xB16170, 0} | – |
 | 5 | Overlay chain walked through the trailer words | 308 modules from 0xB35EF0 to 0xE67FD0 exactly | `layout/ovl_names.tsv` |
 | 6 | Relocating overlays P_S_hand and P_S_heiho (Python) vs RDRAM | 0 differing words in 3,248 and 1,132 | `layout/r_ovl1.bin`, `r_ovl2.bin` |
-| 7 | Breakpoint on `slidec`, dump of its output | `slide.py` = `slide.ts` = RDRAM (0x7E00 bytes, record 0x637C20) | `layout/d1full.bin` |
+| 7 | Breakpoint on `slidec`, dump of its output | ROM analysis = `slide.ts` = RDRAM (0x7E00 bytes, record 0x637C20) | `layout/d1full.bin` |
 | 8 | All 702 CMPR records decoded | sizes exact; the lead's `slide.ts` check matches 702 of 702 extracted files | `lead/slidecheck.ts` |
-| 9 | `extract.py` re-run by the lead into a separate directory | identical manifest, 1,037 entries, full ROM coverage asserted | `lead/fs_check/` |
+| 9 | ROM extraction re-run by the lead into a separate directory | identical manifest, 1,037 entries, full ROM coverage asserted | `lead/fs_check/` |
 | 10 | Course-load DMA trace (Yoshi Select → 1-1) | 1,867 reads: cast tables, cells, units, 50 overlays, messages, world records | `layout/ltrace_lvl3.tsv`, `layout/level_load_summary.txt` |
 | 11 | Leak symbol matching (relocation-masked) | 8,397 J symbols | `layout/symbols_j.txt` |
 
@@ -440,7 +440,7 @@ a world that no warp row or exit record reaches (entered by code, or unused).
 
 | # | Check | Result | Files |
 |---|---|---|---|
-| 1 | Segment bases solved from data: `world+0x5C == world−8` in 30 of 30 entries; `castdt+0x18 == ID` | equal to `SegmentRomStart` | `level/ysrom.py` |
+| 1 | Segment bases solved from data: `world+0x5C == world−8` in 30 of 30 entries; `castdt+0x18 == ID` | equal to `SegmentRomStart` | ROM analysis |
 | 2 | All 143 world structs, 7,150 actor records and 273 BG casts parsed; every CMPR in them decodes | – | `level/worlds_J.json`, `level/layers_all.json` |
 | 3 | Breakpoint on `nextTo_newScene` from a fresh boot | (0, 0) logo … (0, 5) fruit select, (6, 2) Yoshi select, (7, 43) course 1-1 | – |
 | 4 | RDRAM in 1-1, 2-1 and 6-2 (level-select patch *How the game selects and loads a world (verified with breakpoints and RDRAM)*) | world copies equal ROM except +0x5C; 100/100, 112/112 and 84/84 actor records equal ROM | `level/r111a.bin`, `r111b.bin`, `r211a.bin`, `r621a.bin` |
@@ -841,7 +841,7 @@ At layer level, any delay or end command ends that layer's command run.
 - **Timing:** `velocitySquare = vel² / 16129`, `duration = gate × delay >> 8`, and the note is released once the
   remaining delay ≤ duration.
 - **Never used by J music:** portamento, filters, random variance, gain, headset effects and IO-port reads.
-- **Checked:** a static walk of all 62 sequences (`music/ys_audio.py`) finds 0 unknown opcodes and no out-of-range
+- **Checked:** a static walk of all 62 sequences (audio analysis) finds 0 unknown opcodes and no out-of-range
   addresses.
 
 **Bank formats.** Offsets are relative to the bank start.
@@ -1077,7 +1077,7 @@ For each BG cast placed in the world (*Scene table, scene and actor records (ver
 #### How the game builds a frame
 
 Everything here is verified against the running game unless marked: RSP task breakpoints, full RDRAM dumps at
-`osSpTaskLoad`, and display lists decoded with `render/dlwalk.py`. The source is the render agent's
+`osSpTaskLoad`, and display lists decoded with render comparison. The source is the render agent's
 `notes/render.md`, and the captured frames are in `render/f_*.{bin,task.json,dl.txt}`:
 - `f_title`: title screen;
 - `f_page1`: page-1 select;
@@ -1234,7 +1234,7 @@ A layer is a grid of **units** (16 × 16 px) grouped into **blocks** of 16 × 16
 
 Neither map has flip or priority bits (checked over all 273 layers).
 
-**To decode a layer to an image** (what `level/render_level.py` does):
+**To decode a layer to an image** (what render comparison does):
 
 ```
 for by in 0..worldH/256-1, bx in 0..worldW/256-1:
@@ -1690,10 +1690,10 @@ were read from the J/leak code.
 
 | # | Check | Result | Files |
 |---|---|---|---|
-| 1 | Leak interpreter functions vs J code (relocations masked) | 0 differences in six interpreters; `Nas_SubSeq` differs only in struct offsets | `music/codediff.py`, `music/leak/codematch.txt` |
-| 2 | AudioTables tile their segments exactly | 62 banks, 62 sequences, 2 sample banks | `music/ys_audio.py` |
-| 3 | Static walk of all 62 sequences | 0 unknown opcodes, no address out of range | `music/ys_audio.py` |
-| 4 | VADPCM decode vs stored loop states | 590 of 595 exact, 5 within ±1 | `music/vadpcm.py` |
+| 1 | Leak interpreter functions vs J code (relocations masked) | 0 differences in six interpreters; `Nas_SubSeq` differs only in struct offsets | audio analysis, `music/leak/codematch.txt` |
+| 2 | AudioTables tile their segments exactly | 62 banks, 62 sequences, 2 sample banks | audio analysis |
+| 3 | Static walk of all 62 sequences | 0 unknown opcodes, no address out of range | audio analysis |
+| 4 | VADPCM decode vs stored loop states | 590 of 595 exact, 5 within ±1 | audio analysis |
 | 5 | `aspMain` vs the leak; HLE detection | byte-identical; `nead_ys` | – |
 | 6 | RDRAM: `na_scene` and the loaded sequences at intro, title, Yoshi Select, 1-1 | 22 → seq 11; 36 → seq 12; 1 → seq 1 | `music/cap/r_*.bin` |
 | 7 | Audio captures vs renders | seq 11: NCC 0.813, chroma 0.959; seq 1: NCC 0.918, chroma 0.826; stretch 1.000 | `music/cap/run2.raw`, `music/out/` |
@@ -1831,7 +1831,7 @@ its script: `DD 7B` sets 123 BPM, i.e. 98.67 ticks per second, and the backward 
 | 2 | Per-world block match | plain `.wdt` worlds 97.9%, `_US` worlds 55.4% | `leak/world_match.json` |
 | 3 | `files.txt` sizes vs leak objects | 926 of 927 `.o` equal (the Apr 30 build) | – |
 | 4 | Register editor on a pad-1 patched copy | "Debug Registers 0" displayed | `leak/ys_regedit_pad1.z64`, `leak/regpad1_title_zdl.png` |
-| 5 | Crash-screen test on a patched copy (checksum recomputed with `leak/n64crc.py`) | crash reproduced; screen not observed (inconclusive) | `leak/ys_crash_World_to_Unit.z64`, `leak/crash_lastframe.png` |
+| 5 | Crash-screen test on a patched copy (checksum recomputed with ROM analysis) | crash reproduced; screen not observed (inconclusive) | `leak/ys_crash_World_to_Unit.z64`, `leak/crash_lastframe.png` |
 | 6 | Full ROM string scans | *Messages and strings* | `leak/rom_ascii.txt`, `leak/rom_eucjp.txt` |
 
 This section combines the ROM and the leak. **Evidence** says how each item was established, and **Conf.** gives
@@ -1895,7 +1895,7 @@ Details are in `notes/leak.md`; the byte matches are in `leak/obj_match.tsv` and
 
 | Feature | In J? | How to reach it | Evidence | Conf. |
 |---|---|---|---|---|
-| **Crash screen** (`LIB/y_fault.o`, the fault manager shared with the Zelda team) | yes: `.data` at ROM 0xAD2B0, strings at 0xB53D0–0xB5CA0, `.text` 93% (an older revision) | After a CPU exception, hold L+R+Z, then press D-Up, C-Down, C-Up, D-Down, D-Left, C-Left, C-Right, D-Right, B, A, START (string `KeyWaitB (ＬＲＺ 上下 上下 左左 右右 ＢＡスタート)`). The register, FPU, thread and stack pages then follow (KeyWaitA: A/B/C/START) | leak build flags `USE_FAULT=1 DISABLE_FAULT_DISPLAY=0`; key-wait state machine disassembled; J `.data` identical | bytes verified, high. A live test was **inconclusive**: a patched copy (`leak/ys_crash_World_to_Unit.z64`, checksum fixed with `leak/n64crc.py`) crashes at the 1-1 load and keeps polling the controller, consistent with the fault thread waiting. The key sequence was consumed but no screen appeared, probably because the fault screen is drawn by the CPU directly into the frame buffer, which the Glide64 plugin does not show (hypothesis) |
+| **Crash screen** (`LIB/y_fault.o`, the fault manager shared with the Zelda team) | yes: `.data` at ROM 0xAD2B0, strings at 0xB53D0–0xB5CA0, `.text` 93% (an older revision) | After a CPU exception, hold L+R+Z, then press D-Up, C-Down, C-Up, D-Down, D-Left, C-Left, C-Right, D-Right, B, A, START (string `KeyWaitB (ＬＲＺ 上下 上下 左左 右右 ＢＡスタート)`). The register, FPU, thread and stack pages then follow (KeyWaitA: A/B/C/START) | leak build flags `USE_FAULT=1 DISABLE_FAULT_DISPLAY=0`; key-wait state machine disassembled; J `.data` identical | bytes verified, high. A live test was **inconclusive**: a patched copy (`leak/ys_crash_World_to_Unit.z64`, checksum fixed with ROM analysis) crashes at the 1-1 load and keeps polling the controller, consistent with the fault thread waiting. The key sequence was consumed but no screen appeared, probably because the fault screen is drawn by the CPU directly into the frame buffer, which the Glide64 plugin does not show (hypothesis) |
 | **Debug register editor** (libbg `bg_debug.o`): register pages named after programmers (KOMATU, NISIWAKI, OTSUKI, TAKAHATA), string `禁断のレジスタ発動!!` ("forbidden register activated!!") | **J only**: `.text` at ROM 0x787B0, `.rodata` at 0xB7450. The leak's April 1998 build doesn't link it | Called every frame by J-only code at 0x80076FD4, gated by the word at 0x800AC6B8 (which is 1 while the game runs). Toggle: hold Z, press D-Left (help text `Z+ﾋﾀﾞﾘﾃﾞｷｴﾙﾖ`, "Z+Left makes it go away") | **verified live**: it reads **controller 2** (pad array 0x80112980 + 0x18), so hold Z + D-Left on pad 1 does nothing. A copy patched to read pad 1 (`leak/ys_regedit_pad1.z64`) opens **"Debug Registers 0"** on the title screen: R(0)–R(14) with VERBOSE, OAM SELECT (ReadOnly), FrameOffSetX/Y, and the help line "Z+ひだりできえるよ" (screenshot `leak/regpad1_title_zdl.png`). Navigation from disassembly (medium): Z + D-Up/Down/Right and START select pages and modes, the D-pad moves and steps, R + stick changes values | high |
 | Other libbg debug pages driven by the register system: `NEWRENDER_*`, `LOADGRAPH_*` (load-time graph), `BGTASK_TEST`, `OBJ2S_*`, `DRAWBITMAPTILE_MODE`, `RASTER_COPY/TILE` | strings at ROM 0xB66BC–0xB8630 | through the register editor | strings verified | low |
 | `osSyncPrintf` debug output (sound traces `NA :`, EEPROM, DMA, pad and thread logs, actor-spawn messages) | strings in J; no output sink in a retail build | needs an emulator hook on `osSyncPrintf` | strings verified | medium |
@@ -2064,7 +2064,7 @@ added later (*How the game builds a frame*).
 
 - **Filesystem and codec: low.** Fully specified and verified bit-exact; about 60 lines of TypeScript exist.
 - **Tile layers, parallax and level list: low to medium.** The formats are verified pixel-exact against the game's
-  buffers, and a Python renderer exists (`level/render_level.py`). The renderer work is a camera mode and toggles.
+  buffers, and a Python renderer exists (render comparison). The renderer work is a camera mode and toggles.
 - **Objects: medium.**
   - Unit sprite frames (Shy Guy family) and Yoshi's cells are verified byte-exact against RAM, and they use the
     same record system and codec as layers.
@@ -2085,7 +2085,7 @@ added later (*How the game builds a frame*).
 
 Captures used the audio-dump plugin (32,006 Hz AI stream) with RDRAM dumps to identify the loaded sequence.
 Comparisons are a 50 ms loudness envelope with normalised cross-correlation (NCC) and 12-bin chroma at the best
-alignment (`music/compare.py`, `music/chroma.py`).
+alignment.
 
 | Song | Window | Loudness NCC | Time stretch | Chroma at 0 semitones (±1) |
 |---|---|---|---|---|
@@ -2106,13 +2106,13 @@ breakpoints, and RDRAM dumps.
 | # | Check | Result | Files |
 |---|---|---|---|
 | 1 | Breakpoint on `osSpTaskLoad` 0x800870AC; OSTask read; full RDRAM dump | one gfx task per frame, S2DEX task microcode, FIFO buffer 0x80187AC0, alternating list buffers | `render/f_*.task.json`, `f_*.bin` |
-| 2 | Display lists decoded with `render/dlwalk.py` (S2DEX + F3DEX + RDP, following G_LOAD_UCODE and segments) | frames: title, page 1, 1-1 ×4, 2-1 ×2, 5-1, 6-2; 2–6 microcode switches per gameplay frame | `render/f_*.dl.txt`, `r621a.dl.txt` |
+| 2 | Display lists decoded with render comparison (S2DEX + F3DEX + RDP, following G_LOAD_UCODE and segments) | frames: title, page 1, 1-1 ×4, 2-1 ×2, 5-1, 6-2; 2–6 microcode switches per gameplay frame | `render/f_*.dl.txt`, `r621a.dl.txt` |
 | 3 | `ucode_info[]` in RAM | S2DEX and F3DEX.NoN text/data pointers equal the code-segment microcodes | – |
 | 4 | Projection matrix at seg13+0x70 | `translate(0,0,170.33) · guPerspective(40°, 4/3, 40, 5000)` | `render/f_111c.dl.txt` |
 | 5 | BG `G_BG_1CYC` imageX/imageY vs camera across frames | `imageX = P.x mod 336`, `imageY = (P.y + floor(P.x/336)) mod 256` with the *Parallax and scrolling* formula, exact to 1/32 px in 1-1, 2-1, 6-2 | `render/f_111a`–`f_111c`, `f_211a`, `f_211b` |
 | 6 | Per-frame sampler while Yoshi jumps in 6-2 (camX fixed, camY 784 → 768) | vertical slopes: main 1.000, enkei 0.621–0.623 | `render/s621_jump.tsv` |
 | 7 | Breakpoints on `set_bgScreenWPos` 0x8004E13C and `set_bgScrPosProc` 0x8004EBB8 | stored P and the (cam0, z, a) arguments match the formula | – |
-| 8 | Ring buffers vs the level decoder's layer PNGs | pixel-exact (main 0 differences) | `render/bgdump.py`, `level/out/043_world_1_1_1/` |
+| 8 | Ring buffers vs the level decoder's layer PNGs | pixel-exact (main 0 differences) | render comparison, `level/out/043_world_1_1_1/` |
 | 9 | Yoshi palettes 0 and 1 in ROM vs the in-game TLUT (green in 1-1, red in 5-1) | 256 of 256 entries equal | `render/out/yoshi_ucell_pal*.png` |
 | 10 | Captured Yoshi blobs vs leak cells | cells `playI_hey_075` and `playA_ashibumi_091` match by vertices and part textures; the textures are in ROM from 0x944370 | `render/out/yoshi_ucell_index.txt` |
 | 11 | Shy Guy RAM sprite texture vs decompressed ROM `ut` of cast 0x401F | frame 0 byte for byte; palette at ROM 0x567EF8 | `render/out/enemy_401f_extraHeiho_sheet.png` |

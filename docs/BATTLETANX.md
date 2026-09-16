@@ -169,18 +169,18 @@ Verified by static references, plus a dynamic check: 2500 `romread` calls logged
 - Chunks are deduplicated by offset into two lists: ctx+0x936C holds up to 256 texture chunks (read at 0x8008AA38) and ctx+0xA374 holds up to 1800 geometry chunks (read at 0x8008AB4C).
 - Stored data contains no segmented or absolute RAM pointers.
 
-##### Extracting every file
-- **Command:** `python3 btx/fs1/extract.py [ROM] [OUTDIR]`, about 30 s. It writes 5473 files as `NNNN_{romoff}_{name}.bin`, decoded where applicable.
-- **Index:** `index.csv` has the columns id, rom_offset, stored_size, decompressed_size, codec, first4, type_guess, name, group, filename, note and code_refs.
-- **Levels:** `levels.csv` holds the per-level mapping. Its ranges are indexed correctly by internal id, but **its level names are wrong** (taken from the menu-order table). Use the names in 4.2.2.
-- **How the pools are split:** chunk boundaries are the union of all levels' section-6 entries.
+##### Extraction boundaries
+
+The file table yields 5,473 extractable files. Level ranges use internal IDs;
+menu order must not be mistaken for those IDs. Pool chunk boundaries are the
+union of the section-6 entries across all levels.
 
 ### 2.4 Compression formats
 
 #### Codec (shared)
 
 - **New module `src/rom/lzari.ts`:** one function `lzariDecode(src: Uint8Array, offset: number): Uint8Array`, used by both games.
-  - Port it directly from `btx/fs2/lzari.py`, about 120 lines of TypeScript; the algorithm is specified in section 3.1.2.
+  - The stored algorithm is specified below; the shared decoder is used by both games.
   - Use typed arrays: `Uint16Array` for the symbol tables and `Int32Array` for `position_cum`.
   - Keep low/high/value as plain numbers: they stay below 2^18, and `range * cum` stays below 2^33, which is exact in doubles.
   - Allocate `size + 60` bytes and truncate.
@@ -195,16 +195,12 @@ Verified by static references, plus a dynamic check: 2500 `romread` calls logged
 | Check | Method | Result |
 |---|---|---|
 | GA main image uncompressed, RAM = ROM + 0x80070000 | Data pointer ROM 0xAB6D4 = 0x800732D4, which points to "WASHINGTON DC - MALL" at ROM 0x32D4 | Pass |
-| GA LZARI decoder | `fs2/lzari.py` decodes all 271 LZARI blobs; decoded world headers are self-consistent (h0 = 0x20, h7 = file size, whole record counts, e.g. common world 0x3F6EE8: 1 / 244 / 327 / 1200 records) | Pass |
+| GA LZARI decoder | ROM extraction decodes all 271 LZARI blobs; decoded world headers are self-consistent (h0 = 0x20, h7 = file size, whole record counts, e.g. common world 0x3F6EE8: 1 / 244 / 327 / 1200 records) | Pass |
 | GA level-file switch | Debug emulator, breakpoint at 0x800BA6C0 during the boot cutscene: level 0, mode 0, count 2, starts {0xB03F9B60, 0xB03FDA70}, ends {0xB03FCCB0, 0xB03FEA2A}, matching the cutscene column in 4.1 | Pass |
 | GA world coverage | Every byte of 0x3F6EE8-0x46F652 belongs to one of the 75 referenced world files | Pass |
-| BTX1 LZARI identical to GA | GA's decoder (`fs2/lzari.py`) decodes BTX1 internal level 0 (Cinematic) A (0x738900) to 0x7EC0 bytes with header [0x24, 0x304, …, 0x7EC0, 0x7EC0]; the BTX1 extractor decodes all 70 BTX1 LZARI files | Pass |
+| BTX1 LZARI identical to GA | GA's decoder (ROM extraction) decodes BTX1 internal level 0 (Cinematic) A (0x738900) to 0x7EC0 bytes with header [0x24, 0x304, …, 0x7EC0, 0x7EC0]; the BTX1 extractor decodes all 70 BTX1 LZARI files | Pass |
 | BTX1 file boundaries | Debug emulator: 2500 `romread` calls logged over three attract-demo loads of level 0; all start at an extracted boundary and stay inside it. One false boundary at 0x320018 was found and fixed. After load, the in-RAM read lists (133 texture, 778 geometry chunks) are a subset of level 0's static section-6 set (138 / 840) | Pass |
 | Cross-game leftover | The GA 0x100000 blob decodes byte-identical to BTX1 internal level 9 (Chicago - Bonus) A | Pass |
-
-Scripts and logs:
-- `fs1/extract.py`, `fs1/romlog.txt` (emulator read log)
-- `fs2/extract.py`, `fs2/lzari.py`, `fs2/xref.py`, `fs2/romrefs.py`
 
 ### 2.5 Loading process
 
@@ -1292,7 +1288,7 @@ Level numbers here are **internal ids** (4.2.1).
   | 13 | `??????????` | unused placeholder |
 
   **DUMMYHAHA is a hidden developer code that can't be entered.** The Input Code letter set (ROM 0xC5680, "BCDFGHJKLMN" "PQRSTVWXYZ") has no vowels, and the code contains U and A. It isn't in public code lists.
-- **Level codes** (checker 0x800DD544, reimplemented in `ref1/lcode.py`):
+- **Level codes** (checker 0x800DD544, reimplemented in ROM scan):
   - A code is 8 letters from the alphabet "BCFGHJKLMNPRSTVW" at RAM 0x80135778, giving a 32-bit value (4 bits per letter), plus 2 checksum letters: `((v*0x19660D + 95) & 0xFF) ^ 0xB2`.
   - Decoding: `v ^= 0xEFF8DF2B`, then undo the 16 bit-toggle pairs at 0x8013578C.
   - Fields: level = `v & 0x1F` (the internal id, valid 2..17), army = `(v >> 5) & 0x3F`, score = `((v >> 11) & 0x7FFF) * 1000`.
@@ -1340,9 +1336,9 @@ Level numbers here are **internal ids** (4.2.1).
   - `arena1.bin` and `arena1b.bin`: DL 0x8031B0F0
   - `bonus1.bin`: DL 0x8031B0F0
 - **Tools:**
-  - `dldump.py` (F3DEX 1.21 DL walker)
-  - `dlrender.py` (software render with the game matrices)
-  - `lcode.py` (level-code decoder and encoder)
+  - ROM extraction (F3DEX 1.21 DL walker)
+  - render comparison (software render with the game matrices)
+  - ROM analysis (level-code decoder and encoder)
   - `catchgfx.sh` (break on a graphics task and dump)
   - `goto_queens.sh` (power-on to Queens)
 

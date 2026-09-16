@@ -57,10 +57,10 @@ segmented, VROM, and file-relative addresses are named at each use.
 - **`code` VRAM** = `(bootBssStart + bootBssSize + dmadataSize + 0x1F) & ~0x1F`. `bootBssStart`/`size` come from the first
   instructions at ROM 0x1000 (`lui t0; addiu t0` = bss start; `li t1` or `lui/ori t1` = size). **Verified**: the formula
   gives an address under which the actor profiles of the internal actors (in `code`) carry their own ids, for all four
-  ROMs (`fs/tables.py`: `profileIdMatchesInternal = 3`). The loader only needs it for VRAM pointers inside `code` (MM entrance
+  ROMs (ROM extraction: `profileIdMatchesInternal = 3`). The loader only needs it for VRAM pointers inside `code` (MM entrance
   tables, actor profiles, debug names); scene, object and actor overlay tables store VROM ranges.
 - **Finding `code`:** the only file containing a run of at least 60 scene-table records whose VROM pairs match dmadata files.
-  In that file, by structure (`fs/tables.py`, **verified** in all four):
+  In that file, by structure (ROM extraction, **verified** in all four):
 
 | table | record | OoT US 1.0 (code offset, VRAM, count) | OoT MQ debug | MM US | MM debug PAL | how to find |
 |---|---|---|---|---|---|---|
@@ -72,7 +72,7 @@ segmented, VROM, and file-relative addresses are named at each use.
 | effect overlay table | 0x1C | 37 | 37 | 39 | 39 | similar to the actor table (do not confuse) |
 | game state table | 0x30 | 6 | 6 | 7 | 7 | contains the map select overlay (state 1) |
 
-The map select overlay (`ovl_select`, game state 1) is present in all four ROMs, including retail. Its list has 12-byte records (OoT US: 118 entries, MQ debug: 126, MM: 143). **Verified** (`fs/maps.py`).
+The map select overlay (`ovl_select`, game state 1) is present in all four ROMs, including retail. Its list has 12-byte records (OoT US: 118 entries, MQ debug: 126, MM: 143). **Verified** (ROM extraction).
 
 | Offset | Size | Type | Field | Description |
 |---:|---:|---|---|---|
@@ -89,7 +89,7 @@ The map select overlay (`ovl_select`, game state 1) is present in all four ROMs,
 
 #### Filesystem and compression
 
-**dmadata** (**verified**, `fs/verify_dma.py` decodes every file with an independent Yaz0 decoder and compares with the extraction):
+**dmadata** (**verified**, ROM extraction decodes every file with an independent Yaz0 decoder and compares with the extraction):
 
 The directory has 16-byte records and terminates when vromStart = vromEnd = 0 after record 0. Entry 2 describes the directory itself.
 
@@ -112,6 +112,9 @@ The directory has 16-byte records and terminates when vromStart = vromEnd = 0 af
 
 **Yaz0** (**verified** by decoding all 4488 compressed files).
 
+See the shared [Yaz0 format and C codec](./compression/yaz0.md) for the stream
+encoding. The `dmadata` rules above determine which files use it.
+
 | Offset | Size | Type | Field | Description |
 |---:|---:|---|---|---|
 | 0x00 | 4 | char[4] | magic | Yaz0 |
@@ -132,7 +135,7 @@ Copies may overlap. This is Nintendo EAD's standard Yaz0 format.
 pointer to it in `boot` at its load address 0x80000460 - 0x1060; 1532 names, identical to the decomp's list). MM debug PAL
 has no name table (no `makerom\0` string). Retail ROMs have none. Names for other versions can be derived: code-table owners
 give file names (scene files `{name}_scene`, rooms `{name}_room_N` / MM `{name}_room_NN`, objects, overlays): **verified**
-equal to the true names for 1011 (OoT US), 1020 (MQ debug) and 1183 (MM US) files (`fs/tables.py` vs the decomps'
+equal to the true names for 1011 (OoT US), 1020 (MQ debug) and 1183 (MM US) files (ROM extraction vs the decomps'
 `segments.csv` / the debug name table).
 
 ### 2.5 Loading process
@@ -147,7 +150,7 @@ equal to the true names for 1011 (OoT US), 1020 (MQ debug) and 1183 (MM US) file
 
 - A scene or room header may contain command 0x18: a list of segment pointers to alternate headers; slot `k` is used for
   layer `k + 1`, layer 0 is the main header. Room files have their own 0x18 lists that follow the same layer number.
-  **Verified** (`fs/scenes.py`; no alternate header changes a scene's room list in any of the four ROMs), **doc** (z_scene.c).
+  **Verified** (ROM extraction; no alternate header changes a scene's room list in any of the four ROMs), **doc** (z_scene.c).
 - **OoT layers:** 0 child day, 1 child night, 2 adult day, 3 adult night, 4+ cutscene layers (entrance cutscenes; layer =
   4 + cutscene index). A null slot falls back: layer 1 or 2 -> main header; layer 3 -> the adult day header if present,
   else the main header. **Doc** (`oot-decomp/src/code/z_scene.c` Scene_CommandAlternateHeaderList, `z_play.c`).
@@ -169,7 +172,7 @@ equal to the true names for 1011 (OoT US), 1020 (MQ debug) and 1183 (MM US) file
 extra entries directly after the main one (e.g. "Kakariko Village (adult, night)"), or as a variant selector if the UI gets
 one. The test maps (MQ debug 0x65-0x6D) and the MM debug placeholder scene only appear for debug ROMs.
 
-The full tables follow (generated from ROM data by `lead/leveltables.py`; group assignment and the English names
+The full tables follow (generated from ROM data by ROM analysis; group assignment and the English names
 without a ROM title are the lead's proposal / **doc**).
 
 #### Filesystem, tables and level list
@@ -186,15 +189,15 @@ without a ROM title are the lead's proposal / **doc**).
 | claim | method |
 |---|---|
 | hashes, header codes, build strings, byte order | ROM bytes (md5sum, sha1sum, xxd, string search) |
-| dmadata location and record rules, absent files, ordering | ROM bytes (`fs/verify_dma.py`) |
+| dmadata location and record rules, absent files, ordering | ROM bytes (ROM extraction) |
 | Yaz0 format | ROM bytes (independent decoder, all files match the C decoder's output) |
-| `code` VRAM formula | ROM bytes (internal actor profile ids line up, `fs/tables.py`) |
-| code table locations and sizes | ROM bytes (`fs/tables.py`) |
-| OoT entrance table size and position | ROM bytes (`lead/levels.py`) |
+| `code` VRAM formula | ROM bytes (internal actor profile ids line up, ROM extraction) |
+| code table locations and sizes | ROM bytes (ROM extraction) |
+| OoT entrance table size and position | ROM bytes (ROM analysis) |
 | file names derivable from code tables | ROM bytes vs decomp `segments.csv` / debug name table |
-| scene and room counts, alternate header presence, room lists unchanged by layers | ROM bytes (`fs/scenes.py`) |
-| MM scene titles from message data | ROM bytes (`lead/levels.py`) |
-| map select names | ROM bytes (`fs/maps.py`) |
+| scene and room counts, alternate header presence, room lists unchanged by layers | ROM bytes (ROM extraction) |
+| MM scene titles from message data | ROM bytes (ROM analysis) |
+| map select names | ROM bytes (ROM extraction) |
 | MQ debug dungeons differ from US 1.0; 76 scenes identical | ROM bytes (md5 per file) |
 | layer meanings and fallback | doc (z_scene.c); layer 0 matches the reference captures (sidecars: sceneLayer 0) |
 | sidebar grouping, English names of untitled scenes | doc / proposal |
@@ -211,7 +214,7 @@ without a ROM title are the lead's proposal / **doc**).
 #### Scene list and names
 
 A level is a scene: a scene file plus the room files listed by its command 0x04 (8-byte RomFile records). **Verified**
-(`fs/scenes.py`): OoT US 1.0 101 scenes / 388 rooms; OoT MQ debug 110 scenes / 401 rooms; MM US 102 scenes (11 unset ids) /
+(ROM extraction): OoT US 1.0 101 scenes / 388 rooms; OoT MQ debug 110 scenes / 401 rooms; MM US 102 scenes (11 unset ids) /
 299 rooms; MM debug PAL 113 ids / 310 rooms (the 11 ids unset in US all point to one extra debug-only file, dmadata 1559,
 with one room and 9 non-cutscene setups; not examined further).
 
@@ -230,7 +233,7 @@ Names from the game's own data:
   Text starts 11 bytes into
   a message and ends at byte 0xBF. This names 70 of the 102 MM scenes (e.g. 0x6F "South Clock Town", 0x2D "Termina Field");
   the rest have no title (boss rooms, moon, cutscene maps) or share one (Zora Cape shows "Great Bay Coast"). **Verified**
-  (ROM bytes, `lead/levels.py`). The MM debug PAL ROM keeps its message tables in another layout (not located; its scene
+  (ROM bytes, ROM analysis). The MM debug PAL ROM keeps its message tables in another layout (not located; its scene
   ids and files match US one-to-one, so the US names apply by id).
 - **OoT:** area names are title-card textures (`g_pn_*` files referenced by the scene table), not text. The ROMs' map
   select lists (Japanese kana, or `SPOTnn` for the overworld) give a name for most scenes (**verified**, ROM bytes).
@@ -429,7 +432,7 @@ Commands are eight bytes; pointers use segment 2 in scene files and segment 3 in
 
 A header ends at command 0x14 (loader: at most 64 commands; no other terminator). Layouts **doc** (`oot-decomp/include/scene.h`,
 `src/code/z_scene.c`; `mm-decomp/include/z64scene.h`, `src/code/z_scene.c`); usage counts **verified** for OoT US by
-`scene-oot/census.py` → `scene-oot/census-oot-us10.txt` (main headers, 101 scenes / 388 room headers).
+ROM scan → `scene-oot/census-oot-us10.txt` (main headers, 101 scenes / 388 room headers).
 
 | id | OoT name / MM name | data1 | data2 / bytes 4-7 | where | viewer use |
 |---|---|---|---|---|---|
@@ -507,7 +510,7 @@ Wind payload within scene command 0x05 (the complete command remains eight bytes
 
 ##### MM US vs debug PAL
 
-(**verified**, `scene-mm/compare2.py`, `scenes/mmdiff.py`; region attribution is coarse: a "region" runs from one pointer
+(**verified**, cross-check, cross-check; region attribution is coarse: a "region" runs from one pointer
 target to the next)
 - Rooms byte-identical except scenes 50 Z2_16GORON_HOUSE, 86 Z2_IKNINSIDE, 97 Z2_YADOYA, 101 Z2_LOST_WOODS (checkpoint).
 - 67 of 102 scene files identical after masking main-header room lists. Of the other 35, most differ only in
@@ -529,7 +532,7 @@ target to the next)
 #### Census: what kinds of actors the levels use
 
 Instances = entries over all unique room actor lists of all setups plus transition actors (`actors/counts_{rom}.tsv`, ROM
-bytes). Draw class from the decomp source of each actor (`lead/actorclass.py`): `dl` = draws fixed display lists,
+bytes). Draw class from the decomp source of each actor (ROM analysis): `dl` = draws fixed display lists,
 `dyna` = has a collision mesh (DynaPoly), `skel` = skeletal model, `none` = no draw function or effects only.
 
 | draw class | OoT US ids | OoT US instances | MM US ids | MM US instances |
@@ -714,7 +717,7 @@ State found at triangles (**verified**, OoT US census; MM similar in `report-mm-
 
 #### Textures and palettes
 
-Load sequence as stored (**verified**, `scenes/dldump.py oot-us10 1026 0x2790`):
+Load sequence as stored (**verified**, ROM extraction):
 ```
 FD100000 0201AB98   G_SETTIMG image
 F5100000 07014C53   G_SETTILE tile 7 (load tile): fmt, load siz, tmem
@@ -738,8 +741,8 @@ field and the load count; `sizeMismatchCount` in `scenes/renders/*.json`):
    multiply).
 
 The existing 4 KB tile-memory emulation truncates: OoT US has 1 649 G_LOADBLOCKs at the 0x7FF cap; MM US has 903 of
-11 021 texture uses larger than 4 KB (e.g. CI8 64×128, RGBA16 64×64) (**verified**, `scene-oot/census.py`,
-`scene-mm/texcensus.py`). Formats at triangles: RGBA16, CI4/CI8 (RGBA16 TLUT), I4/I8, IA4/IA8/IA16; sizes 4×4 to
+11 021 texture uses larger than 4 KB (e.g. CI8 64×128, RGBA16 64×64) (**verified**, ROM scan,
+ROM scan). Formats at triangles: RGBA16, CI4/CI8 (RGBA16 TLUT), I4/I8, IA4/IA8/IA16; sizes 4×4 to
 256×32.
 
 **Filtering**: the RDP's bilinear filter has texel centres at integer texel coordinates. Sampling with the GL convention
@@ -991,7 +994,7 @@ exactly with the room geometry. Dynamic collision (actors) is not in the scene f
   PRIM_ALPHA) ; (PRIM − ENV)·COMBINED + ENV` (a tinted greyscale sky). **Verified** against RAM: SCT day 12:50 →
   textures 1/1, colours 93 → prim (235,250,235) env (0,4,199); SCT night 23:08 → 0/0, colour 95 → prim (55,53,91) env
   (26,7,0); Termina Field 15:00 config 0 → 0/0, colour 1 → prim (255,255,255) env (0,15,69). Tables transcribed from the
-  decomp for the renderer by `scenes/mmtables.py` (**doc**); a loader must read them from code (offsets not located yet).
+  decomp for the renderer by ROM analysis (**doc**); a loader must read them from code (offsets not located yet).
 - The MM sky rotates: `skyboxCtx.rot.y −= R_TIME_SPEED·1e-4` per frame (**doc**); captured rot.y −0.2365 / −0.5875 /
   −0.8295 rad (**verified** RAM `PlayState+0x46E0+0x208`). A viewer uses 0.
 
@@ -1011,7 +1014,7 @@ exactly with the room geometry. Dynamic collision (actors) is not in the scene f
 | 0x12 | 2 | s16 | blendFog | Low 10 bits = fogNear; bits 10–15 × 4 = blend rate |
 | 0x14 | 2 | s16 | zFar | Far clip distance |
 
-**Verified**: `env/zenv.py` reproduces RAM `envCtx.lightSettings` exactly for every capture (via `scenes/env.ts`, *Lights used for rooms*).
+**Verified**: ROM analysis reproduces RAM `envCtx.lightSettings` exactly for every capture (via `scenes/env.ts`, *Lights used for rooms*).
 
 Which entry (**doc** `z_kankyo.c Environment_Update`; MM `Environment_UpdateLights`):
 - `lightMode` (command 0x11 byte 6) **1 (settings)**: entry `lightSetting`, 0 at scene start; changed at run time by floor
@@ -1115,7 +1118,7 @@ state, software rasteriser `scenes/raster.ts` (perspective-correct textures, scr
 full two-cycle combiner per pixel, TEX_EDGE coverage threshold, XLU blending, decal depth, near/far clipping, 2×2
 supersampling) → PNG (`png.ts`). Camera, time, room and layer come from the capture sidecar. `--mode viewer` renders what
 the viewer model gives (texture 0 × folded vertex colour). `scenes/runrefs.sh` renders all OoT captures;
-`scenes/sbs.py` builds side-by-sides and error numbers. The player, HUD, sun and particles are not rendered; static actors are drawn only in the *Verification by render* renders.
+render comparison builds side-by-sides and error numbers. The player, HUD, sun and particles are not rendered; static actors are drawn only in the *Verification by render* renders.
 
 | capture | render (full) | MAE all / best 75% / bias RGB | viewer model best 75% |
 |---|---|---|---|
@@ -1160,18 +1163,18 @@ combiners in the census (~21 000 OoT US triangles and ~1 300 MM tile-1 uses).
 
 | claim | method |
 |---|---|
-| Scene table layouts/locations, all 4 ROMs | structure finder `scenes/zscene.ts` used by renders of all ROMs; `scene-oot/zrom.py`, `scene-mm/mmscene.py` |
-| Header command usage counts (OoT) | `scene-oot/census.py` → `census-oot-*.txt` |
+| Scene table layouts/locations, all 4 ROMs | structure finder `scenes/zscene.ts` used by renders of all ROMs; ROM analysis, ROM analysis |
+| Header command usage counts (OoT) | ROM scan → `census-oot-*.txt` |
 | Mesh layouts and type counts | `zscene.ts parseMesh` in renders; `scene-oot/meshscan-*.txt`, `scene-mm/report-*.txt` |
-| JPEG backgrounds are baseline JFIF 320×240 | `scenes/bgimage.py` decode with Pillow, images inspected |
+| JPEG backgrounds are baseline JFIF 320×240 | ROM analysis decode with Pillow, images inspected |
 | Prerendered bg camera formula | collision rendered over JPEG, `sbs-oot-us10-prerendered.png` (visual) |
 | DL opcode set, render state, combiner census | `scene-oot/census-*.txt`, `scene-mm/report-mm-us.txt` |
-| Texture load sequence, direct-image model, TLUT indexing | `scenes/dldump.py`; renders; `sizeMismatchCount` 0 |
-| 4 KB model inadequate | census capped loads (OoT 1 649), `scene-mm/texcensus.py` (MM 903 > 4 KB) |
+| Texture load sequence, direct-image model, TLUT indexing | ROM extraction; renders; `sizeMismatchCount` 0 |
+| 4 KB model inadequate | census capped loads (OoT 1 649), ROM scan (MM 903 > 4 KB) |
 | Half-texel convention | render seam and error before/after (`scenes/renders/*-full.json` history in *Scenes, display lists, environment*) |
 | BRANCH_Z semantics | `scenes/branchz.ts` dumps |
 | Draw config table | decomp `z_scene_table.c`; renders SDC 1, 4, 19 |
-| Day/night pointer table location/values | `scenes/findsdc.py` ROM bytes (US, MQ) vs decomp XML offsets |
+| Day/night pointer table location/values | ROM analysis ROM bytes (US, MQ) vs decomp XML offsets |
 | MM animated materials | decomp `z_scene_proc.c`; renders SCT, Termina Field |
 | MM area texture table location | ROM scan (both MM ROMs), filelist names (`mm-decomp/tools/filelists/n64-us/all.csv`) |
 | Light settings layout and selection, sun direction | RAM (`ref/*/…txt` lightCtx/envCtx) equals `env.ts` output for every capture |
@@ -1187,8 +1190,8 @@ combiners in the census (~21 000 OoT US triangles and ~1 300 MM tile-1 uses).
 | Actor transform, MM rotation/half-day decoding, recipes | renders with actors vs screenshots (*Verification by render*) |
 | Dusk light and sky blends | RAM of `ref/oot-us10/hyrule-field-dusk-1` = `env.ts` output (sky fine1/fine2 blend 218); render |
 | Collision/waterbox layout | `camcheck.ts`, `render.ts --collision` overlays aligned with geometry |
-| OoT US vs MQ differences | `scenes/ootcmp.py`, `ootroomdiff.py`, `ootroomhdr.py` |
-| MM US vs debug PAL differences | `scene-mm/compare2.py`, `scenes/mmdiff.py`, pixel-identical SCT render |
+| OoT US vs MQ differences | cross-check, cross-check, ROM analysis |
+| MM US vs debug PAL differences | cross-check, cross-check, pixel-identical SCT render |
 
 #### Scenes and environment
 
@@ -1221,11 +1224,9 @@ combiners in the census (~21 000 OoT US triangles and ~1 300 MM tile-1 uses).
 
 #### Actors and objects
 
-Scripts and outputs: `lead/dumpscene.py` (lists of one scene/layer), `lead/actorclass.py` -> `lead/actors-{rom}.tsv`
-(every actor id used by the ROM: usage counts, category, object, scale, draw class, display lists resolved to
-object offsets and checked against the ROM), `lead/drawfuncs.py` -> `lead/drawfuncs-{rom}.txt` (init scale and
-draw function source of the 40 most used static actors), `actors/zdata.py`, `actors/count.py` -> `actors/counts_{rom}.tsv`
-(usage counts over all unique room actor lists of all setups), `fs/tables.py` (overlay/object tables).
+Actor IDs were enumerated across every unique room actor list and setup, then resolved through the ROM's
+overlay and object tables. Display-list pointers, draw functions, initial scale, and object offsets were
+cross-checked against ROM data for the most common static actors.
 
 #### Where actors come from
 
@@ -1241,9 +1242,9 @@ draw function source of the 40 most used static actors), `actors/zdata.py`, `act
 | actor overlay table | in `code` | 0x20-byte ActorOverlay below | OoT 471 ids, MM 690 ids; 3 internal actors (in `code`) have no RomFile |
 | actor profile | pointed to by the table | 0x20-byte ActorProfile below | category and objectId are readable generically from the ROM |
 
-**Verified** (ROM bytes: `lead/dumpscene.py oot-us10 0x55` Kokiri Forest and `lead/dumpscene.py mm-us 0x6F` South Clock Town
+**Verified** (ROM bytes: ROM extraction Kokiri Forest and ROM extraction South Clock Town
 give plausible positions inside the rooms, actor ids that match the rooms' object lists, and rotations as described below;
-table locations and counts from `fs/tables.py`, where the profile id equals the table index for 420 of 426 OoT and 571 of 573 MM
+table locations and counts from ROM extraction, where the profile id equals the table index for 420 of 426 OoT and 571 of 573 MM
 overlays; the debug ROMs carry name pointers for 429 (OoT) and 575 (MM) actors, the retail ROMs none).
 Record layouts: **doc** (`oot-decomp/include/scene.h`, `mm-decomp/include/z64scene.h`, `z64actor.h`).
 
@@ -1339,7 +1340,7 @@ MM cutscene-script entry, eight bytes:
 - **OoT:** `gEntranceTable` in `code`, 1556 four-byte EntranceTableEntry records, ending exactly where the scene
   table begins (found by structure: a run of records with sceneId <= 0x6E and spawn < 0x20 before the scene table; first
   record `00 00 41 02`). Entrance numbers come in groups of four for the layers child day, child night, adult day, adult
-  night, followed by cutscene entrances. **Verified** (both OoT ROMs: `lead/levels.py`), **doc** (`include/tables/entrance_table.h`).
+  night, followed by cutscene entrances. **Verified** (both OoT ROMs: ROM analysis), **doc** (`include/tables/entrance_table.h`).
   37 records of the US ROM (4 of the MQ debug ROM) name scene 0x6E, which does not exist (test scenes absent from retail).
 - **MM:** entrance = `(sceneEntranceIndex << 9) | (spawn << 4) | layer`; per-scene tables in `code`: 110 records
   with this 0x0C-byte descriptor; each pointed entry uses EntranceTableEntry below:
@@ -1351,7 +1352,7 @@ MM cutscene-script entry, eight bytes:
 | 0x04 | 4 | u32 | table | Linked pointer to entrance-pointer table |
 | 0x08 | 4 | u32 | name | Linked string pointer |
 
-A negative scene id is stored for some scenes; use its absolute value. **Verified** (`fs/maps.py` maps every map-select entrance of both
+A negative scene id is stored for some scenes; use its absolute value. **Verified** (ROM extraction maps every map-select entrance of both
   MM ROMs to a scene), **doc** (`mm-decomp` z_play/entrance code).
 - For a level view, spawn 0 (player entry referenced by entrance list entry 0) is the natural start marker; OoT and MM
   also start Link there when a scene is entered from the map select. **Doc** (z_select.c).
@@ -1396,15 +1397,15 @@ A negative scene id is stored for some scenes; use its absolute value. **Verifie
 
 | claim | method |
 |---|---|
-| actor/transition/spawn/entrance/object record layouts, OoT binary-angle rotations | ROM bytes (`lead/dumpscene.py oot-us10 0x55`) + doc (scene.h) |
-| MM id flags, degree rotations, cutscene id, half-day mask | ROM bytes (`lead/dumpscene.py mm-us 0x6F`) + doc (z_actor.c) |
-| overlay/object table locations and sizes, profile id = index | ROM bytes (`fs/tables.py`) |
+| actor/transition/spawn/entrance/object record layouts, OoT binary-angle rotations | ROM bytes (ROM extraction) + doc (scene.h) |
+| MM id flags, degree rotations, cutscene id, half-day mask | ROM bytes (ROM extraction) + doc (z_actor.c) |
+| overlay/object table locations and sizes, profile id = index | ROM bytes (ROM extraction) |
 | debug builds have actor name pointers, retail none | ROM bytes (`fs/tables-*.json`) |
-| OoT entrance table: 1556 records ending at the scene table | ROM bytes (`lead/levels.py`) |
-| usage counts and categories | ROM bytes (`actors/count.py`) + doc (profiles in source) |
-| draw classes, scales, params rules | doc (decomp source, `lead/actorclass.py`, `lead/drawfuncs-*.txt`) |
-| display-list offsets parse as display lists in each ROM | ROM bytes (`lead/actorclass.py`) |
-| object files that differ between versions | ROM bytes (`actors/objcmp.py`) |
+| OoT entrance table: 1556 records ending at the scene table | ROM bytes (ROM analysis) |
+| usage counts and categories | ROM bytes (ROM analysis) + doc (profiles in source) |
+| draw classes, scales, params rules | doc (decomp source, ROM analysis, `lead/drawfuncs-*.txt`) |
+| display-list offsets parse as display lists in each ROM | ROM bytes (ROM analysis) |
+| object files that differ between versions | ROM bytes (cross-check) |
 | draw transform (T, Ry Rx Rz, S, yOffset), scales, extra draw matrices, MM half-day mask | render vs screenshots (*Verification by render*): South Clock Town day/night, Kokiri Forest, Kakariko day/night |
 | static actors make up visible set pieces | render vs screenshots (*Verification by render*): tent, windmill, night torches |
 | MM degree rotations | ROM bytes + doc; render only with near-symmetric actors (weak test) |
@@ -1455,7 +1456,7 @@ Work dir: `zelda/music/`. Paths below are relative to it unless absolute.
 
 #### Audio data
 
-##### Files (verified: `scripts/tables.py` → `out/tables_summary.txt`; `render/probe.ts`)
+##### Files (verified: ROM tables and disassembly)
 
 | ROM | Audiobank (file 3) | Audioseq (file 4) | Audiotable (file 5) | code file |
 |---|---|---|---|---|
@@ -1714,8 +1715,7 @@ For SMALL_ADPCM, residual = `((code << 14) as s16) >> (14 − scale)` (scale ≥
 - MM: `delayNumSamples = max(windowSize, 4) · 64 / downsampleRate`, minimum 256 (doc MM `heap.c`
   AudioHeap_SetReverbData).
 
-##### US vs debug ROMs (verified: `scripts/compare.py` → `out/compare.txt`, `scripts/samplecmp.py` →
-`out/samplecmp_*.txt`, `scripts/seqscan.py` outputs diffed)
+##### US vs debug ROMs (verified: ROM table and sample comparisons)
 
 - **OoT US 1.0 vs MQ debug:** same seq→font map and table sizes. Sequences differ only in 0 (SFX, 1 byte), 42
   (NA_BGM_FIRE_TEMPLE: 0xE70 vs 0x1240 bytes, 7 vs 8 channels) and 109 (NA_BGM_CUTSCENE_EFFECTS). Sample bank 0
@@ -1734,7 +1734,7 @@ For SMALL_ADPCM, residual = `((code << 14) as s16) >> (14 − scale)` (scale ≥
 
 Sources: OoT `src/audio/internal/{seqplayer,playback,effects,heap,load,synthesis}.c`, MM `src/audio/lib/*.c`
 (doc); rsp-hle `alist_nead.c`/`alist.c` (doc for the emulated RSP); `sf64.ts` and `nas.ts` as ported in the viewer.
-Opcode argument sizes are **verified** by `scripts/seqscan.py`, a reachability disassembly of every distinct
+Opcode argument sizes are **verified** by audio analysis, a reachability disassembly of every distinct
 sequence in all four ROMs with the decomp argument tables: 0 unknown or undefined opcodes; one read past the end in
 OoT seq 2, which is the field-logic sequence loading other sequences into its own buffer at run time (*Majora's Mask (US; debug PAL identical except 0 and 43)*). Its
 coverage agrees with the decomp's own disassembler (`notes/songlist/disasm/oot-us10/*.seq`, 105 files): e.g.
@@ -1936,19 +1936,19 @@ No change is required for a flat list. Two optional additions help a 100+ song s
 
 | claim | method / evidence |
 |---|---|
-| audio files 3/4/5, raw; code file index per ROM | `scripts/tables.py` → `out/tables_summary.txt` |
+| audio files 3/4/5, raw; code file index per ROM | ROM analysis → `out/tables_summary.txt` |
 | table locations by structure and signature, code RAM base | `render/zdata.ts` + `render/probe.ts` on all four ROMs; RAM base reproduces decomp symbol addresses |
-| aliases, seq→font map, US vs debug differences | `scripts/tables.py`, `scripts/compare.py` → `out/compare.txt`; `scripts/samplecmp.py` → `out/samplecmp_*.txt` |
+| aliases, seq→font map, US vs debug differences | ROM analysis, cross-check → `out/compare.txt`; cross-check → `out/samplecmp_*.txt` |
 | font/sample layout, codec counts, loop predictor states (692/692, 700/700, 872/876) | `render/probe.ts` (zdata parser over every font) |
 | SMALL_ADPCM decoding | doc (synthesis.c, rsp-hle `adpcm_predict_frame_2bits`); renders with 2-bit samples match captures (e.g. Woodfall Temple) |
 | audio specs and reverb settings | `render/probe.ts` decode = decomp `session_config.c` values |
-| opcode argument sizes, coverage, 0 unknown opcodes | `scripts/seqscan.py` → `out/seqscan_{rom}.txt/json`; agrees with the decomp disassembler output `notes/songlist/disasm/oot-us10/*.seq` |
-| MM sequences identical to OoT ones (22) | md5 of every sequence (python snippet in this session, uses `scripts/seqscan.py` locator) |
+| opcode argument sizes, coverage, 0 unknown opcodes | audio analysis → `out/seqscan_{rom}.txt/json`; agrees with the decomp disassembler output `notes/songlist/disasm/oot-us10/*.seq` |
+| MM sequences identical to OoT ones (22) | md5 of every sequence (python snippet in this session, uses audio analysis locator) |
 | driver semantics (*Driver: differences from Star Fox 64 (`sf64.ts`) and Yoshi's Story (`nas.ts`)*) | doc (decomp sources named in *Driver: differences from Star Fox 64 (`sf64.ts`) and Yoshi's Story (`nas.ts`)*); rsp-hle for the RSP commands |
-| scene → sequence/spec | `notes/songlist/scenesound.py` output, 11/11 spot-checked against ROM scene headers via `fs/scenes-*.json` |
+| scene → sequence/spec | audio analysis output, 11/11 spot-checked against ROM scene headers via `fs/scenes-*.json` |
 | loops and lengths of every sequence | `render/scanall.ts` → `out/renderscan_*.json` (+ `_extra` for Water Temple) |
-| field logic loads parts, MM 29 day mapping, RUNSEQ chains | renders with logs (`wav/*.json`, `out/renderscan_*.json`), `scripts/seqdump.py` → `out/seqdump_oot-us10_002.txt` |
-| renders match the game | `scripts/compare.py` on the captures (*Verification against captured game audio*); RAM dumps for the active sequences |
+| field logic loads parts, MM 29 day mapping, RUNSEQ chains | renders with logs (`wav/*.json`, `out/renderscan_*.json`), audio analysis → `out/seqdump_oot-us10_002.txt` |
+| renders match the game | cross-check on the captures (*Verification against captured game audio*); RAM dumps for the active sequences |
 | OoT US 1.0 BGM player at RAM 0x80128B60, per-scene tempo/fade/volume scale/IO | lead RAM dumps `runs/lead-ootus-1/{dt1,kv1,lh3,me1,lk1}.bin` decoded with the decomp `SequencePlayer` layout (python snippet in this session) |
 | Market Entrance BGM volume scale 90/127 explains −6 dB | render with `--volscale 0.708661` vs capture (*Verification against captured game audio*) |
 | menus use spec 10; title OoT spec 10 (Hyrule Field header alt 7), MM title Clock Tower alt 1 spec 0 | doc (`z_file_choose.c`), scene sound table, captures |
@@ -1982,7 +1982,7 @@ No change is required for a flat list. Two optional additions help a 100+ song s
 
 ##### How the tables were made
 
-`scripts/songlist.py` → `out/songlist_{rom}.tsv` / `.md`, from:
+audio analysis → `out/songlist_{rom}.tsv` / `.md`, from:
 - **enum names** (doc: `include/tables/sequence_table.h`, condensed in `oot_seq_enum.txt` / `mm_seq_enum.txt`),
   including the sequence flags (FANFARE, ENEMY, RESUME, RESUME_PREV, RESTORE, NO_AMBIENCE, SKIP_HARP_INTRO);
 - **fonts** from the ROM's seq→font map and **loops** from a full render of each sequence (`render/scanall.ts`,
@@ -1993,13 +1993,13 @@ No change is required for a flat list. Two optional additions help a 100+ song s
 - **cutscene uses** from a heuristic scan for cutscene START_SEQ commands in scene files (`cutsceneseq_{rom}.tsv`;
   hypothesis-grade, not all cutscenes live in scene files);
 - **code uses** from a grep of the decomp for the enum name (doc, `callsites_{game}.tsv`; overlay or file names).
-- **Names:** OoT names are the community names used by the OoT Randomizer's `Music.py` (fetched, community-
+- **Names:** OoT names are the community names used by the OoT Randomizer's audio analysis (fetched, community-
   derived) where one exists, else the enum name made readable; MM names are the enum names made readable (the
   games have no sound test).
 - **kind:** sfx player / ambience / logic / field part / ocarina (font 0 or OCARINA in the name) / fanfare (FANFARE
   flag: played on the fanfare player) / jingle-cutscene (music that ends) / music (loops).
 
-MQ debug and MM debug PAL use the same ids and names; their only different sequences are listed in *US vs debug ROMs (verified: `scripts/compare.py` → `out/compare.txt`, `scripts/samplecmp.py` →*.
+MQ debug and MM debug PAL use the same IDs and names; their differing sequences are listed under *US vs debug ROMs*.
 
 ##### Majora's Mask (US; debug PAL identical except 0 and 43)
 
@@ -2284,11 +2284,11 @@ not yet verified by render). Params rules and scales: **doc** (actor source; `le
 - Actor ids and object ids are identical across the versions of each game (same tables: OoT 471/402, MM 690/643).
   **Verified** (table sizes; profile ids).
 - Object files: OoT US vs MQ debug: 267 identical, 115 differ (sizes or bytes, e.g. gameplay_keep); MM US vs debug PAL:
-  453 identical, 12 differ. **Verified** (`actors/objcmp.py`). So display-list offsets must be per version.
+  453 identical, 12 differ. **Verified** (cross-check). So display-list offsets must be per version.
 - Of the display-list offsets resolved from the decomp XMLs, 589 parse as display lists in OoT US (9 fail), 568 in MQ debug
   (18 fail), 901 in MM US (4 fail), 892 in MM debug PAL (13 fail; the MM XMLs describe the US build). Failures are
   objects whose layout differs in that build and the XML has no version block for it (e.g. object_fa, object_sd,
-  object_bv in OoT; object_market_obj in MM). **Verified** (ROM bytes, `lead/actorclass.py`).
+  object_bv in OoT; object_market_obj in MM). **Verified** (ROM bytes, ROM analysis).
 - gameplay_keep entries in the OoT XML have no explicit offsets (lengths only), so they resolve as `?` in the TSV; the
   loader needs those offsets by another route (see open questions).
 
@@ -2396,9 +2396,9 @@ the lists they prepare; half-day filtering (MM) is required or night-only torche
 big-endian PCM plus per-buffer log and a timestamped segment log: `cap/mm-us/` (boot, title, file select, new-game
 intro, South Clock Town day and night, Termina Field, Woodfall Temple), `cap/mm-us-tf/` (Termina Field entered on foot, layer 0), `cap/oot-us10/` (title, file select,
 intro, Inside the Deku Tree, Kakariko Village child, Lake Hylia). Loudness timelines: `out/captimeline_{rom}.txt`
-(`scripts/captimeline.py`).
+(audio analysis).
 
-**Method** (`scripts/compare.py`): capture span resampled 32006 → 32000 Hz; render offset chosen by the best NCC of
+**Method** (cross-check): capture span resampled 32006 → 32000 Hz; render offset chosen by the best NCC of
 20 ms log-loudness envelopes; time stretch from the offsets of the first and last thirds (resolution ≈ ±0.0006 for
 55 s); Welch log-magnitude spectrum correlation (40 Hz–12 kHz); 12-bin chroma correlation at 0 semitones (and the
 best other shift); waveform NCC over the loudest 1 s after ±40 ms sample alignment. Renders use the scene's spec
@@ -2422,7 +2422,7 @@ and the game's IO (*Special sequences and game IO (doc: OoT `src/audio/game/gene
 | OoT Lake Hylia 52900000 / 413.2 s, 30 s | 2 / 2 / io2=0 | 0.317 | – | −24.27 / −23.44 | 0.9542 | 0.714 (0.61) | 0.063 | same instruments and level; the field logic picks random parts, so not note-identical (expected) |
 | MM Termina Field 73676096 and 99000000, 58–80 s (first session) | 2 / 1 | 0.07–0.23 | – | −41.4 / −21.7 | – | – | – | no field music in that capture: the warp loaded Termina Field in layer 5 (the first cycle before the ocarina is recovered), whose header plays the ambience sequence 1 instead of field music (*Majora's Mask (US; debug PAL identical except 0 and 43)*: AMBIENCE, 00KEIKOKU alt5); RAM dumps `runs/lead-mmus-1/tf1*.bin` hold 29 and 21, not 2 |
 | MM Termina Field `cap/mm-us-tf/audio.raw` 37837696 / 295.6 s, 45 s (second session: walked out of South Clock Town's south gate, layer 0, 09:17) | 2 / 1 | 0.904 | 0.9993 | −21.08 / −21.12 | 0.9953 | 0.9984 (0.27) | 0.639 | **match**; RAM dump `runs/lead-mmus-2/tfm.bin` holds sequence 2 (lead's check, same method) |
-| MM boot 8.3–22.3 s | all sequences 1–127 (`scripts/idmatch.py` → `out/idmatch_mm-boot-demo.txt`) | best 0.46 | – | −19.9 | – | best 0.73 (seq 105) | – | **no sequence matches** (open question) |
+| MM boot 8.3–22.3 s | all sequences 1–127 (cross-check → `out/idmatch_mm-boot-demo.txt`) | best 0.46 | – | −19.9 | – | best 0.73 (seq 105) | – | **no sequence matches** (open question) |
 
 **RAM cross-check** (verified: lead's RAM dumps; each sequence found by its first 64 bytes, the player by the
 pointer to it at `SequencePlayer + 0x18`, layout doc `include/audio.h`):
@@ -2460,7 +2460,7 @@ task, which shifts note starts by up to one update relative to the render).
 
 All sessions used the headless mupen64plus described in `EMULATOR.md` (debug core for RAM access,
 rsp-hle, software rendering), one run directory each. Each reference capture is a 320x240 screenshot plus a sidecar with
-RAM values read by `env/zram.py` (scene, layer, room, time, player, View eye/at/fovy/zNear/zFar, light context, skybox),
+RAM values read by ROM analysis (scene, layer, room, time, player, View eye/at/fovy/zNear/zFar, light context, skybox),
 and an 8 MB RAM dump in the run directory. Warps were done by RAM pokes on the SaveContext/PlayState fields named in
 `env/EMU-BRIEF.txt`; the exact input sequences are in the `env/emu-*-notes.txt` files. Two traps for repeat
 captures: in OoT the sky and time-based lights follow `skyboxTime` (SaveContext + 0x141A), which only moves forward, so

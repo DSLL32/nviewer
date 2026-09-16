@@ -73,7 +73,7 @@ adjacency check has zero gaps and zero overlaps across the entire ROM.
 
 The cartridge has a small resident loader, a compressed main load image, a
 master asset directory, and a late overlay region. **Verified—ROM and
-disassembly** (`fs/spiderman_fs.py`, `fs/boot-loader.disasm`,
+disassembly** (ROM extraction, `fs/boot-loader.disasm`,
 `fs/main.disasm`).
 
 The resident image occupies ROM `0x1000..0x13B30` and runs at `0x80000400`.
@@ -146,7 +146,7 @@ transcription of the resident decoder at `0x80000CF8`.
 
 The bitstream is an LZ-family code with literals, backreferences, a
 distance-zero fill path, extended distances, an aligned raw-run escape, and an
-explicit end escape. `fs/spiderman_fs.py:decode_erz2` is the implementation
+explicit end escape. The decoded ROM data is the implementation
 reference; it is preferable to reusing a name-only ERZ decoder without testing
 the version. Boot blocks use `0x10000` output pages. Compressed asset groups use
 `0x4000` output pages; four group-0 leaves are stored raw because they do not
@@ -162,7 +162,7 @@ compress profitably.
 
 The unique 34-record retail level table is at main-image offset `0xDEC14`.
 Records are 20 bytes and begin with pointers to the displayed title and TRG
-stem. **Verified—ROM** (`levels/survey_levels.py`). Group-1 slot number is not
+stem. **Verified—ROM** (ROM analysis). Group-1 slot number is not
 the campaign index: the attract-demo record at slot 30 interrupts the sequence,
 and L5A7/L8A3/L8A5/L8A6 occupy slots 31–34.
 
@@ -265,7 +265,7 @@ draw path then divides those floats by 16. Use `raw/(4096*16)`, followed by
 `(x,-y,-z)`, for a backdrop—not ordinary `raw/(4096*2.25)`. **Verified—RAM/
 disassembly.**
 
-`environment/background_catalog.py` resolves 52 of 53 distinct stage
+ROM analysis resolves 52 of 53 distinct stage
 references to exact O-bank objects. The sole dangling value is L8A2 checksum
 `0x37FAF2CD`; its other two backgrounds resolve. Backdrop instances belong in
 a separate toggleable `background` layer and should ignore camera translation
@@ -387,7 +387,7 @@ Environment state is authored in each TRG's restart/autoexec command stream.
 The strict scanner parses all 59 files without restart/autoexec errors and
 finds 86 restarts, 75 BackgroundCreate commands, 75 fog commands, 65 sky-color
 commands, 61 fade-color commands and 22 BackgroundOff commands. There are no
-LIGHT/OFFLIGHT nodes. **Verified—ROM/tool** (`environment/scan_environment.py`,
+LIGHT/OFFLIGHT nodes. **Verified—ROM/tool** (ROM scan,
 `trg_environment.json`). Multiple restarts can carry different state; a loader
 must not collapse a stage to one unconditional environment tuple.
 
@@ -426,7 +426,7 @@ L1A1 backdrops join exactly to static checksums/meshes:
 | `DE834642` | 5 | `(-221, 70.3125, -1087)` |
 | `160FC566` | 4 | `(-214.5, 87.4375, -1092.125)` |
 
-`environment/analyze_runtime.py` reproduces these values from the immutable
+ROM analysis reproduces these values from the immutable
 capture rather than relying on ad hoc debugger transcription.
 
 ## 4. Objects
@@ -668,7 +668,7 @@ optional capture-fidelity question.
 ### 6.1 Unreferenced assets
 
 This section deliberately separates incomplete/unreferenced material from live,
-gated features. Evidence comes from `hidden/audit_hidden.py`, complete
+gated features. Evidence comes from ROM analysis, complete
 filename/TRG/model/texture reference censuses, and overlay disassembly.
 
 #### Incomplete alternate L3A1 section
@@ -862,18 +862,18 @@ profiles are honest initial behavior.
 | claim | evidence / reproducer |
 |---|---|
 | header, hashes, CIC and identity | direct header/hash commands; `fs/NOTES.md` |
-| complete physical ROM map | `fs/spiderman_fs.py`; `fs/extracted/rom_ranges.csv` adjacency has zero gaps/overlaps |
+| complete physical ROM map | ROM extraction; `fs/extracted/rom_ranges.csv` adjacency has zero gaps/overlaps |
 | ERZ2 | resident `0x80000CF8`; all 1,584 blocks decode to declared sizes |
-| master directory/files/overlays | `fs/spiderman_fs.py`, CSV manifests, loader disassembly; overlay bias checked at `0x8008A0A4` |
-| retail/extra levels and G/L/O slots | `levels/survey_levels.py`, `stages.csv`, 59/59 TRGs parse |
+| master directory/files/overlays | ROM extraction, CSV manifests, loader disassembly; overlay bias checked at `0x8008A0A4` |
+| retail/extra levels and G/L/O slots | ROM analysis, `stages.csv`, 59/59 TRGs parse |
 | geometry/texture/material formats | complete bank/dictionary census, bounds/reference cross-checks, renderer disassembly; `levels/NOTES.md` |
 | representative static renders | `levels/renders/contact.png` and component PNG/SVG files |
-| environment/backdrops | `environment/scan_environment.py`, `background_catalog.py`, handler/renderer disassembly |
-| L1A1 runtime environment | `emulator/session2/L1A1-title.png`, `L1A1-rdram.bin`, `d0.bin`, `d1.bin`, `g.bin`; reproduced by `environment/analyze_runtime.py` |
+| environment/backdrops | ROM scan, ROM analysis, handler/renderer disassembly |
+| L1A1 runtime environment | `emulator/session2/L1A1-title.png`, `L1A1-rdram.bin`, `d0.bin`, `d1.bin`, `g.bin`; reproduced by ROM analysis |
 | placements | 5,913 retail spatial nodes; 1,064/1,070 primary assignments join to their O bank |
-| music bank/effects/schedules | `music/analyze_audio.py`, `extract_music.py`, `music_schedules.json`; scheduler/selectors in disassembly |
+| music bank/effects/schedules | audio analysis, audio analysis, `music_schedules.json`; scheduler/selectors in disassembly |
 | title/menu music | runtime breakpoint at `0x800DA77C`: effect 988, return `0x80031764` |
-| hidden/unreferenced claims | `hidden/audit_hidden.py`, `audit.json`, exclusive texture and table-reference censuses |
+| hidden/unreferenced claims | ROM analysis, `audit.json`, exclusive texture and table-reference censuses |
 
 All research scripts are standard-library Python or direct disassembly helpers,
 hash-pin their critical input where appropriate, use bounded table traversal,

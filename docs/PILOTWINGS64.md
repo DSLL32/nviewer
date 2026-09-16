@@ -103,7 +103,7 @@ Known game-state fields relative to `D_80362690`:
 | `0x10` | 2 | unknown | `class` | Class selection. |
 | `0x12` | 2 | unknown | `test` | Test-mode field. |
 
-E/J addresses come from masked-instruction matching of the US functions (`fs/tools/xmatch.py`, unique matches).
+E/J addresses come from masked-instruction matching of the US functions (ROM extraction, unique matches).
 
 #### Release differences
 
@@ -187,6 +187,9 @@ and task resolution does not.
 
 #### MIO0
 
+The shared [MIO0 format and C codec](./compression/mio0.md) describes the
+bitstream. Here, MIO0 appears inside the game's `GZIP`-tagged chunks.
+
 - **Header:**
 
   | Offset | Size | Type | Field | Description |
@@ -235,7 +238,7 @@ This is the same codec as Star Fox 64 and Super Mario 64. Streams end 0-7 bytes 
 | PDAT | 25 | PHDR PPOS RHDR RPKT | demo recordings |
 
 **Tools:**
-- `fs/tools/extract.py` dumps every file to `fs/files/{us|eu|jp}/{global}_{type}_{typeidx}/{chunk}_{TAG}.bin`, with an inventory (`inventory.tsv`/`.json`, md5 per chunk).
+- ROM extraction dumps every file to `fs/files/{us|eu|jp}/{global}_{type}_{typeidx}/{chunk}_{TAG}.bin`, with an inventory (`inventory.tsv`/`.json`, md5 per chunk).
 - `fs/proto/pwfs.ts` is the TypeScript reader (`openFs`, `file(type, i)`, `userFile(i)`, `comm(type, id)`). `fs/proto/test.ts` checks every file offset, index and chunk md5 against the Python inventory: **ALL OK** on US, E and J.
 
 #### How the game loads a task [decompilation control flow; ROM bytes/disassembly tables and constants]

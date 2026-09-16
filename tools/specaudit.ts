@@ -167,6 +167,7 @@ for (const file of files) {
   }
   if (/§§?\d/.test(text)) problems.push('stale numeric section reference');
   if (/\/home\/n64\/\.ai-tmp\/|research archive\//.test(text)) problems.push('published scratch path');
+  if (/\.py\b/.test(text)) problems.push('unpublished Python script cited in a specification');
   if (/^#{2,4} .*Research.process|^#{2,4} .*Process and artifact hygiene|^#{2,4} .*Emulator and process hygiene/im.test(text)) {
     problems.push('published research-process section');
   }

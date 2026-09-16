@@ -201,7 +201,7 @@ Repeated payload boundaries equal 0x44 + count × 0x24. Collision routines selec
 
 #### Whole-ROM structural counts
 
-The prototype `levels/analyze_orc.py` validates pointer bounds, vertices and face indices on all nine tracks. Counts below are sector-placement references, not unique models. [evidence: deterministic decoding]
+The prototype ROM analysis validates pointer bounds, vertices and face indices on all nine tracks. Counts below are sector-placement references, not unique models. [evidence: deterministic decoding]
 
 | track | sectors | placements | valid mesh refs | unique terrain models | vertex refs | polygon refs | aux objects | atlas height |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -593,10 +593,10 @@ Do not extract files at runtime. An `OffroadRom.file(id)` view over the normaliz
 
 | module | responsibility | starting evidence | difficulty |
 |---|---|---|---|
-| `src/rom/offroad/fs.ts` | version profile, 41-entry table, bounded file views, pointer resolver | `fs/NOTES.md`, `fs/file_table.tsv`, `fs/extract.py` | low |
-| `src/rom/offroad/level.ts` | track tables/root, sector/category walk, placement and model decoding | `levels/NOTES.md`, `levels/analyze_orc.py` | medium-high |
+| `src/rom/offroad/fs.ts` | version profile, 41-entry table, bounded file views, pointer resolver | `fs/NOTES.md`, `fs/file_table.tsv`, ROM extraction | low |
+| `src/rom/offroad/level.ts` | track tables/root, sector/category walk, placement and model decoding | `levels/NOTES.md`, ROM analysis | medium-high |
 | `src/rom/offroad/texture.ts` | packed-CI4 atlas windows, palette selection, RGBA16 TLUT and material state | `levels/NOTES.md` | medium |
-| `src/rom/offroad/music.ts` | WESS/SN64 archive, SSEQ event interpreter, bank/sample decode and song metadata | `music/NOTES.md`, `music/analyze_wess.py` | medium |
+| `src/rom/offroad/music.ts` | WESS/SN64 archive, SSEQ event interpreter, bank/sample decode and song metadata | `music/NOTES.md`, audio analysis | medium |
 | `src/rom/offroad/offroad.ts` | `Game`, nine-entry level list, assembly, layers, camera/environment defaults | *Tracks and track loading* through *Environment, camera and graphics state* | medium |
 | shared `types.ts` / `index.ts` | game ID and detection only | current repository contracts | low |
 
@@ -627,10 +627,10 @@ the bounds and invariants documented here. [viewer design]
 | subject | method/result | artifact |
 |---|---|---|
 | ROM/boot | full-file hashes, CIC CRC recomputation, static boot mapping | `fs/header.json`, `fs/NOTES.md` |
-| filesystem | all 41 records validated and extracted byte-for-byte; sorted ranges are gapless | `fs/file_table.tsv`, `fs/extract.py` |
+| filesystem | all 41 records validated and extracted byte-for-byte; sorted ranges are gapless | `fs/file_table.tsv`, ROM extraction |
 | loader | MIPS control flow through bounded chunked PI DMA | `fs/code.disasm`, `fs/NOTES.md` |
 | tracks | all nine roots/file IDs parsed; six ordinary selector entries and gameplay visually sampled | `fs/tracks.tsv`, `environment/NOTES.md`, `environment/emulator-visuals/` |
-| level structures | all nine roots, sectors, placements, model bounds/indices and texture windows checked | `levels/analyze_orc.py`, `levels/track_summary.tsv`, `levels/NOTES.md` |
+| level structures | all nine roots, sectors, placements, model bounds/indices and texture windows checked | ROM analysis, `levels/track_summary.tsv`, `levels/NOTES.md` |
 | environment | menu strings/frames, display-list templates and projection call flow | `environment/NOTES.md` |
 | Europe | exact header/hash check plus wordwise pointer-rebase comparison of every file | `versions/NOTES.md`, `versions/files.tsv` |
 | music | archive/tables/events/bank parsed and all music sequences classified | `music/NOTES.md`, `music/tables/` |

@@ -117,6 +117,9 @@ All 3354 `MIO0` magics in each ROM are 4-byte aligned, decode without error and 
 
 #### MIO0
 
+The shared [MIO0 format and C codec](./compression/mio0.md) describes the
+bitstream. The following placement and alignment rules are Mario Kart-specific.
+
 **Verified**: the TypeScript decoder reproduces every stream in all five ROMs; the game routine `mio0decode` (0x800400D0) reads the header fields as below.
 | Offset | Size | Type | Field | Description |
 |---:|---:|---|---|---|

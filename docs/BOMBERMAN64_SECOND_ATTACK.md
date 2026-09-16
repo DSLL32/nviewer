@@ -90,6 +90,11 @@ Function-name record, eight bytes:
 
 ### 2.4 Compression formats
 
+The shared [Hudson LZSS format and C++ codec](./compression/hudson-lzss.md)
+covers the 1 KiB stream. Yay0 resources use the separate
+[Yay0 codec](./compression/yay0.md); the size prefix and selection rule below
+belong to this game's resource container.
+
 #### File payloads
 
 | Game | Payload | Codec selection |
@@ -167,13 +172,6 @@ Copy references one byte at a time to allow overlap. Stop after decompressedSize
 
 Offsets are relative to the `Yay0` magic (i.e. SA file offset 4). Verified: resource 13 dumped from
 RDRAM, byte-identical.
-
-#### Extracting everything
-
-Reference extractors (Python 3, no dependencies):
-- Hero: `bm/herofs/extract.py` → `files/` (chain files, overlays, raw blobs), `files/index.txt` with static references per file
-- BM64: `bm/bm64fs/extract.py` (+ `lz.py`) → `files/a{ARCHIVE}/{idx}.bin`, `files/index.txt`
-- SA: `bm/bm64safs/extract.py` → `files/res/NNNN.bin`, `files/exec/`, `files/index.txt` (7 s)
 
 ### 2.5 Loading process
 
@@ -801,7 +799,7 @@ camera-relative quad) textured with the bitmap and tinted by the mode colour.
   hypothesis: area 2223 has no record and showed pitch 33.2°, yaw ≈ 0, distance ≈ 900 in RAM. A viewer start view
   for record-less levels: look at the first player start + (0, 50, 0), pitch 33–42° down, distance 1600, fovy 30.
 - **Object models** (verified in RAM by walking the resource cache lists 0x800A015C/60/64 and matching segment-4
-  bases, `sa_stage/objmap.py`): battle soft block id 25 draws **NIFF 586** at placement + (50, 0, 50), scale 1.
+  bases, ROM analysis): battle soft block id 25 draws **NIFF 586** at placement + (50, 0, 50), scale 1.
   On Rope Bridge, ids 241/213 draw NIFFs 676 and 930 (which is which not separated). Other ids are open; a
   static lead is a possible id → resource table in exec 0x27 (file 0x3F66).
 
@@ -1056,9 +1054,8 @@ pitch bend. BM64 has some finite loops (`cnt = 3`); Hero and SA loop forever.
   no loop. Finite loops (cnt = 3, BM64 only) must be unrolled (jump back `cnt` times) before the final
   forever loop, if any.
 
-Reference implementation (Python): `bm/audio/scripts/n64audio.py` (S2 parser,
-VADPCM decoder, sequence parser including back-references and loops, simple sampler, WAV writer);
-`render_one.py {game} {song} {bank} {seconds}`.
+Sequence parsing, VADPCM decoding, and loop handling were checked against
+captured audio.
 
 ### 5.3 Instruments and sample encoding
 
@@ -1219,7 +1216,7 @@ Rendered samples (Python prototype): `bm/audio/wav/` contains `bm64sa_seq01_bank
 ### 6.1 Unreferenced assets
 
 Source: `notes/unused.md` (tools and string dumps in `bm/unused/`). "Static" means
-disassembly and cross-references: `xref.py` resolves jal targets, lui/addiu pairs and data words over main code
+disassembly and cross-references: ROM scan resolves jal targets, lui/addiu pairs and data words over main code
 and every overlay. Indices computed at run time (base + k, SA event scripts) are not resolved, so
 file-level results are **candidates** unless marked high confidence.
 
@@ -1353,8 +1350,8 @@ rendering, HLE RSP). Its `--debug` core was used for breakpoints and RDRAM dumps
 
 | Claim | Method | Result |
 |---|---|---|
-| ROM identity | header CRC1/CRC2 recomputed with the CIC-6102 algorithm (`notes/crc.py`) | all three match |
-| BM64 LZSS decoder | 125 decompressions (10 overlays, 115 assets) dumped from RDRAM at decoder exit from power-on through the Adventure intro (`bm64fs/dbgdrive.py`, `verify.py`, `dumps/`) | 125/125 byte-identical |
+| ROM identity | header CRC1/CRC2 recomputed with the CIC-6102 algorithm (ROM analysis) | all three match |
+| BM64 LZSS decoder | 125 decompressions (10 overlays, 115 assets) dumped from RDRAM at decoder exit from power-on through the Adventure intro (ROM extraction, cross-check, `dumps/`) | 125/125 byte-identical |
 | SA LZSS and Yay0 | RDRAM at decoder exit: resource 3044 (LZSS), exec 0x1A (LZSS, TLB-mapped), resource 13 (Yay0) (`bm64safs/dumps/d1–d3.bin`) | byte-identical |
 | SA/BM64/Hero code images | RDRAM dumps compared with ROM ranges | code identical; only small `.data` ranges differ |
 | Hero LZSS | break at call/return of `lzssDecode`: source = ROM 0x4C9FD0, output 0xFE70 bytes (`herofs/v1_*.bin`); full-RDRAM slot comparisons | identical; 5/5 (attract) and 41/42 (stage 1-1) slots identical |
@@ -1363,14 +1360,14 @@ rendering, HLE RSP). Its `--debug` core was used for breakpoints and RDRAM dumps
 | BM64 scale, handedness, lighting, cutout | renders with the camera extracted from RDRAM, next to the emulator frame | `bm64_model/renders/gg1_cmp_shot_vs_decode.png` (19.1 mean diff), `rockgarden_cmp_shot_vs_decode.png` (13.9) |
 | Hero map decode, scale, handedness | map-only render at the game camera; replay of all draw calls of the frame | `hero_level/renders/cmp_s11_cam.png`, `frame_s11_cmp.png` (22.7) |
 | Hero placement records | 16 placement records of stage 1-1 vs object positions in the frame | 16/16 match in x, z, yaw |
-| SA NIFF relocation and segment resolver | every live NIFF in two RDRAM dumps; gSPSegment values in the frame list vs shape records (`sa_niff/ramniff.py`, `verify_wrappers.py`) | all pointers = file + base; 27/27 and 38/45 draws match (other 7 = runtime texture sets) |
+| SA NIFF relocation and segment resolver | every live NIFF in two RDRAM dumps; gSPSegment values in the frame list vs shape records (ROM analysis, cross-check) | all pointers = file + base; 27/27 and 38/45 draws match (other 7 = runtime texture sets) |
 | SA texture upload emulation | static: textures produced by running all 4,750 lists vs direct decode of their records (`sa_niff/textest.ts`) | 3,940/3,941 identical |
 | SA battle map, scale, handedness | Normal map rendered with the game camera from the frame matrix | `sa_niff/renders/battle2058_res17_gamecam_vs_emu.png` |
-| Music data locations and VADPCM decoder | loop-state check: `ALADPCMloop.state` vs decoded PCM before the loop (`audio/scripts/loopstate_check.py`) | BM64 66/66, Hero 57/58, SA 105/113 exact |
-| Sequence parser | parse every song to its end (`audio/scripts/seqcheck.py`) | 155/155 with no errors |
+| Music data locations and VADPCM decoder | loop-state check: `ALADPCMloop.state` vs decoded PCM before the loop (audio analysis) | BM64 66/66, Hero 57/58, SA 105/113 exact |
+| Sequence parser | parse every song to its end (audio analysis) | 155/155 with no errors |
 | Output rate | AI_DACRATE in emulator audio captures | 1520 → 32,006 Hz in all three |
 | Renderer timing and tuning | captured game audio (`audio/dumps/aicap/`) vs renders: RMS-envelope correlation and chroma | Hero song 24: NCC 0.88 at tempo 1.00, chroma 0.93 at 0 semitones; SA song 3 (bank 3): NCC 0.71, chroma 0.94 |
-| Which song plays | RDRAM: sequence bytes and bank pointer of the sequence player (`audio/scripts/ramsong.py`) | SA intro 3, menu 1, character select 5, battle 42; Hero title 24; BM64 intro 1, title/menu 26, battle menu 29, battle 27 |
+| Which song plays | RDRAM: sequence bytes and bank pointer of the sequence player (audio analysis) | SA intro 3, menu 1, character select 5, battle 42; Hero title 24; BM64 intro 1, title/menu 26, battle menu 29, battle 27 |
 | Hero Sound Test mapping | code: song table 0x80334468 = 1..32 | song = BGM number + 1 |
 | Hero debug menu | `write 0x8016E424 1`, pause, L | three debug pages shown |
 | BM64 battle stage → overlay | emulator load log per stage-select position (`bm64_model/dbgdrive.log`) | Rock Garden 0x90, UP and Down 0x91, Pyramid 0x92, Greedy TraP 0x93, Top Rules 0x94 |
@@ -1380,7 +1377,7 @@ rendering, HLE RSP). Its `--debug` core was used for breakpoints and RDRAM dumps
 | SA animated water | two RDRAM dumps 50 frames apart in Park (`sa_niff/dumps/park4/5.bin`) | river vertex copy t +1000 = 20/frame, as the UV-track record predicts |
 | SA battle maps | all 22 maps rendered with baked lights; 4 compared with reference shots at the game camera (`sa_niff/renders/battle_all/`) | geometry and camera coincide (mean diff 22.5–38.3, remainder = characters, blocks, objects) |
 | SA first story area | map NIFF 177 at the captured camera vs screenshot (`sa_niff/renders/story2223_res177_gamecam_vs_emu.png`) | floor, bars and walls coincide |
-| SA soft-block model | RDRAM resource cache walk + segment-4 bases (`sa_stage/objmap.py`) | object id 25 → NIFF 586 at placement + (50, 0, 50) |
+| SA soft-block model | RDRAM resource cache walk + segment-4 bases (ROM analysis) | object id 25 → NIFF 586 at placement + (50, 0, 50) |
 | BM64 adventure selection | RAM scene/world/stage variables and screenshots after selecting Green Garden 1 and White Glacier 1 (`bm64_stage/shots/`, `dumps/rdram_gg1_ovl28.bin`, `rd_wg58.bin`) | 0x28 (world 0, stage 0, title card "Untouchable Treasure"); 0x58 (world 3, stage 0) |
 | BM64 Field of Grass | stage select position 6 → RAM (`bm64_stage/dumps/rd_fog95.bin`) | overlay 0x95, map 529, TEXRECT background from 662 |
 | BM64 fog formula | frame list in Blizzard Peaks vs `setFog(945, 970, 230, 240, 255)` | fm 5120, fo −4556, SETFOGCOLOR E6F0FF80, clear 0xE7BF: as predicted |

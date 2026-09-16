@@ -4,20 +4,21 @@ const pagesBase = (process.env.NVIEWER_PAGES_BASE ?? '').replace(/\/$/, '');
 const viewerUrl = process.env.NVIEWER_VIEWER_URL ?? 'http://localhost:5173/';
 
 export default defineConfig({
-  title: 'nviewer game specifications',
+  title: 'nviewer docs',
   description: 'Nintendo 64 ROM format specifications for nviewer',
   base: `${pagesBase}/wiki/`,
   outDir: '../dist/wiki',
+  srcExclude: ['SPECIFICATION_STYLE.md'],
   // Binary-layout diagrams use colspan, which Markdown tables cannot express.
   markdown: { html: true },
   themeConfig: {
     nav: [
-      { text: 'Specifications', link: '/' },
+      { text: 'Docs', link: '/' },
       { text: 'Viewer', link: viewerUrl },
     ],
     sidebar: [
       {
-        text: 'Game specifications',
+        text: 'Games',
         items: [
           { text: 'Air Boarder 64', link: '/AIRBOARDER64' },
           { text: 'BattleTanx', link: '/BATTLETANX' },
@@ -46,15 +47,21 @@ export default defineConfig({
         ],
       },
       {
-        text: 'Documentation',
-        items: [{ text: 'Specification style guide', link: '/SPECIFICATION_STYLE' }],
+        text: 'Compression',
+        items: [
+          { text: 'Formats', link: '/compression/' },
+          { text: 'MIO0', link: '/compression/mio0' },
+          { text: 'Yaz0', link: '/compression/yaz0' },
+          { text: 'Yay0', link: '/compression/yay0' },
+          { text: 'Hudson LZSS', link: '/compression/hudson-lzss' },
+        ],
       },
     ],
     search: { provider: 'local' },
     outline: 'deep',
     editLink: {
       pattern: 'https://github.com/DSLL32/nviewer/edit/master/docs/:path',
-      text: 'Edit this specification on GitHub',
+      text: 'Edit this page on GitHub',
     },
     socialLinks: [{ icon: 'github', link: 'https://github.com/DSLL32/nviewer' }],
   },

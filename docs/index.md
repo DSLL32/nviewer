@@ -1,10 +1,10 @@
-# N64 game specifications
+# nviewer docs
 
-These specifications document the ROM formats implemented by
-[nviewer](https://github.com/DSLL32/nviewer). They distinguish evidence verified
-from ROM bytes, disassembly, memory, captured frames or audio from hypotheses and
-open questions. New and revised manuals follow the
-[specification style guide](./SPECIFICATION_STYLE.md).
+Technical documentation for [nviewer](https://github.com/DSLL32/nviewer).
+The game manuals distinguish verified ROM behavior from hypotheses and open
+questions. Shared codecs are documented under [Compression](./compression/).
+
+## Games
 
 - [Air Boarder 64](./AIRBOARDER64.md)
 - [BattleTanx](./BATTLETANX.md)
@@ -30,3 +30,7 @@ open questions. New and revised manuals follow the
 - [The Legend of Zelda: Majora's Mask](./MAJORAS_MASK.md)
 - [The Legend of Zelda: Ocarina of Time](./OCARINA_OF_TIME.md)
 - [The Legend of Zelda: Ocarina of Time — 1997 prototype](./OCARINA_OF_TIME_1997_PROTOTYPE.md)
+
+## Compression
+
+- [Compression formats](./compression/)

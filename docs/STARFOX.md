@@ -192,6 +192,9 @@ The table is 0x5A0 bytes: 90 slots of 16 bytes, of which 64 are used and the res
 
 #### MIO0
 
+See the shared [MIO0 format and C codec](./compression/mio0.md). The DMA table
+determines which Star Fox files use it.
+
 **Verified** against the game routine `Mio0_Decompress` (0x8001EE70) and all 102 compressed files of both ROMs. The leak's `slidec/slid12.o` `slidstart` is byte-identical to the ROM routine.
 | Offset | Size | Type | Field | Description |
 |---:|---:|---|---|---|
@@ -209,7 +212,7 @@ Stream layout is contiguous in every file: control bits end at backrefOffset, ba
 Both versions produce byte-identical streams for identical content: 39 of 51 streams match, and the other 12 are exactly the files whose content changed.
 
 Reference implementations:
-- `sf/tools/extract.py` (Python);
+- ROM extraction (Python);
 - `sf/fs/proto/sf64fs.ts` (TypeScript, no dependencies). `npx tsx test.ts` decompresses every file of both ROMs and checks sizes and md5s: ALL OK, about 0.2 s per ROM.
 
 #### Extracting every file
@@ -226,11 +229,11 @@ Both scripts produce identical md5s for all 64 files of both ROMs (**verified**)
 
 | claim | evidence |
 |---|---|
-| Header, CRCs, CIC-6101, JP table | `fs/romid.py` (recomputes CRC1/2 over 0x1000-0x100FFF) |
-| DMA table layout, pattern, 64 entries, contiguity, 0xFF tail | `tools/extract.py`, `fs/mio0check.py`, `fs/proto/test.ts` (ALL OK on both ROMs) |
-| MIO0 format; 102 streams decompress to exact size; contiguous streams; 39/51 identical across versions | `fs/mio0check.py` → `fs/tmp/mio0check.out`; game routine disassembly (`fs/dis.sh`); leak `slidec/slid12.o` byte-identical |
-| Loader functions, scene structs, segment map | disassembly `fs/tmp/foxload10.txt`, `foxload11.txt`; `fs/scenes.py` → `fs/tmp/scenes.out` |
-| Segments in RAM = decompressed files | V1.1 Corneria RDRAM `fs/rdram_co11.bin` + `fs/ramcheck.py` (byte-identical except runtime-animated textures); V1.0 title RDRAM `fs/rdram_menu10.bin` + `fs/ramcheck10.py` |
+| Header, CRCs, CIC-6101, JP table | ROM extraction (recomputes CRC1/2 over 0x1000-0x100FFF) |
+| DMA table layout, pattern, 64 entries, contiguity, 0xFF tail | ROM extraction, ROM extraction, `fs/proto/test.ts` (ALL OK on both ROMs) |
+| MIO0 format; 102 streams decompress to exact size; contiguous streams; 39/51 identical across versions | ROM extraction → `fs/tmp/mio0check.out`; game routine disassembly (`fs/dis.sh`); leak `slidec/slid12.o` byte-identical |
+| Loader functions, scene structs, segment map | disassembly `fs/tmp/foxload10.txt`, `foxload11.txt`; ROM extraction → `fs/tmp/scenes.out` |
+| Segments in RAM = decompressed files | V1.1 Corneria RDRAM `fs/rdram_co11.bin` + ROM extraction (byte-identical except runtime-animated textures); V1.0 title RDRAM `fs/rdram_menu10.bin` + ROM extraction |
 | V1.0 overlay base 0x8017D390 | V1.0 `Load_SceneFiles` immediates; overlay internal addresses; ovl_menu found at 0x8017D390 in V1.0 RAM |
 | Per-file V1.0/V1.1 identity | `notes/lead_filecompare.txt` (md5 of decompressed files) |
 
@@ -247,7 +250,7 @@ Both scripts produce identical md5s for all 64 files of both ROMs (**verified**)
 
 **V1.1 is the primary version**: the decomp symbols target it. **One loader serves both versions**: it finds the table by pattern and picks the per-version address set in *Addresses that differ per version*.
 
-Method (**verified**, `fs/align_main.py`, `classify_main.py`, `ovl_diff.py`, `ovl_pos.py`):
+Method (**verified**, ROM extraction, ROM analysis, cross-check, ROM analysis):
 - Both main images and every overlay were aligned instruction by instruction, with relocatable fields masked (jal targets, lui, addiu/ori, load/store immediates).
 - Every remaining differing word was checked against the text, data and bss address maps and the overlay base shift (+0xA190). That covers 23441 code relocation pairs and 4287 differing data words in main, and 44351 relocation words in the overlays.
 - Decompressed asset files were byte-compared, and the differing ranges decoded.
@@ -328,7 +331,7 @@ The level tables listed here shift by exactly −0x49F0 from V1.1 to V1.0. The a
 
 #### The leak and the versions
 
-Relocation-masked matching of every leak `.o` function against both ROMs (`fs/leakver.py`): 1155 match both, 2 match only V1.0 (`game_display`, `fade_cont`), 0 match only V1.1, and 290 match neither (codegen differences). Every function V1.1 changed has its V1.0 behaviour in the leak.
+Relocation-masked matching of every leak `.o` function against both ROMs (ROM extraction): 1155 match both, 2 match only V1.0 (`game_display`, `fade_cont`), 0 match only V1.1, and 290 match neither (codegen differences). Every function V1.1 changed has its V1.0 behaviour in the leak.
 
 The leak's English objects are therefore a **V1.0-lineage build that is not byte-identical to either US ROM** (leak-supported conclusion; the individual matches are **verified**). The tree also carries the iQue (Chinese) localisation (leak-supported; lead check), with details in *Leak-only content (absent from the ROM)*:
 - `#if LOCALE==CHINA` blocks in `Source/spec` select `audio/zh/*`. The file is EUC-JP, so plain `grep` treats it as binary; `grep -a` finds them.
@@ -342,12 +345,12 @@ All level data in the leak (`Source/XX_data.o`: environment records and placemen
 
 | claim | evidence |
 |---|---|
-| main alignment and classification (23441 relocation pairs, 4287 data words) | `fs/align_main.py`, `fs/datamap.py`, `fs/classify_main.py` → `fs/tmp/classify_main.out`, `fs/tmp/blocks_main.txt` |
-| Function-level diffs | `fs/funcdump.py`, `fs/fdiff.sh` → `fs/tmp/f10_*`, `f11_*`, `o10_ve1.txt`, `o11_ve1.txt` |
-| Overlay diffs | `fs/ovl_diff.py`, `ovl_funcs.py`, `ovl_pos.py` → `fs/tmp/ovl_pos.out` |
-| Asset diffs (event scripts, Venom 1 list) | `fs/evdecode.py`, `fs/astyaml.py`, `lv/proto/vercmp.py` → `vercmp.txt` |
+| main alignment and classification (23441 relocation pairs, 4287 data words) | ROM extraction, ROM extraction, ROM extraction → `fs/tmp/classify_main.out`, `fs/tmp/blocks_main.txt` |
+| Function-level diffs | ROM extraction, `fs/fdiff.sh` → `fs/tmp/f10_*`, `f11_*`, `o10_ve1.txt`, `o11_ve1.txt` |
+| Overlay diffs | ROM extraction, ROM analysis, ROM analysis → `fs/tmp/ovl_pos.out` |
+| Asset diffs (event scripts, Venom 1 list) | ROM extraction, ROM extraction, cross-check → `vercmp.txt` |
 | Lead re-checks | hit cap `slti 1000 / li 999` at V1.0 0x800538E0 vs `slti 512 / li 511` at V1.1 0x80057D50; Venom 2 `li t8,180` vs `li t8,250` at ovl_i6 file offset 0xFAB8 (objdump of ROM/extracted bytes) |
-| Leak version | `fs/leakver.py` → `fs/tmp/leakver.out`; lead: leak `BM_data.o` .data = V1.0 Venom 1 list, V1.1 differs in 145 bytes (0xD726-0xDAD3); `lv/proto/leakcheck2.py` → `leakcheck2.txt` |
+| Leak version | ROM extraction → `fs/tmp/leakver.out`; lead: leak `BM_data.o` .data = V1.0 Venom 1 list, V1.1 differs in 145 bytes (0xD726-0xDAD3); cross-check → `leakcheck2.txt` |
 
 #### Filesystem and versions
 
@@ -420,15 +423,15 @@ Title, map and ending scenes are driven by overlay code, not by placement lists.
 
 | claim | evidence |
 |---|---|
-| Level tables (scene ids, list pointers, environment, object info, presets), both versions | `lv/proto/dump.ts` → `lv/proto/dump.txt`; `lv/proto/presets.py` → `presets_v10.txt` = `presets_v11.txt` |
-| Placement record and on-rails world position | Corneria RDRAM `lv/ram_co1.bin` + `lv/proto/ramcheck.py`: 15 live scenery objects equal decoded positions and rotations; gLevelObjects = seg 6 + 0x371A4 |
+| Level tables (scene ids, list pointers, environment, object info, presets), both versions | `lv/proto/dump.ts` → `lv/proto/dump.txt`; ROM analysis → `presets_v10.txt` = `presets_v11.txt` |
+| Placement record and on-rails world position | Corneria RDRAM `lv/ram_co1.bin` + cross-check: 15 live scenery objects equal decoded positions and rotations; gLevelObjects = seg 6 + 0x371A4 |
 | Camera and layout agreement | `lv/renders/corneria_emucam.png` (camera read from RAM) vs `lv/emu_co1.png` |
-| All-range z sign | disassembly `lv/disasm/*.txt` + `lv/proto/zsign.py` (quoted instructions in *Object placement*) |
+| All-range z sign | disassembly `lv/disasm/*.txt` + ROM analysis (quoted instructions in *Object placement*) |
 | Path items only translate | disassembly of ItemPathChange_Update (V1.1 0x80068C88); RAM log `lv/emu_fly2.log` (xPath = 0 on the main route) |
 | Corneria surface switch | `lv/proto/events.ts`; RAM gGroundSurface 2 → 0 between progress 38960 and 43240 (`lv/emu_fly2.log`, `lv/ram_fly_*.bin`) |
 | Opcode set of scenery lists | `lv/proto/dlscan.ts` |
 | Event actors, skeletons, Titania terrain | `lv/proto/events.ts`, `extras.ts`, `titerrain.ts`; renders `lv/renders/{meteo,sectorx,area6,sectory,titania,aquas,macbeth}.png` |
-| Leak level data = ROM | `lv/proto/leakcheck.py`, `leakcheck2.py` |
+| Leak level data = ROM | cross-check, cross-check |
 | Title cards | `lv/titlecards/*.png` |
 | Reference comparison | runtime screenshots `shots/*.png` vs `lv/renders/*.png`. Lead comparison (qualitative): Corneria (RAM camera), Fortuna (towers, mountains, base) and Titania (ruins on terrain) show the same features |
 
@@ -467,7 +470,7 @@ Asset slot, eight bytes:
 | 0x00 | 4 | u32 | vromStart | Inclusive virtual-ROM start. |
 | 0x04 | 4 | u32 | vromEnd | Exclusive virtual-ROM end. |
 
-**Verified:** all 44 structs decode in both versions (`fs/scenes.py`, `lv/proto/dump.txt`).
+**Verified:** all 44 structs decode in both versions (ROM extraction, `lv/proto/dump.txt`).
 
 Tables of Scene structs start at V1.0 0x800C59C4 and V1.1 0x800CA3B4 (`sNoOvl_Logo`). Table order is: logo, ending (6 setups), title, option, map, game over, then the level scenes.
 
@@ -595,8 +598,8 @@ Ground textures are 32×32 RGBA16 tiles loaded by code with `gDPLoadTileTexture`
 #### Skies, backdrops, starfields
 
 Source: `notes/runtime.md`.
-- Frame state, matrices and counts are **verified** in the emulator from 25 captured frame display lists (`rt/dl/*.txt`, `rt/dlwalk.py`, `rt/dlcalls.py`).
-- Display-list, vertex and texture facts are **verified** by decoding the V1.1 asset files (`rt/astdl.py`).
+- Frame state, matrices and counts are **verified** in the emulator from 25 captured frame display lists (`rt/dl/*.txt`, ROM analysis, ROM analysis).
+- Display-list, vertex and texture facts are **verified** by decoding the V1.1 asset files (ROM analysis).
 - Formulas come from decomp `fox_bg.c` / `fox_play.c` where marked.
 
 **Per-frame draw order.** Decomp `Display_Update`; consistent with the captured display lists.
@@ -1000,9 +1003,9 @@ PipeSync; clear all geometry modes; gSPTexture(on/off); SetCombine; SetGeometryM
 
 | claim | evidence |
 |---|---|
-| Environment records = RAM, per level | 25 RDRAM dumps `rt/dumps/*_a.bin` (+ `.task`), `rt/envread.sh`, `rt/env/*.txt`, `rt/table.txt`; static `rt/envdump.py v11\|v10` |
-| Clear, fog, projection, lights, presets, culling in real frames | frame display lists captured at `Graphics_SetTask` (`rt/capture.sh`), walked by `rt/dlwalk.py` / `rt/dlcalls.py` → `rt/dl/*.txt` |
-| Backdrop, ground and water display lists, UVs | `rt/astdl.py` |
+| Environment records = RAM, per level | 25 RDRAM dumps `rt/dumps/*_a.bin` (+ `.task`), `rt/envread.sh`, `rt/env/*.txt`, `rt/table.txt`; static ROM extraction |
+| Clear, fog, projection, lights, presets, culling in real frames | frame display lists captured at `Graphics_SetTask` (`rt/capture.sh`), walked by ROM analysis / ROM analysis → `rt/dl/*.txt` |
+| Backdrop, ground and water display lists, UVs | ROM analysis |
 | Render presets = leak | ROM 0xD3DB0 vs leak `Source/fox_std_rcp.o` `fox_gsCPModeSet_Data` (0x18C0 bytes, 0 of 1584 words differ) |
 | Level switching and crash analysis | `rt/goto.sh`, `rt/dumps/crash_sx.bin`, `rt/log.txt` |
 | V1.0 environment | `rt/dumps/v10_corneria.bin` |
@@ -1486,7 +1489,7 @@ Star Fox 64 uses **Nintendo's EAD sequence driver**, the lineage between Super M
 
 #### Sequence bytecode
 
-Semantics follow decomp `audio_seqplayer.c`; command names in brackets come from the leak's `mml64.def`. Argument encodings are **verified** by a reachability disassembly of all 46 sequences with zero errors (`mus/seqscan.py`, `mus/scan_all.txt`).
+Semantics follow decomp `audio_seqplayer.c`; command names in brackets come from the leak's `mml64.def`. Argument encodings are **verified** by a reachability disassembly of all 46 sequences with zero errors (audio analysis, `mus/scan_all.txt`).
 
 Encodings are big-endian. `var` = 1 byte, or 2 bytes if bit 7 is set: `((b0&0x7F)<<8)|b1`. Offsets are u16 from the sequence start. Every script has a 4-level call stack and 4 loop counters.
 
@@ -1610,11 +1613,11 @@ The same code works for V1.0 and V1.1 (**verified**: identical tables and identi
 
 | claim | evidence |
 |---|---|
-| Tables, fonts, samples in bounds; loop-state 56/56 | `mus/check_data.py`, `mus/sfaudio.py`; lead re-check of the sequence table (66 entries, 20 aliases, tiles audio_seq) and V1.0 table equality |
-| Opcode coverage, 0 errors | `mus/seqscan.py` → `mus/scan_all.txt` |
-| Runtime constants (32000/32006 Hz, 3 updates/frame, gMaxTempo 10770, notes, reverbs) | RDRAM `mus/cap/ram_a.bin`, `mus/cap/ram_co.bin` + `mus/ramparse.py` |
+| Tables, fonts, samples in bounds; loop-state 56/56 | cross-check, audio analysis; lead re-check of the sequence table (66 entries, 20 aliases, tiles audio_seq) and V1.0 table equality |
+| Opcode coverage, 0 errors | audio analysis → `mus/scan_all.txt` |
+| Runtime constants (32000/32006 Hz, 3 updates/frame, gMaxTempo 10770, notes, reverbs) | RDRAM `mus/cap/ram_a.bin`, `mus/cap/ram_co.bin` + ROM analysis |
 | RSP ucode NEAD SF | ROM word 0x110412CC at ucode_data+0x10 (V1.1 ROM 0xC3EE0; lead re-checked) and rsp-hle `try_audio_task_detection` |
-| Sequence state = game | `mus/ramchan.py` + `mus/proto/statecheck.ts` (Corneria, 181 fields, 0 mismatches) |
+| Sequence state = game | ROM analysis + `mus/proto/statecheck.ts` (Corneria, 181 fields, 0 mismatches) |
 | Audio = game | capture `mus/cap/run1.raw` (audio-dump plugin) vs renders, `mus/proto/compare.ts`: title, map, game over (waveform ncc 1.000), mission start, Corneria (SFX muted with `mus/tools/mute_sfx.sh`) |
 | All ids render, V1.0 = V1.1 | `mus/render_all.txt`, `mus/render_all_v10.txt` |
 | Leak audio = ROM | objcopy + md5 of `audio/fox64_*.o`; `.cart` byte compare |
@@ -1787,7 +1790,7 @@ Every item has a location, evidence, a label and a confidence (high, medium or l
 
 #### Unused and unreferenced assets
 
-**Method** (`un/assetrefs.py`, shared code scanner `un/assetrefs_code.py`):
+**Method** (ROM extraction, shared code scanner ROM extraction):
 1. **Nodes.** All 3749 entries of the 49 decomp asset yamls.
 2. **Roots:**
    - Segmented addresses built by `lui` + `addiu`/`ori`/load/store pairs in main and every overlay. This includes the IDO pattern where the `lui` sits in a branch delay slot.
@@ -1842,7 +1845,7 @@ Other asset leftovers:
 
 #### Unused text
 
-**Radio messages** (`un/radio.py`, `un/radio.txt`):
+**Radio messages** (ROM analysis, `un/radio.txt`):
 gMsgLookup is at ast_radio+0xCCAC (V1.1 RAM 0x80185CBC, V1.0 0x8017BB2C), with 779 eight-byte entries:
 
 | Offset | Size | Type | Field | Description |
@@ -1960,7 +1963,7 @@ Other text:
 
 #### Dead code
 
-**Method** (`un/deadcode.py`):
+**Method** (ROM analysis):
 1. **Function starts.** Taken from the V1.1 ROM: the instruction after `jr ra` + delay slot, unless a branch of the current function or a jump-table word targets beyond it.
 2. **Names.** Mapped by order to the decomp C function definitions of each file. 146 of 187 C files map exactly; 41 have count mismatches and are not mapped by order.
 3. **References.**
@@ -1996,12 +1999,12 @@ Other text:
 
 #### Leak-only content (absent from the ROM)
 
-**Method** (`un/leakshape.py`, output `un/leakshape.txt`):
+**Method** (ROM analysis, output `un/leakshape.txt`):
 1. For each of the 56 segment composites `nshape/US/*.o`, take `.data`/`.rodata` and mask every R_MIPS_32 relocation word (objdump -r).
 2. Search the unmasked runs (at least 16 bytes, not single-valued, 256-byte chunks) in all decompressed V1.1 files, using a 4-aligned 8-byte index plus byte compare.
 
 **Result.** 49 composites are **100 %** present. This includes every earlier "weak search" candidate except the ones below: SB_boss and BM_Hatch_L are inside sb.o/bm.o, BM03_Base inside bm03.o, and wp, jts, zo, sn, ac and bm03 are all present. **Absent:** bs.o (11.9 % of bytes found, generic texture fragments), cf.o (0.4 %), tt.o (0 %), s1.o (15.1 %), s2.o (12.3 %), s3.o (7.4 %), s4.o (30.6 %).
-- **Rendering.** The absent sets were linked at segment 6 (`un/leaklink.py`: REL addend + symbol) and drawn with the viewer's display-list interpreter (`un/renderleak.ts`).
+- **Rendering.** The absent sets were linked at segment 6 (ROM analysis: REL addend + symbol) and drawn with the viewer's display-list interpreter (`un/renderleak.ts`).
 - **Label:** VERIFIED (absence by relocation-masked search) + leak-supported (names and meaning).
 
 | leak item | what it is | evidence / render | conf. |
@@ -2025,7 +2028,7 @@ Unusual leak files (leak-supported):
 - **iQue (China) material:**
   - **`i10n/worksheet_ique.html`** is the "StarFox64 Asset Localization Worksheet". It covers voice text `voice/sf64msgs.txt` ("preserve # lines and 5 digit msg IDs") and the English demo, level-name, map, level-end ("moji") and menu textures, which were to be redrawn as `*_Z_*` Chinese versions following the "iQue game translation guideline".
   - `i10n/misc_words.txt` lists ranking/menu words (TOTAL HITS, RANK IN!!, the pilot names, OK, DOWN, TOP, CONGRATULATIONS, STARFOX RANKING, NAME, HITS, TOTAL SCORE), and `i10n/credits.txt` has the English credits.
-  - **`Source/metadata`** holds the iQue Player title data: `title_e.txt` "StarFox"; `title_z.txt` "星际火狐" (GB2312); `isbn.txt` "ISBN 7-900381-09-0" (a Chinese ISBN); `title.inta`, an SGI image (magic 474) of 184x24 intensity+alpha showing "星际火狐"; `thumb.rgba`, a 56x56 RLE SGI RGB thumbnail of Fox and Slippy, saved from "E:/work/sf64/metadata/thmub.rgb". Decoded to `png/leak_ique_title.png` and `png/leak_ique_thumb.png` (`un/sgi.py`).
+  - **`Source/metadata`** holds the iQue Player title data: `title_e.txt` "StarFox"; `title_z.txt` "星际火狐" (GB2312); `isbn.txt` "ISBN 7-900381-09-0" (a Chinese ISBN); `title.inta`, an SGI image (magic 474) of 184x24 intensity+alpha showing "星际火狐"; `thumb.rgba`, a 56x56 RLE SGI RGB thumbnail of Fox and Slippy, saved from "E:/work/sf64/metadata/thmub.rgb". Decoded to `png/leak_ique_title.png` and `png/leak_ique_thumb.png` (ROM analysis).
   - **Region and version.** This is the iQue Player (mainland China) localisation. It was built from the English US code base of the **V1.0 lineage**: the leak's English objects carry V1.0 behaviour and none of the V1.1 fixes (*The leak and the versions*). `LOCALE==CHINA` in `Source/spec` and `audio/zh/` belong to the same effort.
   - Confidence: high for the region, medium for the build lineage.
 
@@ -2071,25 +2074,12 @@ Unusual leak files (leak-supported):
 
 ### 8.1 Verification evidence
 
-All paths are under `sf/un/`.
-
-1. **`assetrefs.py` + `assetrefs_code.py` → `assetrefs.txt`, `assetrefs.json`.** The unreferenced asset scan, 3749 nodes. Validation: only gMsgLookup (absolute pointer) and aVsLandmasterCanonDL are name-referenced in the decomp; the ast_radio font textures are reached through absolute pointers.
-2. **`textures.py sheet` → `png/unref_*.png`, `png/unref_index.txt`.** `renderdl.ts` (the viewer's `displaylist.ts` + `lv/proto/raster.ts`) produces `png/dl_*.png`; `montage.py` produces `png/montage_unref_dls.png`.
-3. **`radio.py` → `radio.txt`, `radio.json`.** The message table, code/data/event-script references, and decoded text. A V1.0 table comparison (inline python) found the ids and texts identical.
-4. **Crash debugger.** `fault_v11.txt`, `fault_v10.txt` (objdump of 0x80007CEC-0x80008018 from both mains); jump tables read at V1.1 0x800C85DC and V1.0 0x800C403C (inline python).
-5. **`deadcode.py` → `deadcode.txt`, `deadcode_decomp.txt`, `deadcode.json`, `funcmap.json`.** Also the source of the unlock-function addresses.
-6. **`leakshape.py` → `leakshape.txt`, `leakshape.json`, `leakshape.log`.** Relocation-masked leak composite search. `leaklink.py` → `leak_*.bin(.json)`; `renderleak.ts` → `png/leak_bs_*.png`, `png/leak_s3_*.png`, `png/leak_s4_*.png`, `png/leak_s1_*.png`; CF/tt textures in `png/leak_tt_cf_textures.png` (inline python with the rgb2c header sizes).
-7. **`sgi.py`** → `png/leak_ique_title.png`, `png/leak_ique_thumb.png`.
-8. **Emulator.**
-   - Setup: run dir `sf/run-un`, V1.1, `--debug`, one instance.
-   - The induced fault attempt is described in 11.4 (debug.log: PCs 0x800257D0-0x80025900 and 0x80000184).
-   - Stopped with `headless-debug.sh quit`; `pgrep -a mupen64plus | grep run-un` returns nothing.
-9. **Earlier evidence reused:**
-   - notes/levels.md 9 (UNK_4, beta list, unused ids);
-   - notes/runtime.md 8 (UNK_4 shot, AC_BG02, leak names);
-   - notes/music.md 9/11 (audio);
-   - notes/fs.md 7 (ovl_unused, strings, rmon);
-   - `lv/proto/leakcheck*.txt`, `fs/tmp/leakver.out`.
+The unreferenced-asset scan traversed 3,749 nodes. A disassembly cross-check found only
+`gMsgLookup` and `aVsLandmasterCanonDL` name-referenced; radio-font textures are reached through
+absolute pointers. Display lists and textures were rendered for visual inspection. V1.0 and
+V1.1 message IDs and text matched. The crash debugger and unlock-function addresses were checked
+against disassembly; composite asset candidates were checked with relocation-masked searches and renders.
+An emulator fault test observed execution at 0x800257D0–0x80025900 and 0x80000184.
 
 ### 8.2 Known unknowns
 

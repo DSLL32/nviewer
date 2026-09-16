@@ -117,7 +117,7 @@ There is no magic. Decoder `0x80026A80` reads the size and fills an 8 KiB circul
 - 14-symbol distance tree, four-bit count;
 - symbols `<256` are literals; otherwise length is `symbol-253` and distance is the LH5 8 KiB wrapped form.
 
-`fs/extract.py` is a region-aware reference decoder. It exactly terminates at declared sizes for all 44 J and 45 P compressed records. J compressed storage `0x2D2601` expands to `0x71C538`; 32 raw records total `0x42F5C`. No MIO0/Yay0/Yaz0/RNC magic occurs, but the codec identification rests on code and successful decoding rather than the negative magic scan. [evidence: deterministic decoding]
+A region-aware decoder terminates at the declared size for all 44 J and 45 P compressed records. J compressed storage `0x2D2601` expands to `0x71C538`; 32 raw records total `0x42F5C`. No MIO0/Yay0/Yaz0/RNC magic occurs, but the codec identification rests on code and successful decoding rather than the negative magic scan. [evidence: deterministic decoding]
 
 ### 2.5 Loading process
 
@@ -573,12 +573,12 @@ Regional contract: select table/ID/overlay/audio offsets from `NABJ` vs `NABP`; 
 
 #### Static/tool verification
 
-- `fs/extract.py` validates every regional table recurrence and decodes 44/45 compressed entries to exact declared sizes.
-- `fs/make_disasm.py` derives resident/overlay bounds structurally; `archive_xrefs.py` inventories archive calls across every mapped text image.
-- `levels/analyze.py` parses all course headers, eight collision contexts and all 75 placement selections; the original `decode_geometry.py` census reports zero malformed lists/vertex references and 162 texture states sampled at vertex loads. The implemented full display-list execution resolves 561 image/TLUT source combinations and 395 distinct decoded images, including swaps preceding `G_MODIFYVTX` or triangle emission.
+- ROM extraction validates every regional table recurrence and decodes 44/45 compressed entries to exact declared sizes.
+- ROM extraction derives resident/overlay bounds structurally; ROM extraction inventories archive calls across every mapped text image.
+- Every course header, eight collision contexts, and all 75 placement selections parse; the initial geometry census reports zero malformed lists or vertex references and 162 texture states sampled at vertex loads. The implemented full display-list execution resolves 561 image/TLUT source combinations and 395 distinct decoded images, including swaps preceding `G_MODIFYVTX` or triangle emission.
 - normal-course decoded packages match J/P byte-for-byte; all eight collision OBJ hashes match across versions.
-- `environment/scan_env.py` reproduces every environment scalar and regional header identity.
-- `music/analyze_audio.py` parses all eight songs, 303 waves, 257 indexed effects, regional timing and every loop; the audition player completes all tracks.
+- ROM scan reproduces every environment scalar and regional header identity.
+- audio analysis parses all eight songs, 303 waves, 257 indexed effects, regional timing and every loop; the audition player completes all tracks.
 - Green Park structural/culling renders use nviewer's existing rasterizer, not a second raster implementation.
 
 #### Runtime verification

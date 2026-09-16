@@ -15,6 +15,9 @@ investigation.
   record definition is preferable to requiring a second game manual.
 - Do not publish scratch paths, emulator cleanup logs, agent activity, commands
   used only during research, or statements about whether the viewer was changed.
+- Do not cite unpublished research scripts or their generated files in a game
+  manual. State the reproducible observation or check instead. Link only
+  committed reference code or public primary sources.
 - State facts as facts only when verified. Introduce homogeneous material with
   `Verified from ROM bytes`, `Verified by disassembly`, `Verified against RAM`,
   or similarly explicit wording. Add an `Evidence` column when rows have mixed
@@ -182,6 +185,14 @@ or prose-only field sequences. A grammar, formula, or source excerpt may remain
 in a code block only when it is not serving as the structure definition. The
 specification checker rejects fenced and inline prose layouts, unnamed fields,
 and placeholder-only rows masquerading as format tables.
+
+When several games use the same asset compression codec, link the shared page
+under `docs/compression/` from each game's compression section. Keep the
+game-specific container and alignment rules in the game manual. Maintain C or
+C++ reference codecs under `codecs/` and transclude those files into the
+compression page; place the decoder before the encoder. Template only parameters
+that leave the token grammar unchanged. Future game extractors belong near
+the reusable codec they call, not in an unpublished research directory.
 
 Other standard forms are:
 

@@ -151,16 +151,16 @@ identical outside the two tables the loader patches (see *Verification evidence*
 4. Player model: Gex 64 ROM `0x49D870..0x4B5750`, Gex 3 ROM `0x158E1B0..0x159C4C0`; inflate, *Relocatable file format (objects and the player model; both games, verified)*.
 5. Code overlays and audio regions are plain ROM ranges.
 
-Reference extractors (Python, stdlib only): `g64fs/g64extract.py [ROM] [OUTDIR]` (with
-`--selftest`, which cross-checks a pure-Python inflater against zlib) and `g3fs/g3extract.py [ROM]
-[OUTDIR]` (1,079 files). Both write an index (`index.json` / `index.tsv`) with ROM ranges and sizes.
+The complete extraction indexes each file by its ROM range and decoded size.
+Independent DEFLATE decoding agrees with zlib for the Gex 64 streams; the
+verification results are tabulated below.
 
 #### Filesystem and codec
 
 | check | method | result | evidence |
 |---|---|---|---|
-| Gex 64 inflate, all streams | `g64extract.py --selftest`: pure-Python RFC 1951 inflater vs zlib | 767 streams (31 levels, 735 objects, common blob), 0 mismatches | `g64fs/g64extract.py`, `g64fs/files/index.json` |
-| Gex 64 level data vs RAM | extracted `map5` and `looney30` vs RDRAM at `0x8024B000` after the in-game load (`g64fs/tools/verify_ram.py`) | map5: 1,064,000/1,064,000 bytes equal outside the two tables `FixupLevel` patches; looney30: 29 differing bytes, all runtime state | `g64fs/ram/map5_hub.bin`, `g64fs/ram/looney30_outoftoon.bin` |
+| Gex 64 inflate, all streams | ROM extraction: pure-Python RFC 1951 inflater vs zlib | 767 streams (31 levels, 735 objects, common blob), 0 mismatches | ROM extraction, `g64fs/files/index.json` |
+| Gex 64 level data vs RAM | extracted `map5` and `looney30` vs RDRAM at `0x8024B000` after the in-game load (ROM extraction) | map5: 1,064,000/1,064,000 bytes equal outside the two tables `FixupLevel` patches; looney30: 29 differing bytes, all runtime state | `g64fs/ram/map5_hub.bin`, `g64fs/ram/looney30_outoftoon.bin` |
 | Gex 64 relocatable objects vs RAM | the 10 persistent objects rebuilt from files (reloc applied at their load addresses) | 171,645/171,664 bytes equal (only `DATA+4..5`, a runtime field) | same dumps |
 | Gex 3 inflate vs RAM | exec breakpoint `0x800315C8` just after the level inflate; dump and `cmp` | opening1 (15,288 bytes) and fly77 (729,776 bytes) byte-identical | `g3fs/d/opening1_fresh.bin`, `g3fs/d/fly77_fresh.bin` |
 | Gex 3 objects vs RAM | relocated objects located in an intro RAM dump | 20 of 25 byte-exact, the rest differ by a few runtime bytes | `g3fs/d/intro.bin` |
@@ -679,11 +679,11 @@ through the viewer's loaders. Scratch scripts are in `gexcoll/`.
 
 | check | method | result |
 |---|---|---|
-| Gex 64 record size | leaf pointers against sequential walks with 5 candidate rules (`g64faces.py`) | `flags & 0x4400` → 20 bytes: 0 misaligned leaf pointers in looney30/map5/scifi10/gillig1; other rules 2–652 |
+| Gex 64 record size | leaf pointers against sequential walks with 5 candidate rules (ROM analysis) | `flags & 0x4400` → 20 bytes: 0 misaligned leaf pointers in looney30/map5/scifi10/gillig1; other rules 2–652 |
 | Gex 64 normals | face normal vs winding, edge normals vs face/edge | dot ≥ 0.995; edge normals in-plane and outward (8,995/9,000) |
 | Gex 64 second BSP | every leaf list in 31 levels vs the instance array | 7,601 pointers, all on 48-byte instance records, all 6,007 instances covered |
-| Gex 3 record size | loop code `0x80017254` + leaf gaps in 30 levels (`g3aux.py`) | 0 mismatches (last run padded with `CDCD`); the `surface & 4` rule gave 2,540 bad leaves |
-| Gex 3 normals | `0x80012B0C` decode vs winding (`g3norm.py`) | 338,878 / 338,891 faces dot ≥ 0.98 |
+| Gex 3 record size | loop code `0x80017254` + leaf gaps in 30 levels (ROM analysis) | 0 mismatches (last run padded with `CDCD`); the `surface & 4` rule gave 2,540 bad leaves |
+| Gex 3 normals | `0x80012B0C` decode vs winding (ROM analysis) | 338,878 / 338,891 faces dot ≥ 0.98 |
 | face counts | viewer load of all 31 + 30 levels (`loadtest.ts`) | decoded faces = `scene+0x1C` (Gex 64) / `scene+0x20` (Gex 3) in every level, 0 skipped records |
 | alignment with the world | collision triangles (minus the 1-unit lift) keyed against world triangles (`render.ts`) | Gex 64: hub 95.7%, looney30 93.1%, scifi10 88.5%, kungfu4 98.9%; Gex 3: gexcave6 95.9%, snow96 96.7%, anime1 96.9%, endboss1 98.0% |
 | visual | offline raster, start camera and top view, world vs world + collision | overlays follow floors, walls and ramps; images `renders/*_cmp.png`, `*_only.png` |

@@ -77,7 +77,7 @@ Not present: `code`, overlays, `gameplay_keep`/`field_keep`/`dangeon_keep` and a
 
 #### How files are delimited
 
-- **Scenes:** found by structure (`v2/alpha.py: find_scenes`). For every 4-aligned `04 nn 00 00 02 xx xx xx` room-list command, try header starts up to 24 commands back. Accept one when the room table (segment-2 offset relative to that start) lists `nn` ascending, non-overlapping absolute ROM ranges inside 0x1000000-0x19A4470, the first starting after the header, and when the command list is valid up to its `14 00 00 00 00 00 00 00` END. This finds exactly 52 scenes; together with their rooms they tile 0x10FA150-0x19A4470 without gaps. Verified.
+- **Scenes:** found by structure (ROM analysis). For every 4-aligned `04 nn 00 00 02 xx xx xx` room-list command, try header starts up to 24 commands back. Accept one when the room table (segment-2 offset relative to that start) lists `nn` ascending, non-overlapping absolute ROM ranges inside 0x1000000-0x19A4470, the first starting after the header, and when the command list is valid up to its `14 00 00 00 00 00 00 00` END. This finds exactly 52 scenes; together with their rooms they tile 0x10FA150-0x19A4470 without gaps. Verified.
 - **Scene file end** = start of its first room. **Room files** = the room-list ranges, which are absolute ROM offsets: VROM == ROM, uncompressed. Verified (the rooms parse at those offsets).
 - **Segments:** scene = segment 2, room = segment 3, as in retail. Verified (all pointers in headers and DLs resolve inside the file).
 - **For the viewer:** since the ROM is identified by hash, a static table of the 52 scene start offsets (*Level list*) is safe; running the structural scan as a check costs under 1 s in Python.
@@ -321,7 +321,7 @@ Some outdoor scenes have zero light directions in setting 0 (0x0B, 0x0C, 0x0F, 0
 
 #### Rendering
 
-- **Pipeline:** `v2/render/render.py` builds jobs (scene file = segment 2, room file = segment 3, all mesh DLs of the main header, lighting from env setting 0). `export.ts` runs them through the viewer's `runDisplayList` (`ucode 'f3dex'`, `vertexScale 1`, `mirrorX false`, `combiner`, `decals`, `textureGen`). `raster.c` is a z-buffered, perspective-correct, near-clipped rasterizer with bilinear textures and back-face culling (CCW front). Views: top-down orthographic, three-quarter overview, and player entry 0 (eye 260 units behind and 110 above).
+- **Pipeline:** render comparison builds jobs (scene file = segment 2, room file = segment 3, all mesh DLs of the main header, lighting from env setting 0). `export.ts` runs them through the viewer's `runDisplayList` (`ucode 'f3dex'`, `vertexScale 1`, `mirrorX false`, `combiner`, `decals`, `textureGen`). `raster.c` is a z-buffered, perspective-correct, near-clipped rasterizer with bilinear textures and back-face culling (CCW front). Views: top-down orthographic, three-quarter overview, and player entry 0 (eye 260 units behind and 110 above).
 - **Two module variants:**
   - `--repo`: `the repository/src/rom/displaylist.ts` as it is now;
   - default: `v2/dl/` = copies of the repo's `displaylist.ts`, `texture.ts`, `types.ts`, `util.ts` taken at 13:25 today (the repo's `displaylist.ts` gained an `'f3d'` path since), patched with `directTextures`: the texture is the SETTIMG image itself, sized by render tile 0 and SETTILESIZE, read without the 4 KB texture memory.
@@ -438,19 +438,19 @@ No emulator request (`alpha/EMU-REQUESTS.md` not written). The upper half has no
 | hashes, byte order, header | md5sum/sha1sum, xxd 0x0-0x40 |
 | Zelda data ends 0x19A4470, then 0xFF | block scan of upper half; last room end from census |
 | no build string / Yaz0 / scene table / dmadata | grep -abo over the whole file; u32 search for all 52 scene starts |
-| 52 scenes, 145 rooms, contiguous 0x10FA150-0x19A4470 | `v2/census.py` structural scan + file-layout check |
+| 52 scenes, 145 rooms, contiguous 0x10FA150-0x19A4470 | ROM scan structural scan + file-layout check |
 | message text, name textures | Shift-JIS decode at 0x10E0000; greyscale images in `v2/probe/` |
 | F3DEX microcode | hex dump at 0x11F2BE8; opcode census over all meshes; sw97 ZAPD source |
 | no CI textures, sizes ≤ 4 KB | census (0 LOADTLUT, TEXTLUT 0); per-texture size check |
 | 12-byte waterbox | raw dumps: boxes end exactly at the collision header in 5 scenes |
 | prerender = raw RGBA16 | room size − source offset = 0x25800 for all 6; decoded images coherent |
-| test-map geometry = debug ROM | `v2/layoutcmp.py` (100% vertex/polygon identity) |
+| test-map geometry = debug ROM | cross-check (100% vertex/polygon identity) |
 | per-scene retail similarity | `v2/layoutcmp.txt`, `v2/texcmp.txt` (byte-identical textures via hash index) |
 | actor id rule | sw97 C sources by position (`sw97actors.txt`) + retail position matches (`actormap.txt`) → `idrule.txt` |
 | object ids = retail | sw97 C object lists mapped to retail object_table indices (`idrule.txt`) |
 | decoding works through the viewer interpreter | offline renders of all scenes via `displaylist.ts` (`renders/sheet_*.png`) |
 | repo texture path mis-decodes 5 textures | `v2/render/dbg/texverify.ts`, patched vs repo vs raw decode |
-| sw97 baserom = overdump files | `v2/sw97diff.py`: 185 identical, 10 differ in one byte, 2 absent (gerudo_valley) |
+| sw97 baserom = overdump files | cross-check: 185 identical, 10 differ in one byte, 2 absent (gerudo_valley) |
 | leak correspondences | 32-byte window matching of leak `.o` data (`leakcmp/`), symbol names via `mips-linux-gnu-nm` |
 
 ### 8.2 Known unknowns

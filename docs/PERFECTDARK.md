@@ -155,13 +155,13 @@ The file layer never relocates; format code converts pointers afterwards (*Addre
 
 | Check | Method | Result | Evidence |
 |---|---|---|---|
-| CIC-6105 | header CRCs recomputed with the 6105 algorithm; IPL3 crc32; RAM word 0x800002E8 | all four dumps match; `98BC2C86`; `C86E2000` | `fs/scripts/cic.py`, `fs/ram/title1.bin` |
-| code images | RDRAM at the title screen vs decompressed boot, lib, data, game (8 MiB); demand-paged game code (4 MiB) | boot, lib and game identical; data differs only in 1,292 bytes of globals; 129/129 pages identical | `fs/scripts/cmp_ram.py`, `fs/ram/boot4mb.bin` |
+| CIC-6105 | header CRCs recomputed with the 6105 algorithm; IPL3 crc32; RAM word 0x800002E8 | all four dumps match; `98BC2C86`; `C86E2000` | ROM extraction, `fs/ram/title1.bin` |
+| code images | RDRAM at the title screen vs decompressed boot, lib, data, game (8 MiB); demand-paged game code (4 MiB) | boot, lib and game identical; data differs only in 1,292 bytes of globals; 129/129 pages identical | ROM extraction, `fs/ram/boot4mb.bin` |
 | rarezip vs the game | breakpoints at the decompressor entry and return during a Defection load; output buffers dumped | 498/498 identical to zlib (text, setup, pads, tiles, 66 models, 409 textures, 10 BG sections, 3 sequences) | `fs/trace/defection.tsv`, `fs/trace/z/` |
 | viewer `inflate.ts` | tsx over all compressed files + lib + data | 1,405 streams identical to zlib | `fs/scripts/inflate_check.ts` |
-| voice clips | MPEG frame parser | 548/548 MPEG-2 Layer III 24 kbit/s 22,050 Hz mono | `fs/scripts/afiles.py` |
+| voice clips | MPEG frame parser | 548/548 MPEG-2 Layer III 24 kbit/s 22,050 Hz mono | ROM extraction |
 | ROM map | contiguity and fill checks | 41 regions cover the ROM | `fs/rommap.tsv` |
-| revisions | structural extraction of U V1.0/V1.1, E, J; decompressed file comparison by name | *Revisions (verified: `fs/scripts/revs.py`, `revcode.py`, `fs/revs.txt`)* | `fs/revs.txt`, `unused/revs/fundiff_U10_U11.txt` |
+| revisions | structural extraction of U V1.0/V1.1, E, J; decompressed file comparison by name | *Revisions (verified: ROM extraction, ROM analysis, `fs/revs.txt`)* | `fs/revs.txt`, `unused/revs/fundiff_U10_U11.txt` |
 
 ### 2.5 Loading process
 
@@ -183,7 +183,7 @@ The file layer never relocates; format code converts pointers afterwards (*Addre
 
 ### 3.1 Level catalog and identifiers
 
-#### Tables (verified: ROM data plus disassembly of the users; `stages/stagetable.py`, `stages/menus.py`)
+#### Tables (verified: ROM data and disassembly)
 
 | Table | vaddr (data offset) | Layout | Users |
 |---|---|---|---|
@@ -412,7 +412,7 @@ RDRAM vertex bytes and renders verify the layout.
 
 #### Level assembly (`loadLevel`)
 
-1. Stage record (*Tables (verified: ROM data plus disassembly of the users; `stages/stagetable.py`, `stages/menus.py`)*) → BG, pads, setup (solo +0x0E or MP +0x10) file ids.
+1. Stage record (*Tables*) → BG, pads, setup (solo +0x0E or MP +0x10) file ids.
 2. BG (*Level geometry*): one `Mesh` per room (room-local positions), `Instance` = `translate(room.pos)`; sky rooms → `Level.skies`;
    textures from the global store (one viewer texture per number × wrap mode).
 3. Setup (*Objects and props*): one `Mesh` per model file (lowest LOD distance band, opaque + xlu batches), one `Instance` per placed
@@ -722,17 +722,17 @@ approach for the combiner fold).
 |---|---|---|---|
 | BG container, rooms, portals, lights, bboxes | parse of all 31 non-stub BGs with cross-checks (vertices inside boxes, light counts, texture lists, colour offsets, no unknown opcodes) | 0 problems | `bg/renders/overview_all.log`, `bg/renders/{code}_overview.png` |
 | BG relocation in RAM | Defection RDRAM: primary data at segment 15, room 2 header and leaf pointers, vertex bytes | match | `runtime/captures/defection_a/ram.bin` |
-| microcode | glide64 ucode checksum; 13 frames walked with no unknown opcodes; BG vertices found byte-exact in the frame (98 runs in Defection) | ucode 7 "Perfect Dark" | `runtime/tools/pdwalk.py`, `runtime/captures/*/dl_*.txt` |
+| microcode | glide64 ucode checksum; 13 frames walked with no unknown opcodes; BG vertices found byte-exact in the frame (98 runs in Defection) | ucode 7 "Perfect Dark" | ROM analysis, `runtime/captures/*/dl_*.txt` |
 | textures | 3,502/3,503 decode; 116 Defection pool textures vs RDRAM | LOD 0 + palette identical 115/116 (1 false hit); all levels 106 (9 hit a game bug) | `bg/scripts/texram.ts`, `bg/dumps/texram_defection_a.json` |
 | **game-camera renders** | BG rendered with each frame's own projection, view, world scale and draw offset, next to the screenshot of the same moment | layout, handedness, textures and vertex colours match in all 11 gameplay/cutscene captures (*How the game draws a frame, environment, fog and sky (verified: 13 RDRAM captures with frame display lists, disassembly)* table); sky polygons, particles and HUD are not drawn | `bg/renders/{defection_a,chicago_a,ci_a,crashsite_a,villa_a,pelagic_a,pelagic_intro_cutscene,airbase_a,airbase_b,attackship_a,skedarruins_a,skedarruins_b,mp_skedar_a}_side_by_side.png` |
 | culling | same camera, opposite cull rule | the helipad floor disappears | `bg/renders/defection_a_gamecam_cullfront.png` |
 | sky rooms | frame modelview of ame room 1, sho room 2, lee room 0x71 = room position with a translation-free projection | exact | frame DLs |
 | world scale | room modelviews in Crash Site, Villa, Air Base | 0.5 on the diagonal, constant offset | `bg/scripts/scalecheck.ts` |
-| fog replacement | room lists in RAM vs file | Crash Site 9/9, Villa 17/17, Pelagic 8/8 and 10/10: PASS → FOG_SHADE_A; none on non-fog stages | `bg/scripts/fogmodes.py` |
+| fog replacement | room lists in RAM vs file | Crash Site 9/9, Villa 17/17, Pelagic 8/8 and 10/10: PASS → FOG_SHADE_A; none on non-fog stages | ROM analysis |
 | fog values | frame movewords vs environment table | equal in Crash Site, Villa, Pelagic II | `runtime/captures/*/manifest.json` |
 | clear colour, near/far | FILLRECT colour and view struct vs environment record | 6 stages (colour), 13 captures (near/far) | same |
-| run-time lighting | RAM colour arrays vs BG file | identical in Defection/CI/Villa; 0.8–0.97 dimming of some entries elsewhere | `runtime/tools/colordiff.py` |
-| sky planes and colours | CPU-rasterised RDP triangles decoded from 5 frames vs the model from `skyRender` | W·depth constant per plane; vertex colours within ~2/255; horizon = sky colour | `runtime/tools/rdptri.py`, `skymodel.py`, `runtime/captures/*/sky_compare.png` |
+| run-time lighting | RAM colour arrays vs BG file | identical in Defection/CI/Villa; 0.8–0.97 dimming of some entries elsewhere | cross-check |
+| sky planes and colours | CPU-rasterised RDP triangles decoded from 5 frames vs the model from `skyRender` | W·depth constant per plane; vertex colours within ~2/255; horizon = sky colour | ROM analysis, ROM analysis, `runtime/captures/*/sky_compare.png` |
 | world-space camera | player struct `+0x1BB0` vs frame eye in 10 stages | `campos − eye/scale` = the constant draw offset per stage, equal to the offsets solved from BG calls | `notes/runtime.md` *How a stage loads (verified: disassembly; order confirmed with file-load breakpoints for stages 0x30 and 0x32)*, `obj/dumps/capture_offsets.json` |
 
 #### Textures
@@ -931,7 +931,7 @@ Sun record (`0x14` bytes):
 | `0x04` | 12 | `f32[3]` | `direction` | Direction vector, with components on the order of one million. |
 | `0x10` | 2 | `u16` | `unknown10` | Unknown. |
 | `0x12` | 2 | `u16` | `unknown12` | Unknown. |
-All records are decoded in `runtime/envtable.json` (`runtime/tools/envtable.py`). Menu stages:
+All records are decoded in `runtime/envtable.json` (ROM analysis). Menu stages:
 
 | Stage | Near/far | Sky/clear colour | Fog min..max | Suns | Clouds (rgb, scale) | Water |
 |---|---|---|---|---|---|---|
@@ -968,7 +968,7 @@ Also present (no menu stage): fog records for 0x24 and 0x2B (`sevx`/`sevxb` slot
 
 ##### Sky
 Verified by disassembly (`skyRender` 0x7F11F754) and against the RDP primitives decoded from Air Base (two frames),
-Villa, Crash Site and Air Force One (`runtime/tools/rdptri.py`, `skymodel.py`):
+Villa, Crash Site and Air Force One:
 
 - **Order:** clear to the sky colour → sky → world. If `cloudsOn` is 0, the sky is just that fill. Otherwise the sky
   colour is filled below the horizon line, and above it the CPU emits "shade + texture, no Z" RDP triangles
@@ -998,7 +998,7 @@ Villa, Crash Site and Air Force One (`runtime/tools/rdptri.py`, `skymodel.py`):
   phase and the texture's axis order are hypotheses.
 - **Suns** (0x7F12583C, disassembly only): the sun direction is projected and eight Z-buffer samples decide
   visibility. A textured sprite is drawn in the sun colour, with flare artefacts from 0x7F126154. Not seen in a frame.
-- **Prototype:** `runtime/tools/skyrender.py`, with `runtime/captures/{villa_a,airbase_a,crashsite_a,airforceone_a}/sky_compare.png`
+- **Prototype:** render comparison, with `runtime/captures/{villa_a,airbase_a,crashsite_a,airforceone_a}/sky_compare.png`
   (screenshot | render). Colours, gradient and horizon match; the cloud pattern is the right texture and scale but not
   pixel-identical; water is untextured.
 - **For the viewer:** clear colour = sky colour. `Level.skies`: one camera-centred disc mesh that follows the camera in
@@ -1321,8 +1321,8 @@ Command lengths are verified.
 #### Detection and game object
 
 - `src/rom/index.ts` `openRom()`: add `case 'NPDE'` (after `normalizeByteOrder()`), accepting `rom[0x3F] === 0`
-  (V1.0; addresses in this spec). V1.1 (`rom[0x3F] === 1`), `NPDP` and `NPDJ` need their own address maps (*Revisions (verified: `fs/scripts/revs.py`, `revcode.py`, `fs/revs.txt`)*);
-  reject them at first or derive the tables from the boot code as `fs/extract.py` does.
+  (V1.0; addresses in this spec). V1.1 (`rom[0x3F] === 1`), `NPDP` and `NPDJ` need their own address maps (*Revisions (verified: ROM extraction, ROM analysis, `fs/revs.txt`)*);
+  reject them at first or derive the tables from the boot code.
 - `src/rom/types.ts`: `Game.id` += `'perfectdark'`. `LevelKind` already has `'campaign'`, `'hub'`, `'battle'` and
   `'other'`; use `campaign` (groups "Mission 1" … "Mission 9", "Special Assignments"), `hub` (Carrington
   Institute), `battle` (groups "Combat Simulator – Dark", "Combat Simulator – Classic") and `other` (group "Unused": 0x14
@@ -1559,7 +1559,7 @@ Sequence-table header and entries:
     menus.
   - Other menu states select 27, 71, 73, 103 and 3 (state meanings are hypotheses).
   - Seq 108 plays as type 1 on the file select; seq 107 plays during the boot logos (RAM).
-- **Cutscenes and AI scripts** (verified: AI command table at data 0x80068490, command-length table 0x80068C14; a walk of all 1,610 setup AI lists and 46 global lists parses without errors, `unused3/scripts/aiwalk.py`):
+- **Cutscenes and AI scripts** (verified: AI command table at data 0x80068490, command-length table 0x80068C14; a walk of all 1,610 setup AI lists and 46 global lists parses without errors, ROM analysis):
   - Music opcodes: `0x15B` play track isolated, `0x17D` play cutscene track, `0x17F` play temporary track, `0x1DA` play music continuously. The music notes gave table indices one higher, from a table start 4 bytes early.
   - `UsetupameZ` starts 34 and ambient 11 in its intro list, matching the RAM state during the Defection intro.
   - Of the 51 sequences in no code table, **42 are started by setup AI lists** (intro, outro and cutscene music).
@@ -1586,7 +1586,7 @@ Sequence-table header and entries:
    `music/wav/NNN_name.wav`). 13 renders clip on up to 220 samples; the game's 16-bit mixer clips the same way.
 
 **Captured game audio vs renders** (audio-dump plugin at 22018 Hz; `music/cap/boot.raw`, `music/cap/mp.raw`;
-`music/tools/cmp2.py`):
+audio analysis):
 
 | Game state (sequence ids from RAM) | Render | Loudness-envelope NCC | Tempo | Chroma at 0 / ±1 semitone | Game − render level |
 |---|---|---|---|---|---|
@@ -1606,9 +1606,9 @@ Sequence-table header and entries:
 |---|---|---|---|
 | engine parameters | RDRAM (synth struct, players) and AI dacrate | 22018 Hz, 184-sample updates, 3 players, linear voice volume | `music/ram/*.bin`, `music/cap/boot.log` |
 | sequences and bank | all 119 inflate to their size and parse; `parseBank` on the music bank | pass | `music/seqsurvey.ts` |
-| song selection | RDRAM during boot logos, attract, file select, Defection, Combat Simulator | seqs 107; 34 + 11; 89 + 108; 9 + 8; 62 | `music/tools/ramvoices.py` |
-| AI music commands | walk of all 1,610 setup and 46 global AI lists with the game's length table | 0 errors; Defection intro starts 34/11 | `unused3/scripts/aiwalk.py` |
-| rendered audio | 5 captures (audio-dump plugin) vs renders: loudness envelope, onset/loop timing, chroma | tempo exact, pitch correct, level −3.0..+2.7 dB | `music/tools/cmp2.py`, `music/cap/` |
+| song selection | RDRAM during boot logos, attract, file select, Defection, Combat Simulator | seqs 107; 34 + 11; 89 + 108; 9 + 8; 62 | audio analysis |
+| AI music commands | walk of all 1,610 setup and 46 global AI lists with the game's length table | 0 errors; Defection intro starts 34/11 | ROM analysis |
+| rendered audio | 5 captures (audio-dump plugin) vs renders: loudness envelope, onset/loop timing, chroma | tempo exact, pitch correct, level −3.0..+2.7 dB | audio analysis, `music/cap/` |
 
 #### Music and sound
 
@@ -1899,10 +1899,10 @@ these files are byte-identical in U, E and J):
 
 #### Text and strings
 
-Text files (all three ROMs dumped: `unused2/text/{U,E,J}/`; reference scan `unused2/scripts/textrefs.py` over code
-immediates, data u16/u32 and every byte offset of every setup. A string is "NONE" when no id reference was found: 303
+Text files were compared across all three ROMs. References were scanned across code
+immediates, data u16/u32, and every byte offset of every setup. A string is "NONE" when no ID reference was found: 303
 of 3,573 English strings in U. NONE is strong for stage banks; the global banks also compute ids, so NONE there is only a
-candidate):
+candidate.
 
 | Item | Where | Evidence | Confidence | Reachable |
 |---|---|---|---|---|
@@ -2073,7 +2073,7 @@ field as a chr number.
 
 | File | Contents | Source prototype | Size |
 |---|---|---|---|
-| `src/rom/perfectdark/rom.ts` | data segment inflate, file table and names, stage table, text banks (`langGet`) | `obj/lib/rom.ts`, `stages/*.py` | ~150 lines |
+| `src/rom/perfectdark/rom.ts` | data segment inflate, file table and names, stage table, text banks (`langGet`) | `obj/lib/rom.ts`, ROM analysis | ~150 lines |
 | `src/rom/perfectdark/texture.ts` | global texture list and both texture decoders (zlib palette, bitstream methods), pool layout → RGBA | `bg/lib/pdtex.ts` | ~600 lines |
 | `src/rom/perfectdark/gbi.ts` | Rare F3DEX variant interpreter: `04` VTX (12-byte, slot bits), `07` colour arrays, `B1` TRI4, `BF` TRI1/10, `C0` texture references, embedded tiles, geometry/other modes, `01` G_MTX slots (models) → `Batch[]` | `bg/lib/pdbg.ts` `buildRoomBatches`, `obj/lib/model.ts` | ~300 lines |
 | `src/rom/perfectdark/bg.ts` | BG container, rooms, sky rooms, section 3 bounds → room meshes and instances | `bg/lib/pdbg.ts` | ~250 lines |

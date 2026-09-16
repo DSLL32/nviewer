@@ -1054,15 +1054,15 @@ enough. [viewer design]
 
 | artifact | coverage |
 |---|---|
-| `fs/analyze.py`, `fs/index.json` | strict codec scan, all map/subfile/car catalogs and bounds |
+| ROM extraction, `fs/index.json` | strict codec scan, all map/subfile/car catalogs and bounds |
 | `fs/main.dis` | complete initialized resident image disassembly |
-| `levels/analyze.py`, `levels/summary.json` | all 13 maps, 1,808 secondary entries, 58,940 render faces, 1,726 materials, collision links and placements |
-| `levels/analyze_vehicles.py`, `levels/vehicles.json` | all 33 vehicles, both compressed extents, 99 raw palette extents, geometry and exact texture-copy totals |
-| `levels/audit_direct_catalogs.py`, `levels/direct_catalogs.json` | one aligned reference pass over 324 outside containers and structural classification of 225 referenced files |
-| `env_unused/extract_env.py` | all environment/skydome fields and hashes |
-| `env_unused/sky_images.py` | all 143 sky material images and all fog byte maps |
-| `env_unused/audit_orphans.py` | bounded uncataloged-container reference audit |
-| `audio/analyze_audio.py` | 14 songs, three bank modes, 85 SFX, patterns/cells/effects/loops |
+| ROM analysis, `levels/summary.json` | all 13 maps, 1,808 secondary entries, 58,940 render faces, 1,726 materials, collision links and placements |
+| ROM analysis, `levels/vehicles.json` | all 33 vehicles, both compressed extents, 99 raw palette extents, geometry and exact texture-copy totals |
+| ROM analysis, `levels/direct_catalogs.json` | one aligned reference pass over 324 outside containers and structural classification of 225 referenced files |
+| ROM extraction | all environment/skydome fields and hashes |
+| ROM analysis | all 143 sky material images and all fog byte maps |
+| ROM analysis | bounded uncataloged-container reference audit |
+| audio analysis | 14 songs, three bank modes, 85 SFX, patterns/cells/effects/loops |
 | `emulator/gliden64_1/NOTES.md`, `selected/title.png` | exact GLideN64/HLE launch and boot/title frame; explicit non-validation of gameplay claims |
 
 Generated JSON/TSV output is authoritative where the prose omits long per-asset

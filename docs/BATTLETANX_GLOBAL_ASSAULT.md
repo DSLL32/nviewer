@@ -226,7 +226,7 @@ The stream and algorithm are exactly Haruhiko Okumura's LZARI (1989):
 - **Termination:** there is no end marker; decoding stops when `size` bytes have been output.
   - The count is only checked between tokens, so the final match can write a few bytes past `size`.
   - Allocate `size + 60` and truncate.
-- **Reference implementation:** `btx/fs2/lzari.py`. It decodes all 271 LZARI blobs.
+- **Reference implementation:** ROM extraction. It decodes all 271 LZARI blobs.
 
 ##### ROM map
 | ROM range | Content | Codec | Reached by |
@@ -247,14 +247,10 @@ The stream and algorithm are exactly Haruhiko Okumura's LZARI (1989):
 | 0x58FAE0-0x7BE9AE | 26 sound blobs ("N64 PtrTablesV2", "N64 WaveTables", ...) | raw | table 0x80114710 |
 | 0x7BE9AE-0x800000 | 0xFF padding | | |
 
-##### Extracting every file
-- **Command:** `python3 btx/fs2/extract.py [ROM] [OUTDIR]`. It is self-contained (LZARI plus a tiny MIPS interpreter that evaluates the level switch in code) and takes about 21 s.
-- **Output:**
-  - `NNNN_{romoff}_{kind}.bin` (decompressed);
-  - `index.csv` (id, rom_offset, stored_size, decompressed_size, codec, first4, type_guess, source, note);
-  - `levels.csv`;
-  - `campaign.csv`.
-- **Counts:** 6251 index rows, 271 of them LZARI.
+##### Extraction boundaries
+
+The ROM map yields 6,251 indexed regions, including 271 LZARI streams. The
+level-file switch in code determines the level ranges.
 
 | Kind | Rows |
 |---|---|
@@ -277,7 +273,7 @@ The stream and algorithm are exactly Haruhiko Okumura's LZARI (1989):
 #### Codec (shared)
 
 - **New module `src/rom/lzari.ts`:** one function `lzariDecode(src: Uint8Array, offset: number): Uint8Array`, used by both games.
-  - Port it directly from `btx/fs2/lzari.py`, about 120 lines of TypeScript; the algorithm is specified in section 3.1.2.
+  - Port it directly from ROM extraction, about 120 lines of TypeScript; the algorithm is specified in section 3.1.2.
   - Use typed arrays: `Uint16Array` for the symbol tables and `Int32Array` for `position_cum`.
   - Keep low/high/value as plain numbers: they stay below 2^18, and `range * cum` stays below 2^33, which is exact in doubles.
   - Allocate `size + 60` bytes and truncate.
@@ -292,16 +288,14 @@ The stream and algorithm are exactly Haruhiko Okumura's LZARI (1989):
 | Check | Method | Result |
 |---|---|---|
 | GA main image uncompressed, RAM = ROM + 0x80070000 | Data pointer ROM 0xAB6D4 = 0x800732D4, which points to "WASHINGTON DC - MALL" at ROM 0x32D4 | Pass |
-| GA LZARI decoder | `fs2/lzari.py` decodes all 271 LZARI blobs; decoded world headers are self-consistent (h0 = 0x20, h7 = file size, whole record counts, e.g. common world 0x3F6EE8: 1 / 244 / 327 / 1200 records) | Pass |
+| GA LZARI decoder | ROM extraction decodes all 271 LZARI blobs; decoded world headers are self-consistent (h0 = 0x20, h7 = file size, whole record counts, e.g. common world 0x3F6EE8: 1 / 244 / 327 / 1200 records) | Pass |
 | GA level-file switch | Debug emulator, breakpoint at 0x800BA6C0 during the boot cutscene: level 0, mode 0, count 2, starts {0xB03F9B60, 0xB03FDA70}, ends {0xB03FCCB0, 0xB03FEA2A}, matching the cutscene column in 4.1 | Pass |
 | GA world coverage | Every byte of 0x3F6EE8-0x46F652 belongs to one of the 75 referenced world files | Pass |
-| BTX1 LZARI identical to GA | GA's decoder (`fs2/lzari.py`) decodes BTX1 internal level 0 (Cinematic) A (0x738900) to 0x7EC0 bytes with header [0x24, 0x304, …, 0x7EC0, 0x7EC0]; the BTX1 extractor decodes all 70 BTX1 LZARI files | Pass |
+| BTX1 LZARI identical to GA | GA's decoder (ROM extraction) decodes BTX1 internal level 0 (Cinematic) A (0x738900) to 0x7EC0 bytes with header [0x24, 0x304, …, 0x7EC0, 0x7EC0]; the BTX1 extractor decodes all 70 BTX1 LZARI files | Pass |
 | BTX1 file boundaries | Debug emulator: 2500 `romread` calls logged over three attract-demo loads of level 0; all start at an extracted boundary and stay inside it. One false boundary at 0x320018 was found and fixed. After load, the in-RAM read lists (133 texture, 778 geometry chunks) are a subset of level 0's static section-6 set (138 / 840) | Pass |
 | Cross-game leftover | The GA 0x100000 blob decodes byte-identical to BTX1 internal level 9 (Chicago - Bonus) A | Pass |
 
-Scripts and logs:
-- `fs1/extract.py`, `fs1/romlog.txt` (emulator read log)
-- `fs2/extract.py`, `fs2/lzari.py`, `fs2/xref.py`, `fs2/romrefs.py`
+The verification includes a full emulator ROM-read log and independent extraction of both games' level files.
 
 ### 2.5 Loading process
 
@@ -1310,7 +1304,7 @@ In the table, **Loop end** is in samples at 22047 Hz; loops start at 0.
 
 How the game picks a song:
 - **Campaign mission:** `play(missionRecord[+0x6C], 10)` at 0x8009A8B8. Mission records are 0x70 bytes each at 0x80124B80..0x80125360.
-- **Cutscenes:** script opcode `0x2F {file}`. Every scene executor's case 47 calls `play`. Scripts are listed at 0x801253D0, and `mus2/scriptmusic.py` walks them all.
+- **Cutscenes:** script opcode `0x2F {file}`. Every scene executor's case 47 calls `play`. Scripts are listed at 0x801253D0, and audio analysis walks them all.
 - **Title and front end:** `play(5, 0 or 10)` from 0x800BFEA0, 0x800CD970 and 0x800C7514.
 - **Battle modes:** a random pick at 0x8009D168: `file = trunc(rand*19) + 6`, remapping 9→10, 22→23 and 24→25.
 - **Mission end** (campaign modes only): `play(*0x80235F74 == 1 ? 22 : 9, 0)`. The flag is set when the mission timer exceeds record +0x68.
@@ -1449,7 +1443,7 @@ Everything found in both ROMs: levels, level variants, pool data, images, music,
   - It is a valid LZARI blob that no GA code references.
   - Decoded (0x5CB4 bytes), it is **byte-for-byte identical** to BTX1's decoded level A for internal level id 9, "Chicago - Bonus" (internal name "ChBonus", BTX1 ROM 0x76FE40-0x771EA8). Its header is `[0x24, 0x304, 0x1420, 0x2CBC, 0x367C, 0x3680, 0x3994, 0x5CB4, 0x5CB4]`.
   - GA has neither a BTX1-format loader nor BTX1's pools, so the game cannot use it.
-  - Verified by decoding both files and comparing every byte (script run from `btx/`, using `fs2/lzari.py` and `fs1/files/`).
+  - Verified by decoding both files and comparing every byte (script run from `btx/`, using ROM extraction and `fs1/files/`).
 - **Unreferenced pool bytes** (the "gap" rows in `fs2/files/index.csv`):
   - TEX pool: 24 regions, 0x1E0D0 bytes, holding **48 complete, unused texture chunks** (contact sheet `lvl2/sheets/unref_tex.png` with index `unref_tex.txt`). Among them:
     - Route 66 road signs ("Grip's Gateway 1 mile", "66 Ahead") and western wooden storefronts;
@@ -1529,7 +1523,7 @@ Everything found in both ROMs: levels, level variants, pool data, images, music,
   - `brk1.bin` / `brk2.bin`: SF Breakout, DL 0x80157F80 / 0x80157E80; a DEFEAT box overlays the level
   - `pan1.bin` / `pan2.bin`: SF Panhandle, DL 0x80157F80 / 0x80157E80
 - **Tools:**
-  - `dldump.py` (F3DEX2 walker; `--render` draws a wireframe)
+  - ROM extraction (F3DEX2 walker; `--render` draws a wireframe)
   - `goto.sh` (menu driving)
 
 #### GA

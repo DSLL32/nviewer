@@ -29,6 +29,9 @@ When asked to investigate a game (ROM formats for the viewer):
    (driver, song list, loops), mapping onto `src/rom/`, verification evidence,
    and known unknowns. Label every claim verified (and how: ROM bytes,
    disassembly, RAM, frames, audio), documented, source-derived, or hypothesis.
+   Published manuals must not cite unpublished scratch scripts or output paths;
+   state the verification method and result. Link shared codecs in
+   `docs/compression/` rather than duplicating their full bitstream definitions.
  - Unless told otherwise, finish the spec first, then surface unused and hidden
    content (cut levels, debug features, unreferenced assets, text, music) in
    its own section.
