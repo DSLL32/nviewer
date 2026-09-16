@@ -16,17 +16,29 @@ its extra bits give the backward distance. The history begins filled with
 spaces.
 
 The [C++ reference codec](https://github.com/DSLL32/nviewer/blob/master/codecs/airboarder_lh5.cpp)
-decodes dynamic trees and encodes using small fixed canonical trees plus a
-bounded greedy match search. It has no heap allocation. Two Japanese ROM
-entries matched the viewer byte-for-byte:
+decodes dynamic trees without allocating memory. The encoder builds canonical
+character and distance trees for each block. It searches an 8 KiB history for
+matches at several distance costs, then refines the token choices against the
+resulting Huffman bit costs. It uses up to six parsing passes; very redundant
+blocks use one pass, and a strong match limits search depth. Encoder scratch
+space is bounded by a 16 KiB decoded block; its history is carried across blocks.
 
-| Entry | ROM stored | Decoded | Re-encoded | FNV-1a decoded |
-|---|---:|---:|---:|---|
-| Course archive 74 | 305,074 | 814,624 | 388,219 | `E01A4685` |
-| Archive 0 | 4,716 | 20,744 | 6,981 | `AC86416B` |
+The largest indexed Japanese/PAL archive stream in the J ROM begins at
+`0x56A8F4`. It occupies 583,156 retail bytes and decodes to 1,271,176 bytes.
+The reference encoder produces **568,048 bytes** (2.59% below retail) in
+2.33 seconds with `-O3` on the test host, or 0.042 seconds per 10 KiB of
+compressed output. The C++ decoder and the independent viewer TypeScript
+decoder both reproduced all 1,271,176 decoded bytes.
 
-Both re-encoded streams round-tripped under sanitizers. The fixed trees are
-intentionally simpler than the retail compressor and may produce larger files.
+All 44 J and 45 PAL compressed archive records re-encoded and round-tripped.
+Their slowest normalized encode time was 0.775 seconds per 10 KiB of compressed
+output, below the 2-second budget.
+
+Address/undefined-behavior sanitizer round trips passed on 2,128 varied
+inputs, including block boundaries, repetitive data and random data. A separate
+sanitizer test checked 2,000 skewed and random Huffman frequency sets, including
+odd and even length-limit overflows. Streams made with both overflow cases also
+decoded byte-for-byte in the independent viewer decoder.
 
 ## Reference source
 
