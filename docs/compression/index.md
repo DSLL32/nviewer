@@ -36,6 +36,8 @@ link with `-lz`.
 | [`CMPR`/`SMSR00` slide-LZ](./smsr.md) | [Yoshi's Story](../YOSHISTORY.md) | Decoder and encoder |
 | [VPK0](./vpk0.md) | [Pokémon Snap](../POKEMONSNAP.md) | Decoder and encoder |
 | [ERZ2](./erz2.md) | [Spider-Man](../SPIDERMAN.md) | Decoder and encoder |
+| [Shadows LZHUF](./shadows-lzhuf.md) | [Star Wars: Shadows of the Empire](../SHADOWS_OF_THE_EMPIRE.md) | Decoder and encoder; release-specific position tables |
+| [Shadows LZSS](./shadows-lzss.md) | [Star Wars: Shadows of the Empire](../SHADOWS_OF_THE_EMPIRE.md) | Decoder and encoder; absolute 4 KiB ring |
 
 Nintendo VADPCM and other audio sample encodings are documented in each game's
 audio section; they are not general-purpose asset compression formats. The 1997
