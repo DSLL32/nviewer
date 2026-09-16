@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <vector>
+#include "common/hash_chain.hpp"
 
 static constexpr unsigned MATCH_DEPTH = 512;
 static constexpr size_t BLOCK_BYTES = 16384;
@@ -224,23 +225,25 @@ static unsigned slot_for(size_t distance) {
     return slot;
 }
 
-class MatchCandidates {
-    std::array<size_t, 4096> last_;
-    std::array<size_t, 8192> chain_;
-    static unsigned hash(const uint8_t *p) {
+struct LhHash3 {
+    static constexpr size_t width = 3, buckets = 4096;
+    unsigned operator()(const uint8_t *p) const {
         return (p[0] * 251u + p[1] * 31u + p[2]) & 4095u;
     }
+};
+
+class MatchCandidates {
+    HashChain<LhHash3, size_t, 8192> index_;
 public:
-    MatchCandidates() { last_.fill(SIZE_MAX); }
     MatchSet find(const uint8_t *src, size_t end, size_t at) const {
         MatchSet result{};
         if (end - at < 3) return result;
         unsigned max_length = (unsigned)std::min<size_t>(255, end - at);
         unsigned best_length = 0;
         bool near_full = false;
-        size_t previous = last_[hash(src + at)];
+        size_t previous = index_.first(src, at);
         for (unsigned n = 0; n < MATCH_DEPTH &&
-             previous != SIZE_MAX && at - previous <= 8192; n++) {
+             previous != index_.absent && at - previous <= 8192; n++) {
             unsigned slot = slot_for(at - previous);
             if (result.slots[slot].length < max_length) {
                 unsigned length = 0;
@@ -254,15 +257,13 @@ public:
             }
             if (near_full && n >= 15) break;
             if (best_length >= 32 && n >= 127) break;
-            previous = chain_[previous & 8191];
+            previous = index_.previous(previous);
         }
         return result;
     }
     void advance(const uint8_t *src, size_t size, size_t at) {
         if (size - at < 3) return;
-        unsigned key = hash(src + at);
-        chain_[at & 8191] = last_[key];
-        last_[key] = at;
+        index_.insert(src, at);
     }
 };
 

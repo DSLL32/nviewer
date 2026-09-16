@@ -7,6 +7,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <vector>
+#include "common/hash_chain.hpp"
+
+struct HudsonHash3 {
+    static constexpr size_t width = 3, buckets = 65536;
+    unsigned operator()(const uint8_t *p) const {
+        return ((unsigned(p[0]) * 251u + p[1]) * 251u + p[2]) & 65535u;
+    }
+};
 
 template<unsigned LenBits>
 int hudson_decode(const uint8_t *src, size_t src_len, uint8_t *dst,
@@ -68,12 +76,7 @@ int hudson_encode_ex(const uint8_t *src, size_t src_len, uint8_t *dst,
 
     struct Match { uint16_t distance; uint8_t length; };
     std::vector<Match> matches(src_len, Match{0, 0});
-    std::array<size_t, 65536> last;
-    std::array<size_t, window> chain;
-    last.fill(SIZE_MAX);
-    auto hash = [](const uint8_t *p) {
-        return ((unsigned(p[0]) * 251u + p[1]) * 251u + p[2]) & 65535u;
-    };
+    HashChain<HudsonHash3, size_t, window> index;
     for (size_t i = 0; i + 2 < src_len; i++) {
         size_t limit = src_len - i < max_len ? src_len - i : max_len;
         Match best{0, 0};
@@ -97,20 +100,18 @@ int hudson_encode_ex(const uint8_t *src, size_t src_len, uint8_t *dst,
                 best = {1, uint8_t(length)};
         }
 
-        unsigned h = hash(src + i);
-        size_t prev = last[h];
-        for (unsigned n = 0; n < depth && prev != SIZE_MAX &&
+        size_t prev = index.first(src, i);
+        for (unsigned n = 0; n < depth && prev != index.absent &&
              i - prev <= window && best.length < limit; n++) {
             size_t length = 0;
             while (length < limit && src[prev + length] == src[i + length])
                 length++;
             if (length >= 3 && length > best.length)
                 best = {uint16_t(i - prev), uint8_t(length)};
-            prev = chain[prev & mask];
+            prev = index.previous(prev);
         }
         matches[i] = best;
-        chain[i & mask] = last[h];
-        last[h] = i;
+        index.insert(src, i);
     }
 
     // The next state is the token's bit position in its flag byte. A new

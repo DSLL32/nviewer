@@ -6,6 +6,7 @@
 #include <new>
 #include <stdexcept>
 #include <vector>
+#include "common/hash_chain.hpp"
 
 extern "C" {
 
@@ -51,18 +52,13 @@ int smsr_encode(const uint8_t *src, size_t size, uint8_t *dst,
     if (!src || !dst || !written || size > UINT32_MAX) return -1;
     // Distances all cost two bytes, so one longest match also represents every
     // shorter match at this position. Search the entire 4 KiB window.
-    constexpr uint32_t absent = UINT32_MAX;
-    std::array<uint32_t, 65536> head;
-    std::array<uint32_t, 4096> prev;
-    head.fill(absent);
+    HashChain<MultiplyHash3, uint32_t, 4096> index;
     struct Match { uint16_t distance; uint8_t length; };
     std::vector<Match> matches(size);
     for (size_t i = 0; size - i >= 3; i++) {
-        uint32_t bytes = (uint32_t(src[i]) << 16) | (uint32_t(src[i + 1]) << 8) | src[i + 2];
-        unsigned hash = (bytes * 0x1e35a7bdu) >> 16;
         unsigned limit = unsigned(size - i < 18 ? size - i : 18);
-        for (uint32_t p = head[hash]; p != absent && i - p <= 4096;
-             p = prev[p & 4095]) {
+        for (uint32_t p = index.first(src, i); p != index.absent && i - p <= 4096;
+             p = index.previous(p)) {
             if (src[p + matches[i].length] != src[i + matches[i].length]) continue;
             unsigned length = 0;
             while (length < limit && src[p + length] == src[i + length]) length++;
@@ -71,8 +67,7 @@ int smsr_encode(const uint8_t *src, size_t size, uint8_t *dst,
                 if (length == limit) break;
             }
         }
-        prev[i & 4095] = head[hash];
-        head[hash] = uint32_t(i);
+        index.insert(src, i);
     }
 
     // Exact byte costs for all 16 control-word phases. A token starts a new

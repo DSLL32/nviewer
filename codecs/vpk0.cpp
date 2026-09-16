@@ -7,6 +7,7 @@
 #include <string.h>
 #include <utility>
 #include <vector>
+#include "common/hash_chain.hpp"
 
 extern "C" {
 
@@ -131,9 +132,12 @@ static unsigned width_of(unsigned v) {
     return v ? 32u - (unsigned)__builtin_clz(v) : 1u;
 }
 
-static unsigned hash3(const uint8_t *p) {
-    return (unsigned)((p[0] * 2654435761u ^ p[1] * 2246822519u ^ p[2] * 3266489917u) >> 16);
-}
+struct VpkHash3 {
+    static constexpr size_t width = 3, buckets = 65536;
+    unsigned operator()(const uint8_t *p) const {
+        return (unsigned)((p[0] * 2654435761u ^ p[1] * 2246822519u ^ p[2] * 3266489917u) >> 16);
+    }
+};
 
 static unsigned offset_class(unsigned distance, unsigned method) {
     if (!method || !(distance & 3)) {
@@ -150,18 +154,15 @@ static MatchGraph find_matches(const uint8_t *src, size_t size, unsigned method,
                                unsigned window) {
     MatchGraph graph;
     graph.starts.resize(size + 1);
-    std::array<uint32_t, 65536> head;
-    std::vector<uint32_t> previous(size, UINT32_MAX);
-    head.fill(UINT32_MAX);
+    HashChain<VpkHash3> index(size);
     for (size_t i = 0; i < size; i++) {
         graph.starts[i] = graph.options.size();
         if (size - i < 3) continue;
         Matches matches{};
-        unsigned h = hash3(src + i);
-        uint32_t j = head[h];
+        uint32_t j = index.first(src, i);
         unsigned limit = (unsigned)std::min<size_t>(max_match, size - i);
-        for (unsigned n = 0; j != UINT32_MAX && n < depth && i - (size_t)j <= window;
-             n++, j = previous[j]) {
+        for (unsigned n = 0; j != index.absent && n < depth && i - (size_t)j <= window;
+             n++, j = index.previous(j)) {
             if (src[j] != src[i] || src[j + 1] != src[i + 1] ||
                 src[j + 2] != src[i + 2]) continue;
             unsigned distance = (unsigned)(i - (size_t)j);
@@ -174,8 +175,7 @@ static MatchGraph find_matches(const uint8_t *src, size_t size, unsigned method,
             while (length < limit && src[j + length] == src[i + length]) length++;
             if (length > best.length) best = {distance - 1, (uint16_t)length};
         }
-        previous[i] = head[h];
-        head[h] = (uint32_t)i;
+        index.insert(src, i);
         for (const Match &m : matches)
             if (m.length) graph.options.push_back(m);
     }

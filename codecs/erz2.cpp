@@ -3,10 +3,10 @@
 #include <stdint.h>
 #include <string.h>
 #include <algorithm>
-#include <array>
 #include <new>
 #include <stdexcept>
 #include <vector>
+#include "common/hash_chain.hpp"
 
 extern "C" {
 
@@ -190,15 +190,8 @@ static void emit_literals(Writer *w, const uint8_t *src,
 int erz2_encode(const uint8_t *src, size_t size, uint8_t *dst,
                 size_t cap, size_t *written) try {
     if (!src || !dst || !written || size > UINT32_MAX || cap < 19) return -1;
-    constexpr uint32_t absent = UINT32_MAX;
-    std::array<uint32_t, 65536> head;
-    head.fill(absent);
-    std::vector<uint32_t> previous(size, absent);
-    for (size_t at = 0; at + 1 < size; at++) {
-        unsigned pair = unsigned(src[at]) << 8 | src[at + 1];
-        previous[at] = head[pair];
-        head[pair] = uint32_t(at);
-    }
+    HashChain<PairHash2> index(size);
+    index.build(src, size);
 
     struct Choice { uint16_t length, distance; };
     std::vector<Choice> choice(size);
@@ -217,8 +210,9 @@ int erz2_encode(const uint8_t *src, size_t size, uint8_t *dst,
         // A pair chain finds every legal match, including the cheap length-two
         // token. Candidates get farther away, so their distance cost cannot
         // improve: only newly reached lengths need to be considered.
-        for (uint32_t from = previous[at]; from != absent && at - from <= 4096;
-             from = previous[from]) {
+        for (uint32_t from = index.previous(uint32_t(at));
+             from != index.absent && at - from <= 4096;
+             from = index.previous(from)) {
             unsigned distance = unsigned(at - from);
             if (longest >= limit) break;
             if (src[from + longest] != src[at + longest]) continue;

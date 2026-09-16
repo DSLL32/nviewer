@@ -4,8 +4,15 @@
  */
 #include <stddef.h>
 #include <stdint.h>
-#include <array>
 #include <vector>
+#include "common/hash_chain.hpp"
+
+struct RushHash3 {
+    static constexpr size_t width = 3, buckets = 65536;
+    unsigned operator()(const uint8_t *p) const {
+        return ((unsigned(p[0]) << 8 | p[1]) ^ unsigned(p[2]) * 251u) & 65535u;
+    }
+};
 
 extern "C" {
 
@@ -60,32 +67,26 @@ static int encode_impl(const uint8_t *src, size_t size, uint8_t *dst,
     if (size > SIZE_MAX / 8 - 1 || size > UINT32_MAX / 2 - 2) return -1;
     struct Match { uint16_t length, distance, two_distance; };
     std::vector<Match> matches(size);
-    std::array<size_t, 65536> last3, last2;
-    std::array<size_t, 4096> chain3, chain2;
-    last3.fill(SIZE_MAX);
-    last2.fill(SIZE_MAX);
+    HashChain<PairHash2, size_t, 4096> pair_index;
+    HashChain<RushHash3, size_t, 4096> triple_index;
     const size_t window = ring_mode ? 4096 : 4095;
     for (size_t pos = 0; pos < size; pos++) {
         Match best{};
         size_t remaining = size - pos;
         if (remaining >= 2) {
-            unsigned key2 = unsigned(src[pos]) << 8 | src[pos + 1];
-            size_t prev = last2[key2];
-            while (prev != SIZE_MAX && pos - prev <= window) {
+            size_t prev = pair_index.first(src, pos);
+            while (prev != pair_index.absent && pos - prev <= window) {
                 size_t distance = pos - prev;
                 unsigned address = ring_mode ? unsigned((pos - distance + 1) & 4095)
                                              : unsigned(distance);
                 if (address) { best.two_distance = uint16_t(distance); break; }
-                prev = chain2[prev & 4095];
+                prev = pair_index.previous(prev);
             }
-            chain2[pos & 4095] = last2[key2];
-            last2[key2] = pos;
+            pair_index.insert(src, pos);
         }
         if (remaining >= 3) {
-            unsigned key3 = ((unsigned(src[pos]) << 8 | src[pos + 1]) ^
-                             unsigned(src[pos + 2]) * 251u) & 65535u;
-            size_t prev = last3[key3];
-            while (prev != SIZE_MAX && pos - prev <= window) {
+            size_t prev = triple_index.first(src, pos);
+            while (prev != triple_index.absent && pos - prev <= window) {
                 size_t length = 0;
                 size_t limit = remaining < 17 ? remaining : 17;
                 while (length < limit && src[prev + length] == src[pos + length]) length++;
@@ -94,10 +95,9 @@ static int encode_impl(const uint8_t *src, size_t size, uint8_t *dst,
                     best.distance = uint16_t(pos - prev);
                     if (length == 17) break;
                 }
-                prev = chain3[prev & 4095];
+                prev = triple_index.previous(prev);
             }
-            chain3[pos & 4095] = last3[key3];
-            last3[key3] = pos;
+            triple_index.insert(src, pos);
         }
         // For the first 4096 bytes, a match can begin in an unwritten (zero)
         // ring cell, then wrap into earlier output or its own copy. Distances
