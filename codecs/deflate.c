@@ -24,10 +24,10 @@ static int inflate_raw(const uint8_t *src, size_t size, uint8_t *dst,
 }
 
 static int deflate_raw(const uint8_t *src, size_t size, uint8_t *dst,
-                       size_t cap, size_t *written) {
+                       size_t cap, size_t *written, int level, int mem_level) {
     if (size > UINT_MAX || cap > UINT_MAX) return -1;
     z_stream z = {0};
-    if (deflateInit2(&z, Z_DEFAULT_COMPRESSION, Z_DEFLATED, -15, 8,
+    if (deflateInit2(&z, level, Z_DEFLATED, -15, mem_level,
                      Z_DEFAULT_STRATEGY) != Z_OK) return -1;
     z.next_in = (Bytef *)src;
     z.avail_in = (uInt)size;
@@ -48,7 +48,7 @@ int raw_deflate_decode(const uint8_t *src, size_t size, uint8_t *dst,
 int raw_deflate_encode(const uint8_t *src, size_t size, uint8_t *dst,
                        size_t cap, size_t *written) {
     if (!src || !dst || !written) return -1;
-    return deflate_raw(src, size, dst, cap, written);
+    return deflate_raw(src, size, dst, cap, written, 8, 6);
 }
 
 int rare1172_decode(const uint8_t *src, size_t size, uint8_t *dst,
@@ -63,7 +63,7 @@ int rare1172_encode(const uint8_t *src, size_t size, uint8_t *dst,
     if (!src || !dst || !written || cap < 2) return -1;
     dst[0] = 0x11; dst[1] = 0x72;
     size_t payload;
-    if (deflate_raw(src, size, dst + 2, cap - 2, &payload)) return -1;
+    if (deflate_raw(src, size, dst + 2, cap - 2, &payload, 9, 5)) return -1;
     *written = payload + 2;
     return 0;
 }
@@ -77,15 +77,26 @@ int rare1173_decode(const uint8_t *src, size_t size, uint8_t *dst,
     return *written == expected ? 0 : -1;
 }
 
-int rare1173_encode(const uint8_t *src, size_t size, uint8_t *dst,
-                    size_t cap, size_t *written) {
+static int rare1173_encode_profile(const uint8_t *src, size_t size, uint8_t *dst,
+                                   size_t cap, size_t *written, int mem_level) {
     if (!src || !dst || !written || size > 0xffffff || cap < 5) return -1;
     dst[0] = 0x11; dst[1] = 0x73;
     dst[2] = (uint8_t)(size >> 16);
     dst[3] = (uint8_t)(size >> 8);
     dst[4] = (uint8_t)size;
     size_t payload;
-    if (deflate_raw(src, size, dst + 5, cap - 5, &payload)) return -1;
+    if (deflate_raw(src, size, dst + 5, cap - 5, &payload, 9, mem_level)) return -1;
     *written = payload + 5;
     return 0;
+}
+
+int rare1173_encode(const uint8_t *src, size_t size, uint8_t *dst,
+                    size_t cap, size_t *written) {
+    return rare1173_encode_profile(src, size, dst, cap, written, 7);
+}
+
+/* Reproduces the retail byte count of the audited PD boot stream, not its bits. */
+int rare1173_encode_retail_size(const uint8_t *src, size_t size, uint8_t *dst,
+                                size_t cap, size_t *written) {
+    return rare1173_encode_profile(src, size, dst, cap, written, 9);
 }
