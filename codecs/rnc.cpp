@@ -1,11 +1,118 @@
-/* A Bug's Life RNC ProPack methods 1 and 2. CRC-checked, no allocation.
- * Both encoders use bounded matches; method 1 uses fixed Huffman tables.
+/* A Bug's Life RNC ProPack methods 1 and 2. CRC-checked reference codecs.
+ * Method 1 iterates a Huffman-cost parse; method 2 uses exact token costs.
  * Streams with the encrypted or locked flags set are not supported.
  */
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
-#include "common/match_finder.hpp"
+#include <algorithm>
+#include <array>
+#include <new>
+#include <stdexcept>
+#include <utility>
+#include <vector>
+
+namespace {
+
+constexpr unsigned absent = UINT32_MAX;
+
+static unsigned category(unsigned value) {
+    unsigned result = 0;
+    while (value) { result++; value >>= 1; }
+    return result;
+}
+
+struct Match { uint16_t length = 0, distance = 0; };
+using Matches = std::array<Match, 16>;
+
+// Two-byte chains also find the short matches allowed by both methods. Keep
+// the longest match in each distance category, since its shorter prefixes
+// have the same distance cost. History continues across method-1 blocks.
+struct MatchIndex {
+    const uint8_t *src;
+    std::vector<uint32_t> previous;
+
+    MatchIndex(const uint8_t *data, size_t size) : src(data), previous(size, absent) {
+        std::array<uint32_t, 65536> head;
+        head.fill(absent);
+        for (size_t i = 0; size - i >= 2; i++) {
+            unsigned key = unsigned(src[i]) << 8 | src[i + 1];
+            previous[i] = head[key]; head[key] = uint32_t(i);
+        }
+    }
+
+    std::vector<Matches> find(size_t start, unsigned size, unsigned window,
+                              unsigned max_length, unsigned depth) const {
+        std::vector<Matches> result(size);
+        // If a match at distance d covered [a,b), every later position inside
+        // that interval already matches through b. Cache that proven prefix
+        // for each distance to avoid re-comparing long, overlapping matches.
+        std::vector<uint32_t> matched_until(window);
+        for (unsigned p = 0; p + 1 < size; p++) {
+            size_t at = start + p;
+            unsigned limit = std::min(max_length, size - p);
+            unsigned visited = 0;
+            for (uint32_t candidate = previous[at]; candidate != absent &&
+                 at - candidate <= window && visited++ < depth;
+                 candidate = previous[candidate]) {
+                unsigned distance = unsigned(at - candidate);
+                unsigned c = category(distance - 1);
+                Match &best = result[p][c];
+                if (best.length == limit ||
+                    src[candidate + best.length] != src[at + best.length]) continue;
+                unsigned length = 2;
+                if (matched_until[distance - 1] > at)
+                    length = std::max(length, unsigned(std::min<size_t>(limit,
+                        matched_until[distance - 1] - at)));
+                while (length < limit && src[candidate + length] == src[at + length]) length++;
+                matched_until[distance - 1] = uint32_t(at + length);
+                if (length > best.length) best = {uint16_t(length), uint16_t(distance)};
+                // The nearest full-length match is sufficient for method 2;
+                // this also bounds method 1's search on highly repetitive data.
+                if (length == limit) break;
+            }
+        }
+        return result;
+    }
+};
+
+// A block-local range minimum carries the suffix position as a tie breaker.
+// Huffman values have constant cost within power-of-two length intervals.
+struct MinTree {
+    unsigned base = 1;
+    std::vector<uint64_t> values;
+
+    explicit MinTree(unsigned size) {
+        while (base < size) base *= 2;
+        values.assign(base * 2, UINT64_MAX);
+    }
+    void set(unsigned at, unsigned cost) {
+        unsigned node = base + at;
+        values[node] = uint64_t(cost) << 32 | at;
+        while (node > 1) {
+            node /= 2;
+            values[node] = std::min(values[node * 2], values[node * 2 + 1]);
+        }
+    }
+    uint64_t get(unsigned first, unsigned last) const { // inclusive
+        uint64_t result = UINT64_MAX;
+        for (first += base, last += base + 1; first < last; first /= 2, last /= 2) {
+            if (first & 1) result = std::min(result, values[first++]);
+            if (last & 1) result = std::min(result, values[--last]);
+        }
+        return result;
+    }
+};
+
+struct Parse1 {
+    MinTree suffix, raw_suffix;
+    std::vector<unsigned> raw_choice;
+    std::vector<Match> match_choice;
+    explicit Parse1(unsigned size) : suffix(size + 1), raw_suffix(size + 1),
+        raw_choice(size + 1), match_choice(size) {}
+};
+
+} // namespace
 
 extern "C" {
 
@@ -222,20 +329,21 @@ static void number1(Writer1 *w, unsigned value, unsigned count) {
     for (unsigned i = 0; i < count; i++) bit1_out(w, (value >> i) & 1u);
 }
 
-static void table1_out(Writer1 *w) {
-    number1(w, 16, 5);
-    for (unsigned i = 0; i < 16; i++) number1(w, 4, 4);
+static unsigned table1_size(const Entry entries[16]) {
+    unsigned count = 16;
+    while (count && !entries[count - 1].depth) count--;
+    return count;
 }
 
-static void symbol1_out(Writer1 *w, unsigned value) {
-    unsigned index = 0;
-    if (value == 1) index = 1;
-    else if (value >= 2) {
-        unsigned n = value;
-        while (n >>= 1) index++;
-        index++;
-    }
-    for (unsigned i = 4; i > 0; i--) bit1_out(w, (index >> (i - 1)) & 1u);
+static void table1_out(Writer1 *w, const Entry entries[16]) {
+    unsigned count = table1_size(entries);
+    number1(w, count, 5);
+    for (unsigned i = 0; i < count; i++) number1(w, entries[i].depth, 4);
+}
+
+static void symbol1_out(Writer1 *w, const Entry entries[16], unsigned value) {
+    unsigned index = category(value);
+    number1(w, entries[index].code, entries[index].depth);
     if (index >= 2) number1(w, value - (1u << (index - 1)), index - 1);
 }
 
@@ -245,44 +353,178 @@ static void literal1_out(Writer1 *w, const uint8_t *src, size_t count) {
     w->pos += count;
 }
 
-static unsigned block1(const uint8_t *src, size_t size, Writer1 *w) {
-    MatchFinder<4096, 255, 8> finder;
-    size_t literal_at = 0, in = 0;
-    unsigned chunks = 1;
-    while (in < size) {
-        auto match = finder.find(src, size, in);
-        size_t count = match.length, distance = match.distance;
-        if (count) {
-            if (w) {
-                symbol1_out(w, (unsigned)(in - literal_at));
-                literal1_out(w, src + literal_at, in - literal_at);
-                symbol1_out(w, (unsigned)(distance - 1));
-                symbol1_out(w, (unsigned)(count - 2));
+typedef struct { unsigned raw; Match match; } Token1;
+typedef struct { Entry raw[16], distance[16], length[16]; } Tables1;
+
+// At most 16 leaves means the ordinary Huffman tree already fits the format's
+// four-bit depth limit. An otherwise constant alphabet still needs one bit.
+static void huffman1(const unsigned frequencies[16], Entry entries[16]) {
+    unsigned weight[31] = {}, parent[31];
+    std::fill(parent, parent + 31, absent);
+    for (unsigned i = 0; i < 16; i++) weight[i] = frequencies[i];
+    for (unsigned next = 16; next < 31; next++) {
+        unsigned first = absent, second = absent;
+        for (unsigned i = 0; i < next; i++) if (weight[i] && parent[i] == absent) {
+            if (first == absent || weight[i] < weight[first]) {
+                second = first; first = i;
+            } else if (second == absent || weight[i] < weight[second]) second = i;
+        }
+        if (second == absent) break;
+        parent[first] = parent[second] = next;
+        weight[next] = weight[first] + weight[second];
+    }
+    memset(entries, 0, sizeof(Entry) * 16);
+    for (unsigned i = 0; i < 16; i++) if (frequencies[i]) {
+        for (unsigned at = i; parent[at] != absent; at = parent[at]) entries[i].depth++;
+        entries[i].depth = std::max(entries[i].depth, 1u);
+    }
+    unsigned code = 0;
+    for (unsigned depth = 1; depth <= 15; depth++) {
+        for (unsigned i = 0; i < 16; i++) if (entries[i].depth == depth)
+            entries[i].code = reverse(code++, depth);
+        code *= 2;
+    }
+}
+
+static unsigned tables1(const std::vector<Token1> &tokens, Tables1 *tables) {
+    unsigned raw[16] = {}, distance[16] = {}, length[16] = {};
+    for (const Token1 &token : tokens) {
+        raw[category(token.raw)]++;
+        if (token.match.length) {
+            distance[category(token.match.distance - 1)]++;
+            length[category(token.match.length - 2)]++;
+        }
+    }
+    huffman1(raw, tables->raw); huffman1(distance, tables->distance);
+    huffman1(length, tables->length);
+    unsigned bits = 16 + 15 + 4 * (table1_size(tables->raw) +
+        table1_size(tables->distance) + table1_size(tables->length));
+    for (unsigned i = 0; i < 16; i++) {
+        unsigned extra = i > 1 ? i - 1 : 0;
+        bits += raw[i] * (tables->raw[i].depth + extra) +
+                distance[i] * (tables->distance[i].depth + extra) +
+                length[i] * (tables->length[i].depth + extra);
+    }
+    for (const Token1 &token : tokens) bits += token.raw * 8;
+    return bits;
+}
+
+static unsigned cost1(const Entry entries[16], unsigned c) {
+    // Give an unused symbol a finite estimate so a later pass can introduce it.
+    return (entries[c].depth ? entries[c].depth : 8) + (c > 1 ? c - 1 : 0);
+}
+
+static std::vector<Token1> parse1(const std::vector<Matches> &matches,
+                                 const Tables1 &tables, Parse1 &work) {
+    unsigned size = unsigned(matches.size());
+    auto &suffix = work.suffix, &raw_suffix = work.raw_suffix;
+    auto &raw_choice = work.raw_choice;
+    auto &match_choice = work.match_choice;
+    suffix.set(size, cost1(tables.raw, 0));
+    raw_suffix.set(size, size * 8);
+    // A chunk is a literal run followed by a match; the last run has no match.
+    // First find each match's best suffix, then choose the literal run ending
+    // there. Adding 8*position makes all literal lengths in one symbol range
+    // comparable with one range query. The terminal zero run is still coded.
+    for (unsigned at = size; at-- > 0;) {
+        unsigned best_match = UINT32_MAX / 4;
+        for (unsigned d = 0; d < 16; d++) {
+            unsigned maximum = matches[at][d].length;
+            if (!maximum) continue;
+            for (unsigned c = 0; c < 16; c++) {
+                unsigned low = (c < 2 ? c : 1u << (c - 1)) + 2;
+                if (low > maximum) break;
+                unsigned high = std::min(maximum, (c < 2 ? c : (1u << c) - 1) + 2);
+                uint64_t choice = suffix.get(at + low, at + high);
+                unsigned bits = unsigned(choice >> 32) + cost1(tables.distance, d) +
+                                cost1(tables.length, c);
+                if (bits < best_match) {
+                    best_match = bits;
+                    match_choice[at] = {uint16_t(uint32_t(choice) - at), matches[at][d].distance};
+                }
             }
-            chunks++;
-            literal_at = in + count;
-        } else count = 1;
-        finder.advance(src, size, in, count);
-        in += count;
+        }
+        raw_suffix.set(at, best_match + at * 8);
+        unsigned best = UINT32_MAX;
+        for (unsigned c = 0; c < 16; c++) {
+            unsigned low = c < 2 ? c : 1u << (c - 1);
+            if (low > size - at) break;
+            unsigned high = std::min(size - at, c < 2 ? c : (1u << c) - 1);
+            uint64_t choice = raw_suffix.get(at + low, at + high);
+            unsigned bits = unsigned(choice >> 32) - at * 8 + cost1(tables.raw, c);
+            if (bits < best) { best = bits; raw_choice[at] = uint32_t(choice) - at; }
+        }
+        suffix.set(at, best);
     }
-    if (w) {
-        symbol1_out(w, (unsigned)(size - literal_at));
-        literal1_out(w, src + literal_at, size - literal_at);
+    std::vector<Token1> tokens;
+    unsigned at = 0;
+    for (;;) {
+        unsigned raw = raw_choice[at];
+        at += raw;
+        Match match = at < size ? match_choice[at] : Match{};
+        tokens.push_back({raw, match});
+        if (!match.length) break;
+        at += match.length;
     }
-    return chunks;
+    return tokens;
+}
+
+static void block1(const uint8_t *src, const std::vector<Matches> &matches, Writer1 *w,
+                   unsigned passes = 6) {
+    std::vector<Token1> best;
+    unsigned pending = 0;
+    for (unsigned at = 0; at < matches.size();) {
+        Match longest{};
+        for (const Match &match : matches[at])
+            if (match.length > longest.length) longest = match;
+        if (longest.length) {
+            best.push_back({pending, longest}); pending = 0;
+            at += longest.length;
+        } else { pending++; at++; }
+    }
+    best.push_back({pending, {}});
+    Tables1 best_tables{};
+    unsigned best_bits = tables1(best, &best_tables);
+    // Already tiny blocks (at most 1,024 coded bits) do not justify an expensive
+    // iterative parse. This keeps work proportional to compressed output even
+    // for large zero-filled assets. Keep the greedy bit cost as a fallback.
+    if (best_bits > 1024) {
+        Parse1 work(unsigned(matches.size()));
+        Tables1 tables{};
+        for (unsigned i = 0; i < 16; i++)
+            tables.raw[i].depth = tables.distance[i].depth = tables.length[i].depth = 4;
+        for (unsigned pass = 0; pass < passes; pass++) {
+            Tables1 previous = tables;
+            std::vector<Token1> tokens = parse1(matches, tables, work);
+            unsigned bits = tables1(tokens, &tables);
+            if (bits < best_bits) { best_bits = bits; best = std::move(tokens); best_tables = tables; }
+            if (!memcmp(&previous, &tables, sizeof tables)) break;
+        }
+    }
+    table1_out(w, best_tables.raw); table1_out(w, best_tables.distance);
+    table1_out(w, best_tables.length); number1(w, unsigned(best.size()), 16);
+    unsigned at = 0;
+    for (const Token1 &token : best) {
+        symbol1_out(w, best_tables.raw, token.raw);
+        literal1_out(w, src + at, token.raw); at += token.raw;
+        if (token.match.length) {
+            symbol1_out(w, best_tables.distance, token.match.distance - 1);
+            symbol1_out(w, best_tables.length, token.match.length - 2);
+            at += token.match.length;
+        }
+    }
 }
 
 int rnc1_encode(const uint8_t *src, size_t size, uint8_t *dst,
-                size_t cap, size_t *written) {
+                size_t cap, size_t *written) try {
     if (!src || !dst || !written || size > UINT32_MAX || cap < 18) return -1;
     Writer1 w = {dst, cap, 18, 0, 0, 0};
+    MatchIndex index(src, size);
     number1(&w, 0, 2); /* unlocked, unencrypted */
     for (size_t at = 0; at < size && !w.bad;) {
-        size_t length = size - at < 32767 ? size - at : 32767;
-        unsigned chunks = block1(src + at, length, NULL);
-        table1_out(&w); table1_out(&w); table1_out(&w);
-        number1(&w, chunks, 16);
-        block1(src + at, length, &w);
+        unsigned length = unsigned(std::min<size_t>(size - at, 8192));
+        auto matches = index.find(at, length, 32768, 32769, 1024);
+        block1(src + at, matches, &w);
         at += length;
     }
     if (w.bad || w.pos - 18 > UINT32_MAX) return -1;
@@ -293,6 +535,10 @@ int rnc1_encode(const uint8_t *src, size_t size, uint8_t *dst,
     dst[16] = dst[17] = 0;
     *written = w.pos;
     return 0;
+} catch (const std::bad_alloc &) {
+    return -1;
+} catch (const std::length_error &) {
+    return -1;
 }
 
 typedef struct { uint8_t *dst; size_t cap, pos, control; unsigned left; int bad; } Writer;
@@ -348,19 +594,47 @@ static void emit_literals(Writer *w, const uint8_t *src,
 }
 
 int rnc2_encode(const uint8_t *src, size_t size, uint8_t *dst,
-                size_t cap, size_t *written) {
+                size_t cap, size_t *written) try {
     if (!src || !dst || !written || size > UINT32_MAX || cap < 20) return -1;
+    MatchIndex index(src, size);
+    auto matches = index.find(0, unsigned(size), 4096, 263, UINT32_MAX);
+    std::vector<uint64_t> suffix(size + 1);
+    std::vector<Match> choice(size);
+    // Every token has a fixed bit cost. Bytes inserted between control bits do
+    // not affect their phase, so minimizing total bits also minimizes bytes.
+    for (size_t at = size; at-- > 0;) {
+        uint64_t best = suffix[at + 1] + 9;
+        Match selected{1, 0};
+        for (unsigned run = 12; run <= 72 && run <= size - at; run += 4) {
+            uint64_t bits = suffix[at + run] + run * 8 + 9;
+            if (bits < best) { best = bits; selected = {uint16_t(run), 0}; }
+        }
+        unsigned longest = 1;
+        for (const Match &match : matches[at]) {
+            if (!match.length) continue;
+            unsigned high = (unsigned(match.distance) - 1) >> 8;
+            unsigned offset_bits = 8 + (!high ? 1 : high == 1 ? 3 : high < 4 ? 4 : high < 8 ? 5 : 6);
+            unsigned first = std::max(longest + 1, match.distance <= 256 ? 2u : 3u);
+            for (unsigned length = first; length <= match.length; length++) {
+                unsigned token_bits = length == 2 ? 11 : offset_bits +
+                                      (length <= 5 ? 4 : length <= 8 ? 5 : 12);
+                uint64_t bits = suffix[at + length] + token_bits;
+                if (bits < best) { best = bits; selected = {uint16_t(length), match.distance}; }
+            }
+            longest = std::max(longest, unsigned(match.length));
+        }
+        suffix[at] = best; choice[at] = selected;
+    }
     Writer w = {dst, cap, 18, 0, 0, 0};
     emit_bit(&w, 0); emit_bit(&w, 0); /* unlocked, unencrypted */
-    MatchFinder<4096, 263, 8> finder;
-    size_t pending_at = 0, pending = 0;
     for (size_t i = 0; i < size && !w.bad;) {
-        auto match = finder.find(src, size, i);
+        auto match = choice[i];
         size_t count = match.length, distance = match.distance;
-        if (count) {
-            emit_literals(&w, src, pending_at, pending);
-            pending = 0;
-            if (count >= 9) {
+        if (distance) {
+            if (count == 2) {
+                emit_bit(&w, 1); emit_bit(&w, 1); emit_bit(&w, 0);
+                emit_byte(&w, unsigned(distance - 1));
+            } else if (count >= 9) {
                 emit_bit(&w, 1); emit_bit(&w, 1); emit_bit(&w, 1); emit_bit(&w, 1);
                 emit_byte(&w, (unsigned)(count - 8));
             } else if (count == 3) {
@@ -371,17 +645,10 @@ int rnc2_encode(const uint8_t *src, size_t size, uint8_t *dst,
                 emit_bit(&w, count >= 6);
                 if (count >= 6) emit_bit(&w, count == 7);
             }
-            emit_offset2(&w, distance);
-        } else {
-            count = 1;
-            if (!pending) pending_at = i;
-            pending++;
-            if (pending == 72) { emit_literals(&w, src, pending_at, pending); pending = 0; }
-        }
-        finder.advance(src, size, i, count);
+            if (count != 2) emit_offset2(&w, distance);
+        } else emit_literals(&w, src, i, count);
         i += count;
     }
-    emit_literals(&w, src, pending_at, pending);
     for (int i = 0; i < 4; i++) emit_bit(&w, 1);
     emit_byte(&w, 0); emit_bit(&w, 0); /* method-2 end marker */
     if (w.bad || w.pos - 18 > UINT32_MAX) return -1;
@@ -392,6 +659,10 @@ int rnc2_encode(const uint8_t *src, size_t size, uint8_t *dst,
     dst[16] = dst[17] = 0;
     *written = w.pos;
     return 0;
+} catch (const std::bad_alloc &) {
+    return -1;
+} catch (const std::length_error &) {
+    return -1;
 }
 
 } /* extern "C" */
