@@ -4,7 +4,7 @@ A browser viewer for the levels of these N64 games (USA versions): *San Francisc
 *San Francisco Rush: Extreme Racing*, *Bomberman 64*, *Bomberman 64: The Second Attack!*,
 *Bomberman Hero*, *BattleTanx*, *BattleTanx: Global Assault*, *Gex 64: Enter the Gecko*,
 *Gex 3: Deep Cover Gecko*, *Yoshi's Story* (Japan), *Star Fox 64* (V1.0 and V1.1), *GoldenEye 007*,
-*Off Road Challenge* (USA and Europe), *Air Boarder 64* (Japan and Europe), *Pilotwings 64* (USA, Europe and Japan), *Pokémon Snap*, *A Bug's Life* (USA and Europe), *Spider-Man*,
+*Off Road Challenge* (USA and Europe), *Air Boarder 64* (Japan and Europe), *Pilotwings 64* (USA, Europe and Japan), *Pokémon Snap*, *A Bug's Life* (USA and Europe), *Spider-Man*, *Star Wars: Shadows of the Empire* (USA V1.0–V1.2 and Europe),
 *Mario Kart 64* (USA, V1.0), *Perfect Dark* (V1.0), and *The Legend of Zelda: Ocarina of Time* and
 *Majora's Mask* (retail and debug builds, plus the 1997 Ocarina of Time prototype preserved on an F-Zero X development
 cartridge). Load one or more ROMs, pick a level in the sidebar, and fly around freely, with
@@ -118,6 +118,10 @@ Z shows or hides collision · Shift+F collision wireframe · the View panel can 
       native render banks and the global texture dictionary
     - `trg.ts`, `level.ts`: campaign, training, demo, restart and hidden-studio views, placements, backgrounds,
       markers and collision candidates; `music.ts`: 36 Sound Tools stem schedules and adaptive profiles
+  - `shadows/`: Shadows of the Empire (USA V1.0–V1.2 and Europe; format notes in `docs/SHADOWS_OF_THE_EMPIRE.md`)
+    - `archive.ts`, `codecs.ts`: Ogre scene catalog, LZHUF and intro LZSS decoding
+    - `scene.ts`, `geometry.ts`, `texture.ts`, `shadows.ts`: tagged scene graph, meshes, materials and level assembly
+    - `music.ts`: indexed libultra VADPCM cue player
   - `perfectdark/`: Perfect Dark (format notes in `docs/PERFECTDARK.md`)
     - `rom.ts`: data segment, file and stage tables, text; `texture.ts`: the global texture store and its two decoders
     - `gbi.ts`: Perfect Dark's display-list microcode; `bg.ts`: rooms and sky rooms; `environment.ts`: fog, sky planes;
@@ -154,7 +158,8 @@ Z shows or hides collision · Shift+F collision wireframe · the View panel can 
     - `npm run check:transfer` (`transfer.ts`): load every level twice through `structuredClone` with
       all ArrayBuffers transferred, as `src/worker.ts` does. Catches buffers shared between levels.
     - `npm run check:layers` (`layeraudit.ts`): every drawn instance must be in a toggleable layer, and
-      every game except Star Fox 64 must have a collision layer.
+      every game except Star Fox 64 must have a collision layer. Shadows of the Empire's
+      indexed collision polygons are supported.
     - `npm run check:render` (`render/selftest.ts`): numeric self-checks of the offline renderer.
     - `npm run check:zelda-source -- /path/to/bbgames`: load the 21 allowlisted Zelda source maps twice,
       exercise transferable buffers, audit their layers, and test the linked `zelda_tool_rom.o` fallback.
@@ -584,3 +589,7 @@ document the formats in full; in short:
   reproduced. Background meshes are placed correctly for each authored starting camera but do not follow later free-camera
   translation. Kind-`0x0800` geometry is shown as a collision candidate, not proven physical collision. Fixed music-schedule
   timing uses the researched 30 Hz hypothesis, and exact Sound Tools envelope/pan gain is not captured.
+- Shadows of the Empire: scene geometry and base texture tiles are decoded, but mip levels, exact RDP blend/lighting
+  state, animated actors, and authored cameras are not reproduced. The hidden collision layer contains verified indexed
+  polygons; null-index polygons and unclassified graph branches remain omitted. Audio cues use slot-number labels because
+  song names and level assignments are unverified; runtime pitch, envelopes and fades are not simulated.

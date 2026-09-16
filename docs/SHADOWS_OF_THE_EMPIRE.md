@@ -10,18 +10,18 @@ entry is not, by itself, proof that the scene is reachable in normal play.
 
 | Property | Value |
 |---|---|
-| Asset organization | `Ogre` root at ROM `0x1F30` (USA), with program/audio/shared-resource bounds and 32 indexed scene members. |
-| Compression | Main program and scene IDs 01–31: adaptive-Huffman LZ (LZHUF); scene ID 00: separate 4 KiB-ring LZSS. |
+| Asset organization | `Ogre` root at ROM `0x1F30` (USA), with program/audio/shared-resource bounds, 32 indexed scenes, and a shared image archive. |
+| Compression | Main program and scene IDs 01–31: adaptive-Huffman LZ (LZHUF); scene ID 00 and shared image archive: 4 KiB-ring LZSS. |
 | Graphics microcode | `RSP SW Version: 2.0D, 04-01-96` occurs in the decoded program; scene command indices differ from stock F3DEX, and exact task identity remains **Unknown**. |
-| Geometry | Scene-local `LStb` containers; sampled `0x2C`-byte mesh records have six-float bounds and a pointer to vertex/primitive commands. |
-| Textures | Present in the rendered game; stored formats and descriptor layout remain **Unknown**. |
-| Collision | Stored representation and query rules remain **Unknown**. |
+| Geometry | `LStb` tagged scene graph, transformed `0x2C`-byte meshes, 16-byte vertices, and custom-index display lists. |
+| Textures | Shared image archive; CI4, CI8, I4, RGBA16, and RGBA32 base tiles. |
+| Collision | Scene-local `f32` vertex pool and indexed polygon/strip groups attached to render mesh records; non-indexed path remains incomplete. |
 | Music driver | Indexed libultra `ALSound` cue player with eight cue states; a separate sequence player has not been established. |
 | Audio microcode | **Unknown**. |
 | Sample encoding | Nintendo VADPCM, 98 distinct waves in one libultra bank. |
 | Levels | 32 indexed scene members: 17 gameplay segments, 14 cutscene/end segments, one menu. |
 | Memory requirement | Base 4 MiB; active gameplay was observed without an Expansion Pak. |
-| Viewer support | No loader yet. Archive/codec extraction is established; geometry, collision, and music naming need further decoding. |
+| Viewer support | Four releases; 32 scene entries, graph meshes/materials, indexed collision overlay, and audio cues. Authored music names remain unavailable. |
 
 ### 1.2 ROM identification
 
@@ -87,7 +87,7 @@ assert a resource type.
 | `[0x002AC0, 0x083590)` | `0x80AD0` | `0xEBEC0` | `0x80001EC0` | LZHUF | main executable/data. |
 | `[0x083590, 0x088690)` | `0x5100` | same | copied control | none | libultra `B1` bank control. |
 | `[0x088690, 0x4E8900)` | `0x460270` | same | ROM-streamed | none | VADPCM sample table. |
-| `[0x4E8900, 0x618F50)` | `0x130650` | **Unknown** | **Unknown** | **Unknown** | shared A; type unverified. |
+| `[0x4E8900, 0x618F50)` | `0x130650` | `0x2027E0` | decoded virtual base `0x80400000` | LZSS | shared image archive, 1,259 entries. |
 | `[0x618F50, 0x65DD60)` | `0x44E10` | **Unknown** | **Unknown** | **Unknown** | shared B; type unverified. |
 | `[0x65DD60, 0x67D980)` | `0x1FC20` | **Unknown** | **Unknown** | **Unknown** | shared C; type unverified. |
 | `[0x67D980, 0xBFCAD0)` | `0x57F150` | per scene | `0x80195F90` | LZSS or LZHUF | 32 contiguous scenes. |
@@ -128,6 +128,9 @@ IDs are `0x00`–`0x1F`.
 
 ### 2.4 Compression formats
 
+Reference codecs: [Shadows LZHUF](compression/shadows-lzhuf.md) and
+[Shadows LZSS](compression/shadows-lzss.md).
+
 Verified by boot disassembly and by decoding the entire program and all 32
 scene members. The main stream and IDs 01–31 use an adaptive-Huffman LZ
 variant with 314 symbol values, a 4 KiB history, and match lengths 3–60.
@@ -141,6 +144,16 @@ frequency `0x8000`. A copy uses distance 1–4096 and permits overlapping
 output. The stored block may have up to 15 trailing bytes after the last
 consumed compressed byte; they are not assumed to be zero or a checksum.
 
+The fixed position tables move between releases; each is 256 bytes of code
+values followed by 256 bytes of code lengths in the preamble preceding the
+main compressed stream:
+
+| Release | Code table | Length table |
+|---|---|---|
+| USA V1.0 | `[0x28C0, 0x29C0)` | `[0x29C0, 0x2AC0)` |
+| USA V1.1/V1.2 | `[0x28BC, 0x29BC)` | `[0x29BC, 0x2ABC)` |
+| Europe | `[0x2804, 0x2904)` | `[0x2904, 0x2A04)` |
+
 | Offset | Size | Type | Field | Description |
 |---:|---:|---|---|---|
 | `0x00` | 4 | `u32` | `decodedSize` | Exact output byte count. |
@@ -153,6 +166,12 @@ starts at one. A match length is `(firstByte >> 4) + 2`; its absolute ring
 position is `((firstByte & 0x0F) << 8) | secondByte`. Position zero terminates
 the stream. All bytes emitted by the intro stream come from written ring
 positions; its complete output is `0x2A0F0` bytes and begins `LStb`.
+
+Verified by main-program disassembly and complete bounded decoding: shared
+resource A uses the same LSB-first LZSS grammar. Its decoded size is
+`0x2027E0`; the ring-position-zero terminator occurs at stored offset
+`0x130635`. The decoded bytes form the image catalog described under
+[Textures and materials](#35-textures-and-materials).
 
 | Offset | Bits | Field | Meaning |
 |---:|---|---|---|
@@ -285,22 +304,34 @@ and `0xD065` scene-node tags found at Hoth header targets +`0x18` and
 +`0x14`, respectively; the same routine emits display-list calls. This links
 those tagged nodes to the graphics hierarchy, but not every `LStb` section.
 
-The sampled mesh record has this layout. The roles of its three intermediate
-pointers and its word ending in `0005` remain unverified.
+The `0x2C`-byte mesh record combines render and collision references. Its
+middle fields were identified by the collision-query code:
 
 | Offset | Size | Type | Field | Description |
 |---:|---:|---|---|---|
 | `0x00` | `0x18` | `f32[6]` | `bounds` | Three lower and three upper coordinates; ordered in eight Hoth records. |
-| `0x18` | 4 | `u32` | `unknown_18` | Ends in `0x0005` in the sampled records. |
-| `0x1C` | 4 | `u32` | `pointer_1C` | In-scene pointer; target role unverified. |
-| `0x20` | 4 | `u32` | `pointer_20` | In-scene pointer; target role unverified. |
-| `0x24` | 4 | `u32` | `pointer_24` | In-scene pointer; target role unverified. |
+| `0x18` | 2 | `s16` | `polygonCount` | Collision polygon/strip group count. |
+| `0x1A` | 2 | `s16` | `polygonType` | Observed types 3, 4, 5, 7. |
+| `0x1C` | 4 | `u32` | `groupSizes` | Scene pointer to per-strip `u32` counts for types 5/7. |
+| `0x20` | 4 | `u32` | `collisionIndices` | Scene pointer to `u16` indices; zero selects a separate non-indexed path. |
+| `0x24` | 4 | `u32` | `material` | Scene pointer to render material binding. |
 | `0x28` | 4 | `u32` | `displayList` | Pointer to sampled graphics command stream. |
 
 The Hoth stream's three vertex loads address 40 contiguous 16-byte records
 immediately before its commands. A separate main-menu stream addresses 125
-such records. The interpretation of individual vertex fields, coordinate
-scale/axes, and complete mesh traversal remain **Unknown**.
+such records. Verified by checking 43,019 first-batch vertices from six
+scenes against their mesh bounds: position components are signed `s16`
+scaled by `1/8`. Vertex S/T are signed `s16` with five fractional bits.
+The game uses Z-up; the viewer maps scene Z to world Y. The remaining vertex
+bytes serve colour/normal roles that depend on render state.
+
+The scene graph rooted at header pointer `+0x1C` traverses tagged `0x5064`
+and `0x5065` groups, then `0xD064`/`0xD065` nodes with 3×3 transforms and
+translation, then `0x3064` mesh-pointer lists. This graph references 662
+Hoth render meshes and 3,232 Train meshes; repeated references produce
+multiple placed instances. Flat mesh bounds on one axis are legal, so
+`min == max` there does not invalidate a mesh. Other scene-root roles and
+complete cutscene traversal remain **Unknown**.
 
 ### 3.4 Display lists and render state
 
@@ -321,16 +352,101 @@ applied unchanged. Exact graphics task identity and `0xBE` semantics remain
 
 ### 3.5 Textures and materials
 
-The Hoth frame visibly uses a textured blue/cloud sky and snow/brown-ground
-surfaces. Stored texture formats, palette rules, material records, and texture
-addressing in `LStb` are **Unknown**. No raw byte pattern has been promoted to
-a verified texture descriptor.
+Verified by scene records, decoded shared-A bytes, and the main renderer:
+shared A is an LZSS-compressed image archive. Its first four `u32` fields
+each equal `0x4EB` (1,259). Starting at decoded offset `0x10` are 1,259
+interleaved records of stride `0x0C`:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 4 | `u32` | `commandPtr` | Image display-list pointer. |
+| `0x04` | 4 | `u32` | `blockStart` | Inclusive image-block start. |
+| `0x08` | 4 | `u32` | `blockEnd` | Exclusive image-block end. |
+
+All three pointer values use virtual base `0x80400000`: subtract it to
+index the **decoded** shared-A buffer. Image and palette pointers *inside*
+the image display list instead use base `0x84400000`. Resource IDs index
+the `0x0C`-byte catalog directly; main code at `0x8001889C` multiplies
+the ID by 12.
+
+Mesh record `+0x24` points to a scene-local `0x0C`-byte material binding:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 4 | `u32` | `flags` | RSP geometry-state controls; see below. |
+| `0x04` | 4 | `u32` | `unknown_04` | Zero in checked bindings. |
+| `0x08` | 4 | `u32` | `imageRecord` | Scene pointer to a `0x10`-byte image record. |
+
+Image records reached from header pointer `+0x30` have this stored layout;
+the game rewrites them during loading:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 2 | `u16` | `widthLike` | Four times base-tile width in directly checked images. |
+| `0x02` | 2 | `u16` | `heightLike` | Four times base-tile height in directly checked images. |
+| `0x04` | 4 | `u32` | `unknown_04` | Zero in checked records. |
+| `0x08` | 4 | `u32` | `resourceId` | Index into the shared-A catalog. |
+| `0x0C` | 4 | `u32` | `unknown_0C` | Zero in checked records. |
+
+The image display list supplies the actual base-tile dimensions and texel
+format. The following counts are distinct resource IDs in a structural
+survey of all 32 scenes, not proof that every candidate mesh is reachable:
+
+| Base tile format | Referenced IDs | Palette |
+|---|---:|---|
+| CI4 | 672 | 16-entry RGBA16 |
+| CI8 | 31 | 256-entry RGBA16 |
+| I4 | 337 | none |
+| RGBA16 | 25 | none |
+| RGBA32 | 12 | none |
+
+All 1,077 referenced IDs resolve inside the 1,259-entry archive. Of their
+image command lists, 940 are flat and 137 call an in-block mip-level list;
+the base tile is still identified by the first load/tile-size commands.
+For example, Hoth ground image `0x216` is CI4, 64×32, with texels at decoded
+shared-A `+0xFD410` and RGBA16 palette at `+0xFD818`; Hoth sky image
+`0x229` is CI4, 64×64, with texels at `+0x102C50` and palette at
+`+0x103458`. Hoth scene header `+0x34` points to a separate resource-prefetch
+list, not the per-mesh image binding.
+
+Disassembly at `0x800BBB5C`–`0x800BBBC8` establishes that material flag
+`0x10` disables back-face culling; flags `0x08`, `0x20`, and `0x40` control
+smooth shading and linear texture generation. Other blend and depth-write
+semantics remain **Unknown**.
 
 ### 3.6 Collision
 
-Collision storage and query rules remain **Unknown**. The game contains
-playable 3D terrain, but this observation alone does not establish whether
-collision reuses render triangles or has separate data.
+Verified by disassembly of geometric query routines `0x80002FDC`–`0x80004088`:
+the game traverses the tagged scene graph, tests each `0x3064` mesh's
+six-float bounds, and reads separate collision polygons. Header pointer
+`+0x44` locates a scene-local vertex pool at 12-byte stride:
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 4 | `f32` | `x` | Scene X coordinate. |
+| `0x04` | 4 | `f32` | `y` | Scene Y coordinate. |
+| `0x08` | 4 | `f32` | `z` | Scene Z coordinate. |
+
+Mesh `+0x20` indexes that pool with zero-based `u16`
+indices. These are **not** the packed render vertices or display-list
+triangles, despite sharing a mesh record and graph transform.
+
+For polygon type 3, each group consumes three indices; type 4 consumes
+four. Types 5 and 7 use one `u32` count per group from mesh `+0x1C`, then
+consume that many indices as a strip. Consecutive triples alternate
+winding. The semantic distinction between types 5 and 7, and the exact
+intersection diagonal for quads, remain **Unknown**. A zero `+0x20` pointer
+selects a separate sequential-vertex path; it must not be read as proof
+that the mesh has no collision.
+
+For example, Hoth mesh scene+`0x657D4` has eight type-5 groups. Counts at
+scene+`0x75280` are `[3,3,4,4,4,5,6,11]`, totaling 40 `u16` indices at
+scene+`0x752A0`. The first index `0x2A` selects the pool vertex at
+scene+`0x6EC80 + 0x2A*12 = 0x6EE78`. A graph audit of all 32 scenes found
+15,963 indexed records, 49,593 groups, and 117,387 visualization
+triangles with valid finite referenced vertices. It also found 4,572
+null-index records and 557 unclassified graph branches; indexed coverage
+is therefore substantial but not exhaustive.
 
 ### 3.7 Environment, sky, fog, and lighting
 
@@ -353,16 +469,19 @@ cutscene spline grammar remain **Unknown**.
 The Hoth member contains recurring tagged data at header pointer targets:
 `D0 65 00 03`, `D0 64 FF 03`, `50 64 FF 00`, `50 65 FF 00`, and
 `30 64 FF 00` (verified from decoded ROM bytes). The `D064`/`D065` tags
-are read by a graphics-hierarchy dispatch, but their complete fields and
-the other tags' consumers are **Unknown**; none is yet a verified object
-placement format.
+are read by a graphics-hierarchy dispatch. Header `+0x1C` reaches
+`0x5064`/`0x5065` groups, `0xD064`/`0xD065` transform nodes, and `0x3064`
+mesh lists. Their complete field layouts and non-render consumers remain
+**Unknown**; this is a verified render placement path, not yet a general
+gameplay-object placement format.
 
 ### 4.2 Object and model formats
 
-Visible craft and terrain objects are present in gameplay. Section 3.3
-describes sampled scene mesh bounds and graphics commands; those records have
-not been tied to a specific placed object or reusable model. Shared-resource
-spans A/B/C may hold further model assets, but their types remain unverified.
+Visible craft and terrain objects are present in gameplay. The tagged graph
+places scene-local meshes using 3×3+translation transforms, sometimes
+referencing one mesh more than once. The viewer exposes those static render
+instances. Animated actors and shared-model ownership are not established;
+shared spans B/C remain unclassified.
 
 ### 4.3 Skeletons and animation
 
@@ -510,28 +629,30 @@ padding. Whether code ever intentionally displays it remains unverified.
 
 ### 7.1 Module mapping
 
-The viewer has no Shadows of the Empire module yet. A future loader should
-identify the ROM using the header/SHA-1 table; parse `Ogre`; decode the
-LZHUF program/scene streams and the intro LZSS stream; expose the 32 scene
-IDs; then decode `LStb`'s still-unidentified sections. The main entry and
-game registration belong in `src/rom/index.ts`; release-specific offsets
-should be located through the `Ogre` signature rather than hard-coded to
-USA V1.0. Existing `src/rom/music/libultra.ts` can inform VADPCM decoding,
-but the game's direct sound-slot player needs its own cue-selection path.
+`src/rom/shadows/archive.ts` locates `Ogre` per release and uses
+`codecs.ts` to decode the 32 scenes and shared image archive.
+`scene.ts`, `geometry.ts`, and `texture.ts` read `LStb` graph nodes,
+static render meshes, and material-bound base tiles. `shadows.ts` presents
+levels through `src/rom/index.ts`; `music.ts` decodes the indexed libultra
+cue bank. Four documented releases are recognized by ROM code and revision.
 
 ### 7.2 Supported features
 
-None for this game. Archive extraction and codec behavior are verified
-research results, not existing viewer features.
+The sidebar exposes all 32 catalog entries, including cutscenes and the menu.
+Static scene-graph meshes and five base texture formats are decoded; render
+instances belong to a toggleable main layer. Indexed collision polygons
+form a separate hidden-by-default layer. The music box exposes all 131
+indexed VADPCM cue slots with their stored loop metadata.
 
 ### 7.3 Approximations and omissions
 
-A viewer based only on the current findings could list and extract all 32
-members and offer the indexed VADPCM cues. It could decode the sampled
-vertex/primitive command grammar, but not yet faithfully traverse complete
-scenes or reproduce textures, collision, sky state, objects, or named music.
-Assigning format meanings from tag byte patterns alone would be an
-unsupported approximation.
+Null-index collision records and unclassified graph branches remain omitted
+from the collision overlay. Mipmapped image resources currently use their
+base tile; precise blend/depth state, dynamic
+actors, authored camera paths and complete cutscene setup are not reproduced.
+Cue labels use slot IDs because no song names or level associations are
+verified. The player uses linear sample-rate conversion and omits runtime
+pitch, envelope and fade scheduling.
 
 ## 8. Verification and remaining work
 
@@ -543,18 +664,21 @@ unsupported approximation.
 | ROM map and scenes | root-table arithmetic and complete scene extraction | 32 contiguous members; every decoded member begins `LStb`, has valid paired lengths, and all 13 pointers resolve inside its member. |
 | Main codec | boot disassembly plus full decode/RAM comparison | `0xEBEC0` decoded bytes; initial `0xCE04F` bytes match menu RAM; 262 total differing runtime bytes. |
 | Scene codecs | boot disassembly plus full bounded decoding | ID 00 LZSS gives `0x2A0F0` bytes; IDs 01–31 LZHUF reach exact advertised sizes. |
+| Cross-release decoder | complete scene load and independent extraction comparison | All 128 indexed scenes decode and pass `LStb` bounds; USA V1.0's 32 decoded scenes are byte-identical to independent extracts. |
 | Menu scene | captured RAM and decoded ROM member comparison | First `0x130` bytes at `0x80195F90` match; later bytes include 791 differences. |
 | Active Hoth scene | captured emulator frame | Snow terrain, clouded blue sky, rear-chase camera, live HUD. |
 | Geometry sample | scene-pointer walk, main-program dispatch cross-reference, and bounded command/index verification | Eight Hoth mesh records with ordered bounds; Hoth and menu vertex/primitive streams resolve within their scenes. |
+| Graph and materials | tagged-node traversal, pointer/index checks, RDP display lists and cross-scene survey | Hoth graph references 662 render meshes; 1,077 distinct image IDs resolve to the decoded shared-A catalog in a 32-scene structural scan. |
+| Collision | gameplay-query disassembly, 32-scene indexed-polygon audit, and loader comparison | 15,963 indexed records yield 117,387 visualization triangles with no invalid pool references; the viewer matches those totals, while the null-index path remains unrendered. |
 | Audio bank and driver | complete `B1` bank walk, sample bounds, program disassembly | 131 slots, 98 VADPCM waves, ROM-streamed samples and direct slot cue manager. |
 | Revisions | root-table and byte-hash comparison | USA V1.1 scenes and shared assets are identical to V1.0; V1.2 changes all stored scene streams. |
 
 ### 8.2 Known unknowns
 
-The primary remaining task is to traverse all scene geometry and identify
-individual vertex fields, textures, collision, objects, scripts, and
-camera/path records. Also unresolved: the meaning of the
-second `LStb` address range, shared-resource spans A/B/C, precise graphics
+The primary remaining tasks are to decode the non-indexed collision path,
+dynamic objects, scripts, camera paths, lighting and the full render-state policy. Also
+unresolved: the meaning of the second `LStb` address range, shared-resource
+spans B/C, precise graphics
 and audio microcode identities, music-slot names and level assignments,
 reachability of individual cutscenes, and what changes in USA V1.2/Europe
 scene *content* as opposed to packing.
