@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <vector>
 #include "common/hash_chain.hpp"
+#include "common/rnc2_tokens.hpp"
 
 extern "C" {
 
@@ -132,61 +133,6 @@ int erz2_decode(const uint8_t *src, size_t size, uint8_t *dst,
     return -1;
 }
 
-typedef struct { uint8_t *dst; size_t cap, pos, control; unsigned left; int bad; } Writer;
-
-static void emit_bit(Writer *w, unsigned value) {
-    if (!w->left) {
-        if (w->pos == w->cap) { w->bad = 1; return; }
-        w->control = w->pos++;
-        w->dst[w->control] = 0;
-        w->left = 8;
-    }
-    w->left--;
-    if (value) w->dst[w->control] |= 1u << w->left;
-}
-
-static void emit_byte(Writer *w, unsigned value) {
-    if (w->pos == w->cap) { w->bad = 1; return; }
-    w->dst[w->pos++] = (uint8_t)value;
-}
-
-static void emit_distance(Writer *w, size_t distance) {
-    unsigned value = (unsigned)(distance - 1), high = value >> 8;
-    if (!high) emit_bit(w, 0);
-    else if (high == 1) {
-        emit_bit(w, 1); emit_bit(w, 1); emit_bit(w, 0);
-    } else if (high <= 3) {
-        emit_bit(w, 1); emit_bit(w, 0); emit_bit(w, 0);
-        emit_bit(w, high - 2);
-    } else {
-        unsigned base = high >= 8 ? high >> 1 : high;
-        emit_bit(w, 1);
-        emit_bit(w, (base - 4) >> 1);
-        emit_bit(w, 1);
-        emit_bit(w, (base - 4) & 1u);
-        emit_bit(w, high < 8);
-        if (high >= 8) emit_bit(w, high & 1u);
-    }
-    emit_byte(w, value & 255u);
-}
-
-static void emit_literals(Writer *w, const uint8_t *src,
-                          size_t start, size_t count) {
-    while (count >= 12) {
-        size_t run = count > 72 ? 72 : 12 + ((count - 12) / 4) * 4;
-        /* The length-nine escape stores 12, 16, ..., 72 raw bytes. */
-        emit_bit(w, 1); emit_bit(w, 0);
-        emit_bit(w, 1); emit_bit(w, 1); emit_bit(w, 1);
-        for (unsigned bit = 4; bit; bit--)
-            emit_bit(w, ((run - 12) / 4 >> (bit - 1)) & 1u);
-        for (size_t j = 0; j < run; j++) emit_byte(w, src[start + j]);
-        start += run; count -= run;
-    }
-    /* A zero dispatch bit stores a literal; two zeros store a pair. */
-    while (count--) { emit_bit(w, 0); emit_byte(w, src[start++]); }
-}
-
-
 int erz2_encode(const uint8_t *src, size_t size, uint8_t *dst,
                 size_t cap, size_t *written) try {
     if (!src || !dst || !written || size > UINT32_MAX || cap < 19) return -1;
@@ -218,13 +164,9 @@ int erz2_encode(const uint8_t *src, size_t size, uint8_t *dst,
             if (src[from + longest] != src[at + longest]) continue;
             unsigned length = 2;
             while (length < limit && src[from + length] == src[at + length]) length++;
-            unsigned high = (distance - 1) >> 8;
-            unsigned offset_bits = 8 + (!high ? 1 : high == 1 ? 3 : high < 4 ? 4 : high < 8 ? 5 : 6);
             unsigned first = std::max(longest + 1, distance <= 256 ? 2u : 3u);
             for (unsigned count = first; count <= length; count++) {
-                unsigned token_bits = count == 2 ? 11 : offset_bits +
-                                      (count <= 5 ? 4 : count <= 8 ? 5 : 12);
-                uint64_t bits = suffix[at + count] + token_bits;
+                uint64_t bits = suffix[at + count] + rnc2_match_bits(count, distance);
                 if (bits < best) { best = bits; selected = {uint16_t(count), uint16_t(distance)}; }
             }
             longest = std::max(longest, length);
@@ -234,33 +176,14 @@ int erz2_encode(const uint8_t *src, size_t size, uint8_t *dst,
     }
 
     /* The first control byte contributes only bits 5..0; its top bits are skipped. */
-    Writer w = {dst, cap, 19, 18, 6, 0};
+    Rnc2Writer w = {dst, cap, 19, 18, 6, 0};
     dst[18] = 0;
     for (size_t i = 0; i < size && !w.bad;) {
         size_t count = choice[i].length, distance = choice[i].distance;
-        if (distance) {
-            if (count == 2) {
-                emit_bit(&w, 1); emit_bit(&w, 1); emit_bit(&w, 0);
-                emit_byte(&w, unsigned(distance - 1));
-            } else if (count >= 9) {
-                emit_bit(&w, 1); emit_bit(&w, 1);
-                emit_bit(&w, 1); emit_bit(&w, 1);
-                emit_byte(&w, (unsigned)(count - 8));
-            } else if (count == 3) {
-                emit_bit(&w, 1); emit_bit(&w, 1);
-                emit_bit(&w, 1); emit_bit(&w, 0);
-            } else {
-                emit_bit(&w, 1); emit_bit(&w, 0);
-                emit_bit(&w, count == 5 || count == 8);
-                emit_bit(&w, count >= 6);
-                if (count >= 6) emit_bit(&w, count == 7);
-            }
-            if (count != 2) emit_distance(&w, distance);
-        } else emit_literals(&w, src, i, count);
+        w.token(src, i, unsigned(count), unsigned(distance));
         i += count;
     }
-    for (unsigned i = 0; i < 4; i++) emit_bit(&w, 1);
-    emit_byte(&w, 0); emit_bit(&w, 0); /* end escape */
+    w.end();
     if (w.bad || w.pos - 18 > UINT32_MAX) return -1;
     memcpy(dst, "ERZ\2", 4);
     dst[4] = (uint8_t)(size >> 24); dst[5] = (uint8_t)(size >> 16);
