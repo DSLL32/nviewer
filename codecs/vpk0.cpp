@@ -438,7 +438,7 @@ int vpk0_encode_ex(const uint8_t *src, size_t size, uint8_t *dst,
 
 int vpk0_encode(const uint8_t *src, size_t size, uint8_t *dst,
                 size_t cap, size_t *written, unsigned method) {
-    return vpk0_encode_ex(src, size, dst, cap, written, method, 6);
+    return vpk0_encode_ex(src, size, dst, cap, written, method, 4);
 }
 
 } /* extern "C" */

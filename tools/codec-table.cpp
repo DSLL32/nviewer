@@ -24,7 +24,7 @@ CODEC(lzari_decode); CODEC(lzari_encode);
 CODEC(rnc_decode); CODEC(rnc1_encode); CODEC(rnc2_encode);
 CODEC(airboarder_lh5_decode); CODEC(airboarder_lh5_encode);
 CODEC(vpk0_decode);
-int vpk0_encode_ex(const uint8_t *, size_t, uint8_t *, size_t, size_t *, unsigned, unsigned);
+int vpk0_encode(const uint8_t *, size_t, uint8_t *, size_t, size_t *, unsigned);
 CODEC(erz2_decode); CODEC(erz2_encode);
 #undef CODEC
 }
@@ -41,7 +41,7 @@ static uint32_t le32(const uint8_t *p) {
 
 static int vpk1_encode(const uint8_t *src, size_t size, uint8_t *dst,
                        size_t cap, size_t *used) {
-    return vpk0_encode_ex(src, size, dst, cap, used, 1, 9);
+    return vpk0_encode(src, size, dst, cap, used, 1);
 }
 
 static int hudson1_decode(const uint8_t *src, size_t size, uint8_t *dst,

@@ -24,7 +24,7 @@ This is not a globally optimal parse: the match search is depth-bounded.
 
 `vpk0_encode_ex(src, size, dst, cap, written, method, level)` accepts method
 `0` or `1` and effort level `0` through `9`; the existing `vpk0_encode`
-signature calls level `6`. A higher level spends more time searching, with no
+signature calls level `4`. A higher level spends more time searching, with no
 guarantee that output size improves on every input. All levels use a 1,023-byte
 maximum match except levels `0`–`5`, which use 255 bytes.
 
@@ -39,13 +39,14 @@ and file I/O were excluded:
 | 1 | 32 | 64 KiB | 2 | 309,506 | 1.98 |
 | 2 | 64 | 64 KiB | 2 | 308,192 | 2.66 |
 | 3 | 128 | 64 KiB | 3 | 307,471 | 4.17 |
-| 4 | 256 | 64 KiB | 4 | 306,867 | 6.54 |
+| 4 (default) | 256 | 64 KiB | 4 | 306,867 | 6.54 |
 | 5 | 512 | 64 KiB | 4 | 306,483 | 10.05 |
-| 6 (default) | 256 | 64 KiB | 4 | 305,300 | 16.72 |
+| 6 | 256 | 64 KiB | 4 | 305,300 | 16.72 |
 | 7 | 512 | 256 KiB | 4 | 303,585 | 27.41 |
 | 8 | 768 | 512 KiB | 4 | 303,496 | 38.53 |
 | 9 | 1,024 | 1 MiB | 4 | 303,264 | 49.11 |
 
+The default level 4 saves 9,571 bytes (3.02%) in 6.54 s on this sample.
 Level 9 saves 13,174 bytes (4.16%) relative to the ROM stream. Its 49.11 s
 encode time is below a limit of two seconds per 10 KiB of compressed output
 (59.23 s for this stream). Wider windows can create offsets beyond the
