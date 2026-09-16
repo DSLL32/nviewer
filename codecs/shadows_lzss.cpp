@@ -36,14 +36,46 @@ int shadows_lzss_decode(const uint8_t *src, size_t size, uint8_t *dst,
     return -1; /* missing position-zero terminator */
 }
 
-static unsigned hash3(const uint8_t *p) {
-    return ((unsigned)p[0] * 251u + (unsigned)p[1] * 31u + p[2]) & 4095;
-}
-
 int shadows_lzss_encode(const uint8_t *src, size_t size, uint8_t *dst,
                         size_t cap, size_t *written) {
     if (!src || !dst || !written || size > 0x7fffffffu) return -1;
-    std::vector<int32_t> head(4096, -1), prev(size, -1);
+    // Search the full written history for two-byte and longer matches. Keeping all
+    // positions in the chain makes this independent of the eventual parse.
+    std::vector<int32_t> head(65536, -1), prev(size, -1);
+    for (size_t p = 0; size - p >= 2; p++) {
+        unsigned hash = (unsigned)src[p] << 8 | src[p + 1];
+        prev[p] = head[hash];
+        head[hash] = (int32_t)p;
+    }
+    struct Match { uint16_t position; uint8_t length; };
+    std::vector<Match> parse(size);
+    std::vector<size_t> cost(size + 1);
+    // A literal costs nine bits and a match costs seventeen, including its
+    // flag. Rounding the total up to bytes exactly accounts for flag groups.
+    cost[size] = 17; // final position-zero token
+    for (size_t p = size; p-- > 0;) {
+        cost[p] = 9 + cost[p + 1];
+        parse[p] = {0, 1};
+        unsigned best = 1, limit = (unsigned)((size - p < 17) ? size - p : 17);
+        for (int32_t at = prev[p]; at >= 0 && best < limit; at = prev[at]) {
+            size_t old = (size_t)at;
+            if (p - old > 4096) break;
+            unsigned position = (unsigned)((old + 1) & 4095);
+            if (!position) continue; // zero is the end token
+            if (best >= 2 && src[old + best] != src[p + best]) continue;
+            unsigned length = 2;
+            while (length < limit && src[old + length] == src[p + length]) length++;
+            for (unsigned n = best + 1; n <= length; n++) {
+                size_t candidate = 17 + cost[p + n];
+                if (candidate <= cost[p]) {
+                    cost[p] = candidate;
+                    parse[p] = {(uint16_t)position, (uint8_t)n};
+                }
+            }
+            if (length > best) best = length;
+        }
+    }
+    if ((cost[0] + 7) / 8 > cap) return -1;
     size_t in = 0, out = 0, control = 0;
     unsigned bits = 8, flags = 0;
     auto token = [&](bool literal) {
@@ -59,37 +91,14 @@ int shadows_lzss_encode(const uint8_t *src, size_t size, uint8_t *dst,
         return true;
     };
     while (in < size) {
-        unsigned best = 0, position = 0;
-        if (size - in >= 3) {
-            unsigned hash = hash3(src + in);
-            int32_t at = head[hash];
-            for (unsigned depth = 0; at >= 0 && depth < 128; depth++, at = prev[at]) {
-                size_t old = (size_t)at;
-                if (in - old > 4096) break;
-                unsigned absolute = (unsigned)((old + 1) & 4095);
-                if (!absolute) continue; /* zero is the end token */
-                unsigned length = 0, limit = (unsigned)((size - in < 17) ? size - in : 17);
-                while (length < limit && src[old + length] == src[in + length]) length++;
-                if (length > best) { best = length; position = absolute; }
-                if (best == 17) break;
-            }
-        }
-        if (best >= 3) {
+        unsigned best = parse[in].length, position = parse[in].position;
+        if (best >= 2) {
             if (!token(false) || cap - out < 2) return -1;
             dst[out++] = (uint8_t)(((best - 2) << 4) | (position >> 8));
             dst[out++] = (uint8_t)position;
         } else {
-            best = 1;
             if (!token(true) || out >= cap) return -1;
             dst[out++] = src[in];
-        }
-        for (unsigned j = 0; j < best; j++) {
-            size_t p = in + j;
-            if (size - p >= 3) {
-                unsigned hash = hash3(src + p);
-                prev[p] = head[hash];
-                head[hash] = (int32_t)p;
-            }
         }
         in += best;
     }

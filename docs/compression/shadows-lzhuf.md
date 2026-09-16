@@ -33,25 +33,41 @@ release-specific and must be supplied alongside a stream:
 | Europe | `[0x2804, 0x2904)` | `[0x2904, 0x2A04)` |
 
 The [standalone C++17 reference](https://github.com/DSLL32/nviewer/blob/master/codecs/shadows_lzhuf.cpp)
-contains the decoder first and a bounded hash-chain, longest-match encoder
-second. The encoder derives its position prefixes from the supplied tables;
-it does not embed any release's table or attempt to reproduce the retail parse.
+contains the decoder first and an iterative shortest-path encoder second.
+The encoder derives its position prefixes from the supplied tables and
+searches the full written 4 KiB history. It caches useful matches, then
+runs six parsing passes using Huffman lengths sampled every 128 decoded
+bytes from the preceding parse. These are estimated future costs: every
+candidate is measured with the actual adaptive tree, and the smallest is
+retained alongside the original 128-candidate greedy fallback. It does not
+embed any release's table or reproduce the retail parse.
 Its `encode` and `decode` functions return zero on success and `-1` on invalid
 input or inadequate output capacity. The caller owns all buffers.
 
-Verified against the four retail releases: the decoder completed all 31
-LZHUF scene members and the main-program stream per release, with every scene
-reaching its advertised output size and `LStb` header. All 128 LZHUF scene
-re-encodes and four program re-encodes round-tripped byte-for-byte. The USA
-V1.0 program and scene outputs also matched independently decoded bytes. In
-USA V1.0, scene 03's indexed stored member occupies 154,272 bytes including
-alignment, versus 154,345 bytes from
-the reference encoder. Scene 31 occupies 102,336 stored bytes versus 101,733
-reference bytes. The main program occupies 527,056 stored bytes versus 522,223
-reference bytes. These compression decisions are not byte-identical to retail.
-The scene 03, scene 31, and main-program re-encodes took 29 ms, 17 ms, and
-75 ms respectively with `-O3` on the audit host, far below the 2 s per 10 KiB
-output budget. The times are not a portable guarantee.
+Verified against all four retail releases: all 124 LZHUF scene members and
+four main-program streams round-trip byte-for-byte through both the C++
+reference decoder and the independent TypeScript viewer decoder. Every
+re-encode is smaller than retail and smaller than the previous greedy
+encoder. Every scene reaches its advertised output size and `LStb` header.
+
+Europe's main program is the largest retail LZHUF stream across the four
+releases and is the primary benchmark. Retail sizes below include archive
+alignment; reference sizes include the four-byte header and final partial
+bitstream byte, without archive alignment.
+
+| Stream | Retail bytes | Previous greedy bytes | Tuned bytes | Encode time |
+|---|---:|---:|---:|---:|
+| Europe main program | 530,704 | 525,829 | 512,849 | 0.79 s |
+| USA V1.0 main program | 527,056 | 522,223 | 509,333 | 0.80 s |
+| USA V1.0 scene 03 | 154,272 | 154,345 | 149,732 | 1.09 s |
+| USA V1.0 scene 31 | 102,336 | 101,733 | 99,870 | 0.23 s |
+
+Measured with GCC 14.2, `-O3 -std=c++17`, on an Intel Xeon E5-2697 v2.
+The worst normalized time across all 128 streams is 0.129 s per 10 KiB of
+compressed output, below the 2 s budget; host timings are not portable
+guarantees. ASan and UBSan checks cover empty
+inputs, short and exact-capacity buffers, truncated and malformed streams,
+ring wrap, adaptive-tree reconstruction, and reordered valid position tables.
 
 ## Reference source
 

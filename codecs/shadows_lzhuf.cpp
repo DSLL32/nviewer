@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <array>
 #include <vector>
 
 #define BE32(p) ((uint32_t)(p)[0] << 24 | (uint32_t)(p)[1] << 16 | \
@@ -131,6 +132,12 @@ struct Tree {
         while (count) bits.put(path[--count]);
         update(symbol);
     }
+
+    unsigned length(unsigned symbol) const {
+        unsigned count = 0;
+        for (unsigned node = parent[symbol + T]; node != ROOT; node = parent[node]) count++;
+        return count;
+    }
 };
 
 } // namespace
@@ -192,14 +199,21 @@ int shadows_lzhuf_encode(const uint8_t *src, size_t size, uint8_t *dst,
         }
     }
     for (unsigned q = 0; q < 64; q++) if (!width[q]) return -1;
-    PUT32(dst, (uint32_t)size);
-    Bits bits{nullptr, dst + 4, 0, cap - 4, 0, 0, 0, false};
-    Tree tree;
+    bool ordered = true;
+    for (unsigned q = 1; q < 64; q++) if (width[q] < width[q - 1]) ordered = false;
     std::vector<int32_t> head(8192, -1), prev(size, -1);
-    for (size_t in = 0; in < size && !bits.bad;) {
+    for (size_t p = 0; size - p >= 3; p++) {
+        unsigned hash = hash3(src + p);
+        prev[p] = head[hash]; head[hash] = (int32_t)p;
+    }
+    struct Match { uint16_t distance; uint8_t length; };
+    std::vector<Match> parse(size), best_parse;
+    // Keep the original greedy parse as a fallback. Later parses are compared
+    // using their actual adaptive-tree bit counts, not the estimated costs.
+    for (size_t in = 0; in < size;) {
         unsigned best = 0, distance = 0;
         if (size - in >= 3) {
-            int32_t at = head[hash3(src + in)];
+            int32_t at = prev[in];
             for (unsigned depth = 0; at >= 0 && depth < 128; depth++, at = prev[at]) {
                 size_t old = (size_t)at;
                 if (in - old > 4096) break;
@@ -209,23 +223,103 @@ int shadows_lzhuf_encode(const uint8_t *src, size_t size, uint8_t *dst,
                 if (best == 60) break;
             }
         }
-        if (best >= 3) {
-            tree.encode(bits, best + 253);
-            unsigned value = distance - 1, q = value >> 6;
-            bits.putn(prefix[q], width[q]);
-            bits.putn(value & 63, 6);
-        } else {
-            best = 1;
-            tree.encode(bits, src[in]);
+        if (best < 3) { best = 1; distance = 0; }
+        parse[in] = {(uint16_t)distance, (uint8_t)best};
+        in += best;
+    }
+
+    // Cache the useful matches once: a farther source matters only when it
+    // extends the match (or has a cheaper position code in a custom table).
+    std::vector<size_t> start(size + 1);
+    std::vector<Match> matches;
+    for (size_t in = 0; in < size; in++) {
+        start[in] = matches.size();
+        unsigned longest = 2, by_width[9] = {};
+        unsigned limit = (unsigned)((size - in < 60) ? size - in : 60);
+        for (int32_t at = prev[in]; at >= 0; at = prev[at]) {
+            size_t old = (size_t)at;
+            if (in - old > 4096) break;
+            unsigned distance = (unsigned)(in - old), w = width[(distance - 1) >> 6];
+            unsigned previous = ordered ? longest : by_width[w];
+            if (previous >= limit || src[old + previous] != src[in + previous]) continue;
+            unsigned length = 0;
+            while (length < limit && src[old + length] == src[in + length]) length++;
+            if (length >= 3 && length > previous) {
+                matches.push_back({(uint16_t)distance, (uint8_t)length});
+                by_width[w] = length;
+            }
+            if (length > longest) longest = length;
+            if (ordered && longest == limit) break;
         }
-        for (unsigned j = 0; j < best; j++) {
-            size_t p = in + j;
-            if (size - p >= 3) {
-                unsigned hash = hash3(src + p);
-                prev[p] = head[hash]; head[hash] = (int32_t)p;
+    }
+    start[size] = matches.size();
+
+    enum { STRIDE = 128, PASSES = 6 };
+    std::vector<std::array<uint8_t, NCHAR>> lengths((size + STRIDE - 1) / STRIDE);
+    auto measure = [&]() {
+        Tree model;
+        size_t count = 32, sample = 0;
+        for (size_t in = 0; in < size;) {
+            while (sample < lengths.size() && sample * STRIDE <= in) {
+                for (unsigned symbol = 0; symbol < NCHAR; symbol++)
+                    lengths[sample][symbol] = (uint8_t)model.length(symbol);
+                sample++;
+            }
+            Match match = parse[in];
+            unsigned symbol = match.length == 1 ? src[in] : match.length + 253;
+            count += model.length(symbol);
+            if (match.length != 1) count += width[(match.distance - 1) >> 6] + 6;
+            model.update(symbol);
+            in += match.length;
+        }
+        while (sample < lengths.size()) {
+            for (unsigned symbol = 0; symbol < NCHAR; symbol++)
+                lengths[sample][symbol] = (uint8_t)model.length(symbol);
+            sample++;
+        }
+        return count;
+    };
+    size_t best_bits = measure();
+    best_parse = parse;
+    std::vector<size_t> cost(size + 1);
+    for (unsigned pass = 0; pass < PASSES; pass++) {
+        // Shortest paths with tree lengths sampled from the preceding parse.
+        // Every source within the ring is searched; nearer equal-length
+        // matches dominate farther ones when position widths are ordered.
+        for (size_t in = size; in-- > 0;) {
+            const auto &prices = lengths[in / STRIDE];
+            cost[in] = prices[src[in]] + cost[in + 1];
+            parse[in] = {0, 1};
+            unsigned longest = 2;
+            for (size_t at = start[in]; at < start[in + 1]; at++) {
+                unsigned length = matches[at].length, distance = matches[at].distance;
+                unsigned position_cost = width[(distance - 1) >> 6] + 6;
+                for (unsigned n = ordered ? longest + 1 : 3; n <= length; n++) {
+                    size_t candidate = prices[n + 253] + position_cost + cost[in + n];
+                    if (candidate < cost[in]) {
+                        cost[in] = candidate;
+                        parse[in] = {(uint16_t)distance, (uint8_t)n};
+                    }
+                }
+                if (length > longest) longest = length;
             }
         }
-        in += best;
+        size_t count = measure();
+        if (count < best_bits) { best_bits = count; best_parse = parse; }
+    }
+    if ((best_bits + 7) / 8 > cap) return -1;
+    PUT32(dst, (uint32_t)size);
+    Bits bits{nullptr, dst + 4, 0, cap - 4, 0, 0, 0, false};
+    Tree tree;
+    for (size_t in = 0; in < size;) {
+        Match match = best_parse[in];
+        tree.encode(bits, match.length == 1 ? src[in] : match.length + 253);
+        if (match.length != 1) {
+            unsigned value = match.distance - 1, q = value >> 6;
+            bits.putn(prefix[q], width[q]);
+            bits.putn(value & 63, 6);
+        }
+        in += match.length;
     }
     if (bits.bad) return -1;
     *written = bits.bytes() + 4;
