@@ -7,6 +7,12 @@ streams but do not attempt to match a game's original compression decisions.
 Decoder-only cases are identified explicitly. Verification uses actual ROM
 streams; no codec tests are kept in the repository.
 
+To compare reference encoders with the largest indexed retail stream for each
+format, set `NVIEWER_ROMS` to the ROM directory and run
+`npm run bench:codecs -- --jobs 4`. The [benchmark manifest and runner](https://github.com/DSLL32/nviewer/blob/master/tools/codec-table.ts)
+record each chosen stream and print a Markdown table. The comparison excludes
+archive alignment bytes and verifies every re-encoded stream by decoding it.
+
 The C++ LZ encoders share a small [bounded match finder](./common.md); each
 format keeps its own token and bitstream writer.
 Build the C++ sources with C++17. The DEFLATE-based C sources use zlib and

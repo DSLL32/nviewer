@@ -18,6 +18,7 @@
     "check:hashes": "tsx tools/hashall.ts",
     "check:render": "tsx tools/render/selftest.ts",
     "check:specs": "tsx tools/specaudit.ts",
+    "bench:codecs": "tsx tools/codec-table.ts",
     "check:zelda-source": "tsx tools/zelda-source.ts"
   },
   "devDependencies": {
