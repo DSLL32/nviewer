@@ -2,6 +2,9 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#include "common/match_finder.hpp"
+
+extern "C" {
 
 #define BE32(p) ((uint32_t)(p)[0] << 24 | (uint32_t)(p)[1] << 16 | (uint32_t)(p)[2] << 8 | (p)[3])
 
@@ -179,7 +182,6 @@ static void emit_literals(Writer *w, const uint8_t *src,
     while (count--) { emit_bit(w, 0); emit_byte(w, src[start++]); }
 }
 
-#define HASH3(p) (((p)[0] * 251u + (p)[1] * 31u + (p)[2]) & 4095u)
 
 int erz2_encode(const uint8_t *src, size_t size, uint8_t *dst,
                 size_t cap, size_t *written) {
@@ -187,22 +189,11 @@ int erz2_encode(const uint8_t *src, size_t size, uint8_t *dst,
     /* The first control byte contributes only bits 5..0; its top bits are skipped. */
     Writer w = {dst, cap, 19, 18, 6, 0};
     dst[18] = 0;
-    size_t last[4096], chain[4096];
-    for (size_t k = 0; k < 4096; k++) last[k] = SIZE_MAX;
+    MatchFinder<4096, 263, 8> finder;
     size_t pending_at = 0, pending = 0;
     for (size_t i = 0; i < size && !w.bad;) {
-        size_t count = 0, distance = 0;
-        if (size - i >= 3) {
-            size_t prev = last[HASH3(src + i)];
-            for (unsigned tries = 0; tries < 8 && prev != SIZE_MAX &&
-                 i - prev <= 4096; tries++) {
-                size_t n = 0;
-                while (n < 263 && n < size - i && src[prev + n] == src[i + n]) n++;
-                if (n > count) { count = n; distance = i - prev; }
-                prev = chain[prev & 4095];
-            }
-            if (count < 3) count = 0;
-        }
+        auto match = finder.find(src, size, i);
+        size_t count = match.length, distance = match.distance;
         if (count) {
             emit_literals(&w, src, pending_at, pending);
             pending = 0;
@@ -229,11 +220,7 @@ int erz2_encode(const uint8_t *src, size_t size, uint8_t *dst,
                 pending = 0;
             }
         }
-        for (size_t j = 0; j < count; j++) if (size - (i + j) >= 3) {
-            size_t h = HASH3(src + i + j);
-            chain[(i + j) & 4095] = last[h];
-            last[h] = i + j;
-        }
+        finder.advance(src, size, i, count);
         i += count;
     }
     emit_literals(&w, src, pending_at, pending);
@@ -250,3 +237,5 @@ int erz2_encode(const uint8_t *src, size_t size, uint8_t *dst,
     *written = w.pos;
     return 0;
 }
+
+} /* extern "C" */

@@ -27,7 +27,7 @@ The one-bit branch begins a back-reference or an escape:
 Raw runs store 12, 16, ..., 72 bytes. Distance zero repeats the previous
 byte; other distances permit overlapping matches. Blocks are independent.
 
-The [C reference codec](https://github.com/DSLL32/nviewer/blob/master/codecs/erz2.c)
+The [C++ reference codec](https://github.com/DSLL32/nviewer/blob/master/codecs/erz2.cpp)
 bounds input and output and allocates nothing. Its encoder uses a bounded
 greedy match search, literal pairs, and raw runs. It is valid but not tuned
 to match the original packer's ratio.
@@ -38,3 +38,7 @@ were 28,748 → 65,536 → 30,693 and 32,884 → 65,536 → 34,585 bytes.
 The viewer independently decoded both repacked streams byte-for-byte to the
 original output (FNV-1a `C8510988` and `342EDC6F`). Sanitized varied-content
 round trips also passed.
+
+## Reference source
+
+<<< ../../codecs/erz2.cpp{cpp}

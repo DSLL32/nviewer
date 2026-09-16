@@ -6,6 +6,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include "common/match_finder.hpp"
 
 template<unsigned LenBits>
 int hudson_decode(const uint8_t *src, size_t src_len, uint8_t *dst,
@@ -54,8 +55,7 @@ int hudson_encode(const uint8_t *src, size_t src_len, uint8_t *dst,
     constexpr size_t window = size_t{1} << (16 - LenBits);
     constexpr size_t mask = window - 1;
     constexpr size_t max_len = (size_t{1} << LenBits) + 2;
-    std::array<size_t, 4096> last;
-    last.fill(SIZE_MAX);
+    MatchFinder<window, max_len> finder;
     if (!src || !dst || !dst_len) return -1;
     size_t in = 0, out = 0, write = window - max_len;
     while (in < src_len) {
@@ -63,17 +63,8 @@ int hudson_encode(const uint8_t *src, size_t src_len, uint8_t *dst,
         size_t flag_at = out++;
         unsigned flags = 0;
         for (unsigned bit = 0; bit < 8 && in < src_len; bit++) {
-            size_t count = 0, distance = 0;
-            if (src_len - in >= 3) {
-                unsigned h = (src[in] * 251u + src[in + 1] * 31u + src[in + 2]) & 4095u;
-                size_t prev = last[h];
-                if (prev != SIZE_MAX && in - prev <= window) {
-                    while (count < max_len && in + count < src_len &&
-                           src[prev + count] == src[in + count]) count++;
-                    if (count >= 3) distance = in - prev;
-                    else count = 0;
-                }
-            }
+            auto match = finder.find(src, src_len, in);
+            size_t count = match.length, distance = match.distance;
             if (count) {
                 if (dst_cap - out < 2) return -1;
                 size_t pos = (write - distance) & mask;
@@ -84,12 +75,7 @@ int hudson_encode(const uint8_t *src, size_t src_len, uint8_t *dst,
                 flags |= 1u << bit;
                 dst[out++] = src[in]; count = 1;
             }
-            for (size_t j = 0; j < count; j++) {
-                if (src_len - in - j < 3) break;
-                unsigned h = (src[in + j] * 251u + src[in + j + 1] * 31u +
-                              src[in + j + 2]) & 4095u;
-                last[h] = in + j;
-            }
+            finder.advance(src, src_len, in, count);
             in += count; write = (write + count) & mask;
         }
         dst[flag_at] = flags;

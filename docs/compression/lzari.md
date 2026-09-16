@@ -17,3 +17,7 @@ still compresses suitable input: BattleTanx's `0x738900` stream decoded to
 32,448 bytes (FNV-1a `877EBE04`) and re-encoded to 18,866 bytes (0.581×
 decoded size). The C output matches the viewer, and the re-encoded stream
 round-trips under sanitizers.
+
+## Reference source
+
+<<< ../../codecs/lzari.c{c}

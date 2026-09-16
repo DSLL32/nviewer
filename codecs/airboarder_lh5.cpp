@@ -5,6 +5,9 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#include "common/match_finder.hpp"
+
+extern "C" {
 
 #define BE32(p) ((uint32_t)(p)[0] << 24 | (uint32_t)(p)[1] << 16 | (uint32_t)(p)[2] << 8 | (p)[3])
 #define PUT32(p, n) do { \
@@ -205,26 +208,13 @@ int airboarder_lh5_decode(const uint8_t *src, size_t size, uint8_t *dst,
     return 0;
 }
 
-#define HASH3(p) (((p)[0] * 251u + (p)[1] * 31u + (p)[2]) & 4095u)
-
 static int block_tokens(const uint8_t *src, size_t size, Writer *w,
                         size_t *token_count) {
-    size_t last[4096], chain[8192];
-    for (size_t k = 0; k < 4096; k++) last[k] = SIZE_MAX;
+    MatchFinder<8192, 255, 8> finder;
     size_t in = 0, tokens = 0;
     while (in < size) {
-        size_t count = 0, distance = 0;
-        if (size - in >= 3) {
-            size_t prev = last[HASH3(src + in)];
-            for (unsigned tries = 0; tries < 8 && prev != SIZE_MAX &&
-                     in - prev <= 8192; tries++) {
-                size_t n = 0;
-                while (n < 255 && n < size - in && src[prev + n] == src[in + n]) n++;
-                if (n > count) { count = n; distance = in - prev; }
-                prev = chain[prev & 8191];
-            }
-            if (count < 3) count = 0;
-        }
+        auto match = finder.find(src, size, in);
+        size_t count = match.length, distance = match.distance;
         if (w) {
             if (!count) {
                 if (put(w, 9, src[in])) return -1;
@@ -238,11 +228,7 @@ static int block_tokens(const uint8_t *src, size_t size, Writer *w,
             }
         }
         if (!count) count = 1;
-        for (size_t j = 0; j < count; j++) if (size - (in + j) >= 3) {
-            size_t h = HASH3(src + in + j);
-            chain[(in + j) & 8191] = last[h];
-            last[h] = in + j;
-        }
+        finder.advance(src, size, in, count);
         in += count; tokens++;
     }
     *token_count = tokens;
@@ -270,3 +256,5 @@ int airboarder_lh5_encode(const uint8_t *src, size_t size, uint8_t *dst,
     *written = 4 + (w.bit + 7) / 8;
     return 0;
 }
+
+} /* extern "C" */

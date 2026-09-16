@@ -4,6 +4,9 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#include "common/match_finder.hpp"
+
+extern "C" {
 
 #define BE32(p) ((uint32_t)(p)[0] << 24 | (p)[1] << 16 | (p)[2] << 8 | (p)[3])
 #define PUT32(p, value) do { \
@@ -11,7 +14,6 @@
     (p)[0] = n_ >> 24; (p)[1] = n_ >> 16; \
     (p)[2] = n_ >> 8; (p)[3] = n_; \
 } while (0)
-#define HASH3(p) (((p)[0] * 251u + (p)[1] * 31u + (p)[2]) & 4095u)
 
 int yay0_decode(const uint8_t *src, size_t src_len, uint8_t *dst,
                 size_t dst_cap, size_t *dst_len) {
@@ -47,20 +49,11 @@ int yay0_decode(const uint8_t *src, size_t src_len, uint8_t *dst,
 static void encode_pass(const uint8_t *src, size_t src_len, uint8_t *dst,
                         size_t link_at, size_t chunk_at,
                         size_t *tokens_out, size_t *links_out, size_t *chunks_out) {
-    size_t last[4096];
-    for (size_t k = 0; k < 4096; k++) last[k] = SIZE_MAX;
+    MatchFinder<4096, 273> finder;
     size_t i = 0, tokens = 0, links = 0, chunks = 0;
     while (i < src_len) {
-        size_t count = 0, distance = 0;
-        if (i + 2 < src_len) {
-            size_t prev = last[HASH3(src + i)];
-            if (prev != SIZE_MAX && i - prev <= 4096) {
-                while (count < 273 && i + count < src_len &&
-                       src[prev + count] == src[i + count]) count++;
-                if (count >= 3) distance = i - prev;
-                else count = 0;
-            }
-        }
+        auto match = finder.find(src, src_len, i);
+        size_t count = match.length, distance = match.distance;
         if (count) {
             unsigned word = (count >= 18 ? 0 : count - 2) << 12 | (distance - 1);
             if (dst) { dst[link_at + links] = word >> 8; dst[link_at + links + 1] = word; }
@@ -76,8 +69,7 @@ static void encode_pass(const uint8_t *src, size_t src_len, uint8_t *dst,
             }
             chunks++; count = 1;
         }
-        for (size_t j = 0; j < count; j++)
-            if (i + j + 2 < src_len) last[HASH3(src + i + j)] = i + j;
+        finder.advance(src, src_len, i, count);
         i += count; tokens++;
     }
     *tokens_out = tokens; *links_out = links; *chunks_out = chunks;
@@ -100,3 +92,5 @@ int yay0_encode(const uint8_t *src, size_t src_len, uint8_t *dst,
     *dst_len = total;
     return 0;
 }
+
+} /* extern "C" */

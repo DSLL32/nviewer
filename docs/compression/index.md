@@ -7,6 +7,11 @@ streams but do not attempt to match a game's original compression decisions.
 Decoder-only cases are identified explicitly. Verification uses actual ROM
 streams; no codec tests are kept in the repository.
 
+The C++ LZ encoders share a small [bounded match finder](./common.md); each
+format keeps its own token and bitstream writer.
+Build the C++ sources with C++17. The DEFLATE-based C sources use zlib and
+link with `-lz`.
+
 | Format | Known games | Reference code |
 |---|---|---|
 | [MIO0](./mio0.md) | [Mario Kart 64](../MARIOKART64.md), [Pilotwings 64](../PILOTWINGS64.md), [Star Fox 64](../STARFOX.md) | Decoder and encoder |

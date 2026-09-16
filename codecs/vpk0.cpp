@@ -3,6 +3,9 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#include "common/match_finder.hpp"
+
+extern "C" {
 
 #define BE32(p) ((uint32_t)(p)[0] << 24 | (uint32_t)(p)[1] << 16 | (uint32_t)(p)[2] << 8 | (p)[3])
 #define PUT32(p, n) do { \
@@ -111,7 +114,6 @@ static int put_bits(Writer *w, unsigned count, unsigned value) {
     return 0;
 }
 
-#define HASH3(p) (((p)[0] * 251u + (p)[1] * 31u + (p)[2]) & 4095u)
 
 int vpk0_encode(const uint8_t *src, size_t size, uint8_t *dst,
                 size_t cap, size_t *written, unsigned method) {
@@ -123,19 +125,11 @@ int vpk0_encode(const uint8_t *src, size_t size, uint8_t *dst,
         /* Fixed-width offset and length leaves, each followed by tree-end. */
         put_bits(&w, 1, 0) || put_bits(&w, 8, 16) || put_bits(&w, 1, 1) ||
         put_bits(&w, 1, 0) || put_bits(&w, 8, 8) || put_bits(&w, 1, 1)) return -1;
-    size_t last[4096];
-    for (size_t k = 0; k < 4096; k++) last[k] = SIZE_MAX;
+    MatchFinder<4096, 255> finder;
     for (size_t i = 0; i < size;) {
-        size_t count = 0, distance = 0;
-        if (size - i >= 3) {
-            size_t prev = last[HASH3(src + i)];
-            if (prev != SIZE_MAX && i - prev <= 4096) {
-                while (count < 255 && count < size - i &&
-                       src[prev + count] == src[i + count]) count++;
-                distance = i - prev;
-                if (count < (method && distance % 4 ? 5u : 3u)) count = 0;
-            }
-        }
+        auto match = finder.find(src, size, i);
+        size_t count = match.length, distance = match.distance;
+        if (count && count < (method && distance % 4 ? 5u : 3u)) count = 0;
         if (count) {
             unsigned adjust = method ? (unsigned)(distance % 4) : 0;
             unsigned value = method ? (unsigned)((distance + 8 - adjust) / 4)
@@ -147,10 +141,11 @@ int vpk0_encode(const uint8_t *src, size_t size, uint8_t *dst,
             if (put_bits(&w, 1, 0) || put_bits(&w, 8, src[i])) return -1;
             count = 1;
         }
-        for (size_t j = 0; j < count; j++)
-            if (size - (i + j) >= 3) last[HASH3(src + i + j)] = i + j;
+        finder.advance(src, size, i, count);
         i += count;
     }
     *written = 8 + (w.bit + 7) / 8;
     return 0;
 }
+
+} /* extern "C" */

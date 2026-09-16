@@ -2,6 +2,9 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
+#include "common/match_finder.hpp"
+
+extern "C" {
 
 #define BE32(p) ((uint32_t)(p)[0] << 24 | (uint32_t)(p)[1] << 16 | (uint32_t)(p)[2] << 8 | (p)[3])
 #define PUT32(p, n) do { \
@@ -39,12 +42,10 @@ int smsr_decode(const uint8_t *src, size_t size, uint8_t *dst,
     return 0;
 }
 
-#define HASH3(p) (((p)[0] * 251u + (p)[1] * 31u + (p)[2]) & 4095u)
 
 static void encode_pass(const uint8_t *src, size_t size, uint8_t *dst,
                         size_t literal_at, size_t *controls, size_t *literals) {
-    size_t last[4096];
-    for (size_t k = 0; k < 4096; k++) last[k] = SIZE_MAX;
+    MatchFinder<4096, 18> finder;
     size_t in = 0, ctrl = 0, lit = 0, tokens = 0, flag_at = 0;
     while (in < size) {
         if (tokens % 16 == 0) {
@@ -52,17 +53,10 @@ static void encode_pass(const uint8_t *src, size_t size, uint8_t *dst,
             if (dst) dst[16 + ctrl] = dst[17 + ctrl] = 0;
             ctrl += 2;
         }
-        size_t count = 0, prev = SIZE_MAX;
-        if (size - in >= 3) {
-            prev = last[HASH3(src + in)];
-            if (prev != SIZE_MAX && in - prev <= 4096) {
-                while (count < 18 && count < size - in &&
-                       src[prev + count] == src[in + count]) count++;
-                if (count < 3) count = 0;
-            }
-        }
+        auto match = finder.find(src, size, in);
+        size_t count = match.length;
         if (count) {
-            unsigned word = (unsigned)((count - 3) << 12 | (in - prev - 1));
+            unsigned word = (unsigned)((count - 3) << 12 | (match.distance - 1));
             if (dst) { dst[16 + ctrl] = (uint8_t)(word >> 8); dst[17 + ctrl] = (uint8_t)word; }
             ctrl += 2;
         } else {
@@ -73,8 +67,7 @@ static void encode_pass(const uint8_t *src, size_t size, uint8_t *dst,
             }
             lit++; count = 1;
         }
-        for (size_t j = 0; j < count; j++)
-            if (size - (in + j) >= 3) last[HASH3(src + in + j)] = in + j;
+        finder.advance(src, size, in, count);
         in += count; tokens++;
     }
     *controls = ctrl; *literals = lit;
@@ -116,3 +109,5 @@ int cmpr_encode(const uint8_t *src, size_t size, uint8_t *dst,
     *written = 16 + stored;
     return 0;
 }
+
+} /* extern "C" */

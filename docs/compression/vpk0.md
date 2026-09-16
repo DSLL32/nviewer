@@ -14,7 +14,7 @@ zero token bit gives an eight-bit literal; a one gives a back-reference. Method
 0 uses a direct backward distance. Method 1 combines one or two offset-tree
 values into an interleaved distance, as detailed in the game manual.
 
-The [C reference codec](https://github.com/DSLL32/nviewer/blob/master/codecs/vpk0.c)
+The [C++ reference codec](https://github.com/DSLL32/nviewer/blob/master/codecs/vpk0.cpp)
 decodes both methods and uses fixed-width value leaves plus a bounded match
 search when encoding. The encoder takes a method argument (`0` or `1`) and
 does not attempt retail tree optimization.
@@ -28,3 +28,7 @@ Two USA ROM streams matched the independently written VPK0 decoder:
 
 Both methods pass sanitized round trips. Re-encoded output is valid but larger
 than the retail stream because the reference trees are fixed.
+
+## Reference source
+
+<<< ../../codecs/vpk0.cpp{cpp}

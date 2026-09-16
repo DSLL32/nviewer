@@ -11,7 +11,7 @@ backward distance from the output cursor. Rush 1 reads an absolute index in a
 zero-filled, 4 KiB circular dictionary whose initial write index is one. Copy
 and dictionary writes happen one byte at a time, so matches can overlap.
 
-The [C reference codec](https://github.com/DSLL32/nviewer/blob/master/codecs/rush_lzss.c)
+The [C++ reference codec](https://github.com/DSLL32/nviewer/blob/master/codecs/rush_lzss.cpp)
 has separate functions for each variant. Its encoder uses one recent
 three-byte match per hash bucket, with a 4 KiB search limit. It emits valid
 streams without attempting to reproduce retail match choices.
@@ -21,3 +21,7 @@ Verification: Rush 1's main image at `0x7A7930` decoded to 509,264 bytes
 (0.689× decoded size). Rush 2049 file 6, 3,232 stored bytes, decoded to 6,856
 bytes (`EF06A70D`) and re-encoded to 3,518 bytes (0.513× decoded size).
 Both round trips passed under sanitizers.
+
+## Reference source
+
+<<< ../../codecs/rush_lzss.cpp{cpp}

@@ -29,3 +29,7 @@ header, but exclude later ROM padding.
 
 Sanitized round trips pass for all three entry points. Re-encoded streams are
 valid but do not match the retail compressor's choices.
+
+## Reference source
+
+<<< ../../codecs/deflate.c{c}

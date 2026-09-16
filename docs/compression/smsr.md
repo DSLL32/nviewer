@@ -19,9 +19,13 @@ from the separate stream; zero means a match word. Its high nibble gives
 length minus three; its low 12 bits give backward distance minus one. There
 is no end marker.
 
-The [C reference codec](https://github.com/DSLL32/nviewer/blob/master/codecs/smsr.c)
+The [C++ reference codec](https://github.com/DSLL32/nviewer/blob/master/codecs/smsr.cpp)
 supports bare `SMSR00` and wrapped `CMPR` streams. Its encoder uses one recent
 three-byte match per hash bucket. The ROM record at `0x637C20` decoded to
 32,256 bytes (FNV-1a `E87F835B`), identical to the viewer. The original CMPR
 record was 5,652 bytes; re-encoding made a 7,574-byte record (0.235× decoded
 size). Sanitized round trips pass.
+
+## Reference source
+
+<<< ../../codecs/smsr.cpp{cpp}

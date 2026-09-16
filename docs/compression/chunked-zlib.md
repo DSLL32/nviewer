@@ -18,3 +18,7 @@ uses zlib (`-lz`) for each block. It needs no extra allocation of its own. A
 container at ROM `0x1775C0` was checked against independent zlib inflation:
 44,004 stored bytes yielded 150,224 bytes, FNV-1a `E83FD904`. Re-encoding
 that output produced 44,004 bytes and round-tripped under sanitizers.
+
+## Reference source
+
+<<< ../../codecs/chunked_zlib.c{c}

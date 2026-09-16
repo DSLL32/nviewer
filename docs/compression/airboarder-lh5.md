@@ -15,7 +15,7 @@ positions. Character values below 256 are literals; higher values copy
 its extra bits give the backward distance. The history begins filled with
 spaces.
 
-The [C reference codec](https://github.com/DSLL32/nviewer/blob/master/codecs/airboarder_lh5.c)
+The [C++ reference codec](https://github.com/DSLL32/nviewer/blob/master/codecs/airboarder_lh5.cpp)
 decodes dynamic trees and encodes using small fixed canonical trees plus a
 bounded greedy match search. It has no heap allocation. Two Japanese ROM
 entries matched the viewer byte-for-byte:
@@ -27,3 +27,7 @@ entries matched the viewer byte-for-byte:
 
 Both re-encoded streams round-tripped under sanitizers. The fixed trees are
 intentionally simpler than the retail compressor and may produce larger files.
+
+## Reference source
+
+<<< ../../codecs/airboarder_lh5.cpp{cpp}

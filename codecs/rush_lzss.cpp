@@ -4,6 +4,9 @@
  */
 #include <stddef.h>
 #include <stdint.h>
+#include "common/match_finder.hpp"
+
+extern "C" {
 
 static int decode(const uint8_t *src, size_t size, uint8_t *dst,
                   size_t cap, size_t *written, int ring_mode) {
@@ -50,14 +53,10 @@ int rush2049_lzss_decode(const uint8_t *src, size_t size, uint8_t *dst,
     return decode(src, size, dst, cap, written, 0);
 }
 
-#define HASH3(p) (((p)[0] * 251u + (p)[1] * 31u + (p)[2]) & 4095u)
-
-/* One recent three-byte candidate per bucket keeps the search bounded. */
 static int encode(const uint8_t *src, size_t size, uint8_t *dst,
                   size_t cap, size_t *written, int ring_mode) {
     if (!src || !dst || !written) return -1;
-    size_t last[4096];
-    for (size_t i = 0; i < 4096; i++) last[i] = SIZE_MAX;
+    MatchFinder<4096, 17, 1, 4095> finder;
     size_t in = 0, out = 0;
     for (;;) {
         if (out == cap) return -1;
@@ -71,19 +70,12 @@ static int encode(const uint8_t *src, size_t size, uint8_t *dst,
                 *written = out;
                 return 0;
             }
-            size_t count = 0, prev = SIZE_MAX;
-            if (size - in >= 3) {
-                prev = last[HASH3(src + in)];
-                if (prev != SIZE_MAX && in - prev <= 4095) {
-                    while (count < 17 && count < size - in &&
-                           src[prev + count] == src[in + count]) count++;
-                    if (count < 3) count = 0;
-                }
-            }
+            auto match = finder.find(src, size, in);
+            size_t count = match.length;
             if (count) {
                 if (cap - out < 2) return -1;
-                unsigned address = ring_mode ? (unsigned)((prev + 1) & 4095)
-                                             : (unsigned)(in - prev);
+                unsigned address = ring_mode ? (unsigned)((in - match.distance + 1) & 4095)
+                                             : (unsigned)match.distance;
                 dst[out++] = (uint8_t)((address >> 4 & 0xf0u) | (count - 2));
                 dst[out++] = (uint8_t)address;
             } else {
@@ -92,8 +84,7 @@ static int encode(const uint8_t *src, size_t size, uint8_t *dst,
                 dst[out++] = src[in];
                 count = 1;
             }
-            for (size_t j = 0; j < count; j++)
-                if (size - (in + j) >= 3) last[HASH3(src + in + j)] = in + j;
+            finder.advance(src, size, in, count);
             in += count;
         }
         dst[flag_at] = (uint8_t)flags;
@@ -109,3 +100,5 @@ int rush2049_lzss_encode(const uint8_t *src, size_t size, uint8_t *dst,
                          size_t cap, size_t *written) {
     return encode(src, size, dst, cap, written, 0);
 }
+
+} /* extern "C" */

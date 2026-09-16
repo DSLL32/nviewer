@@ -22,7 +22,7 @@ per-chunk Huffman tables. Method 2 reads control bits MSB-first and interleaves
 raw bytes with literals, distances, match lengths, and raw runs. Both allow
 overlapping back-references.
 
-The [C reference codec](https://github.com/DSLL32/nviewer/blob/master/codecs/rnc.c)
+The [C++ reference codec](https://github.com/DSLL32/nviewer/blob/master/codecs/rnc.cpp)
 decodes and CRC-checks both methods. `rnc1_encode` writes fixed, 4-bit
 Huffman tables per block; `rnc2_encode` writes raw runs and back-references.
 Both use a bounded greedy match search and no heap allocation. The output is
@@ -39,4 +39,8 @@ packed → decoded → reference repacked bytes:
 | RNC2 | `level15/end03.tpg` | 1,696 → 3,136 → 1,837 | `F1E25214` |
 
 The viewer independently decoded the repacked method-1 stream byte-for-byte.
-Sanitized C round trips passed, including varied content and block boundaries.
+Sanitized round trips passed, including varied content and block boundaries.
+
+## Reference source
+
+<<< ../../codecs/rnc.cpp{cpp}
