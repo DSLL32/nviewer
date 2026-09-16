@@ -122,6 +122,7 @@ Research complete (spec under `docs/`, implementation pending):
 | Game | Research |
 |---|---|
 | Pilotwings 64 | `r49/pilotwings/` |
+| Star Wars: Shadows of the Empire | `r49/shadows_empire/` |
 
 Research in progress (spec not yet under `docs/`):
 
@@ -132,7 +133,6 @@ Research in progress (spec not yet under `docs/`):
 | Glover | `r49/glover/` |
 | Mario Party (J) | `r49/mparty/` |
 | Stunt Racer 64 | `r49/stuntracer64/` |
-| Star Wars: Shadows of the Empire | `r49/shadows_empire/` |
 
 Shared:
  - `r49/impl/`: per-agent check directories (`ge_core`, `pd_obj`, `zelda_mus`,
