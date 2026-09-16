@@ -7,7 +7,7 @@
 #include <new>
 #include <stdexcept>
 #include <vector>
-#include "common/longest_match.hpp"
+#include "common/hash_chain.hpp"
 
 extern "C" {
 
@@ -51,7 +51,26 @@ int mio0_encode(const uint8_t *src, size_t src_len, uint8_t *dst,
                 size_t dst_cap, size_t *dst_len) try {
     if (!src || !dst || !dst_len || src_len > UINT32_MAX ||
         src_len > SIZE_MAX / sizeof(uint64_t) - 1) return -1;
-    auto matches = longest_matches<18>(src, src_len);
+    HashChain<MultiplyHash3> index(src_len);
+    std::vector<uint8_t> longest(src_len, 0);
+    std::vector<uint16_t> distance(src_len, 0);
+    for (size_t i = 0; i + 2 < src_len; i++) {
+        uint32_t candidate = index.first(src, i);
+        unsigned limit = unsigned(src_len - i < 18 ? src_len - i : 18);
+        unsigned best = 0;
+        for (; candidate != index.absent && i - candidate <= 4096;
+             candidate = index.previous(candidate)) {
+            unsigned length = 0;
+            while (length < limit && src[candidate + length] == src[i + length]) length++;
+            if (length > best) {
+                best = length;
+                distance[i] = uint16_t(i - candidate);
+                if (best == limit) break;
+            }
+        }
+        longest[i] = best >= 3 ? best : 0;
+        index.insert(src, i);
+    }
 
     // A control bit costs 1/8 byte. Rounding the final control word changes
     // the estimate by less than four bytes.
@@ -59,7 +78,7 @@ int mio0_encode(const uint8_t *src, size_t src_len, uint8_t *dst,
     std::vector<uint8_t> choice(src_len, 1);
     for (size_t i = src_len; i-- > 0;) {
         uint64_t best = 9 + cost[i + 1];
-        for (unsigned length = 3; length <= matches[i].length; length++) {
+        for (unsigned length = 3; length <= longest[i]; length++) {
             uint64_t trial = 17 + cost[i + length];
             if (trial <= best) { best = trial; choice[i] = uint8_t(length); }
         }
@@ -84,7 +103,7 @@ int mio0_encode(const uint8_t *src, size_t src_len, uint8_t *dst,
             dst[16 + token / 8] |= 0x80u >> (token % 8);
             dst[lit++] = src[i];
         } else {
-            unsigned word = (length - 3) << 12 | (matches[i].distance - 1);
+            unsigned word = (length - 3) << 12 | (distance[i] - 1);
             dst[link++] = word >> 8;
             dst[link++] = word;
         }

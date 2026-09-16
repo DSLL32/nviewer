@@ -12,7 +12,6 @@
 #include <utility>
 #include <vector>
 #include "common/hash_chain.hpp"
-#include "common/rnc2_tokens.hpp"
 
 namespace {
 
@@ -538,6 +537,58 @@ int rnc1_encode(const uint8_t *src, size_t size, uint8_t *dst,
     return -1;
 }
 
+typedef struct { uint8_t *dst; size_t cap, pos, control; unsigned left; int bad; } Writer;
+static void emit_bit(Writer *w, unsigned bit) {
+    if (!w->left) {
+        if (w->pos == w->cap) { w->bad = 1; return; }
+        w->control = w->pos++;
+        w->dst[w->control] = 0;
+        w->left = 8;
+    }
+    w->left--;
+    if (bit) w->dst[w->control] |= 1u << w->left;
+}
+static void emit_byte(Writer *w, unsigned value) {
+    if (w->pos == w->cap) { w->bad = 1; return; }
+    w->dst[w->pos++] = (uint8_t)value;
+}
+
+static void emit_offset2(Writer *w, size_t distance) {
+    unsigned value = (unsigned)(distance - 1);
+    unsigned high = value >> 8;
+    if (!high) emit_bit(w, 0);
+    else if (high == 1) {
+        emit_bit(w, 1); emit_bit(w, 1); emit_bit(w, 0);
+    } else if (high <= 3) {
+        emit_bit(w, 1); emit_bit(w, 0); emit_bit(w, 0);
+        emit_bit(w, high - 2);
+    } else {
+        unsigned base = high >= 8 ? high >> 1 : high;
+        emit_bit(w, 1);
+        emit_bit(w, (base - 4) >> 1);
+        emit_bit(w, 1);
+        emit_bit(w, (base - 4) & 1u);
+        emit_bit(w, high < 8);
+        if (high >= 8) emit_bit(w, high & 1u);
+    }
+    emit_byte(w, value & 255u);
+}
+
+static void emit_literals(Writer *w, const uint8_t *src,
+                          size_t start, size_t count) {
+    while (count >= 12) {
+        size_t run = count > 72 ? 72 : 12 + ((count - 12) / 4) * 4;
+        /* The length-nine escape is a raw run of 12,16,...,72 bytes. */
+        emit_bit(w, 1); emit_bit(w, 0); emit_bit(w, 1);
+        emit_bit(w, 1); emit_bit(w, 1);
+        for (unsigned bit = 4; bit > 0; bit--)
+            emit_bit(w, ((run - 12) / 4 >> (bit - 1)) & 1u);
+        for (size_t j = 0; j < run; j++) emit_byte(w, src[start + j]);
+        start += run; count -= run;
+    }
+    while (count--) { emit_bit(w, 0); emit_byte(w, src[start++]); }
+}
+
 int rnc2_encode(const uint8_t *src, size_t size, uint8_t *dst,
                 size_t cap, size_t *written) try {
     if (!src || !dst || !written || size > UINT32_MAX || cap < 20) return -1;
@@ -557,24 +608,45 @@ int rnc2_encode(const uint8_t *src, size_t size, uint8_t *dst,
         unsigned longest = 1;
         for (const Match &match : matches[at]) {
             if (!match.length) continue;
+            unsigned high = (unsigned(match.distance) - 1) >> 8;
+            unsigned offset_bits = 8 + (!high ? 1 : high == 1 ? 3 : high < 4 ? 4 : high < 8 ? 5 : 6);
             unsigned first = std::max(longest + 1, match.distance <= 256 ? 2u : 3u);
             for (unsigned length = first; length <= match.length; length++) {
-                uint64_t bits = suffix[at + length] + rnc2_match_bits(length, match.distance);
+                unsigned token_bits = length == 2 ? 11 : offset_bits +
+                                      (length <= 5 ? 4 : length <= 8 ? 5 : 12);
+                uint64_t bits = suffix[at + length] + token_bits;
                 if (bits < best) { best = bits; selected = {uint16_t(length), match.distance}; }
             }
             longest = std::max(longest, unsigned(match.length));
         }
         suffix[at] = best; choice[at] = selected;
     }
-    Rnc2Writer w = {dst, cap, 18, 0, 0, 0};
-    w.bit(0); w.bit(0); /* unlocked, unencrypted */
+    Writer w = {dst, cap, 18, 0, 0, 0};
+    emit_bit(&w, 0); emit_bit(&w, 0); /* unlocked, unencrypted */
     for (size_t i = 0; i < size && !w.bad;) {
         auto match = choice[i];
         size_t count = match.length, distance = match.distance;
-        w.token(src, i, unsigned(count), unsigned(distance));
+        if (distance) {
+            if (count == 2) {
+                emit_bit(&w, 1); emit_bit(&w, 1); emit_bit(&w, 0);
+                emit_byte(&w, unsigned(distance - 1));
+            } else if (count >= 9) {
+                emit_bit(&w, 1); emit_bit(&w, 1); emit_bit(&w, 1); emit_bit(&w, 1);
+                emit_byte(&w, (unsigned)(count - 8));
+            } else if (count == 3) {
+                emit_bit(&w, 1); emit_bit(&w, 1); emit_bit(&w, 1); emit_bit(&w, 0);
+            } else {
+                emit_bit(&w, 1); emit_bit(&w, 0);
+                emit_bit(&w, count == 5 || count == 8);
+                emit_bit(&w, count >= 6);
+                if (count >= 6) emit_bit(&w, count == 7);
+            }
+            if (count != 2) emit_offset2(&w, distance);
+        } else emit_literals(&w, src, i, count);
         i += count;
     }
-    w.end();
+    for (int i = 0; i < 4; i++) emit_bit(&w, 1);
+    emit_byte(&w, 0); emit_bit(&w, 0); /* method-2 end marker */
     if (w.bad || w.pos - 18 > UINT32_MAX) return -1;
     memcpy(dst, "RNC", 3); dst[3] = 2;
     PUT32(dst + 4, size); PUT32(dst + 8, w.pos - 18);

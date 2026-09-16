@@ -6,7 +6,7 @@
 #include <new>
 #include <stdexcept>
 #include <vector>
-#include "common/longest_match.hpp"
+#include "common/hash_chain.hpp"
 
 extern "C" {
 
@@ -50,8 +50,25 @@ int smsr_decode(const uint8_t *src, size_t size, uint8_t *dst,
 int smsr_encode(const uint8_t *src, size_t size, uint8_t *dst,
                 size_t cap, size_t *written) try {
     if (!src || !dst || !written || size > UINT32_MAX) return -1;
-    // Every shorter prefix of the longest match has the same two-byte cost.
-    auto matches = longest_matches<18, 4096>(src, size);
+    // Distances all cost two bytes, so one longest match also represents every
+    // shorter match at this position. Search the entire 4 KiB window.
+    HashChain<MultiplyHash3, uint32_t, 4096> index;
+    struct Match { uint16_t distance; uint8_t length; };
+    std::vector<Match> matches(size);
+    for (size_t i = 0; size - i >= 3; i++) {
+        unsigned limit = unsigned(size - i < 18 ? size - i : 18);
+        for (uint32_t p = index.first(src, i); p != index.absent && i - p <= 4096;
+             p = index.previous(p)) {
+            if (src[p + matches[i].length] != src[i + matches[i].length]) continue;
+            unsigned length = 0;
+            while (length < limit && src[p + length] == src[i + length]) length++;
+            if (length >= 3 && length > matches[i].length) {
+                matches[i] = {uint16_t(i - p), uint8_t(length)};
+                if (length == limit) break;
+            }
+        }
+        index.insert(src, i);
+    }
 
     // Exact byte costs for all 16 control-word phases. A token starts a new
     // two-byte control word at phase zero, plus one literal or two match bytes.

@@ -7,7 +7,52 @@
 #include <new>
 #include <stdexcept>
 #include <vector>
-#include "common/yaz_yay_parse.hpp"
+#include "common/hash_chain.hpp"
+
+namespace {
+
+// The tree holds suffix costs for the next 512 positions. Every match ends at
+// most 273 bytes ahead, so old values can be overwritten as parsing goes back.
+struct SuffixMin {
+    static constexpr unsigned span = 512;
+    std::array<uint64_t, span * 2> tree{};
+
+    SuffixMin() { tree.fill(UINT64_MAX); }
+
+    void set(size_t pos, uint64_t cost) {
+        unsigned at = span + (unsigned(pos) & (span - 1));
+        tree[at] = cost << 9 | (unsigned(pos) & (span - 1));
+        while (at > 1) {
+            at >>= 1;
+            tree[at] = std::min(tree[at * 2], tree[at * 2 + 1]);
+        }
+    }
+
+    uint64_t part(unsigned first, unsigned last) const {
+        uint64_t best = UINT64_MAX;
+        for (first += span, last += span; first < last; first >>= 1, last >>= 1) {
+            if (first & 1) best = std::min(best, tree[first++]);
+            if (last & 1) best = std::min(best, tree[--last]);
+        }
+        return best;
+    }
+
+    uint64_t get(size_t first, size_t last) const { // inclusive positions
+        unsigned a = unsigned(first) & (span - 1);
+        unsigned b = unsigned(last) & (span - 1);
+        if (a <= b) return part(a, b + 1);
+        return std::min(part(a, span), part(0, b + 1));
+    }
+
+    static unsigned length(uint64_t packed, size_t from, unsigned minimum) {
+        // A queried interval is shorter than 512, so the leaf index uniquely
+        // identifies the absolute suffix position in that interval.
+        unsigned first = (unsigned(from) + minimum) & (span - 1);
+        return minimum + ((unsigned(packed) - first) & (span - 1));
+    }
+};
+
+} // namespace
 
 extern "C" {
 
@@ -48,8 +93,52 @@ int yaz0_decode(const uint8_t *src, size_t src_len, uint8_t *dst,
 int yaz0_encode(const uint8_t *src, size_t src_len, uint8_t *dst,
                 size_t dst_cap, size_t *dst_len) try {
     if (!src || !dst || !dst_len || src_len > UINT32_MAX || dst_cap < 16) return -1;
-    auto matches = longest_matches<273>(src, src_len);
-    auto choice = yaz_yay_parse<8, 1>(matches);
+    HashChain<MultiplyHash3> index(src_len);
+    std::vector<uint16_t> longest(src_len, 0), distance(src_len, 0);
+    for (size_t i = 0; src_len - i >= 3; i++) {
+        uint32_t candidate = index.first(src, i);
+        unsigned limit = unsigned(std::min<size_t>(273, src_len - i));
+        unsigned best = 0;
+        for (; candidate != index.absent && i - candidate <= 4096;
+             candidate = index.previous(candidate)) {
+            if (best && src[candidate + best] != src[i + best]) continue;
+            unsigned length = 0;
+            while (length < limit && src[candidate + length] == src[i + length]) length++;
+            if (length > best) {
+                best = length;
+                distance[i] = uint16_t(i - candidate);
+                if (best == limit) break;
+            }
+        }
+        longest[i] = best >= 3 ? best : 0;
+        index.insert(src, i);
+    }
+
+    // Exact byte costs include the control byte at every eighth token.
+    // Suffix minima make the two match-length ranges cheap to search.
+    std::array<SuffixMin, 8> suffix;
+    std::vector<std::array<uint16_t, 8>> choice(src_len);
+    for (auto &s : suffix) s.set(src_len, 0);
+    for (size_t i = src_len; i-- > 0;) {
+        unsigned length = longest[i];
+        for (unsigned phase = 0; phase < 8; phase++) {
+            unsigned next = (phase + 1) & 7;
+            uint64_t best = 1 + (phase == 0) + (suffix[next].get(i + 1, i + 1) >> 9);
+            unsigned selected = 1;
+            if (length >= 3) {
+                uint64_t short_best = suffix[next].get(i + 3, i + std::min(length, 17u));
+                uint64_t cost = 2 + (phase == 0) + (short_best >> 9);
+                if (cost < best) { best = cost; selected = SuffixMin::length(short_best, i, 3); }
+            }
+            if (length >= 18) {
+                uint64_t long_best = suffix[next].get(i + 18, i + length);
+                uint64_t cost = 3 + (phase == 0) + (long_best >> 9);
+                if (cost < best) { best = cost; selected = SuffixMin::length(long_best, i, 18); }
+            }
+            choice[i][phase] = uint16_t(selected);
+            suffix[phase].set(i, best);
+        }
+    }
 
     memcpy(dst, "Yaz0", 4); PUT32(dst + 4, src_len);
     memset(dst + 8, 0, 8);
@@ -69,7 +158,7 @@ int yaz0_encode(const uint8_t *src, size_t src_len, uint8_t *dst,
             dst[flag_at] |= 0x80u >> phase;
             dst[out++] = src[i];
         } else {
-            unsigned d = matches[i].distance - 1;
+            unsigned d = distance[i] - 1;
             dst[out++] = ((count >= 18 ? 0 : count - 2) << 4) | (d >> 8);
             dst[out++] = d;
             if (count >= 18) dst[out++] = count - 18;
