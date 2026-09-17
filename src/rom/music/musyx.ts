@@ -72,13 +72,20 @@ export interface DecodedSample {
   loopLength: number;
 }
 
+interface KeymapEntry { obj: number; transpose: number; pan: number }
+interface LayerEntry { obj: number; lo: number; hi: number; transpose: number; volume: number; pan: number }
+export interface MusyxRenderOptions { maxVoices?: number; accurateVolumeSelect?: boolean }
+
 const GUARD = 4;
+const BIPOLAR_CONTROLLERS = new Set([0x01, 0x0a, 0x80, 0x83, 0x84, 0xa0, 0xa1]);
 
 export class MusyxBank {
   readonly groups = new Map<number, SongGroup>();
   readonly macros = new Map<number, Uint8Array>(); // commands, 8 bytes each, little-endian field order
   readonly adsr = new Map<number, Adsr>();
   readonly samples = new Map<number, SampleInfo>();
+  readonly keymaps = new Map<number, KeymapEntry[]>();
+  readonly layers = new Map<number, LayerEntry[]>();
   private decoded = new Map<number, DecodedSample | null>();
 
   constructor(proj: Uint8Array, pool: Uint8Array, sdir: Uint8Array, private samp: Uint8Array) {
@@ -166,6 +173,27 @@ export class MusyxBank {
           release: le16(o + 18) / 1000,
         });
       }
+    });
+    const signed = (v: number) => (v << 24) >> 24;
+    objects(u32(d, 8), (o, size, id) => {
+      if (size < 8 + 128 * 8) return;
+      const entries: KeymapEntry[] = [];
+      for (let key = 0; key < 128; key++) {
+        const p = o + 8 + key * 8;
+        entries.push({ obj: u16(d, p), transpose: signed(d[p + 2]), pan: d[p + 3] });
+      }
+      this.keymaps.set(id, entries);
+    });
+    objects(u32(d, 12), (o, size, id) => {
+      const entries: LayerEntry[] = [];
+      const count = Math.min(u32(d, o + 8), Math.floor((size - 12) / 12));
+      for (let i = 0; i < count; i++) {
+        const p = o + 12 + i * 12;
+        const obj = u16(d, p);
+        if (obj === 0xffff) break;
+        entries.push({ obj, lo: d[p + 2], hi: d[p + 3], transpose: signed(d[p + 4]), volume: d[p + 5], pan: d[p + 8] });
+      }
+      this.layers.set(id, entries);
     });
   }
 
@@ -629,7 +657,7 @@ class Channel {
   pitchWheel = 0;
   wheelRange = -1;
   rpn = 0;
-  notes = new Map<number, Voice>();
+  notes = new Map<number, Voice[]>();
   constructor(
     readonly synth: Synth,
     readonly id: number,
@@ -681,6 +709,7 @@ class Voice {
   keyoffTrap: [number, number] | null = null;
   sampleEndTrap: [number, number] | null = null;
   volumeSelect: { ctrl: number; scale: number; combine: number; isVar: boolean }[] = [];
+  volumeSelectSet = false;
   adsr: AdsrState | null = null;
   velocity: number; // current (enveloped) velocity driving the volume
   velRamp: { time: number; dur: number; from: number; to: number } | null = null;
@@ -689,6 +718,10 @@ class Voice {
   wheelDown = 200;
   sustained = false;
   sustainKeyOff = false;
+  sourceKey = 0;
+  sourcePage = 0;
+  volumeScale = 1;
+  panOffset = 0;
 
   smp: DecodedSample | null = null;
   pos = 0;
@@ -830,6 +863,9 @@ class Voice {
       case 0x06: // Goto
         this.jump(le16(2), le16(4));
         break;
+      case 0x0a: // SplitMod
+        if (this.curMod >= c[o + 1]) this.jump(le16(2), le16(4));
+        break;
       case 0x0c: {
         // SetAdsr
         const a = this.synth.bank.adsr.get(le16(1));
@@ -941,14 +977,22 @@ class Voice {
         this.wheelUp = i8(1) * 100;
         this.wheelDown = i8(2) * 100;
         break;
-      case 0x40: // VolSelect
-        this.volumeSelect.push({
-          ctrl: c[o + 1],
-          scale: ((le16(2) << 16) >> 16) / 100 + i8(6) / 10000,
-          combine: c[o + 4],
-          isVar: c[o + 5] !== 0,
+      case 0x40: { // VolSelect
+        const combine = c[o + 4];
+        if (this.synth.options.accurateVolumeSelect) {
+          if (!this.volumeSelectSet || combine === 0) {
+            this.volumeSelect.length = 0;
+            this.volumeSelectSet = true;
+          }
+          if (this.volumeSelect.length < 4) this.volumeSelect.push({
+            ctrl: c[o + 1], scale: Math.trunc((((le16(2) << 16) >> 16) * 256) / 100), combine, isVar: c[o + 5] !== 0,
+          });
+        } else this.volumeSelect.push({
+          ctrl: c[o + 1], scale: ((le16(2) << 16) >> 16) / 100 + i8(6) / 10000,
+          combine, isVar: c[o + 5] !== 0,
         });
         break;
+      }
       case 0x65: // SetVar
         if (!c[o + 1]) this.vars[c[o + 2] & 31] = (le16(4) << 16) >> 16;
         break;
@@ -1015,19 +1059,43 @@ class Voice {
 
     let user = this.chan.volume;
     if (this.volumeSelect.length) {
-      let v = 0;
-      for (let i = 0; i < this.volumeSelect.length; i++) {
-        const s = this.volumeSelect[i];
-        const x = (s.isVar ? this.vars[s.ctrl & 31] : this.chan.ctrl[s.ctrl]) * s.scale;
-        v = i === 0 || s.combine === 0 ? x : s.combine === 1 ? v + x : v * x;
+      if (this.synth.options.accurateVolumeSelect) {
+        let current = 0;
+        let signed = 0;
+        for (const s of this.volumeSelect) {
+          const raw = s.isVar ? clamp(this.vars[s.ctrl & 31], 0, 127) : this.chan.ctrl[s.ctrl];
+          const v14 = raw << 7;
+          if (BIPOLAR_CONTROLLERS.has(s.ctrl)) {
+            const value = clamp(((v14 - 8192) * s.scale) >> 8, -8192, 8191);
+            if (s.combine === 0) signed = value;
+            else if (s.combine === 1) signed = clamp(current + value - 8192, -8192, 8191);
+            else if (s.combine === 2) signed = clamp(((current - 8192) * value) >> 13, -8192, 8191);
+            current = signed + 8192;
+          } else {
+            let value = (v14 * s.scale) >> 8;
+            if (value >= 16384) value = 16383;
+            if (s.combine === 0) current = value;
+            else if (s.combine === 1) current += value;
+            else if (s.combine === 2) current = (current * value) >>> 14;
+            if (s.combine === 1 || s.combine === 2) current = current >>> 0 < 16384 ? current : 16383;
+          }
+        }
+        user = clamp((current & 0xffff) / 16383, 0, 1);
+      } else {
+        let v = 0;
+        for (let i = 0; i < this.volumeSelect.length; i++) {
+          const s = this.volumeSelect[i];
+          const x = (s.isVar ? this.vars[s.ctrl & 31] : this.chan.ctrl[s.ctrl]) * s.scale;
+          v = i === 0 || s.combine === 0 ? x : s.combine === 1 ? v + x : v * x;
+        }
+        user = clamp(v / 127, 0, 1);
       }
-      user = clamp(v / 127, 0, 1);
     }
-    const level = clamp(user * (this.velocity / 127) * adsr, 0, 1);
+    const level = clamp(user * this.volumeScale * (this.velocity / 127) * adsr, 0, 1);
     const gain = this.smp ? lookupVolume(level) : 0;
     // Pan law of the N64 MusyX runtime (boot code 0x8001e0e8): piecewise linear through
     // 0, 0.7079 and 1 at pan 0, 64 and 128.
-    const p = clamp((this.chan.pan + 1) * 64, 0, 128);
+    const p = clamp((this.chan.pan + this.panOffset + 1) * 64, 0, 128);
     const targetL = gain * panLaw(128 - p);
     const targetR = gain * panLaw(p);
     if (this.macroDone && gain < 1e-6 && this.gainL < 1e-6 && this.gainR < 1e-6) return false;
@@ -1122,6 +1190,7 @@ export class Synth {
     readonly group: SongGroup,
     songId: number,
     tempo: number,
+    readonly options: MusyxRenderOptions = {},
   ) {
     this.ticksPerSec = (tempo * 384) / 60;
     const setups = group.setups.get(songId);
@@ -1143,7 +1212,34 @@ export class Synth {
     v.state = VoiceState.Dead;
     const i = this.voices.indexOf(v);
     if (i >= 0) this.voices.splice(i, 1);
-    if (v.chan.notes.get(v.note) === v) v.chan.notes.delete(v.note);
+    const notes = v.chan.notes.get(v.sourceKey);
+    if (notes) {
+      const index = notes.indexOf(v);
+      if (index >= 0) notes.splice(index, 1);
+      if (notes.length === 0) v.chan.notes.delete(v.sourceKey);
+    }
+  }
+
+  private resolve(obj: number, key: number, depth: number, volume: number, pan: number,
+    out: { macro: number; key: number; volume: number; pan: number }[]) {
+    if (depth > 4) return;
+    switch (obj & 0xc000) {
+      case 0:
+        out.push({ macro: obj, key: clamp(key, 0, 127), volume, pan });
+        break;
+      case 0x4000: {
+        const entry = this.bank.keymaps.get(obj)?.[clamp(key, 0, 127)];
+        if (entry && entry.obj !== 0xffff)
+          this.resolve(entry.obj, key + entry.transpose, depth + 1, volume, pan + (entry.pan - 64) / 64, out);
+        break;
+      }
+      case 0x8000:
+        for (const entry of this.bank.layers.get(obj) ?? [])
+          if (key >= entry.lo && key <= entry.hi)
+            this.resolve(entry.obj, key + entry.transpose, depth + 1,
+              volume * entry.volume / 127, pan + (entry.pan - 64) / 64, out);
+        break;
+    }
   }
 
   event(e: SongEvent) {
@@ -1152,24 +1248,33 @@ export class Synth {
       case EV_NOTE_ON: {
         const old = ch.notes.get(e.a);
         if (old) {
-          old.keyOff();
+          for (const voice of old) voice.keyOff();
           ch.notes.delete(e.a);
         }
         const page = ch.page;
         if (!page) return;
-        // Per-page polyphony limit, then a global cap: steal the oldest voice.
-        const same = this.voices.filter((v) => v.pageObj === page.objId && v.chan === ch);
-        if (page.maxVoices > 0 && same.length >= page.maxVoices) this.kill(same[0]);
-        if (this.voices.length >= Synth.MAX_VOICES) this.kill(this.voices[0]);
-        const v = new Voice(this, ch, e.a, e.b, page.objId, this.serial++);
-        this.voices.push(v);
-        ch.notes.set(e.a, v);
+        const targets: { macro: number; key: number; volume: number; pan: number }[] = [];
+        this.resolve(page.objId, e.a, 0, 1, 0, targets);
+        const notes: Voice[] = [];
+        for (const target of targets) {
+          const same = this.voices.filter((v) => v.sourcePage === page.objId && v.chan === ch);
+          if (page.maxVoices > 0 && same.length >= page.maxVoices) this.kill(same[0]);
+          if (this.voices.length >= (this.options.maxVoices ?? Synth.MAX_VOICES)) this.kill(this.voices[0]);
+          const voice = new Voice(this, ch, target.key, e.b, target.macro, this.serial++);
+          voice.sourceKey = e.a;
+          voice.sourcePage = page.objId;
+          voice.volumeScale = target.volume;
+          voice.panOffset = target.pan;
+          this.voices.push(voice);
+          notes.push(voice);
+        }
+        if (notes.length) ch.notes.set(e.a, notes);
         break;
       }
       case EV_NOTE_OFF: {
-        const v = ch.notes.get(e.a);
-        if (v) {
-          v.keyOff();
+        const notes = ch.notes.get(e.a);
+        if (notes) {
+          for (const voice of notes) voice.keyOff();
           ch.notes.delete(e.a);
         }
         break;
@@ -1251,11 +1356,12 @@ export interface RenderedSong {
 }
 
 // Renders a whole song (plus a loop tail) at 22050 Hz. `songId` selects the MIDI setup.
-export function renderSong(bank: MusyxBank, groupId: number, songId: number, song: Uint8Array): RenderedSong {
+export function renderSong(bank: MusyxBank, groupId: number, songId: number, song: Uint8Array,
+  options: MusyxRenderOptions = {}): RenderedSong {
   const group = bank.groups.get(groupId);
   if (!group) throw new Error(`MusyX: no song group ${groupId}`);
   const timing = expandSong(song);
-  const synth = new Synth(bank, group, songId, u32(song, 16) & 0x7fffffff || 120);
+  const synth = new Synth(bank, group, songId, u32(song, 16) & 0x7fffffff || 120, options);
   const frames = Math.ceil(timing.totalSamples / FRAME);
   const left = new Float32Array(frames * FRAME);
   const right = new Float32Array(frames * FRAME);
