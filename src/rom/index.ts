@@ -22,6 +22,7 @@ import { openRush1 } from './rush1';
 import { openStarFox64 } from './sf64/sf64';
 import { openSpiderMan } from './spiderman/spiderman';
 import { openShadowsOfTheEmpire } from './shadows/shadows';
+import { openTwine } from './twine/twine';
 import type { Game } from './types';
 import { isZeldaAlpha, openZeldaAlpha } from './zelda/alpha';
 import { findZeldaBuild } from './zelda/fs';
@@ -106,6 +107,9 @@ export function openRom(bytes: Uint8Array): Game {
     case 'NSWE':
     case 'NSWP':
       return openShadowsOfTheEmpire(rom);
+    case 'NO7E':
+    case 'NO7P':
+      return openTwine(rom);
     case 'NPDE':
       if (rom[0x3f] !== 0) throw new Error(`Perfect Dark (U) V1.${rom[0x3f]} is not supported: only the V1.0 ROM (revision 0) is.`);
       return openPerfectDark(rom);
@@ -125,7 +129,8 @@ export function openRom(bytes: Uint8Array): Game {
         'Off Road Challenge (U/E), ' +
         'Pokémon Snap (U), ' +
         'Mario Kart 64 (U) (V1.0), ' +
-        'Pilotwings 64 (U/E/J), Spider-Man (U), Star Wars: Shadows of the Empire (U V1.0–V1.2/E), Perfect Dark (U) (V1.0), ' +
+        'Pilotwings 64 (U/E/J), Spider-Man (U), Star Wars: Shadows of the Empire (U V1.0–V1.2/E), ' +
+        'The World Is Not Enough (U/E), Perfect Dark (U) (V1.0), ' +
         'The Legend of Zelda: Ocarina of Time and Majora\'s Mask.');
     }
   }
