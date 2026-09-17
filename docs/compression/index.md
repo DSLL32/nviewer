@@ -24,6 +24,7 @@ link with `-lz`.
 | [Yaz0](./yaz0.md) | [Ocarina of Time](../OCARINA_OF_TIME.md), [Majora's Mask](../MAJORAS_MASK.md) | Decoder and encoder |
 | [Yay0](./yay0.md) | [Bomberman 64: The Second Attack!](../BOMBERMAN64_SECOND_ATTACK.md) | Decoder and encoder |
 | [Rare `1172` + raw DEFLATE](./raw-deflate.md) | [GoldenEye 007](../GOLDENEYE.md) | Decoder and encoder, zlib |
+| [Rare `1172` + u32 size + raw DEFLATE](./raw-deflate.md) | [Banjo-Kazooie](../BANJOKAZOOIE.md) | Same codec, distinct wrapper |
 | [Rare `1173` + raw DEFLATE](./raw-deflate.md) | [Perfect Dark](../PERFECTDARK.md) | Same codec |
 | [Headerless raw DEFLATE](./raw-deflate.md) | [Gex 64](../GEX64.md), [Gex 3](../GEX3.md), [Rush 2049](../SAN_FRANCISCO_RUSH_2049.md) | Same codec |
 | [Chunked zlib](./chunked-zlib.md) | [Stunt Racer 64](../STUNTRACER64.md) | Decoder and encoder, zlib |

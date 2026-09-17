@@ -14,6 +14,7 @@ CODEC(yaz0_decode); CODEC(yaz0_encode);
 CODEC(yay0_decode); CODEC(yay0_encode);
 CODEC(raw_deflate_decode); CODEC(raw_deflate_encode);
 CODEC(rare1172_decode); CODEC(rare1172_encode);
+CODEC(rare1172_u32_decode); CODEC(rare1172_u32_encode);
 CODEC(rare1173_decode); CODEC(rare1173_encode);
 CODEC(chunked_zlib_decode); CODEC(chunked_zlib_encode);
 CODEC(rush1_lzss_decode); CODEC(rush1_lzss_encode);
@@ -100,6 +101,7 @@ static std::pair<Codec *, Codec *> codec(const char *name) {
     PAIR("yay0", yay0_outer_decode, yay0_outer_encode);
     PAIR("raw-deflate", raw_deflate_decode, raw_deflate_encode);
     PAIR("rare1172", rare1172_decode, rare1172_encode);
+    PAIR("rare1172-u32", rare1172_u32_decode, rare1172_u32_encode);
     PAIR("rare1173", rare1173_decode, rare1173_encode);
     PAIR("chunked-zlib", chunked_zlib_decode, chunked_zlib_encode);
     PAIR("hudson1", hudson1_decode, hudson1_encode);
@@ -131,19 +133,19 @@ int main(int argc, char **argv) {
     long end = std::ftell(file);
     if (end < 0 || at > size_t(end) || stored > size_t(end) - at ||
         std::fseek(file, long(at), SEEK_SET)) return 2;
-    std::vector<uint8_t> source(stored), raw(expected), repacked(expected * 3 + 4096),
-                         again(expected);
+    std::vector<uint8_t> source(stored), raw(expected ? expected : 1),
+                         repacked(expected * 3 + 4096), again(expected ? expected : 1);
     if (std::fread(source.data(), 1, stored, file) != stored) return 2;
     std::fclose(file);
     size_t decoded = 0, packed = 0, checked = 0;
-    if (decode(source.data(), stored, raw.data(), raw.size(), &decoded) ||
+    if (decode(source.data(), stored, raw.data(), expected, &decoded) ||
         decoded != expected) { std::fprintf(stderr, "retail decode failed\n"); return 1; }
     auto start = std::chrono::steady_clock::now();
     if (encode(raw.data(), decoded, repacked.data(), repacked.size(), &packed)) {
         std::fprintf(stderr, "encode failed\n"); return 1;
     }
     auto stop = std::chrono::steady_clock::now();
-    if (decode(repacked.data(), packed, again.data(), again.size(), &checked) ||
+    if (decode(repacked.data(), packed, again.data(), expected, &checked) ||
         checked != decoded || std::memcmp(raw.data(), again.data(), decoded)) {
         std::fprintf(stderr, "repacked round trip failed\n"); return 1;
     }

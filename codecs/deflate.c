@@ -15,12 +15,13 @@ static int inflate_raw(const uint8_t *src, size_t size, uint8_t *dst,
     if (inflateInit2(&z, -15) != Z_OK) return -1;
     z.next_in = (Bytef *)src;
     z.avail_in = (uInt)size;
-    z.next_out = dst;
-    z.avail_out = (uInt)cap;
+    uint8_t empty_sink;
+    z.next_out = cap ? dst : &empty_sink;
+    z.avail_out = cap ? (uInt)cap : 1;
     int result = inflate(&z, Z_FINISH);
     *written = z.total_out;
     inflateEnd(&z);
-    return result == Z_STREAM_END ? 0 : -1;
+    return result == Z_STREAM_END && *written <= cap ? 0 : -1;
 }
 
 static int deflate_raw(const uint8_t *src, size_t size, uint8_t *dst,
@@ -65,6 +66,31 @@ int rare1172_encode(const uint8_t *src, size_t size, uint8_t *dst,
     size_t payload;
     if (deflate_raw(src, size, dst + 2, cap - 2, &payload, 9, 5)) return -1;
     *written = payload + 2;
+    return 0;
+}
+
+/* Banjo-Kazooie uses 1172 with a four-byte decoded size before the bitstream. */
+int rare1172_u32_decode(const uint8_t *src, size_t size, uint8_t *dst,
+                        size_t cap, size_t *written) {
+    if (!src || !dst || !written || size < 6 || src[0] != 0x11 || src[1] != 0x72)
+        return -1;
+    size_t expected = (size_t)src[2] << 24 | (size_t)src[3] << 16 |
+                      (size_t)src[4] << 8 | src[5];
+    if (expected > cap || inflate_raw(src + 6, size - 6, dst, cap, written)) return -1;
+    return *written == expected ? 0 : -1;
+}
+
+int rare1172_u32_encode(const uint8_t *src, size_t size, uint8_t *dst,
+                        size_t cap, size_t *written) {
+    if (!src || !dst || !written || size > UINT32_MAX || cap < 6) return -1;
+    dst[0] = 0x11; dst[1] = 0x72;
+    dst[2] = (uint8_t)(size >> 24);
+    dst[3] = (uint8_t)(size >> 16);
+    dst[4] = (uint8_t)(size >> 8);
+    dst[5] = (uint8_t)size;
+    size_t payload;
+    if (deflate_raw(src, size, dst + 6, cap - 6, &payload, 9, 5)) return -1;
+    *written = payload + 6;
     return 0;
 }
 
