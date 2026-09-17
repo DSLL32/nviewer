@@ -115,6 +115,7 @@ Implemented (spec under `docs/`):
 | Mario Kart 64 | `r49/mk64/` | archive course audit: `r49/mk64/archive_cut/` |
 | Perfect Dark | `r49/pd/` | |
 | Pokémon Snap | `r49/snap/` | |
+| The World Is Not Enough | `r49/twine/` | |
 | Zelda 64 (OoT, MM, 1997 alpha) | `r49/zelda/` (alpha in `zelda/alpha/`) | |
 
 Research complete (spec under `docs/`, implementation pending):
@@ -123,7 +124,6 @@ Research complete (spec under `docs/`, implementation pending):
 |---|---|
 | Pilotwings 64 | `r49/pilotwings/` |
 | Star Wars: Shadows of the Empire | `r49/shadows_empire/` |
-| The World Is Not Enough | `r49/twine/` |
 
 Research in progress (spec not yet under `docs/`):
 

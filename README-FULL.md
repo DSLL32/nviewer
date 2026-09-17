@@ -4,7 +4,7 @@ A browser viewer for the levels of these N64 games (USA versions): *San Francisc
 *San Francisco Rush: Extreme Racing*, *Bomberman 64*, *Bomberman 64: The Second Attack!*,
 *Bomberman Hero*, *BattleTanx*, *BattleTanx: Global Assault*, *Gex 64: Enter the Gecko*,
 *Gex 3: Deep Cover Gecko*, *Yoshi's Story* (Japan), *Star Fox 64* (V1.0 and V1.1), *GoldenEye 007*,
-*Off Road Challenge* (USA and Europe), *Air Boarder 64* (Japan and Europe), *Pilotwings 64* (USA, Europe and Japan), *Pokémon Snap*, *A Bug's Life* (USA and Europe), *Spider-Man*, *Star Wars: Shadows of the Empire* (USA V1.0–V1.2 and Europe),
+*Off Road Challenge* (USA and Europe), *Air Boarder 64* (Japan and Europe), *Pilotwings 64* (USA, Europe and Japan), *Pokémon Snap*, *A Bug's Life* (USA and Europe), *Spider-Man*, *Star Wars: Shadows of the Empire* (USA V1.0–V1.2 and Europe), *007: The World Is Not Enough* (USA and Europe),
 *Mario Kart 64* (USA, V1.0), *Perfect Dark* (V1.0), and *The Legend of Zelda: Ocarina of Time* and
 *Majora's Mask* (retail and debug builds, plus the 1997 Ocarina of Time prototype preserved on an F-Zero X development
 cartridge). Load one or more ROMs, pick a level in the sidebar, and fly around freely, with
@@ -122,6 +122,9 @@ Z shows or hides collision · Shift+F collision wireframe · the View panel can 
     - `archive.ts`, `codecs.ts`: Ogre scene catalog, LZHUF and intro LZSS decoding
     - `scene.ts`, `geometry.ts`, `texture.ts`, `shadows.ts`: tagged scene graph, meshes, materials and level assembly
     - `music.ts`: indexed libultra VADPCM cue player
+  - `twine/`: 007: The World Is Not Enough (USA and Europe; format notes in `docs/WORLDISNOTENOUGH.md`)
+    - `edl.ts`, `level.ts`, `objtypes.ts`, `twine.ts`: EDL archive, meshes, textures, placements, environment and levels
+    - `music.ts`: 18 MusyX songs and authored loops
   - `perfectdark/`: Perfect Dark (format notes in `docs/PERFECTDARK.md`)
     - `rom.ts`: data segment, file and stage tables, text; `texture.ts`: the global texture store and its two decoders
     - `gbi.ts`: Perfect Dark's display-list microcode; `bg.ts`: rooms and sky rooms; `environment.ts`: fog, sky planes;

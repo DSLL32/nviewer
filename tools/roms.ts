@@ -34,6 +34,8 @@ export const ROM_FILES = [
   'Star Wars - Shadows of the Empire (U) (V1.1) [!].z64',
   'Star Wars - Shadows of the Empire (U) (V1.2) [!].z64',
   'Star Wars - Shadows of the Empire (E) [!].z64',
+  '007 - The World is Not Enough (U) [!].z64',
+  '007 - The World is Not Enough (E) (M3) [!].z64',
   'Legend of Zelda, The - Ocarina of Time (U) (V1.0) [!].z64',
   "Legend of Zelda, The - Majora's Mask (U) [!].z64",
   '_folders/F-ZERO X [CFZE].z64', // the development ROM holding the 1997 Ocarina of Time prototype

@@ -17,7 +17,7 @@
 | Sample encoding | MusyX ADPCM; speech encoding distinct and undecoded. |
 | Levels | 28 selectable missions/arenas; other archive entries contain cutscene and front-end sets. |
 | Memory requirement | Base 4 MiB supported; Expansion Pak detected for optional video modes. |
-| Viewer support | Research decoder renders 42 archive entries on USA and Europe; no integrated nviewer loader yet. |
+| Viewer support | USA and Europe: 28 retail missions/arenas and 12 archival/front-end sets, plus all 18 songs. |
 
 ### 1.2 ROM identification
 
@@ -415,7 +415,9 @@ The animation-record fields are:
 | `0x08` | 12 | f32[3] | `translationScale` | Scale for quantized XYZ translation. |
 | `0x14` | 12 | f32[3] | `translationOffset` | Bias for quantized XYZ translation. |
 
-Each frame has `T` u16 XYZ translation triples followed by `B` packed u32 angle words, where `B` is bone count and `T=B` if the flag is set, otherwise 1. The data span is `frameCount × (6T + 4B)` for all 1,035 records. Translation = `u16 × scale + offset`. Packed-angle extraction is known from disassembly, but quaternion composition/order is not verified against frame bones; a static viewer should use the bind pose. A bind-pose construction from model records gives exact captured joint positions at yaw zero, but idle animation leaves 2–40° orientation differences. Non-zero-yaw bind-pose sign and live head variant remain unverified.
+Each frame has `T` u16 XYZ translation triples followed by `B` packed u32 angle words, where `B` is bone count and `T=B` if the flag is set, otherwise 1. The data span is `frameCount × (6T + 4B)` for all 1,035 records. Translation = `u16 × scale + offset`. The packed angle components are `(word >>> 22) << 2`, `(word >>> 10) & 0xFFE`, and `(word << 1) & 0xFFE`; quaternion sin/cos use half-angles `π × component / 4096`, and bone rotations compose parent × local. That decode matched 14 captured bone-local rotations from animation 164 within 1.38° mean / 2.14° maximum.
+
+Character creation at `0x8000265C` initializes animation 113. It is one neutral frame for 15-bone human rigs (group 17; key-data offset `0x9B810`), with root bias `(0, 1.08446, 0)`. Captured Courier RAM confirms animation 113 on the reported guard. The viewer applies this source-derived neutral pose to human characters; larger first-person rigs retain their bind-record pose. Time-dependent animation selection, blending, head variants, and exact root settlement remain unverified.
 
 ### 4.4 Behaviors, triggers, and scripted objects
 
@@ -549,26 +551,26 @@ Europe changes 18 archive entries after decompression, including texture downsca
 
 ### 7.1 Module mapping
 
-The following is an implementation map, not a claim that the current viewer already supports the game. Detect normalized header code `NO7E` or `NO7P`; choose release-specific addresses and present the 28 menu-selectable levels plus scene/front-end sets, with entries 27/37 listed as common models rather than levels.
+The viewer detects normalized header code `NO7E` or `NO7P`, selects release-specific addresses, and presents the 28 menu-selectable levels plus 12 scene/front-end/archive sets. Entries 27 and 37 are common models, not levels.
 
 | Component | Existing or suggested module | Responsibility |
 |---|---|---|
 | ROM dispatch and game contract | `src/rom/index.ts`, `src/rom/types.ts` | Detect `NO7E`/`NO7P`, add `twine` game id. |
 | EDL | `src/rom/twine/edl.ts` | Methods 0/1/2 and bounds-checked header handling, guided by [EDL reference](compression/edl.md). |
-| Archive | `src/rom/twine/archive.ts` | Index, entry headers, cross-entry component references, release map. |
-| Geometry | `src/rom/twine/mesh.ts` | D stream to batches; record transforms and draw-mode state. |
+| Archive | `src/rom/twine/level.ts` | Index, entry headers, cross-entry component references, release map. |
+| Geometry | `src/rom/twine/level.ts` | D stream to batches; record transforms and draw-mode state. |
 | Textures | `src/rom/texture.ts` | Existing CI/I row decoders; apply storage nibble swap. |
-| Environment/objects | `src/rom/twine/environment.ts`, `objects.ts` | Fog, sky, camera, layers, markers, bind-pose characters. |
+| Environment/objects | `src/rom/twine/level.ts`, `objtypes.ts` | Fog, sky, camera, layers, markers, bind-pose characters. |
 | Music | `src/rom/music/musyx.ts`, `src/rom/twine/music.ts` | Extend generic MusyX keymaps/layers, SplitMod and VolSelect; expose 18 songs. |
 | Game facade | `src/rom/twine/twine.ts` | Level list, loading, music and metadata. |
 
 ### 7.2 Supported features
 
-Research decoders demonstrated all 42 index-addressable entries in USA, all 7,440 unique mesh command streams, textures, initial fog and skies, static object transforms, bind-pose characters, and all 18 MusyX songs. Europe uses the same data formats, with differences surveyed by decoded-entry comparison; an all-level Europe viewer render was not recorded. A future integrated loader should group drawn world geometry, objects, skies, characters, markers, and a hidden provisional helper-plane layer. Every drawn instance needs a corresponding toggleable layer. The standalone decoder's Courier render aligns with an emulator frame in pillars, doors, furniture, and texture placement; 9 captured frame comparisons across 8 levels additionally support colour, fog, sky, and camera mappings. These are feasibility evidence, not an integrated viewer test.
+The integrated loader renders all 40 exposed sets on both USA and Europe, with initial fog and skies, static object transforms, neutral-pose human characters, and all 18 MusyX songs. Drawn world geometry, objects, skies, characters, markers, and provisional helper planes have toggleable layers; the helper layer is hidden by default. Transparent meshes retain ROM vertex alpha and use a blended, no-depth-write pass. The corrected Courier offline render has lower mean absolute RGB error against its captured game frame than the initial loader (10.14 versus 10.84 at 320×240). Earlier emulator comparisons across eight levels support colour, fog, sky, and camera mappings; they are not exhaustive runtime-fidelity tests.
 
 ### 7.3 Approximations and omissions
 
-Initial static geometry does not reproduce runtime visibility, moving doors, vehicles, mission scripting, or animated character pose/head choice. The bind pose has exact joint positions at one captured yaw but nontrivial orientation differences from idle animation. Sky fog needs viewer support because game skies retain G_FOG; a no-fog viewer sky can look too bright, especially at Cold Reception. The game's RSP fog is per vertex, while the viewer may fog per pixel. Collision can be shown only as provisional helper surfaces until the query code is decoded. Intensity-mode PRIM/ENV colours were not established. Music can use the existing MusyX player after keymap/layer, SplitMod, VolSelect, and voice-cap support, with an approximate full-scale gain of 0.92; reverb/chorus sends and portamento are not modelled in the research renderer.
+Initial static geometry does not reproduce runtime visibility, moving doors, vehicles, mission scripting, or time-dependent character animation/head choice. Human characters show the initialized neutral pose, not a sampled gameplay frame. Sky fog needs viewer support because game skies retain G_FOG; a no-fog viewer sky can look too bright, especially at Cold Reception. The game's RSP fog is per vertex, while the viewer may fog per pixel. Collision can be shown only as provisional helper surfaces until the query code is decoded. Intensity-mode PRIM/ENV colours were not established. The music player supports keymaps/layers, SplitMod, VolSelect, and the game's voice cap, with an approximate full-scale gain of 0.92; reverb/chorus sends and portamento are not modelled.
 
 ## 8. Verification and remaining work
 
@@ -585,7 +587,7 @@ Initial static geometry does not reproduce runtime visibility, moving doors, veh
 | Texture payload | Compare all 71 texture blobs loaded for Courier against ROM decoding. | All 71 byte-identical. |
 | In-game rendering | Render with captured frame cameras; compare nine frames on eight levels. | Main geometry/texture/fog/sky alignment; frame mean absolute pixel error 2.8–11.6 except character-heavy Masquerade 19.3 and moving-camera Cold Reception 30.5. |
 | Fog and camera | Read F3DEX2 fog/projection commands and RAM in eight levels; compare record-derived camera with six frames. | Fog words and far planes match; static eye within 0.06 units, yaw exact. |
-| Objects/characters | Compare Courier object list and rigid bone matrices to records. | Static object transforms exact; joint offsets within 0.0005; animation rotation convention unresolved. |
+| Objects/characters | Compare Courier object list, rigid bone matrices, spawn calls, and animation callback against RAM. | Static object transforms exact; joint offsets within 0.0005; half-angle quaternion convention and initialized human pose verified. |
 | MusyX | Parse all banks/songs/samples; render 18 songs; compare three captured songs. | 667 samples and 18 songs parse; clean waveform windows correlate up to 0.95–1.00; song-12 loop confirmed. The game's long-run sequence timing is ≈0.034% slower than a nominal 22,050 Hz offline render; cause unknown. |
 | Unused candidates | Cross-reference mission, overlay, scenes, preloads, models, songs, and text. | Entries 8/17 and song 11 statically unreferenced as described; computed references remain possible. |
 
@@ -594,7 +596,7 @@ Initial static geometry does not reproduce runtime visibility, moving doors, veh
 - Runtime collision structures and exact role of helper-plane types 30/31/104.
 - Speech compression bitstream, speech-clip-to-text mapping, and use of clips 272–275.
 - Meaning of 28-byte entry extras, several 24-byte placement extras, and many object type-dependent fields.
-- Animation angle-to-quaternion composition, live head variant, and non-zero-yaw bind pose.
+- Time-dependent animation selection/blending, live head variant, and exact root settlement.
 - PRIM/ENV for intensity draw modes and exact sky-fog visual treatment.
 - Reachability of scene 36/entry 17, title Password Menu, and computed references to apparently unused models/song 11.
 - Level-song loop seams beyond captured song 12, clean isolated song 17, and cause of the ≈0.034% long-run sequencer timing drift.

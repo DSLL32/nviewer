@@ -29,7 +29,18 @@ if (!jobArgs.workerRom && jobArgs.jobs > 1 && roms.length > 1) {
 }
 
 for (const rom of roms) {
-  const game = openRom(new Uint8Array(readFileSync(rom)));
+  let game: Game;
+  try {
+    game = openRom(new Uint8Array(readFileSync(rom)));
+  } catch (error) {
+    // A baseline checkout predating a newly added game cannot identify its ROM.
+    // Skip only that expected case; failures for games it recognizes still fail the audit.
+    if (src && error instanceof Error && error.message.startsWith('Unsupported ROM (game code ')) {
+      console.warn(`baseline does not support ${rom}; skipped`);
+      continue;
+    }
+    throw error;
+  }
   await prepareGame(game, src ?? undefined);
   const h = createHash('sha1');
   for (const info of game.levels) {
