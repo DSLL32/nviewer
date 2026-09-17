@@ -179,12 +179,24 @@ function collisionBatch(model: Model, scale: number): Batch | null {
 }
 
 export function loadBanjoLevel(archive: BanjoRom, entry: MapEntry, info: LevelInfo): Level {
+  return buildModelPair(archive, entry, info, entry.map);
+}
+
+// The model-only test environment is present in the asset archive but has no map-table record.
+// Keep it separate from the 128 loadable map IDs: no setup, sky or map music is inferred.
+export function loadBanjoTestModels(archive: BanjoRom, info: LevelInfo): Level {
+  return buildModelPair(archive, { opaque: 0x14d6, translucent: 0x14d7, scale: 1 }, info, null);
+}
+
+function buildModelPair(archive: BanjoRom, entry: Pick<MapEntry, 'opaque' | 'translucent' | 'scale'>,
+  info: LevelInfo, map: number | null): Level {
   const textures: Texture[] = [], meshes: Mesh[] = [], instances: Instance[] = [], layers: LevelLayer[] = [], unplaced: number[] = [];
   const keys = new Map<string, number>();
   const min: [number, number, number] = [Infinity, Infinity, Infinity], max: [number, number, number] = [-Infinity, -Infinity, -Infinity];
-  const policy: ModelPolicy = { selector: selectorValues(entry.map), camera: 'all', lod: 'nearest' };
+  const policy: ModelPolicy = { selector: selectorValues(map ?? 0), camera: 'all', lod: 'nearest' };
   const loadModel = (id: number) => parseModel(archive.asset(id));
-  const add = (id: number, name: string, depth: DepthMode, scale: number, layerKind: LevelLayer['kind']) => {
+  const add = (id: number, name: string, depth: DepthMode, scale: number,
+    layerKind: LevelLayer['kind'], visible = true) => {
     const model = loadModel(id);
     if (model.errors.length) throw new Error(`Banjo model ${hex(id)}: ${model.errors.slice(0, 4).join('; ')}`);
     const batches = buildModelBatches(model, depth, textures, keys, `${id}:`, policy, scale);
@@ -195,7 +207,7 @@ export function loadBanjoLevel(archive: BanjoRom, entry: MapEntry, info: LevelIn
     }
     const mesh = meshes.push({ name: `${name} ${hex(id)}`, radius, batches, info: { asset: hex(id) } }) - 1;
     const instance = instances.push({ name, mesh, matrix: idMatrix(), info: { asset: hex(id) } }) - 1;
-    layers.push({ name, kind: layerKind, instances: [instance] });
+    layers.push({ name, kind: layerKind, instances: [instance], visibleByDefault: visible });
     const collision = collisionBatch(model, scale);
     if (collision && collision.positions.length) {
       const collMesh = meshes.push({ name: `${name} collision`, radius, batches: [collision], info: { asset: hex(id) } }) - 1;
@@ -203,15 +215,20 @@ export function loadBanjoLevel(archive: BanjoRom, entry: MapEntry, info: LevelIn
       layers.push({ name: `${name} collision`, kind: 'collision', instances: [collInst], visibleByDefault: false });
     }
   };
-  add(entry.opaque, 'opaque map', 'full', entry.scale, 'main');
-  if (entry.translucent) add(entry.translucent, 'translucent map', 'compare', entry.scale, 'main');
-  const level: Level = { info, id: `bk-${entry.map.toString(16)}`, textures, meshes, instances, layers, unplaced,
+  const archival = map === null;
+  add(entry.opaque, archival ? 'Test model OPA (0x14D6)' : 'opaque map', 'full', entry.scale, 'main');
+  if (entry.translucent) add(entry.translucent,
+    archival ? 'Test model XLU (0x14D7)' : 'translucent map', 'compare', entry.scale, 'main', !archival);
+  const level: Level = { info, id: map === null ? 'bk-archive-test-models' : `bk-${map.toString(16)}`,
+    textures, meshes, instances, layers, unplaced,
     bounds: { min: min.map((v) => Number.isFinite(v) ? v : -500) as typeof min,
       max: max.map((v) => Number.isFinite(v) ? v : 500) as typeof max }, clearColor: [0, 0, 0] };
-  addBanjoSky(level, entry.map, archive.core2, loadModel,
-    (model, scale, skyTextures, skyKeys, prefix) => buildModelBatches(model, 'none', skyTextures, skyKeys, prefix,
-      { selector: selectorValues(0), camera: 'all', lod: 'nearest' }, scale, true));
-  addObjects(level, archive, entry.map);
+  if (map !== null) {
+    addBanjoSky(level, map, archive.core2, loadModel,
+      (model, scale, skyTextures, skyKeys, prefix) => buildModelBatches(model, 'none', skyTextures, skyKeys, prefix,
+        { selector: selectorValues(0), camera: 'all', lod: 'nearest' }, scale, true));
+    addObjects(level, archive, map);
+  }
   return level;
 }
 

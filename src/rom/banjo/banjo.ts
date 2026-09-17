@@ -1,6 +1,6 @@
 import type { Game } from '../types';
 import { BanjoRom } from './archive';
-import { loadBanjoLevel, mapEntries, mapLevels } from './level';
+import { loadBanjoLevel, loadBanjoTestModels, mapEntries, mapLevels } from './level';
 import { decodeBanjoMusic, listBanjoMusic } from './music';
 
 export function openBanjoKazooie(rom: Uint8Array): Game {
@@ -20,6 +20,8 @@ export function openBanjoKazooie(rom: Uint8Array): Game {
     });
   const entries = ordered.map((row) => row.entry);
   const levels = ordered.map((row, index) => ({ ...row.info, index }));
+  const archivalIndex = entries.length;
+  levels.push({ index: archivalIndex, name: 'Test map models (USA V1.0, archival)', kind: 'other', group: 'Archive models' });
   return {
     id: 'banjokazooie',
     title: 'Banjo-Kazooie (USA V1.0)',
@@ -27,6 +29,7 @@ export function openBanjoKazooie(rom: Uint8Array): Game {
     music: listBanjoMusic(rom),
     decodeMusic: (index) => decodeBanjoMusic(rom, index),
     loadLevel(index) {
+      if (index === archivalIndex) return loadBanjoTestModels(archive, levels[index]);
       const entry = entries[index];
       if (!entry) throw new Error(`Banjo-Kazooie map index ${index} is not selectable`);
       return loadBanjoLevel(archive, entry, levels[index]);
