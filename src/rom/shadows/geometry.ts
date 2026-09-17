@@ -23,6 +23,7 @@ function decodeMesh(scene: ShadowsSceneImage, textures: ShadowsSceneTextures, re
   let ended = false;
   const texture = textures.forRecord(record);
   const image = texture >= 0 ? textures.textures[texture] : null;
+  const [scaleS, scaleT] = textures.scale(texture);
   const push = (indices: number[], command: number) => {
     // Swapping the source Y/Z axes changes handedness; reverse each triangle
     // so the game's back-face mode still selects the authored front face.
@@ -30,7 +31,8 @@ function decodeMesh(scene: ShadowsSceneImage, textures: ShadowsSceneTextures, re
       const v = loaded[index];
       if (!v) return false;
       positions.push(...v.position);
-      uvs.push(image ? v.uv[0] / image.width : 0, image ? v.uv[1] / image.height : 0);
+      uvs.push(image ? v.uv[0] * scaleS / image.width : 0,
+        image ? v.uv[1] * scaleT / image.height : 0);
       colors.push(...v.color);
     }
     sources.push(command);
@@ -171,28 +173,15 @@ export function shadowsGeometry(scene: ShadowsSceneImage, textures: ShadowsScene
       v[1], v[7], v[4], 0, v[9], v[11], v[10], 1,
     ]);
   };
-  const instanceKeys = new Set<string>(), visited = new Set<string>();
+  const renderKeys = new Set<string>(), collisionKeys = new Set<string>(), visited = new Set<string>();
   const extents: { center: [number, number, number]; size: number }[] = [];
   const mainInstances: number[] = [], collisionInstances: number[] = [];
-  const append = (record: number, matrix: Float32Array) => {
-    const mesh = recordToMesh.get(record);
-    if (mesh === undefined) return;
+  const dormant: { record: number; mesh: number; matrix: Float32Array }[] = [];
+  const addRender = (record: number, mesh: number, matrix: Float32Array) => {
     const key = `${record}/${matrix.join(',')}`;
-    if (instanceKeys.has(key)) return;
-    instanceKeys.add(key);
+    if (renderKeys.has(key)) return;
+    renderKeys.add(key);
     mainInstances.push(instances.push({ name: meshes[mesh].name, mesh, matrix, info: { record: hex(record) } }) - 1);
-    let collision = recordToCollision.get(record);
-    if (collision === undefined && scene.contains(pool, 12)) {
-      const decoded = decodeIndexedCollision(scene, record, pool);
-      if (decoded) {
-        collision = meshes.push(decoded) - 1;
-        recordToCollision.set(record, collision);
-      } else recordToCollision.set(record, -1);
-    }
-    if (collision !== undefined && collision >= 0) collisionInstances.push(instances.push({
-      name: meshes[collision].name, mesh: collision, matrix: matrix.slice(), noFog: true,
-      info: { record: hex(record), indexedCollision: 1 },
-    }) - 1);
     const localMin = [Infinity, Infinity, Infinity], localMax = [-Infinity, -Infinity, -Infinity];
     for (let bits = 0; bits < 8; bits++) {
       const x = scene.f32(record + (bits & 1 ? 12 : 0));
@@ -213,14 +202,40 @@ export function shadowsGeometry(scene: ShadowsSceneImage, textures: ShadowsScene
       size: Math.max(...localMax.map((n, i) => n - localMin[i])) / 2,
     });
   };
+  const append = (record: number, matrix: Float32Array, renderEnabled: boolean) => {
+    const mesh = recordToMesh.get(record);
+    if (mesh === undefined) return;
+    const key = `${record}/${matrix.join(',')}`;
+    // Geometric queries traverse disabled render branches too. Keep their
+    // indexed polygons in the collision layer, but do not draw their DLs.
+    if (!collisionKeys.has(key)) {
+      collisionKeys.add(key);
+      let collision = recordToCollision.get(record);
+      if (collision === undefined && scene.contains(pool, 12)) {
+        const decoded = decodeIndexedCollision(scene, record, pool);
+        if (decoded) {
+          collision = meshes.push(decoded) - 1;
+          recordToCollision.set(record, collision);
+        } else recordToCollision.set(record, -1);
+      }
+      if (collision !== undefined && collision >= 0) collisionInstances.push(instances.push({
+        name: meshes[collision].name, mesh: collision, matrix: matrix.slice(), noFog: true,
+        info: { record: hex(record), indexedCollision: 1 },
+      }) - 1);
+    }
+    if (renderEnabled) addRender(record, mesh, matrix);
+    else dormant.push({ record, mesh, matrix });
+  };
 
   // The +0x1C tagged root contains the main scene hierarchy. A 0x3064
   // node's count and pointer lead to mesh-record addresses. The other known
   // tags point to further nodes; D064/D065 additionally transform children.
   const root = scene.u32(0x1c) - scene.base;
-  const stack: { at: number; matrix: Float32Array; depth: number }[] = [{ at: root, matrix: identity(), depth: 0 }];
+  const stack: { at: number; matrix: Float32Array; renderEnabled: boolean; depth: number }[] = [{
+    at: root, matrix: identity(), renderEnabled: scene.contains(root, 4) && !!(scene.u16(root + 2) & 0xff00), depth: 0,
+  }];
   while (stack.length) {
-    const { at, matrix, depth } = stack.pop()!;
+    const { at, matrix, renderEnabled, depth } = stack.pop()!;
     if (!scene.contains(at, 0x14) || depth > 64) continue;
     const tag = scene.u16(at);
     if (tag !== 0x3064 && tag !== 0x5064 && tag !== 0x5065 && tag !== 0xd064 && tag !== 0xd065) continue;
@@ -228,18 +243,64 @@ export function shadowsGeometry(scene: ShadowsSceneImage, textures: ShadowsScene
       ? scene.contains(at, 0x48) && nodeMatrix(at) : identity();
     if (!current) continue;
     const nextMatrix = tag === 0xd064 || tag === 0xd065 ? multiply(matrix, current) : matrix;
-    const key = `${at}/${nextMatrix.join(',')}`;
+    const key = `${at}/${nextMatrix.join(',')}/${renderEnabled}`;
     if (visited.has(key)) continue;
     visited.add(key);
     const count = scene.u32(at + 0xc), array = scene.u32(at + 0x10) - scene.base;
     if (count > 10000 || !scene.contains(array, count * 4)) continue;
     for (let i = 0; i < count; i++) {
       const child = scene.u32(array + i * 4) - scene.base;
-      if (tag === 0x3064) append(child, nextMatrix);
-      else stack.push({ at: child, matrix: nextMatrix, depth: depth + 1 });
+      if (tag === 0x3064) append(child, nextMatrix, renderEnabled);
+      // The renderer rejects +2 high-byte-zero child nodes (0x800BB2E0);
+      // collision query 0x80003DDC descends those branches regardless.
+      else if (scene.contains(child, 4)) stack.push({ at: child, matrix: nextMatrix,
+        renderEnabled: renderEnabled && !!(scene.u16(child + 2) & 0xff00), depth: depth + 1 });
     }
   }
-  if (!instances.length) { bounds.min = [-1, -1, -1]; bounds.max = [1, 1, 1]; }
+  // Stored enable bits do not describe every runtime pose: zero-flagged
+  // branches also contain articulated model pieces. Show their geometry, but do
+  // not let a dormant untextured duplicate cover an enabled textured mesh.
+  // This is a viewer union of potential states, not a claim about one frame.
+  const hashes = new Map<number, number>();
+  const geometryHash = (index: number) => {
+    const cached = hashes.get(index);
+    if (cached !== undefined) return cached;
+    let hash = 2166136261;
+    for (const batch of meshes[index].batches) for (const array of [batch.positions, batch.colors]) {
+      const bytes = new Uint8Array(array.buffer, array.byteOffset, array.byteLength);
+      for (const byte of bytes) hash = Math.imul(hash ^ byte, 16777619);
+    }
+    hashes.set(index, hash >>> 0);
+    return hash >>> 0;
+  };
+  const sameGeometry = (a: number, b: number) => {
+    const left = meshes[a].batches, right = meshes[b].batches;
+    return left.length === right.length && left.every((batch, i) =>
+      batch.positions.length === right[i].positions.length &&
+      batch.colors.length === right[i].colors.length &&
+      batch.positions.every((value, j) => value === right[i].positions[j]) &&
+      batch.colors.every((value, j) => value === right[i].colors[j]));
+  };
+  const enabledTextured = new Map<string, number[]>();
+  for (const instance of mainInstances) {
+    const { mesh, matrix } = instances[instance];
+    if (meshes[mesh].batches[0].texture < 0) continue;
+    const key = `${geometryHash(mesh)}/${matrix.join(',')}`;
+    const matches = enabledTextured.get(key) ?? [];
+    matches.push(mesh);
+    enabledTextured.set(key, matches);
+  }
+  const suppressed = new Set<string>();
+  for (const { record, mesh, matrix } of dormant) {
+    const placement = `${record}/${matrix.join(',')}`;
+    if (renderKeys.has(placement) || suppressed.has(placement)) continue;
+    if (meshes[mesh].batches[0].texture < 0) {
+      const matches = enabledTextured.get(`${geometryHash(mesh)}/${matrix.join(',')}`);
+      if (matches?.some((other) => sameGeometry(mesh, other))) { suppressed.add(placement); continue; }
+    }
+    addRender(record, mesh, matrix);
+  }
+  if (!mainInstances.length) { bounds.min = [-1, -1, -1]; bounds.max = [1, 1, 1]; }
   const used = new Set(instances.map((instance) => instance.mesh));
   const unplaced = meshes.map((_, i) => i).filter((i) => !used.has(i));
   // Viewer convenience only: this is not an authored game camera. Excluding

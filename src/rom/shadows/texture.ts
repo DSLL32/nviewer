@@ -8,6 +8,7 @@ const be32 = (bytes: Uint8Array, at: number) =>
 export class ShadowsTextureArchive {
   private decoded?: Uint8Array;
   private readonly block: Uint8Array;
+  private readonly scales = new Map<number, [number, number]>();
 
   constructor(rom: Uint8Array) {
     let root = -1;
@@ -27,7 +28,14 @@ export class ShadowsTextureArchive {
     const command = be32(bytes, catalog) - 0x80400000;
     const start = be32(bytes, catalog + 4) - 0x80400000;
     const end = be32(bytes, catalog + 8) - 0x80400000;
-    if (start < 0 || command < start + 8 || command + 8 > end || end > bytes.length) return null;
+    if (start < 0 || command < start + 8 || command + 16 > end || end > bytes.length) return null;
+
+    // Each image DL begins (after its rewritten head) with G_TEXTURE. Its
+    // unsigned 16-bit S/T factors multiply the vertex's 10.5 coordinates.
+    const scaleWord = be32(bytes, command + 8);
+    if ((scaleWord >>> 24) !== 0xbb || !(scaleWord & 1)) return null;
+    const factors = be32(bytes, command + 12);
+    this.scales.set(imageId, [(factors >>> 16) / 65536, (factors & 0xffff) / 65536]);
 
     const commands: [number, number][] = [];
     const walk = (at: number, depth: number) => {
@@ -101,17 +109,26 @@ export class ShadowsTextureArchive {
       source: `shared A image ${imageId} at +0x${texel.toString(16)}`,
     };
   }
+
+  scale(imageId: number): [number, number] | undefined {
+    return this.scales.get(imageId);
+  }
 }
 
 export class ShadowsSceneTextures {
   readonly textures: Texture[] = [];
   private readonly modes: BlendMode[] = [];
+  private readonly scales: [number, number][] = [];
   private readonly byId = new Map<number, number>();
 
   constructor(private readonly scene: ShadowsSceneImage, private readonly archive: ShadowsTextureArchive) {}
 
   mode(index: number): BlendMode {
     return index < 0 ? 'opaque' : this.modes[index];
+  }
+
+  scale(index: number): [number, number] {
+    return index < 0 ? [0, 0] : this.scales[index];
   }
 
   forRecord(record: number): number {
@@ -126,6 +143,7 @@ export class ShadowsSceneTextures {
     if (!texture) { this.byId.set(imageId, -1); return -1; }
     const index = this.textures.length;
     this.textures.push(texture);
+    this.scales.push(this.archive.scale(imageId)!);
     let cutout = false, blend = false;
     for (let i = 3; i < texture.rgba.length; i += 4) {
       const alpha = texture.rgba[i];
