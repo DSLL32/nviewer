@@ -451,7 +451,7 @@ Tracks contain variable-length delta times and MIDI-compatible events. The compr
 | `FF 2D` | variable | Count, current count, raw u32 back offset | Loop end; back-offset operand is not passed through the back-reference expander. |
 | `FF 2F` | variable | MIDI end-of-track meta body | End track. |
 
-All 848 observed loop ends are perpetual; 95 songs loop and 78 play once. The loop-end operand must be read raw, not expanded as compressed data.
+All 848 observed loop ends are perpetual; 95 sequences have loop markers and 78 have none. Song `0x8A` has no events within its marked repeat span, so only 94 sequences have an audible repeat region. The loop-end operand must be read raw, not expanded as compressed data.
 
 The runtime channel-mask system adds controller events `0x7D` (channel volume), `0x7E` (mask out channel) and `0x7F` (mask in channel); these are posted by game code, not stored in sequence assets. Unmasked playback can exceed 24 voices and lose notes. Masks change with map, player position, water and game state. Verified mask examples are Spiral Mountain `0x6FFF`, Mumbo's Mountain start `0x103F` and near Ticker's Tower `0x513F`, Treasure Trove Cove jetty `0x60FF`, and file select `0x0200` on save slot 0 versus `0x01FF` on slots 1–2. The file-select mask follows highlighted slot index, not whether a file has been saved. Two-track maps start both tracks concurrently; Treasure Trove Cove crossfades `0x05` Beach and `0x11` Lighthouse by height, while Spiral Mountain switches `0x10` and `0x56` at the bridge.
 
@@ -611,7 +611,7 @@ The complete per-ID name, duration and loop catalog follows.
 | `87` | `159D` | Secret Squirrel | 20000 | 56.256–99.879 |
 | `88` | `159E` | Secret Egg | 20000 | once, 3.261 |
 | `89` | `159F` | Jinjup | 32000 | once, 4.957 |
-| `8A` | `15A0` | Turbo Talon Trot short | 28000 | 1.263–2.525 |
+| `8A` | `15A0` | Turbo Talon Trot short | 28000 | 1.263–2.525 (silent repeat span) |
 | `8B` | `15A1` | Fade Down | 25000 | once, 1.586 |
 | `8C` | `15A2` | Big Jinjo | 32000 | once, 17.714 |
 | `8D` | `15A3` | T1000 | 15000 | once, 9.600 |
