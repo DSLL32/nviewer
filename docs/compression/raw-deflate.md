@@ -47,6 +47,11 @@ reference encoder produces 224,030 bytes. A level-1–9, `memLevel`-1–9,
 five-strategy zlib grid on that asset did not improve on its level-9,
 `memLevel`-5 default.
 
+Across all 3,308 compressed USA V1.0 assets, that default produces 13,730,546
+bytes versus 14,035,043 retail stream bytes, excluding alignment: 860 streams
+shrink, 2,042 tie, and 406 grow (largest growth 1,083 bytes). Every repack
+round-trips. This profile is not a guarantee of a smaller individual stream.
+
 ## Reference source
 
 <<< ../../codecs/deflate.c{c}
