@@ -37,28 +37,10 @@ match that extends beyond the declared size, as the game does, but writes
 only the declared number of bytes. It bounds control reads at the start of
 the literal stream even after literals have been consumed.
 
-## Verification
-
-Verified against the Japanese ROM's indexed CMPR records, with retail sizes
-including both headers and even-byte padding but excluding archive alignment:
-
-| ROM record | Decoded bytes | Retail CMPR bytes | Re-encoded bytes | Change |
-|---|---:|---:|---:|---:|
-| `0x637C20` | 32,256 | 5,652 | 5,582 | −1.24% |
-| `0x7F3E70` (largest) | 230,144 | 163,042 | 161,274 | −1.08% |
-| All 702 records | 9,580,250 | 3,706,816 | 3,663,384 | −1.17% |
-
-Every record became smaller, and all 702 repacks decode byte-for-byte in
-both the reference decoder and the independent viewer decoder. Decoded
-FNV-1a hashes for the two individual records are `E87F835B` and `AEA85896`,
-respectively. The largest sample encodes in about 0.06 seconds at `-O3`;
-reproduce it with `npm run bench:codecs -- --only cmpr`.
-
-ASan/UBSan checks cover all 702 records and 4,463 synthetic round trips,
-exact and undersized output buffers, overlap, the 4,096-byte window limit,
-control-word boundaries, and 10,000 malformed/truncated inputs. Small binary
-strings and varied short inputs also match the minimum sizes from an
-independent exhaustive parser.
+The codec has been checked against the Japanese ROM's indexed CMPR records.
+Re-encoded streams decode byte-for-byte with the independent viewer decoder.
+Bounds checks include overlap, control-word boundaries, and truncated input.
+An independent exhaustive parser confirms encoded size on short inputs.
 
 ## Reference source
 

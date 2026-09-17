@@ -193,6 +193,11 @@ C++ reference codecs under `codecs/` and transclude those files into the
 compression page; place the decoder before the encoder. Template only parameters
 that leave the token grammar unchanged. Future game extractors belong near
 the reusable codec they call, not in an unpublished research directory.
+Write compression pages as references to the current format and codec: describe
+stored fields, decoding, encoder behavior and options, and concise compatibility
+evidence. Do not include tuning chronology, former-encoder comparisons, or
+host-specific size and timing tables; use the reproducible benchmark command
+in the compression index for current measurements.
 
 Other standard forms are:
 

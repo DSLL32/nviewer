@@ -35,12 +35,9 @@ caller buffers and return 0 on success or −1 for malformed input or insufficie
 space.
 The maintained source is [codecs/mio0.cpp](https://github.com/DSLL32/nviewer/blob/master/codecs/mio0.cpp).
 
-Verification: the largest indexed stream, Star Fox 64 U V1.1 at `0xA88180`,
-repacked to 190,009 bytes versus 191,968 retail (396,960 decoded bytes) in
-0.46 seconds at `-O3`. All 4,727 MIO0 streams found in the US Star Fox 64,
-Mario Kart 64, and Pilotwings 64 ROMs round-tripped through this codec and
-matched the respective independent viewer decoders byte-for-byte. The slowest
-observed encode rate was 0.27 seconds per 10 KiB of output. ASan/UBSan passed
-119 varied-size and patterned round trips, including short-output checks.
+The codec has been checked against the MIO0 streams indexed in the US Star Fox
+64, Mario Kart 64, and Pilotwings 64 ROMs. Re-encoded streams decode
+byte-for-byte with the independent viewer decoders. Bounds checks include
+short output buffers.
 
 <<< ../../codecs/mio0.cpp{cpp}

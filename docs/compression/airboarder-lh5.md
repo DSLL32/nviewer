@@ -23,22 +23,10 @@ resulting Huffman bit costs. It uses up to six parsing passes; very redundant
 blocks use one pass, and a strong match limits search depth. Encoder scratch
 space is bounded by a 16 KiB decoded block; its history is carried across blocks.
 
-The largest indexed Japanese/PAL archive stream in the J ROM begins at
-`0x56A8F4`. It occupies 583,156 retail bytes and decodes to 1,271,176 bytes.
-The reference encoder produces **568,048 bytes** (2.59% below retail) in
-2.33 seconds with `-O3` on the test host, or 0.042 seconds per 10 KiB of
-compressed output. The C++ decoder and the independent viewer TypeScript
-decoder both reproduced all 1,271,176 decoded bytes.
-
-All 44 J and 45 PAL compressed archive records re-encoded and round-tripped.
-Their slowest normalized encode time was 0.775 seconds per 10 KiB of compressed
-output, below the 2-second budget.
-
-Address/undefined-behavior sanitizer round trips passed on 2,128 varied
-inputs, including block boundaries, repetitive data and random data. A separate
-sanitizer test checked 2,000 skewed and random Huffman frequency sets, including
-odd and even length-limit overflows. Streams made with both overflow cases also
-decoded byte-for-byte in the independent viewer decoder.
+The codec has been checked against all indexed compressed records in the
+Japanese and PAL archives. Re-encoded streams decode byte-for-byte with the
+independent viewer decoder. Bounds checks include block boundaries, Huffman
+length limits, and malformed trees.
 
 ## Reference source
 

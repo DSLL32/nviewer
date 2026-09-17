@@ -66,30 +66,11 @@ minimizing total bits also minimizes bytes after rounding the final control
 byte. This includes the fixed two skipped bits and the end escape. No
 search-depth or compression-level setting is needed.
 
-**Verified—ROM and independent decoding:** all 1,584 ERZ2 blocks in the
-Spider-Man (USA) boot and archive indexes repack smaller than retail, totaling
-13,583,829 bytes versus 13,839,481 retail bytes (255,652 bytes saved). Both the
-C++ decoder and the viewer's independent TypeScript decoder reproduce all
-26,636,106 decoded bytes exactly.
-
-| Boot block at ROM | Decoded bytes | Retail stream bytes | Repacked bytes |
-|---|---:|---:|---:|
-| `0x13B7C` | 65,536 | 28,747 | 27,955 |
-| `0x1ABC8` | 65,536 | 32,882 | 32,390 |
-| `0x63218` (largest indexed stream) | 65,536 | 35,513 | 34,869 |
-
-Stream sizes include the 18-byte header and exclude archive padding. The
-largest block occupies a 35,516-byte archive extent, including three padding
-bytes; comparing complete extents previously overstated its retail size.
-Its repack saves 644 bytes (1.81%) against the actual stream and 2,571 bytes
-against the previous 37,440-byte greedy output.
-
-The largest sample encodes in approximately 0.01 s at `-O3`. Across the full
-corpus, the slowest measured rate was 0.53 s per 10 KiB of compressed output,
-below the 2 s target. An exhaustive byte-cost parser retaining all eight
-control-bit phases agreed on 191 small and distance-boundary cases.
-ASan/UBSan checks covered 423 varied-content round trips with exact and
-undersized buffers, plus 20,000 malformed streams.
+The codec has been checked against all 1,584 ERZ2 blocks in the Spider-Man
+(USA) boot and archive indexes. Re-encoded streams decode byte-for-byte with
+the independent viewer decoder. An independent parser confirms the encoded
+size for short inputs and distance-boundary cases; bounds checks include
+undersized buffers and malformed streams.
 
 ## Reference source
 

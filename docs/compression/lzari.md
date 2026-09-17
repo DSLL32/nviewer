@@ -24,28 +24,21 @@ symbol costs, not a proof of globally minimal compressed size. The stable
 for size; smaller output is not guaranteed for every input as the level
 increases.
 
-For BattleTanx's front-end bank at ROM `0x2D2790–0x2E2CD0`, the original
-stream is 66,880 bytes and decodes to 150,208 bytes. At level 9, the reference
-encoder produces 63,343 bytes, 3,537 bytes (5.3%) smaller than the original.
-Each level's output round-tripped, and level 9 decoded byte-for-byte with the
-independent viewer decoder and passed sanitizer checks. The encode times below
-are medians of three `-O3` runs measured with `CLOCK_MONOTONIC` around encoding
-on the development host, not portable performance guarantees. All are well
-below the 2 seconds per 10 KiB of compressed output budget (12.4 seconds for
-level 9's 63,343-byte result).
+| Level | Search depth | Parse |
+|---:|---:|---|
+| 0 | 0 | Literals only |
+| 1 | 1 | Greedy |
+| 2 | 4 | Greedy |
+| 3 | 16 | Greedy |
+| 4 | 32 | Greedy |
+| 5 | 64 | Greedy |
+| 6 | 128 | One-byte lazy |
+| 7 | 256 | One-byte lazy |
+| 8 | 512 | One-byte lazy |
+| 9 | 4,096 | 20-pass estimated-cost parse |
 
-| Level | Search depth | Parse | Bytes | Encode time |
-|---:|---:|---|---:|---:|
-| 0 | 0 | literals | 88,123 | 13 ms |
-| 1 | 1 | greedy | 70,654 | 11 ms |
-| 2 | 4 | greedy | 68,189 | 12 ms |
-| 3 | 16 | greedy | 66,723 | 13 ms |
-| 4 | 32 | greedy | 66,303 | 14 ms |
-| 5 | 64 | greedy | 65,988 | 15 ms |
-| 6 | 128 | lazy | 65,111 | 25 ms |
-| 7 | 256 | lazy | 65,024 | 29 ms |
-| 8 | 512 | lazy | 64,974 | 33 ms |
-| 9 | 4,096 | 20-pass parse | 63,343 | 1,074 ms |
+The codec has been checked against BattleTanx's front-end bank. Re-encoded
+streams decode byte-for-byte with the independent viewer decoder.
 
 ## Reference source
 

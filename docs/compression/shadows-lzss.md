@@ -34,27 +34,9 @@ token and does not reproduce retail parse decisions. Both functions return
 zero on success and `-1` on invalid input or inadequate destination capacity; the decoder
 also reports the bytes consumed through the terminator.
 
-Verified against scene 00 and the shared image archive in all four retail
-releases. All eight re-encodes round-trip byte-for-byte through both the C++
-reference decoder and the independent TypeScript viewer decoder. Every
-re-encode is smaller than retail and smaller than the previous greedy
-encoder.
-
-The shared image archive is the largest retail stream in every release,
-with tied stored sizes; USA V1.0 is the primary benchmark. Retail sizes
-include archive alignment; reference sizes end immediately after the
-terminator.
-
-| Stream | Retail bytes | Previous greedy bytes | Tuned bytes | Encode time |
-|---|---:|---:|---:|---:|
-| USA V1.0 shared images | 1,246,800 | 1,244,550 | 1,207,027 | 0.75 s |
-| USA V1.0 scene 00 | 71,232 | 71,567 | 68,942 | 0.17 s |
-
-Measured with GCC 14.2, `-O3 -std=c++17`, on an Intel Xeon E5-2697 v2.
-The worst normalized time across all eight streams is 0.026 s per 10 KiB of
-compressed output, below the 2 s budget; host timings are not portable
-guarantees. ASan and UBSan checks cover empty
-inputs, short and exact-capacity buffers, truncated and malformed streams,
+The codec has been checked against scene 00 and the shared image archive in
+all four documented releases. Re-encoded streams decode byte-for-byte with
+the independent viewer decoder. Bounds and malformed-stream checks include
 two-byte matches, overlapping matches, and ring wrap.
 
 ## Reference source

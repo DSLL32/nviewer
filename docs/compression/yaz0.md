@@ -35,14 +35,9 @@ match the game's encoder. Both functions return 0 on success or −1 for
 malformed input or insufficient space.
 The maintained source is [codecs/yaz0.cpp](https://github.com/DSLL32/nviewer/blob/master/codecs/yaz0.cpp).
 
-Verification: Ocarina of Time's ROM stream at `0x84FB10` decoded to 47,408
-bytes (FNV-1a `98CBB1A1`), matching the viewer. Sanitized encoder round trips
-passed on varied inputs and Majora's Mask's largest audited stream. On that
-stream (U ROM, `0xA684D0`), the encoder reduced 1,303,776 decoded bytes to
-773,898 bytes, versus 778,426 retail bytes; the reference decoder and the
-viewer's independent Yaz0 decoder both reproduced the original. Across 4,488
-compressed `dmadata` files in the US and European Majora's Mask and US
-Ocarina of Time ROMs, every repack decoded byte-for-byte. A separate exhaustive
-match enumeration confirmed minimum encoded sizes for 1,960 small inputs.
+The codec has been checked against compressed `dmadata` files in the US and
+European Majora's Mask and US Ocarina of Time ROMs. Re-encoded streams decode
+byte-for-byte with the independent viewer decoder. An exhaustive match
+enumeration confirms encoded size on short inputs.
 
 <<< ../../codecs/yaz0.cpp{cpp}

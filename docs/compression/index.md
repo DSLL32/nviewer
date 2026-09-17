@@ -13,8 +13,8 @@ format, set `NVIEWER_ROMS` to the ROM directory and run
 record each chosen stream and print a Markdown table. The comparison excludes
 archive alignment bytes and verifies every re-encoded stream by decoding it.
 
-The C++ LZ encoders share a small [bounded match finder](./common.md); each
-format keeps its own token and bitstream writer.
+An optional [bounded match finder](./common.md) is provided; the current
+reference encoders implement their own format-specific searches.
 Build the C++ sources with C++17. The DEFLATE-based C sources use zlib and
 link with `-lz`.
 

@@ -19,18 +19,9 @@ programming to minimize the byte count, including one flag byte per eight
 tokens and the terminating token. It does not try to reproduce retail token
 choices; multiple equally short streams can represent the same bytes.
 
-Verification: the largest indexed Rush 1 stream at `0x2354C0` consumed
-570,270 retail bytes and decoded to 1,052,128 bytes. The encoder produced
-550,972 bytes in 0.35 seconds (`g++ -O3`), 3.38% below retail. The largest
-indexed Rush 2049 LZSS stream at `0x399370` consumed 90,821 bytes (excluding
-11 archive-padding bytes) and decoded to 219,288; the encoder produced 88,856
-bytes in 0.30 seconds, 2.16% below retail. Both were checked byte-for-byte
-with the C++ and independent viewer decoders. Across the complete indexed
-corpora, all 69 unique Rush 1 streams (including the main image) improved,
-with aggregate bytes 6,333,101 → 6,095,212; all 48 Rush 2049 LZSS files
-improved, 619,752 → 602,530. An AddressSanitizer/UBSan run passed 1,600
-mixed-pattern round trips, including 4 KiB boundary cases and short-capacity
-checks.
+The codec has been checked against the indexed LZSS streams in both games.
+Re-encoded streams decode byte-for-byte with the independent viewer decoders.
+Bounds checks include ring-wrap and short-capacity cases.
 
 ## Reference source
 
