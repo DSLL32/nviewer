@@ -1,5 +1,6 @@
 // Entry point: detect which supported game a ROM is and open it.
 import { openAirBoarder64 } from './airboarder64';
+import { openBanjoKazooie } from './banjo/banjo';
 import { openBattleTanx } from './battletanx';
 import { openBattleTanxGA } from './battletanxga';
 import { openBomberman64 } from './bomberman/bm64';
@@ -64,6 +65,12 @@ export function openRom(bytes: Uint8Array): Game {
     case 'NBYD':
     case 'NBYI':
       return openBugsLife(rom);
+    case 'NBKE':
+      if (rom[0x3f] !== 0) throw new Error(`Banjo-Kazooie (U) V1.${rom[0x3f]} is not supported: only the V1.0 ROM (revision 0) is.`);
+      return openBanjoKazooie(rom);
+    case 'NBKP':
+    case 'NBKJ':
+      throw new Error(`Banjo-Kazooie (${code === 'NBKP' ? 'E' : 'J'}) is not supported: only Banjo-Kazooie (U) (V1.0) is.`);
     case 'NBXE':
       return openBattleTanx(rom);
     case 'NBQE':
@@ -126,6 +133,7 @@ export function openRom(bytes: Uint8Array): Game {
         'Gex 64: Enter the Gecko (U), Gex 3: Deep Cover Gecko (U), Yoshi\'s Story (J), Star Fox 64 (U), GoldenEye 007 (U), ' +
         `A Bug's Life (U/E/F/G/I), ` +
         'Air Boarder 64 (J/E), ' +
+        'Banjo-Kazooie (U) (V1.0), ' +
         'Off Road Challenge (U/E), ' +
         'Pokémon Snap (U), ' +
         'Mario Kart 64 (U) (V1.0), ' +
