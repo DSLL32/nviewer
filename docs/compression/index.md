@@ -36,6 +36,7 @@ link with `-lz`.
 | [`CMPR`/`SMSR00` slide-LZ](./smsr.md) | [Yoshi's Story](../YOSHISTORY.md) | Decoder and encoder |
 | [VPK0](./vpk0.md) | [Pokémon Snap](../POKEMONSNAP.md) | Decoder and encoder |
 | [ERZ2](./erz2.md) | [Spider-Man](../SPIDERMAN.md) | Decoder and encoder |
+| [EDL](./edl.md) | [007: The World Is Not Enough](../WORLDISNOTENOUGH.md) | Stored, Huffman-LZ, and fixed-code LZ; decoder and encoder |
 | [Shadows LZHUF](./shadows-lzhuf.md) | [Star Wars: Shadows of the Empire](../SHADOWS_OF_THE_EMPIRE.md) | Decoder and encoder; release-specific position tables |
 | [Shadows LZSS](./shadows-lzss.md) | [Star Wars: Shadows of the Empire](../SHADOWS_OF_THE_EMPIRE.md) | Decoder and encoder; absolute 4 KiB ring |
 

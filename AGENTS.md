@@ -123,12 +123,12 @@ Research complete (spec under `docs/`, implementation pending):
 |---|---|
 | Pilotwings 64 | `r49/pilotwings/` |
 | Star Wars: Shadows of the Empire | `r49/shadows_empire/` |
+| The World Is Not Enough | `r49/twine/` |
 
 Research in progress (spec not yet under `docs/`):
 
 | Game | Research |
 |---|---|
-| The World Is Not Enough | `r49/twine/` |
 | Banjo-Kazooie | `r49/banjo/` |
 | Glover | `r49/glover/` |
 | Mario Party (J) | `r49/mparty/` |
