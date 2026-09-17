@@ -591,5 +591,6 @@ document the formats in full; in short:
   timing uses the researched 30 Hz hypothesis, and exact Sound Tools envelope/pan gain is not captured.
 - Shadows of the Empire: scene geometry and base texture tiles are decoded, but mip levels, exact RDP blend/lighting
   state, animated actors, and authored cameras are not reproduced. The hidden collision layer contains verified indexed
-  polygons; null-index polygons and unclassified graph branches remain omitted. Audio cues use slot-number labels because
+  polygons; null-index polygons and unclassified graph branches remain omitted. The static scene view combines potentially
+  runtime-activated geometry rather than reproducing one gameplay frame. Audio cues use slot-number labels because
   song names and level assignments are unverified; runtime pitch, envelopes and fades are not simulated.

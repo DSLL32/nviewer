@@ -333,6 +333,15 @@ multiple placed instances. Flat mesh bounds on one axis are legal, so
 `min == max` there does not invalidate a mesh. Other scene-root roles and
 complete cutscene traversal remain **Unknown**.
 
+The renderer tests the high byte of each child node's flags at `+0x02` before
+descending; a zero high byte disables that branch in the stored state
+(main-program code `0x800BB2E0`–`0x800BB2E8`). For example, an untextured
+Hoth Base mesh under a disabled `0x5064` node is coplanar with an enabled,
+textured mesh under `0xD065`. The collision query at `0x80003DDC`–`0x80003E64`
+does not apply this render-enable test. Stored enable bits are not necessarily
+the final gameplay pose: some initially disabled Hoth actor parts are visible
+after runtime activation.
+
 ### 3.4 Display lists and render state
 
 Two bounded scene command streams have been verified by pointer and primitive
@@ -389,7 +398,12 @@ the game rewrites them during loading:
 | `0x0C` | 4 | `u32` | `unknown_0C` | Zero in checked records. |
 
 The image display list supplies the actual base-tile dimensions and texel
-format. The following counts are distinct resource IDs in a structural
+format. Its `0xBB` `G_TEXTURE` command, at catalog `commandPtr + 0x08`, also
+supplies unsigned 16-bit S/T factors in its second word. Multiply the vertex
+S/T values by `factor / 65536` before dividing by the base-tile width/height;
+omitting the factors over-repeats terrain and mountain textures. All 1,077
+USA and 1,080 Europe image IDs referenced by the scene graphs have a valid
+scale command. The following counts are distinct resource IDs in a structural
 survey of all 32 scenes, not proof that every candidate mesh is reachable:
 
 | Base tile format | Referenced IDs | Palette |
@@ -650,6 +664,11 @@ Null-index collision records and unclassified graph branches remain omitted
 from the collision overlay. Mipmapped image resources currently use their
 base tile; precise blend/depth state, dynamic
 actors, authored camera paths and complete cutscene setup are not reproduced.
+For static inspection, the viewer includes unique geometry from potentially
+runtime-activated branches. It suppresses only dormant untextured placements
+whose transformed geometry and vertex colours exactly match an enabled
+textured placement; this union is not one authored gameplay frame. Indexed
+collision traverses those branches independently.
 Cue labels use slot IDs because no song names or level associations are
 verified. The player uses linear sample-rate conversion and omits runtime
 pitch, envelope and fade scheduling.
