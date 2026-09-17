@@ -116,6 +116,7 @@ Implemented (spec under `docs/`):
 | Perfect Dark | `r49/pd/` | |
 | Pokémon Snap | `r49/snap/` | |
 | The World Is Not Enough | `r49/twine/` | |
+| Banjo-Kazooie | `r49/banjo/` | |
 | Zelda 64 (OoT, MM, 1997 alpha) | `r49/zelda/` (alpha in `zelda/alpha/`) | |
 
 Research complete (spec under `docs/`, implementation pending):
@@ -129,7 +130,6 @@ Research in progress (spec not yet under `docs/`):
 
 | Game | Research |
 |---|---|
-| Banjo-Kazooie | `r49/banjo/` |
 | Glover | `r49/glover/` |
 | Mario Party (J) | `r49/mparty/` |
 | Stunt Racer 64 | `r49/stuntracer64/` |

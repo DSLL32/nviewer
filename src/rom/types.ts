@@ -261,7 +261,7 @@ export type StaticAssetLoader = (path: string) => Promise<Uint8Array>;
 
 // A loaded ROM of one supported game.
 export interface Game {
-  id: 'rush2049' | 'rush1' | 'bm64' | 'bm64sa' | 'bmhero' | 'battletanx' | 'battletanxga' | 'gex64' | 'gex3' | 'yoshistory' | 'sf64' | 'goldeneye' | 'perfectdark' | 'oot' | 'mm' | 'oot-alpha' | 'pilotwings64' | 'pokemonsnap' | 'offroadchallenge' | 'airboarder64' | 'bugslife' | 'spiderman' | 'mk64' | 'shadows' | 'twine' | 'zelda-source';
+  id: 'rush2049' | 'rush1' | 'bm64' | 'bm64sa' | 'bmhero' | 'battletanx' | 'battletanxga' | 'gex64' | 'gex3' | 'yoshistory' | 'sf64' | 'goldeneye' | 'perfectdark' | 'oot' | 'mm' | 'oot-alpha' | 'pilotwings64' | 'pokemonsnap' | 'offroadchallenge' | 'airboarder64' | 'bugslife' | 'spiderman' | 'mk64' | 'shadows' | 'twine' | 'banjokazooie' | 'zelda-source';
   title: string;
   levels: LevelInfo[];
   prepare?(loadAsset: StaticAssetLoader): Promise<void>;

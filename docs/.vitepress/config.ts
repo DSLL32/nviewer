@@ -21,6 +21,7 @@ export default defineConfig({
         text: 'Games',
         items: [
           { text: 'Air Boarder 64', link: '/AIRBOARDER64' },
+          { text: 'Banjo-Kazooie', link: '/BANJOKAZOOIE' },
           { text: 'BattleTanx', link: '/BATTLETANX' },
           { text: 'BattleTanx: Global Assault', link: '/BATTLETANX_GLOBAL_ASSAULT' },
           { text: 'Bomberman 64', link: '/BOMBERMAN64' },

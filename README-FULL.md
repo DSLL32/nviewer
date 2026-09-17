@@ -4,6 +4,7 @@ A browser viewer for the levels of these N64 games (USA versions): *San Francisc
 *San Francisco Rush: Extreme Racing*, *Bomberman 64*, *Bomberman 64: The Second Attack!*,
 *Bomberman Hero*, *BattleTanx*, *BattleTanx: Global Assault*, *Gex 64: Enter the Gecko*,
 *Gex 3: Deep Cover Gecko*, *Yoshi's Story* (Japan), *Star Fox 64* (V1.0 and V1.1), *GoldenEye 007*,
+*Banjo-Kazooie* (USA V1.0),
 *Off Road Challenge* (USA and Europe), *Air Boarder 64* (Japan and Europe), *Pilotwings 64* (USA, Europe and Japan), *Pokémon Snap*, *A Bug's Life* (USA and Europe), *Spider-Man*, *Star Wars: Shadows of the Empire* (USA V1.0–V1.2 and Europe), *007: The World Is Not Enough* (USA and Europe),
 *Mario Kart 64* (USA, V1.0), *Perfect Dark* (V1.0), and *The Legend of Zelda: Ocarina of Time* and
 *Majora's Mask* (retail and debug builds, plus the 1997 Ocarina of Time prototype preserved on an F-Zero X development
@@ -92,6 +93,12 @@ Z shows or hides collision · Shift+F collision wireframe · the View panel can 
     - `bg.ts`: BG rooms; `environment.ts`: fog, clear colour, sky planes; `setup.ts`, `stan.ts`: setup files, floors
     - `models.ts`, `place.ts`: prop and character models at rest, object placement; `goldeneye.ts`: levels;
       `music.ts`: songs and their loop rules
+  - `banjo/`: Banjo-Kazooie (USA V1.0; format notes in `docs/BANJOKAZOOIE.md`)
+    - `archive.ts`: indexed assets, size-bearing Rare DEFLATE and core tables
+    - `model.ts`, `displaylist.ts`, `sprites.ts`: model trees, F3DEX batches, textures and sprites
+    - `objects.ts`, `sky.ts`, `level.ts`, `banjo.ts`: setups, placed objects, collision, sky, 128 maps
+      and the model-only test environment
+    - `music.ts`: 173 compressed-sequence tracks and channel masks
   - `pilotwings/`: Pilotwings 64 (USA, Europe and Japan; format notes in `docs/PILOTWINGS64.md`)
     - `fs.ts`, `tables.ts`: UVRM/TABL filesystem, FORM/MIO0 decoding, task and environment tables
     - `texture.ts`, `model.ts`, `objects.ts`: UVTX textures, UVMD/UVCT/UVTR geometry, UPWT/UPWL objects and paths
@@ -532,6 +539,10 @@ document the formats in full; in short:
 
 ## Known gaps
 
+- Banjo-Kazooie: static map, sky, actor and prop poses are shown, but the player avatar,
+  code-spawned effects, live skeletal/vertex/texture animation, scripted cutscenes and
+  state-dependent visibility are not reproduced. Music uses static default channel masks
+  without positional crossfades or the game's reverb. Only USA V1.0 is supported.
 - Rush 2049: scripted objects are shown frozen at the start of their paths.
 - Rush: not shown: checkpoint flags, weapon power-up icons, cars, and the collision files' track sections. The
   collision layer is coloured by surface class, but only walls (class 5) are identified.

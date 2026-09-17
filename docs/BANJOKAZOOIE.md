@@ -15,9 +15,9 @@
 | Music driver | Rare's `n_audio`-based compressed-sequence player. |
 | Audio microcode | Nintendo `n_audio` task; exact binary revision not established. |
 | Sample encoding | VADPCM in two `ALBankFile` soundfonts. |
-| Levels | 128 model-table map records, with 129 setup assets; 25 map IDs are geometry stubs. |
+| Levels | 128 model-table map records, one model-only test environment, and 129 setup assets; 25 map IDs are geometry stubs. |
 | Memory requirement | Base 4 MiB. |
-| Viewer support | Planned: USA V1.0 maps, objects, collision, sky, and 173 music slots. |
+| Viewer support | USA V1.0: 128 map records and a model-only archival view, static objects and sky, collision, and 173 music tracks. |
 
 ### 1.2 ROM identification
 
@@ -71,7 +71,7 @@ Verified by walking the ROM table and disassembling its reader. All physical byt
 | `[0xF19250,0xFDAA30)` | `0xC17E0` | segment-dependent | code RAM | size-bearing `1172` | Core1, core2, level overlays. |
 | `[0xFDAA30,0x1000000)` | `0x255D0` | — | — | — | `0xFF` fill. |
 
-The asset table begins at ROM `0x5E90`. It has `count = 0x15C7` entries in USA V1.0; entry `0x15C6` is a terminal offset sentinel. Header size is eight bytes and each entry is eight bytes. The data base is `0x5E90 + 8 + 8 × count = 0x10CD0`. Stored asset `i` occupies `[base + offset[i], base + offset[i+1])`, so the last real ID is `0x15C5`.
+The asset table begins at ROM `0x5E90`. It has `count = 0x15C7` entries in USA V1.0; entry `0x15C6` is a terminal offset sentinel. Header size is eight bytes and each entry is eight bytes. The data base is `0x5E90 + 8 + 8 × count = 0x10CD0`. Stored asset `i` occupies `[base + offset[i], base + offset[i+1])`, so the last real ID is `0x15C5`. The table contains **no per-asset filename or name string**; symbolic asset labels used below come from the cited decompilation enum, not the ROM.
 
 | Offset | Size | Type | Field | Description |
 |---:|---:|---|---|---|
@@ -136,7 +136,7 @@ Verified from the USA V1.0 section, map-model and main-exit tables in core2 data
 | Click Clock Wood | `40` | Seasonal main maps `43`–`46`, Mumbo's skull `4A`–`4D`, hives `5A`–`5C`, Nabnut's house `5E`–`61`, water supply `63`–`64`, Whipcrack rooms `65`–`68`, winter honeycomb `62`. |
 | Cutscenes and front end | — | Logo intros `1E`–`1F`; ending beach `20`, `95`–`97`; Grunty's fall `87`; file select `91`; additional intro/ending maps `7B`–`7E`, `81`–`8A`, `94`, `98`–`99` where present in the model table. Credits-only Klungo map `84` belongs here. |
 
-The main-exit table has 13 `{level, map, exit}` records; examples are Spiral Mountain `01`/`12`, Mumbo's Mountain `02`/`05`, Treasure Trove Cove `07`/`04`, and the boss battlements `90`/`00`. Map IDs `03`, `04`, `08`, `09`, `0F`, `17`–`19`, `32`, `33`, `42`, `49`, `4E`–`52`, `54`–`59`, `5D`, `73` are stubs, not complete levels. Map `73` retains a setup but no environment model; details are under [cut or inaccessible levels](#62-cut-or-inaccessible-levels).
+The main-exit table has 13 `{level, map, exit}` records; examples are Spiral Mountain `01`/`12`, Mumbo's Mountain `02`/`05`, Treasure Trove Cove `07`/`04`, and the boss battlements `90`/`00`. Map IDs `03`, `04`, `08`, `09`, `0F`, `17`–`19`, `32`, `33`, `42`, `49`, `4E`–`52`, `54`–`59`, `5D`, `73` are stubs, not complete levels. Map `73` retains a setup but no environment model; details are under [cut or inaccessible levels](#62-cut-or-inaccessible-levels). A separate pair of [test-map model assets](#62-cut-or-inaccessible-levels) has no map ID or setup.
 
 ### 3.2 Level container
 
@@ -664,6 +664,8 @@ Verified from the USA V1.0 map, section, setup, sky and music tables: 25 map IDs
 
 Map `84`, although called `CS_UNUSED_MACHINE_ROOM` in a source enum, is **not unused**. Verified by the USA V1.0 credits-parade table and its installer at `0x8031ADB4`: the 58-entry post-battle parade includes map `84`, exit zero, for Klungo. It has setup `0x7A0` and the laboratory model `0x150F`. It should be listed with credits/cutscene maps.
 
+USA V1.0 also retains a **model-only test environment**: asset `0x14D6` at ROM `0x931908` and asset `0x14D7` at `0x931E70` (named `MODEL_TEST_MAP_OPA` and `MODEL_TEST_MAP_XLU` in source-derived labels). Each decodes to `0xE44` bytes with 110 vertices, 50 draw triangles, one 16×16 CI4 texture, and 96 collision entries across 46 cells. Their geometry, display lists and collision are identical; their texture bytes differ. A direct scan of all 128 map-model records finds neither asset, and there is no associated map ID, setup, music or sky record. The pair is absent from the USA V1.1, Europe and Japan asset maps. It is therefore preserved geometry, **not a proven playable cut level**.
+
 ### 6.3 Debug features
 
 The lair overlay contains the development-flavored sentence `THIS IS A SLIGHTLY LONGER PIECE OF TEXT FOR THE QUIZ DIALOGS!`; code at `0x8038D0F4` references it for a text-display call. Its in-game reachability was not established. A scan of printable strings in core1, core2 and overlays found assert source filenames and audio trace strings, but no debug-menu labels or build timestamp; this cannot exclude non-text debug behavior. Sandcastle codes are obfuscated in the Treasure Trove Cove overlay; the stored string `knip68n3664j` decodes to `BANJOKAZOOIE` using its letter-substitution table. These cheats are intentionally hidden game features, not unused content.
@@ -676,15 +678,15 @@ The stub IDs and retained mask cases are compatible with prior development of ad
 
 ### 7.1 Module mapping
 
-The game contract should detect USA V1.0 by `NBKE`, revision zero and asset count `0x15C7`. `src/rom/inflate.ts` already decodes the raw DEFLATE body at stream offset six. A Banjo ROM module reads the asset table and core2 map/music/sky tables; model and display-list modules emit batches; a setup module resolves actors and props; sky and music modules build the viewer's environment and player. `src/rom/music/libultra.ts` and `cseq.ts` can parse the soundfont and sequences. Other revisions require their own high-ID and table-location maps, not just a header alias.
+`src/rom/banjo/archive.ts` identifies USA V1.0 by `NBKE`, revision zero and asset count `0x15C7`; it uses `src/rom/inflate.ts` on the raw DEFLATE body at stream offset six. `model.ts` and `displaylist.ts` decode models, textures and batches; `objects.ts` and `sprites.ts` place setup actors and props; `sky.ts` builds ordered camera-centered sky meshes. `level.ts` and `banjo.ts` expose levels and layers. `music.ts` uses the shared `libultra.ts` and `cseq.ts` parser/player. Other revisions need separate high-ID and table-location maps, not a header alias.
 
 ### 7.2 Supported features
 
-The implementation target is 128 model-table maps selectable by group; 25 model-less stubs are excluded from the normal level list, while setup-only `0x73` may be offered as archival content. Every visible map model, object, prop and sky instance must have a viewer layer; collision belongs in a hidden-by-default collision layer. Build opaque and translucent models separately, applying the table's model scale only to geometry. Resolve actor model IDs from the core2 plus overlay registration lists; place sprite props as billboards. Use the game's black clear color, no level fog, a camera-centered ordered sky and a default entrance-based camera. The 173 sequence assets are exposed as music tracks, with the default per-map channel mask where relevant.
+The 128 model-table maps are selectable under distinct world groups. The model-only test pair is offered as a clearly labeled archival view without a fabricated map ID; its unit scale and camera framing are viewer conventions. The 25 model-less stubs, including setup-only `0x73`, are excluded. Opaque and translucent models, static actors and props, and ordered sky meshes each have layers; model collision is hidden by default. The map-model scale applies only to geometry, while sprite props are billboards. The viewer uses the game's black clear color and no level fog. With no authored runtime camera pose available for each map, it frames decoded bounds rather than guessing from entrance yaw. All 173 sequence assets are exposed as music tracks, with a static default channel mask for tracks with known map arrangements.
 
 ### 7.3 Approximations and omissions
 
-Characters in bind pose, frame-zero animated textures, static water/mist UVs and vertices, and a nonrotating sky are recognizable but not frame-accurate. Runtime model-selector state and lighting-node tints can change geometry or actors. The player model, dynamic effects, scripted cutscenes, sample reverb, area-dependent music masks, and game-state-dependent spawns are not fully specified for static display. The exact rendering of mipmapped levels and the single observed incompatible stale-tile draw in map `0x6F` remain to be checked. These are limitations, not grounds for manually adjusting source geometry.
+Characters in bind pose, frame-zero animated textures, static water/mist UVs and vertices, and a nonrotating sky are recognizable but not frame-accurate. Runtime model-selector state and lighting-node tints can change geometry or actors. The player model, dynamic effects, scripted cutscenes, sample reverb, area-dependent music masks, and game-state-dependent spawns are not reproduced. The exact rendering of mipmapped levels and the single observed incompatible stale-tile draw in map `0x6F` remain to be checked. No source geometry is manually adjusted.
 
 ## 8. Verification and remaining work
 
@@ -714,3 +716,4 @@ The most useful exact-camera visual comparisons are Treasure Trove Cove map `0x0
 ### 8.3 References
 
 - [Raw DEFLATE and Rare wrappers](compression/raw-deflate.md) — bitstream and reference encoder/decoder.
+- [Banjo-Kazooie decompilation enum labels](https://github.com/n64decomp/banjo-kazooie/blob/9db90a003fff15d13d29505d571aff2543b50383/include/enums.h) — source-derived names only; the ROM asset table has no filenames.

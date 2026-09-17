@@ -15,6 +15,5 @@ Verbatim copies of each interrupted research lead's `WIP.md`, taken from
 | File | Game | Scratch directory |
 |---|---|---|
 | `worldisnotenough.md` | The World Is Not Enough | `~/.ai-tmp/r49/twine/` |
-| `banjokazooie.md` | Banjo-Kazooie | `banjo/` |
 | `glover.md` | Glover | `glover/` |
 | `marioparty.md` | Mario Party (J) | `mparty/` |
