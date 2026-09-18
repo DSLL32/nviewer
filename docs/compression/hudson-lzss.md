@@ -1,18 +1,19 @@
 # Hudson LZSS
 
-[Bomberman 64](../BOMBERMAN64.md) and
-[The Second Attack!](../BOMBERMAN64_SECOND_ATTACK.md) use the 1 KiB variant;
+[Bomberman 64](../BOMBERMAN64.md),
+[The Second Attack!](../BOMBERMAN64_SECOND_ATTACK.md), and
+[Mario Party](../MARIOPARTY.md) use the 1 KiB variant;
 [Bomberman Hero](../BOMBERMAN_HERO.md) uses the 4 KiB variant. These are the
 same absolute-ring token scheme with different constant fields. The game-specific
 file wrappers supply the stopping rule and are documented in the game manuals.
 
-| Parameter | Bomberman 64 / Second Attack | Bomberman Hero |
-|---|---:|---:|
-| Ring size | 1,024 bytes | 4,096 bytes |
-| Initial write index | `0x3BE` | `0xFEE` |
-| Length bits in second match byte | 6 | 4 |
-| Match length | 3–66 bytes | 3–18 bytes |
-| Outer size | Big-endian decoded size | Little-endian compressed size |
+| Parameter | Bomberman 64 / Second Attack | Mario Party | Bomberman Hero |
+|---|---:|---:|---:|
+| Ring size | 1,024 bytes | 1,024 bytes | 4,096 bytes |
+| Initial write index | `0x3BE` | `0x3BE` | `0xFEE` |
+| Length bits in second match byte | 6 | 6 | 4 |
+| Match length | 3–66 bytes | 3–66 bytes | 3–18 bytes |
+| Outer size | Big-endian decoded size | Mainfs file-record decoded size | Little-endian compressed size |
 
 The ring begins zero-filled. Each flag byte is consumed least-significant bit
 first: 1 means a literal byte; 0 means a two-byte match `a,b`. With `L` length

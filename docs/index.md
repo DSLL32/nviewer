@@ -19,6 +19,7 @@ questions. Shared codecs are documented under [Compression](./compression/).
 - [Glover](./GLOVER.md)
 - [GoldenEye 007](./GOLDENEYE.md)
 - [Mario Kart 64](./MARIOKART64.md)
+- [Mario Party](./MARIOPARTY.md)
 - [Off Road Challenge](./OFFROADCHALLENGE.md)
 - [Perfect Dark](./PERFECTDARK.md)
 - [Pilotwings 64](./PILOTWINGS64.md)
