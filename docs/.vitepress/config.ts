@@ -63,7 +63,6 @@ export default defineConfig({
           { text: 'Chunked zlib', link: '/compression/chunked-zlib' },
           { text: 'Boss pattern LZ/RLE', link: '/compression/boss-pattern' },
           { text: 'FLA2', link: '/compression/fla2' },
-          { text: 'HVQ 2.0', link: '/compression/hvq2' },
           { text: 'Rush LZSS', link: '/compression/rush-lzss' },
           { text: 'LZARI', link: '/compression/lzari' },
           { text: 'RNC', link: '/compression/rnc' },
