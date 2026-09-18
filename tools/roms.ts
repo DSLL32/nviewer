@@ -20,6 +20,7 @@ export const ROM_FILES = [
   'GoldenEye 007 (U) [!].z64',
   'Banjo-Kazooie (U) (V1.0) [!].z64',
   "Bug's Life, A (U) [!].z64",
+  "Cruis'n USA (U) (V1.0) [!].z64",
   'Off Road Challenge (U) [!].z64',
   'Off Road Challenge (E) [!].z64',
   'Pokemon Snap (U) [!].z64',
