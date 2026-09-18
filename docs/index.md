@@ -14,6 +14,7 @@ questions. Shared codecs are documented under [Compression](./compression/).
 - [Bomberman 64: The Second Attack!](./BOMBERMAN64_SECOND_ATTACK.md)
 - [Bomberman Hero](./BOMBERMAN_HERO.md)
 - [A Bug's Life](./BUGSLIFE.md)
+- [Cruis'n USA](./CRUISN_USA.md)
 - [Gex 3: Deep Cover Gecko](./GEX3.md)
 - [Gex 64: Enter the Gecko](./GEX64.md)
 - [Glover](./GLOVER.md)

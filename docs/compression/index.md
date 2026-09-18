@@ -43,6 +43,7 @@ link with `-lz`.
 | [Shadows LZHUF](./shadows-lzhuf.md) | [Star Wars: Shadows of the Empire](../SHADOWS_OF_THE_EMPIRE.md) | Decoder and encoder; release-specific position tables |
 | [Shadows LZSS](./shadows-lzss.md) | [Star Wars: Shadows of the Empire](../SHADOWS_OF_THE_EMPIRE.md) | Decoder and encoder; absolute 4 KiB ring |
 | [Vigilante LZSS](./vigilante-lzss.md) | [Vigilante 8](../VIGILANTE8.md), [2nd Offense](../VIGILANTE8_2ND_OFFENSE.md) | Decoder and encoder; absolute 2 KiB ring |
+| [Cruis'n USA RLE](./cruisn-rle.md) | [Cruis'n USA](../CRUISN_USA.md) | Decoder and encoder; one-, two-, and four-byte elements |
 
 Nintendo VADPCM and other audio sample encodings are documented in each game's
 audio section; they are not general-purpose asset compression formats. The 1997
