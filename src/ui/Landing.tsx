@@ -26,6 +26,7 @@ export function Landing({ busy, error, onPick, onPickBbgames }: LandingProps) {
             <li>Bomberman Hero (U)</li>
             <li>BattleTanx (U)</li>
             <li>BattleTanx: Global Assault (U)</li>
+            <li>Cruis'n USA (U) (revision 0)</li>
             <li>Gex 64: Enter the Gecko (U)</li>
             <li>Gex 3: Deep Cover Gecko (U)</li>
             <li>Yoshi's Story (J)</li>

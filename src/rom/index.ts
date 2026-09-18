@@ -7,6 +7,7 @@ import { openBomberman64 } from './bomberman/bm64';
 import { openBomberman64SA } from './bomberman/bm64sa';
 import { openBombermanHero } from './bomberman/bmhero';
 import { openBugsLife } from './bugslife';
+import { openCruisnUsa } from './cruisnusa/cruisnusa';
 import { openGex3 } from './gex/gex3';
 import { openGex64 } from './gex/gex64';
 import { openGoldenEye } from './goldeneye/goldeneye';
@@ -75,6 +76,11 @@ export function openRom(bytes: Uint8Array): Game {
       throw new Error(`Banjo-Kazooie (${code === 'NBKP' ? 'E' : 'J'}) is not supported: only Banjo-Kazooie (U) (V1.0) is.`);
     case 'NBXE':
       return openBattleTanx(rom);
+    case 'NCUE':
+      if (rom[0x3f] !== 0) throw new Error(`Cruis'n USA (U) revision ${rom[0x3f]} is not supported: only revision 0 is.`);
+      return openCruisnUsa(rom);
+    case 'NCUP':
+      throw new Error("Cruis'n USA (E) is not supported: only Cruis'n USA (U) revision 0 is.");
     case 'NBQE':
       return openBattleTanxGA(rom);
     case 'NX2E':
@@ -141,6 +147,7 @@ export function openRom(bytes: Uint8Array): Game {
       throw new Error(`Unsupported ROM (game code "${code.replace(/[^\x20-\x7e]/g, '?')}"). ` +
         'Supported: San Francisco Rush 2049 (U), San Francisco Rush: Extreme Racing (U), Bomberman 64 (U), ' +
         'Bomberman 64: The Second Attack! (U), Bomberman Hero (U), BattleTanx (U), BattleTanx: Global Assault (U), ' +
+        "Cruis'n USA (U) (revision 0), " +
         'Gex 64: Enter the Gecko (U), Gex 3: Deep Cover Gecko (U), Yoshi\'s Story (J), Star Fox 64 (U), GoldenEye 007 (U), ' +
         `A Bug's Life (U/E/F/G/I), ` +
         'Air Boarder 64 (J/E), ' +
