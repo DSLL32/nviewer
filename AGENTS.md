@@ -133,6 +133,7 @@ Research in progress (spec unfinished or under review):
 
 | Game | Research |
 |---|---|
+| Cruis'n USA | `r49/cruisn_usa/` |
 | Vigilante 8 | `r49/vigilante8/` |
 | Vigilante 8: 2nd Offense | `r49/vigilante8_2/` |
 
