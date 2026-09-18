@@ -8,6 +8,7 @@ const META_TABLE = 0xbe414;
 const DATA_TABLE = 0xbe44c;
 const BANK_TABLE = 0xbe3f0;
 const MAP_TABLE = 0xbe408;
+const PERIOD_TABLE = 0xbe2e8;
 const MAX_VOICES = 10;
 
 const u16 = (b: Uint8Array, p: number) => (b[p] << 8) | b[p + 1];
@@ -114,6 +115,26 @@ interface Sample { pcm: Int16Array; pan: number; baseNote: number; fine: number;
 interface Palette { samples: Sample[]; maps: Uint8Array[] }
 const paletteCache = new WeakMap<Uint8Array, Map<number, Palette>>();
 
+// 0x80054174–0x80054284 interpolates the ROM period table, then 0x800537B4
+// converts that period to the mixer's 16.16 source-sample advance. In
+// particular, the interpolation's factor of 32 must remain *before* the
+// octave shift; treating the table as a conventional equal-tempered rate
+// makes these samples play several times too slowly.
+function sampleStep(rom: Uint8Array, note: number, sample: Sample): number {
+  const combined = (note + sample.baseNote) & 0xff;
+  const octave = Math.floor(combined / 12);
+  const fine = sample.fine;
+  const fraction = fine < 0 ? -((-fine & 15) * 2) : (fine & 15) * 2;
+  const entry = (combined % 12) * 8 + (fine >> 4);
+  const first = (u16(rom, PERIOD_TABLE + entry * 2) << 16) >> 16;
+  const second = (u16(rom, PERIOD_TABLE + (entry + 1) * 2) << 16) >> 16;
+  const period = (first * (32 - fraction) + second * fraction) >> octave;
+  if (period <= 0) throw new Error('Stunt Racer music: invalid note period');
+  const clockPerPeriod = Math.trunc(0xda7790 / period);
+  const fixedAdvance = Math.trunc(((clockPerPeriod << 15) >>> 0) / (RATE >> 1));
+  return fixedAdvance / 65536;
+}
+
 function readBank(rom: Uint8Array, start: number, samples: (Sample | undefined)[], overlay: boolean): void {
   let p = start, index = 0;
   while (p + 4 <= rom.length && u32(rom, p) !== 0xffffffff) {
@@ -211,13 +232,11 @@ export function decodeStuntRacerMusic(rom: Uint8Array, index: number): DecodedMu
             const sample = bank.samples[sampleIndex];
             if (!sample) throw new Error('Stunt Racer music: missing mapped sample');
             if (state.voice) state.voice.end = Math.min(state.voice.end, time + 256);
-            // Sample offsets are in tracker semitones. The PCM itself has no rate
-            // header; this is its pitch relative to the native 21,998 Hz mixer.
-            const step = Math.pow(2, (cell.note + sample.baseNote + sample.fine / 128 - 96) / 12);
+            const step = sampleStep(rom, cell.note, sample);
             const active = voices.filter((v) => v.end > time);
             if (active.length >= MAX_VOICES) active[0].end = time;
             const voice: Voice = { sample, start: time, end: time + Math.ceil(sample.pcm.length / step),
-              gain: (state.volume / 64) * (sample.volume / 64) * (globalVolume / 128) * 0.19,
+              gain: (state.volume / 64) * (sample.volume / 64) * (globalVolume / 128) * 0.38,
               pan: state.pan === 128 ? sample.pan : state.pan,
               segments: [{ start: time, source: 0, step }] };
             voices.push(voice);
