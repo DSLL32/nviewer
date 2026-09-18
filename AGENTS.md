@@ -126,12 +126,12 @@ Research complete (spec under `docs/`, implementation pending):
 | Game | Research |
 |---|---|
 | Stunt Racer 64 | `r49/stuntracer64/` |
+| Glover | `r49/glover/` |
 
 Research in progress (spec unfinished or under review):
 
 | Game | Research |
 |---|---|
-| Glover | `r49/glover/` |
 | Mario Party (J) | `r49/mparty/` |
 
 Shared:
