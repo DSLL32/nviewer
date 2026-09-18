@@ -112,6 +112,7 @@ Implemented (spec under `docs/`):
 | Air Boarder 64 | `r49/airboarder64/` | |
 | A Bug's Life | `r49/bugs_life/` | |
 | Spider-Man | `r49/spiderman/` | |
+| Stunt Racer 64 | `r49/stuntracer64/` | |
 | Mario Kart 64 | `r49/mk64/` | archive course audit: `r49/mk64/archive_cut/` |
 | Mario Party (J) | `r49/mparty/` | |
 | Perfect Dark | `r49/pd/` | |
@@ -127,7 +128,6 @@ Research complete (spec under `docs/`, implementation pending):
 | Game | Research |
 |---|---|
 | Glover | `r49/glover/` |
-| Stunt Racer 64 | `r49/stuntracer64/` |
 
 Research in progress (spec unfinished or under review):
 

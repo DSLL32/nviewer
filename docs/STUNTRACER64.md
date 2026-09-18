@@ -72,7 +72,8 @@ structures directly. [evidence: emulator observation, ROM bytes]
 The resident image maps ROM offset `r` in `[0x1000,0xCB250)` to KSEG0 address
 `r + 0x7FFFF400`. Map-header pointers and geometry pointers instead use offsets
 from the start of the inflated primary map; secondary-file start/end fields use
-offsets from `secondaryBase`. Audio tables contain ROM offsets. Do not apply the
+offsets from `secondaryBase`, while each secondary metadata pointer is relative
+to its own inflated file. Audio tables contain ROM offsets. Do not apply the
 resident-image conversion to either asset-pointer class. [evidence: disassembly,
 ROM bytes]
 
@@ -145,7 +146,7 @@ Eight file tables inside each inflated primary map contain 12-byte records:
 |---:|---:|---|---|---|
 | `+0x00` | 4 | `u32` | `packedStartRelativeToSecondaryBase` | — |
 | `+0x04` | 4 | `u32` | `packedEndRelativeToSecondaryBase` | — |
-| `+0x08` | 4 | `u32` | `metadataOffsetInInflatedPrimaryMap` | — |
+| `+0x08` | 4 | `u32` | `metadataOffsetInInflatedSecondaryFile` | Points to that file's metadata header. |
 
 All 1,808 table records resolve in the bundle, begin at a strict zlib container, and
 end exactly at its declared `sourceSize`. Runtime fixup `0x80046DA8` adds the
@@ -1103,54 +1104,43 @@ The corresponding internal IDs are the 14 words at `0xC1F24`: [evidence: ROM byt
 | 13 | Halfpipe | 12 / Four Player 2 |
 
 `No Track` is a UI sentinel rather than a separate archive [hypothesis]. The viewer
-should expose 13 unique physical environments, preferably in public order while
-omitting the duplicate: the eleven named courses followed by Stunt Bowl and
-Halfpipe. It should retain internal IDs in diagnostics. [viewer design]
+exposes 13 unique physical environments in public order, omitting the duplicate:
+the eleven named courses followed by Stunt Bowl and Halfpipe. Internal IDs remain
+available in level diagnostics. [evidence: nviewer source]
 
 #### Mapping onto `src/rom/`
 
-Recommended loader layout: [viewer design]
+Implemented loader modules and remaining extensions: [evidence: nviewer source]
 
-| file | responsibility | difficulty |
+| file | responsibility | status |
 |---|---|---|
-| `src/rom/stuntracer64/fs.ts` | ROM ID, fixed catalogs, chunked-zlib, bundle/table bounds | low |
-| `src/rom/stuntracer64/material.ts` | three DL tables, TMEM loads, TLUT/direct texture decode and render state | medium |
-| `src/rom/stuntracer64/geometry.ts` | GeometryMeta, mesh origins, face triangulation and vertex colors | low–medium |
-| `src/rom/stuntracer64/collision.ts` | collision meshes and optional link diagnostics | low |
-| `src/rom/stuntracer64/objects.ts` | base scenery hierarchy and optional animation | medium / medium-high |
-| `src/rom/stuntracer64/vehicles.ts` | optional car catalog, packed texels, palette variants and specialized corner decode | medium / high for exact rendering |
-| `src/rom/stuntracer64/environment.ts` | skydome and spatial atmosphere projection | medium / high for exact overlay |
-| `src/rom/stuntracer64/music.ts` | banks, note maps, pattern decoder, tracker scheduler/mixer | medium-high |
-| `src/rom/stuntracer64/stuntracer64.ts` | public level list, assembly, bounds, layers, music choices | low |
+| `src/rom/stuntracer64/fs.ts` | Fixed catalogs, chunked-zlib, bundle/table bounds | Implemented |
+| `src/rom/stuntracer64/material.ts` | Material display lists, TMEM loads, texture and palette decode | Implemented; runtime combiner tint and distant mip selection unresolved |
+| `src/rom/stuntracer64/geometry.ts` | Geometry metadata, mesh origins, faces and vertex colors | Implemented |
+| `src/rom/stuntracer64/collision.ts` | Collision meshes | Implemented |
+| `src/rom/stuntracer64/scenery.ts` | Static scenery roots and skydomes | Implemented; child transforms and animation unresolved |
+| `src/rom/stuntracer64/paths.ts` | Paths and placement diagnostics | Implemented; hidden by default |
+| `src/rom/stuntracer64/music.ts` | Banks, note maps, pattern decoder, tracker mixer | Implemented; no reference PCM comparison |
+| `src/rom/stuntracer64/stuntracer64.ts` | Public level list, assembly, bounds, layers, music choices | Implemented |
+| Vehicle and spatial-atmosphere extensions | Vehicle variants, exact camera-projected atmosphere | Not implemented |
 
-Shared `src/rom/inflate.ts` can perform RFC-1950 decompression, while the outer block
-walker remains game-specific. Existing texture and libultra audio primitives are
-reusable; no existing sequence engine matches the tracker. No shared type extension is
-required for a first implementation: skydome geometry can use `MeshSky`; atmosphere
-can initially be a diagnostic/background approximation unless a new renderer contract
-is deliberately added. [evidence: nviewer source, viewer design]
+Shared `src/rom/inflate.ts` performs RFC-1950 decompression; the outer block walker
+is game-specific. Existing texture and VADPCM primitives are reused, while the
+tracker mixer is game-specific. The viewer draws the textured skydome and retains
+ROM clear colors; it does not emulate the spatial atmosphere compositor.
+[evidence: nviewer source]
 
-Every instance must be layered:
+Every drawn instance is layered: [evidence: nviewer source]
 
 - `background`: skydome;
 - `main`: grouped track meshes;
 - `objects`: all 179 map-resident scenery roots as applicable;
 - `collision`: all collision sections, hidden by default;
-- `markers`: paths, tilt lines, coin/booster and unresolved placement groups, with
-  visibility on by default but independently toggleable.
+- `diagnostics`: paths, tilt lines, coin/booster and unresolved placement groups,
+  hidden by default but independently toggleable.
 
-Unreferenced mesh assets should go in `unplaced`, not be silently instantiated.
-[viewer design]
-
-A sensible staged implementation is:
-
-1. catalogs/decompression, 13 unique public levels, vertex-color track meshes and
-   hidden collision;
-2. exact material/TMEM decode plus skydome;
-3. base scenery roots and diagnostic paths/coins/boosters;
-4. custom music player;
-5. optional standalone vehicle catalog;
-6. optional animation hierarchy and exact spatial-atmosphere compositor.
+Unreferenced mesh assets are not silently instantiated. The vehicle catalog,
+animation hierarchy, and exact spatial-atmosphere compositor remain future work.
 
 The format supports direct random access and does not benefit materially from a
 persistent cache in the initial implementation: inflate only the selected primary map
@@ -1159,20 +1149,20 @@ enough. [viewer design]
 
 ### 7.2 Supported features
 
-The map and file tables expose all 13 unique physical environments, all 1,808
-secondary files, track meshes, skydomes, base scenery geometry, hidden collision,
-and path/marker overlays. The audio tables expose all 14 tracker slots with the
-18 authored race-song/palette combinations. These are implementable data paths,
-not a claim that an nviewer Stunt Racer loader already exists. [viewer design]
+The viewer loads all 13 unique physical environments from the map and file tables,
+including track meshes, skydomes, static scenery roots, hidden collision, and
+toggleable path/placement diagnostics. The music box exposes 26 choices: the
+18 authored race-song/palette pairs and eight other song slots. All 14 source
+tracker streams decode. [evidence: nviewer source and bounded load checks]
 
 ### 7.3 Approximations and omissions
 
-The first pass may leave scenery animation, vehicle corner attributes, and the
-camera-projected atmosphere effect approximate. Static course data establishes
-asset extents and topology, but no in-race emulator frame has yet validated
-camera placement or final compositing. Keep these omissions explicit in the
-viewer and do not present a guessed linear-fog distance as a retail value.
-[evidence: emulator observation, viewer design]
+Scenery animation and children, vehicle corner attributes, distant mip selection,
+runtime combiner tint, authored camera positions, and the camera-projected
+atmosphere effect remain unresolved or absent. Static course data establishes
+asset extents and topology, but no in-race emulator frame has validated final
+compositing. The viewer does not substitute guessed linear-distance fog.
+[evidence: nviewer source, emulator observation]
 
 ## 8. Verification and remaining work
 

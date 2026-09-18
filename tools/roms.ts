@@ -32,6 +32,7 @@ export const ROM_FILES = [
   'Airboarder 64 (E) [!].z64',
   'Perfect Dark (U) (V1.0) [!].z64',
   'Spider-Man (U) [!].z64',
+  'Stunt Racer 64 (U) [!].z64',
   'Star Wars - Shadows of the Empire (U) (V1.0) [!].z64',
   'Star Wars - Shadows of the Empire (U) (V1.1) [!].z64',
   'Star Wars - Shadows of the Empire (U) (V1.2) [!].z64',
