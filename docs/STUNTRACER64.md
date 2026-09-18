@@ -1051,6 +1051,13 @@ not be implemented for these ROM tracks. The mixer is stereo, has ten voice slot
 and permits overlapping/releasing voices beyond the six pattern channels.
 [evidence: disassembly, deterministic decoding]
 
+Native pitch is table-driven, not a direct equal-tempered rate. Routine
+`0x80054174–0x80054284` combines tracker note with sample base note, interpolates
+adjacent signed entries in the 96-entry period table at ROM `0xBE2E8` using
+the sample fine-tune byte, then applies an octave shift. Routine `0x800537B4`
+converts that period into a 16.16 source-sample advance using clock constant
+`0xDA7790` and the 21,998 Hz mix rate. [evidence: disassembly, ROM bytes]
+
 Song 6 is selected with bank 1 when the race-state byte `+0x88` equals 17; its semantic
 name is unresolved. Slots 8/9/10 are selected by finishing position. Slot 12 is tied
 to the `OPPONENTS` racer-profile formatter; slot 13 is tied to the `MIDWAY STAFF` /
