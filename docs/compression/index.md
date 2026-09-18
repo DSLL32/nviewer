@@ -42,6 +42,7 @@ link with `-lz`.
 | [EDL](./edl.md) | [007: The World Is Not Enough](../WORLDISNOTENOUGH.md) | Stored, Huffman-LZ, and fixed-code LZ; decoder and encoder |
 | [Shadows LZHUF](./shadows-lzhuf.md) | [Star Wars: Shadows of the Empire](../SHADOWS_OF_THE_EMPIRE.md) | Decoder and encoder; release-specific position tables |
 | [Shadows LZSS](./shadows-lzss.md) | [Star Wars: Shadows of the Empire](../SHADOWS_OF_THE_EMPIRE.md) | Decoder and encoder; absolute 4 KiB ring |
+| [Vigilante LZSS](./vigilante-lzss.md) | [Vigilante 8](../VIGILANTE8.md), [2nd Offense](../VIGILANTE8_2ND_OFFENSE.md) | Decoder and encoder; absolute 2 KiB ring |
 
 Nintendo VADPCM and other audio sample encodings are documented in each game's
 audio section; they are not general-purpose asset compression formats. The 1997

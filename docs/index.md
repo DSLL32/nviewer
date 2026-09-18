@@ -30,6 +30,8 @@ questions. Shared codecs are documented under [Compression](./compression/).
 - [Star Wars: Shadows of the Empire](./SHADOWS_OF_THE_EMPIRE.md)
 - [Star Fox 64](./STARFOX.md)
 - [Stunt Racer 64](./STUNTRACER64.md)
+- [Vigilante 8](./VIGILANTE8.md)
+- [Vigilante 8: 2nd Offense](./VIGILANTE8_2ND_OFFENSE.md)
 - [Yoshi's Story](./YOSHISTORY.md)
 - [The Legend of Zelda: Majora's Mask](./MAJORAS_MASK.md)
 - [The Legend of Zelda: Ocarina of Time](./OCARINA_OF_TIME.md)
