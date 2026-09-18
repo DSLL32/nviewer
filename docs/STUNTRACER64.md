@@ -586,6 +586,15 @@ of wrap/shift/mip setup. This is expected and is the main correctness trap in th
 format. Palette color count is `((G_LOADTLUT.word1 >> 14) & 0x3FF) + 1`.
 [evidence: deterministic decoding]
 
+All indexed image loads have `G_LOADBLOCK.dxt = 0`, so the block enters TMEM
+linearly. Sampling is different: odd rows exchange the 32-bit halves of each
+64-bit TMEM word. On a repeating axis, the `G_SETTILE` mask defines the period
+even when `G_SETTILESIZE` names a smaller sampling rectangle. For example, a
+Giant Toys CI4 material has a 32×30 rectangle but a 32×32 mask period; decoding
+it as 32×30 with linear row addressing smears the source artwork. The viewer
+applies both rules to every material, not only this example. [evidence: ROM
+display-list words, bounded decoding, viewer render]
+
 Final tile-0 formats across all material slots are:
 
 | format | slots |
