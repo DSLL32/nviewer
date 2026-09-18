@@ -251,10 +251,7 @@ function parseBank(r: Reader, layout: Layout): Bank {
         env: {
           attack: r.u16(mapAt + 12) * 1000,
           decay: r.u16(mapAt + 14) * 1000,
-          // Music NoteOff detaches the voice instead of releasing it. A
-          // synthetic duration stops the renderer when the sample itself ends,
-          // so no additional release ramp belongs here.
-          release: 0,
+          release: r.u16(mapAt + 16) * 1000,
           attackVolume: r.u8(mapAt + 18),
           decayVolume: r.u8(mapAt + 19),
         },
@@ -384,6 +381,8 @@ function parseMusicSequence(r: Reader, record: SequenceRecord, sequence: number,
     let patch = header.patch;
     let volume = header.volume;
     let pan = header.pan;
+    const heldNotes = new Map<number, MidiEvent[]>();
+    const firstLoopNoteOff = new Map<number, number>();
     let terminated = false;
     const commandTicks = new Map<number, number>();
     while (position < header.end) {
@@ -425,12 +424,18 @@ function parseMusicSequence(r: Reader, record: SequenceRecord, sequence: number,
         const velocity = r.u8(position + 2);
         const sound = instruments[patch]?.sounds.find((s) => key >= s.keyMin && key <= s.keyMax && velocity >= s.velMin && velocity <= s.velMax);
         if (!sound) throw new Error(`Cruis'n USA sequence ${sequence} note has no patch map`);
-        const sourceSamples = Math.floor(sound.wave.len / 9) * 16;
-        const ratio = Math.pow(2, ((key - sound.keyBase) * 100 + sound.detune) / 1200);
-        events.push({ tick, us, status: 0x90 | channel, a: key, b: velocity, durUs: (sourceSamples * 1_000_000) / (OUTPUT_RATE * ratio) });
+        const event: MidiEvent = { tick, us, status: 0x90 | channel, a: key, b: velocity };
+        events.push(event);
+        const held = heldNotes.get(key) ?? [];
+        held.push(event);
+        heldNotes.set(key, held);
       } else if (command === 18) {
-        // Music NoteOff transfers a WESS voice out of track ownership; its
-        // pre-rendered sample continues naturally, so duration is set above.
+        // The N64 driver scans all active voices of this key and track,
+        // releasing each. The shared mixer releases a note at durUs.
+        const key = r.u8(position + 1);
+        if (loop && tick >= loop[0] && !firstLoopNoteOff.has(key)) firstLoopNoteOff.set(key, tick);
+        for (const held of heldNotes.get(key) ?? []) held.durUs = Math.max(0, us - held.us);
+        heldNotes.delete(key);
       } else if (command === 32) {
         const label = r.u8(position + 1) | (r.u8(position + 2) << 8);
         // Sequence 167, track 2 has TrkJump 0 and no declared label. The
@@ -461,6 +466,12 @@ function parseMusicSequence(r: Reader, record: SequenceRecord, sequence: number,
       position += size;
     }
     if (!terminated) throw new Error(`Unterminated Cruis'n USA sequence ${sequence} track`);
+    for (const [key, held] of heldNotes) {
+      const wrappedOff = loop ? firstLoopNoteOff.get(key) : undefined;
+      const offTick = wrappedOff === undefined ? tick : tick + wrappedOff - loop![0];
+      const offUs = ticksToUs(offTick, ppq, qpm);
+      for (const note of held) note.durUs = Math.max(0, offUs - note.us);
+    }
     trackAt = header.end;
   }
   if (trackAt > record.end || record.end - trackAt > 7) throw new Error(`Invalid Cruis'n USA sequence ${sequence} payload accounting`);
