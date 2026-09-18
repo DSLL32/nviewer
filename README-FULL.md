@@ -6,7 +6,7 @@ A browser viewer for the levels of these N64 games (USA versions): *San Francisc
 *Gex 3: Deep Cover Gecko*, *Yoshi's Story* (Japan), *Star Fox 64* (V1.0 and V1.1), *GoldenEye 007*,
 *Banjo-Kazooie* (USA V1.0),
 *Off Road Challenge* (USA and Europe), *Air Boarder 64* (Japan and Europe), *Pilotwings 64* (USA, Europe and Japan), *Pokémon Snap*, *A Bug's Life* (USA and Europe), *Spider-Man*, *Star Wars: Shadows of the Empire* (USA V1.0–V1.2 and Europe), *007: The World Is Not Enough* (USA and Europe),
-*Mario Kart 64* (USA, V1.0), *Perfect Dark* (V1.0), and *The Legend of Zelda: Ocarina of Time* and
+*Mario Kart 64* (USA, V1.0), *Mario Party* (Japan), *Perfect Dark* (V1.0), and *The Legend of Zelda: Ocarina of Time* and
 *Majora's Mask* (retail and debug builds, plus the 1997 Ocarina of Time prototype preserved on an F-Zero X development
 cartridge). Load one or more ROMs, pick a level in the sidebar, and fly around freely, with
 each game's soundtrack in the music box. ROMs are parsed entirely in the browser (in a Web Worker)
@@ -120,6 +120,10 @@ Z shows or hides collision · Shift+F collision wireframe · the View panel can 
     - `level.ts`, `collision.ts`, `objects.ts`, `environment.ts`: 20 courses and the award ceremony, course geometry,
       collision surfaces, object markers and decoded static actors, continuous course-path overlays, start markers, skies and fog
     - `town.ts`: optional source-archive TOWN static art, loaded from the committed gzip package only for Mario Kart 64
+  - `marioparty/`: Mario Party (Japan; format notes in `docs/MARIOPARTY.md`)
+    - `fs.ts`, `form.ts`, `hvq.ts`: mainfs, FORM geometry and collision, and HVQ image decoding
+    - `boards.ts`, `scenes.ts`, `scene-recipes.json`: 15 boards and 59 static arena, hub and debug scenes; board paths and layers
+    - `music.ts`: 88 S2 tracks and loop metadata; `marioparty.ts`: level and music catalog
   - `spiderman/`: Spider-Man (USA; format notes in `docs/SPIDERMAN.md`)
     - `fs.ts`: ERZ2 decompression and the eight-group master directory; `model.ts`, `texture.ts`: model shells,
       native render banks and the global texture dictionary

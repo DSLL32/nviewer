@@ -19,7 +19,7 @@ This manual describes the Japanese retail ROM. North American and European offse
 | Sample encoding | libultra VADPCM in `B1` banks. |
 | Levels | Eight party boards, training board, five Mini-Game Island maps, stadium board, Mushroom Village, and mini-game arenas. |
 | Memory requirement | **Unknown** from current runtime tests; no observed allocation exceeds base 4 MiB. |
-| Viewer support | Proposed Japanese release only; implementation pending. |
+| Viewer support | Japanese release: 15 boards and 59 nonempty arena, hub and debug scenes; static geometry, HVQ backgrounds, board overlays and 88 music tracks. |
 
 ### 1.2 ROM identification
 
@@ -497,24 +497,25 @@ Europe adds overlay 112; language-selection purpose is a **hypothesis**. Japan a
 
 ### 7.1 Module mapping
 
-No Mario Party loader is present yet. A Japanese-only loader would register `CLBJ` after structural validation. Suggested modules:
+The Japanese-only loader registers `CLBJ` after structural validation. Modules:
 
 | Module | Responsibility |
 |---|---|
-| `src/rom/marioparty/fs.ts` | Mainfs, overlays, strings; reuse the existing 1 KiB LZSS decoder. |
-| `src/rom/marioparty/form.ts` | FORM tree, batches, textures, MAP1 collision. |
+| `src/rom/marioparty/fs.ts` | Mainfs access and 1 KiB Hudson LZSS decoding. |
+| `src/rom/marioparty/form.ts` | FORM tree, batches, textures and MAP1 collision. |
 | `src/rom/marioparty/hvq.ts` | HVQ tile decoding and bottom-row-first assembly. |
-| `src/rom/marioparty/boards.ts` | Fifteen board maps, space quads, paths, camera, backdrop. |
-| `src/rom/marioparty/scenes.ts` | Arena and hub asset recipes, placements, fog, lights, cameras. |
-| music integration | Two S2 tables through existing Hudson/libultra sequence support. |
+| `src/rom/marioparty/boards.ts` | Fifteen board maps, space quads, paths, camera and backdrop. |
+| `src/rom/marioparty/scenes.ts` | Static arena and hub recipes, placements and environment. |
+| `src/rom/marioparty/music.ts` | Two S2 tables and 88 tracks through shared libultra rendering. |
+| `src/rom/marioparty/marioparty.ts` | Level and music catalog. |
 
 ### 7.2 Supported features
 
-**Not yet implemented.** ROM analysis supports a planned 15-map board loader with HVQ backdrops, space quads, paths, static props, and hidden collision; arena and hub FORM rendering; and an 88-sequence music catalog. The proposed board camera is the original fixed metadata camera. Every drawn class should have a selectable layer, including hidden-by-default MAP1 collision.
+The viewer exposes 15 board maps and 59 nonempty arena, hub and debug scenes. Boards have HVQ backdrops, space quads, stored-chain path overlays, static props, authored fixed-camera metadata and hidden-by-default MAP1 collision where present. FORM geometry and static placement are layered in the scenes. All 88 S2 music slots are selectable. Seven research scenes with incomplete placement are labeled `(partial)`; Hot Rope Jump has no verified static scenery recipe and is omitted rather than shown as an empty level.
 
 ### 7.3 Approximations and omissions
 
-Unresolved arena placement and runtime lighting would initially require approximations. Dynamic characters, board-state changes, scene scripting, and some special path links are not representable solely from static files. Audio reverb/vibrato/tremolo and A2/A9 loop edge cases need fidelity work. No release support beyond Japan is specified for the viewer.
+Some arena placements and runtime lighting remain approximate. Dynamic characters, board-state changes, scene scripting and cross-chain event links are not reconstructed; board event props with explicit space IDs are offered as a hidden optional layer, not asserted to appear in the initial state. Audio reverb/vibrato/tremolo and A2's long-drone loop need fidelity work. No release support beyond Japan is specified for the viewer.
 
 ## 8. Verification and remaining work
 
