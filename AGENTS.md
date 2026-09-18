@@ -121,7 +121,11 @@ Implemented (spec under `docs/`):
 | Star Wars: Shadows of the Empire | `r49/shadows_empire/` | |
 | Zelda 64 (OoT, MM, 1997 alpha) | `r49/zelda/` (alpha in `zelda/alpha/`) | |
 
-Research complete (spec under `docs/`, implementation pending): none currently.
+Research complete (spec under `docs/`, implementation pending):
+
+| Game | Research |
+|---|---|
+| Stunt Racer 64 | `r49/stuntracer64/` |
 
 Research in progress (spec unfinished or under review):
 
@@ -129,7 +133,6 @@ Research in progress (spec unfinished or under review):
 |---|---|
 | Glover | `r49/glover/` |
 | Mario Party (J) | `r49/mparty/` |
-| Stunt Racer 64 (existing spec under review) | `r49/stuntracer64/` |
 
 Shared:
  - `r49/impl/`: per-agent check directories (`ge_core`, `pd_obj`, `zelda_mus`,
