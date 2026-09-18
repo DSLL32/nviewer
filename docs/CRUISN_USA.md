@@ -250,30 +250,46 @@ zero extent mismatches. Together they contain 16,046 material batches and
 ROM `0x1D21C–0x1D4F8`. It reads two coordinate arrays and the material
 batches; several mesh flags remain unresolved.
 
-Each mesh begins with a four-byte index-limit header, followed by
+Each mesh begins with an eight-byte header, followed by
 `positionMaxIndex+1` signed-16-bit XYZ triples and
-`secondaryMaxIndex+1` signed-16-bit coordinate pairs. Two signed-16-bit
-per-mesh metadata fields follow those arrays; their semantics are **Unknown**.
-Then come material batches. The stored
+`secondaryMaxIndex+1` signed-16-bit coordinate pairs. The second header word
+is zero in all 6,430 catalog meshes; its runtime purpose is **Unknown**. Then
+come material batches. The stored
 `primitiveUnits` is the sum of `1 + triangleCount` over every batch, and the
 last triangle ends at the file boundary.
+
+The position array starts at `0x08`, not `0x04`. This is verified against a
+live Golden Gate Park display list: all eight vertices of mesh `0x11C5`
+(ROM `0x29DDEC`) match the game-generated `G_VTX` buffer at RAM
+`0x8006F960` byte-for-byte, including the first vertex
+`(-2304, 0, -2603)` and first ST pair `(0, 10240)`. All six source triangles
+are nondegenerate. Treating `0x04–0x07` as vertex data instead produces
+spurious degenerate triangles. [evidence: ROM bytes, live RAM/display list]
 
 | Offset | Size | Type | Field | Description |
 |---:|---:|---|---|---|
 | `0x00` | 1 | `u8` | `positionMaxIndex` | Highest valid position index; array has one more element. |
 | `0x01` | 1 | `u8` | `secondaryMaxIndex` | Highest valid secondary index; array has one more element. |
 | `0x02` | 2 | `u16` | `primitiveUnits` | Sum of `1 + triangleCount` across all batches. |
-| `0x04` | `6 × (positionMaxIndex + 1)` | Array of `s16[3]` | `positions` | Stored XYZ coordinates; scale and basis not yet verified. |
-| After positions | `4 × (secondaryMaxIndex + 1)` | Array of `s16[2]` | `secondaryCoordinates` | Texture-coordinate selectors; exact scaling still under investigation. |
-| After coordinates | 2 | `s16` | `unknown0` | Unresolved per-mesh field. |
-| After `unknown0` | 2 | `s16` | `unknown1` | Unresolved per-mesh field. |
-| After metadata | Variable | Batch array | `batches` | Ends at file boundary and when `primitiveUnits` are exhausted. |
+| `0x04` | 4 | `u32` | `reserved` | Zero in all catalog meshes; runtime purpose unresolved. |
+| `0x08` | `6 × (positionMaxIndex + 1)` | Array of `s16[3]` | `positions` | Stored XYZ coordinates, in native vertex-axis order. |
+| After positions | `4 × (secondaryMaxIndex + 1)` | Array of `s16[2]` | `secondaryCoordinates` | Signed 10.5 ST pairs; course drawing applies a further half-scale to both components. |
+| After coordinates | Variable | Batch array | `batches` | Ends at file boundary and when `primitiveUnits` are exhausted. |
 
 Each batch has a six-byte header and `triangleCount` six-byte triangle
-records. The 32-bit material ID references a texture asset when applicable;
-batch flag bit 2 skips texture material loading. Material IDs `0xFF` and
-`0xFFFFFFFF` are sentinels used only with that bit set. Other flag bits need
-further classification.
+records. The 32-bit material ID references a texture asset when applicable.
+Batch flag bit 0 selects a combiner that uses texture alpha; when clear, the
+combiner uses primitive alpha and ignores transparent palette entries. ROM
+code at `0x1D9A0` emits the two distinct `G_SETCOMBINE` commands. For
+example, Appalachia texture `0x0CB4` has 20 transparent-black texels, but
+mesh `0x0B9B` uses batch flag zero, so these render opaque black. Golden Gate
+tree material `0x0EA2` uses flag 1 and texture-alpha cutout. [evidence: ROM
+material flags, palette bytes, disassembly]
+
+Batch flag bit 2 skips texture material loading. Material IDs `0xFF` and
+`0xFFFFFFFF` are sentinels used only with that bit set. Texture-addressing
+bits are described under Textures and materials; remaining flag bits need
+classification.
 The header alternates field order according to its two-byte alignment:
 
 | Offset within batch | Size | Type | Field | Description |
@@ -291,10 +307,28 @@ triangle batches at runtime. The ROM contains the string
 `RSP SW Version: 2.0D, 04-01-96`, but that string alone does not identify the
 game-specific command dialect or its complete render-state configuration.
 
+A live model matrix loaded immediately before mesh `0x11C5` has diagonal
+coefficients approximately `(0.20049, 0.199997, 0.20049, 1)` and translation
+`(-114.4, -115.1, 248)`. This establishes local Y scale near `0.2`; the
+slightly larger X/Z factors may include section-specific stretch. [evidence:
+live RAM/display list]
+
+The course-scene display list sets `G_TEXTURE` scale to `0x8000` for both ST
+components (`BB000001 80008000` at captured DL `0x39F5A8`). Thus normalized
+course-mesh UVs are stored ST divided by `64 × texture dimension`. Mesh
+`0x0F0D` spans 112×72 stored texels over texture `0x0EA2` (56×36), yielding
+one tile after that half-scale. The sky uses a separate render path.
+[evidence: ROM mesh, live display list]
+
 ### 3.5 Textures and materials
 
-All 4,361 class-`0x40` texture files have an eight-byte header. Stored
-`halfWidth` and `halfHeight` are doubled to obtain pixel dimensions.
+All 4,361 class-`0x40` texture files have an eight-byte header. Pixel width
+is four times byte 0; pixel height is byte 1. The product happens to equal
+the incorrect `2 × byte0` by `2 × byte1` interpretation, so payload-size
+validation alone cannot distinguish the layouts. Live RDP tile sizes confirm
+the dimensions: asset `0x0EA2` has header `0E 24` and renders at 56×36;
+asset `0x11DF` has header `10 20` and renders at 64×32. [evidence: ROM bytes,
+live display list]
 The 4,353 files with mode 1 and nonzero `paletteAssetID` have a CI8 pixel
 payload of exactly `width × height` bytes. Seven files with mode 0 and a
 zero palette ID have direct 16-bit payloads of exactly `2 × width × height`
@@ -303,7 +337,7 @@ bytes. One mode-1 file has palette ID zero; its intended palette source is
 
 <table class="byte-layout">
   <thead><tr><th>Offset</th><th>+0</th><th>+1</th><th>+2</th><th>+3</th><th>+4</th><th>+5</th><th>+6</th><th>+7</th></tr></thead>
-  <tbody><tr><th><code>0x00</code></th><td><code>halfWidth: u8</code></td><td><code>halfHeight: u8</code></td><td colspan="2"><code>mode: u16</code></td><td colspan="4"><code>paletteAssetID: u32</code></td></tr></tbody>
+  <tbody><tr><th><code>0x00</code></th><td><code>quarterWidth: u8</code></td><td><code>height: u8</code></td><td colspan="2"><code>mode: u16</code></td><td colspan="4"><code>paletteAssetID: u32</code></td></tr></tbody>
 </table>
 
 The 508 class-`0x30` palette files start with `u32 marker=1` and
@@ -317,6 +351,24 @@ For example, mesh leaf `0x0D62` refers to texture
 `0x0D9C` has transparent entry `0x0000` and opaque-red entry `0xF801`,
 confirming RGBA5551. Material index and palette-selection rules within the
 mesh remain under investigation.
+
+The runtime tile builder defaults to clamping both axes. Material-batch flags
+select the following addressing modes; a mirror bit takes precedence over the
+repeat bit on its axis. [evidence: ROM code `0x1DAE0–0x1DD4C`, live RDP tiles]
+
+| Flag bit | S axis | T axis |
+|---:|---|---|
+| `0x02` | Repeat | — |
+| `0x08` | Mirror | — |
+| `0x10` | — | Mirror |
+| `0x20` | — | Repeat |
+
+Live tiles for texture `0x0EA2` and tree textures `0x0EA4`/`0x0EA5` clamp;
+texture `0x11DF` mirrors. These settings belong to the material draw, not
+the texture asset: the same image may need more than one viewer texture object
+when batches use different addressing. One captured `0x2C31` tile mirrors
+although its catalog batch flags predict repeat; the override or draw path
+remains **Unknown**.
 
 The palette-file header is eight bytes:
 
@@ -366,6 +418,14 @@ course file. Obsys code at ROM `0x4A320–0x4A57C` consumes the transformed
 coordinates and segment length to track progress along the driving path.
 Race camera, checkpoints and any separate AI path spline remain **Unknown**.
 
+The builder accumulates root-placement yaw in 16-bit binary turns and applies
+each placement's X/Z displacement at scale `0.2`. Root child `i` is drawn
+using section `i`'s transform before that placement advances the path. A
+per-course grade table selected by the pointer array at ROM `0x32B5C`
+supplies vertical adjustment. Reconstructed X/Z transforms match all 109
+adjacent Golden Gate Park live records within 0.014 unit. [evidence:
+disassembly, RAM comparison]
+
 | Offset | Size | Type | Field | Description |
 |---:|---:|---|---|---|
 | `0x00` | 4 | `f32` | `cos` | Planar rotation component. |
@@ -389,10 +449,15 @@ that scene's child list; all tested indices in the 14 course graphs are in
 bounds. Verified by disassembly of the render loop at ROM `0x18250–0x1861C`:
 bit 0 of `flags` skips the instance; bit 15 of `drawFlags` recomputes a
 camera-facing yaw; bits `0x0700` alter render state. Other bits are not yet
-assigned. Nested-scene XYZ are signed integers scaled by 0.2 into 16.16;
+assigned. Nested-scene XYZ use signed low 16 bits scaled by 0.2 into 16.16;
 leaf XYZ are already signed 16.16 fixed-point. The renderer converts fixed
 positions to float using `1/65536`. `yaw` is read unless `drawFlags` bit 15
-selects the camera-facing value; its angle units remain **Unknown**.
+selects the camera-facing value. Root-path yaw accumulates negatively in
+16-bit binary turns, while leaf placement yaw composes positively with the
+current path frame. The positive leaf sign makes adjacent curved-road mesh
+edges meet within 0.02 source units in Golden Gate Park section 48; the
+opposite sign leaves a roughly 640-unit gap. [evidence: ROM scene geometry,
+live RAM root-section transform]
 
 | Offset | Size | Type | Field | Description |
 |---:|---:|---|---|---|
@@ -535,27 +600,32 @@ differences have not been verified. No prototype-only course is claimed.
 
 ### 7.1 Module mapping
 
-A future `src/rom/cruisnusa/` loader can separate catalog indexing/RLE,
-course graph and geometry, texture/material lookup, object placement, and
-WESS audio. Identify ROMs by game code and revision byte, with per-revision
-catalog base and bounds. Catalog IDs, not absolute payload offsets, are the
-stable cross-reference in the validated course graph.
+`src/rom/cruisnusa/catalog.ts` indexes assets and decodes RLE;
+`scene.ts` parses course graphs; `assets.ts` decodes meshes and textures;
+`cruisnusa.ts` assembles course instances, paths and layers; `sky.ts` supplies
+the panorama; `music.ts` renders WESS sequences. The viewer currently accepts
+USA V1.0 only. Catalog IDs, not absolute payload offsets, are the stable
+cross-reference in the course graph.
 
 ### 7.2 Supported features
 
-No Cruis'n USA viewer loader or music player exists yet. The validated
-catalog, 14 course roots, WESS bank and sequence directory are sufficient
-to start an implementation but not to render a course accurately.
+The viewer lists all 14 courses and their section-path markers. It renders
+course meshes, per-material CI8/RGBA5551 and direct RGBA5551 textures,
+the cloud panorama, and a music player for the 14 indexed WESS sequences.
+Course meshes use the native eight-byte header and material-specific texture
+addressing and alpha selection. Focused level/layer checks covered all 14
+courses before the final alpha-selection change; that last change was not
+retested at the user's request.
 
 ### 7.3 Approximations and omissions
 
-The shared Off Road Challenge code recognizes related `SN64`/`SSEQ` and
-VADPCM containers, but its event parser rejects Cruis'n USA opcodes
-`0x09`, `0x0B`, `0x0C`, `0x0D` and `0x0E`; it cannot be reused unchanged.
-The music player must preserve concurrent tracks, variable QPM, authored
-loops, patch-map tuning/pan/envelopes and the exceptional sequence-167 track.
-Mesh coordinate scaling, material selection, collision and environment
-parameters need further verification before claiming viewer fidelity.
+There is no collision layer: the polygon collision representation remains
+unknown. Traffic/vehicle objects, original camera behavior, fog and lighting
+are not reproduced. The starting camera is viewer framing, not the game's
+chase camera. Palette selection beyond bank zero and one captured material's
+runtime texture-addressing override remain unresolved. The music renderer
+handles NoteOff and patch-release timing, but precise mixing/modulation and
+sequence 167's anomalous jump need further comparison against game audio.
 
 ## 8. Verification and remaining work
 
@@ -578,9 +648,10 @@ parameters need further verification before claiming viewer fidelity.
 
 ### 8.2 Known unknowns
 
-Mesh coordinate scaling and several render-state flags, exact palette
-selection, collision, sky panorama camera mapping, fog/light parameters,
-object transforms, any AI path and camera structures remain to be established.
+Section-specific X/Z stretch and several render-state flags, palette
+selection beyond bank zero, collision, sky panorama camera mapping,
+fog/light parameters, traffic transforms, any AI path and camera structures
+remain to be established.
 The monitor entry path, `RK`
 expansion, unreferenced asset meaning, precise music mix and the anomalous
 sequence-167 branch are also unresolved. These are not claimed as verified.

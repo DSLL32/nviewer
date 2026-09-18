@@ -5,7 +5,7 @@ A browser viewer for the levels of these N64 games (USA versions): *San Francisc
 *Bomberman Hero*, *BattleTanx*, *BattleTanx: Global Assault*, *Gex 64: Enter the Gecko*,
 *Gex 3: Deep Cover Gecko*, *Yoshi's Story* (Japan), *Star Fox 64* (V1.0 and V1.1), *GoldenEye 007*,
 *Banjo-Kazooie* (USA V1.0),
-*Off Road Challenge* (USA and Europe), *Air Boarder 64* (Japan and Europe), *Pilotwings 64* (USA, Europe and Japan), *Pokémon Snap*, *A Bug's Life* (USA and Europe), *Spider-Man*, *Stunt Racer 64* (USA), *Star Wars: Shadows of the Empire* (USA V1.0–V1.2 and Europe), *007: The World Is Not Enough* (USA and Europe),
+*Off Road Challenge* (USA and Europe), *Air Boarder 64* (Japan and Europe), *Pilotwings 64* (USA, Europe and Japan), *Pokémon Snap*, *A Bug's Life* (USA and Europe), *Spider-Man*, *Stunt Racer 64* (USA), *Cruis'n USA* (USA V1.0; scenery and music, without collision or traffic), *Star Wars: Shadows of the Empire* (USA V1.0–V1.2 and Europe), *007: The World Is Not Enough* (USA and Europe),
 *Mario Kart 64* (USA, V1.0), *Mario Party* (Japan), *Perfect Dark* (V1.0), and *The Legend of Zelda: Ocarina of Time* and
 *Majora's Mask* (retail and debug builds, plus the 1997 Ocarina of Time prototype preserved on an F-Zero X development
 cartridge). Load one or more ROMs, pick a level in the sidebar, and fly around freely, with
@@ -134,6 +134,10 @@ Z shows or hides collision · Shift+F collision wireframe · the View panel can 
     - `scenery.ts`, `collision.ts`, `paths.ts`, `stuntracer64.ts`: 13 courses, skydomes, static scenery,
       collision and hidden-by-default path/placement diagnostics
     - `music.ts`: 14 tracker songs and 26 selectable song/palette combinations
+  - `cruisnusa/`: Cruis'n USA (USA V1.0; format notes in `docs/CRUISN_USA.md`)
+    - `catalog.ts`, `scene.ts`, `assets.ts`: asset catalog, 14 course graphs, meshes and textures
+    - `cruisnusa.ts`, `sky.ts`: course placement, path markers and sky panorama
+    - `music.ts`: 14 WESS sequences
   - `shadows/`: Shadows of the Empire (USA V1.0–V1.2 and Europe; format notes in `docs/SHADOWS_OF_THE_EMPIRE.md`)
     - `archive.ts`, `codecs.ts`: Ogre scene catalog, LZHUF and intro LZSS decoding
     - `scene.ts`, `geometry.ts`, `texture.ts`, `shadows.ts`: tagged scene graph, meshes, materials and level assembly
