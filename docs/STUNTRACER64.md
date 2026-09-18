@@ -11,7 +11,7 @@ interpretations are labelled hypotheses.
 | Property | Value |
 |---|---|
 | Asset organization | Thirteen map archives, eight secondary-file catalogs, and separate vehicle and model catalogs; 2,211 containers indexed. |
-| Compression | Boss chunked-zlib: independent RFC 1950/DEFLATE streams decoding to at most 16,000 bytes each. |
+| Compression | Boss chunked-zlib for general assets (independent RFC 1950/DEFLATE blocks of at most 16,000 decoded bytes); separate Boss LZ/RLE for music patterns. |
 | Graphics microcode | Custom RSP graphics task, CRC `844B55B5`; GLideN64 supports it. |
 | Geometry | primary pointer-rich map blob plus eight tables containing 1,808 exact secondary archives |
 | Textures | material-indexed Gfx setup/load/TLUT lists; CI4, CI8, RGBA16, IA8 and one I4 material; exact payload size comes from `G_LOADBLOCK`, not `G_SETTILESIZE` |
@@ -69,11 +69,26 @@ structures directly. [evidence: emulator observation, ROM bytes]
 
 ### 2.2 Memory and address mapping
 
+The resident image maps ROM offset `r` in `[0x1000,0xCB250)` to KSEG0 address
+`r + 0x7FFFF400`. Map-header pointers and geometry pointers instead use offsets
+from the start of the inflated primary map; secondary-file start/end fields use
+offsets from `secondaryBase`. Audio tables contain ROM offsets. Do not apply the
+resident-image conversion to either asset-pointer class. [evidence: disassembly,
+ROM bytes]
+
 ### 2.3 ROM map and asset organization
+
+The linked image occupies `0x1000–0xCB250`. The thirteen complete map bundles
+tile `0x1775C0–0x7B36D0`. General assets occupy the regions between and after
+those spans; the audio allocation covers `0x92DDC0–0xBCD31C`. The ROM is zero
+filled from `0xBCD31B` to `0xC00000`. The indexed containers are organized by
+tables and map-relative extents, not by filename strings. [evidence: ROM bytes,
+deterministic decoding]
 
 ### 2.4 Compression formats
 
-Reference codec: [chunked zlib](compression/chunked-zlib.md).
+Reference codecs: [chunked zlib](compression/chunked-zlib.md) for general assets;
+[Boss pattern LZ/RLE](compression/boss-pattern.md) for packed music patterns.
 
 #### Chunked-zlib container
 
@@ -105,9 +120,10 @@ zlib header `78 DA`; 13 use `78 9C`. A `78 DA`-only extractor therefore silently
 misses valid files. The strict scanner validates outer bounds, every zlib checksum,
 block output limits, and total output size. [evidence: deterministic decoding]
 
-No second general level-geometry codec was identified. Raw texture/palette and audio
-pools coexist with the zlib containers, so absence of zlib framing does not imply
-padding. [evidence: ROM bytes, disassembly]
+No second general level-geometry codec was identified. Music pattern payloads
+have the separate Boss LZ/RLE format specified under *Song and pattern formats*.
+Raw texture/palette and audio pools coexist with the zlib containers, so absence
+of zlib framing does not imply padding. [evidence: ROM bytes, disassembly]
 
 #### Map bundles
 
@@ -140,7 +156,7 @@ Some bundles place a raw high-entropy prefix between the primary map and the fir
 table-listed file. These are map-resident image/palette resources addressed by
 display-list pointers, not filesystem holes. [evidence: ROM bytes, disassembly]
 
-#### Sample palettes and codec
+#### Audio sample storage
 
 There are three complete sample/instrument palettes. Runtime loads a base bank then a
 sparse overlay; overlay flag `0x80` means retain that base slot and supplies no sample.
@@ -164,10 +180,11 @@ Normal sample records have a 0x94-byte header; known fields are below. Field wid
 | Offset | Size | Type | Field | Description |
 |---:|---:|---|---|---|
 | 0x04 | 4 | u32 | decodedBytes | Decoded PCM byte count, rounded to 32. |
-| 0x0C | Unknown | Unknown | initialPan | Initial pan. |
-| 0x10 | 1 | u8 | baseNote | Base note. |
-| 0x11 | 1 | u8 | fineTune | Fine tuning; signedness not established here. |
-| 0x12 | Unknown | Unknown | volume | Default volume. |
+| 0x0C | 2 | u16 | initialPan | Initial pan; 128 in authored music samples. |
+| 0x10 | 1 | s8 | baseNote | Base-note offset added to tracker note. |
+| 0x11 | 1 | s8 | fineTune | Signed fine-tuning value used by pitch calculation. |
+| 0x12 | 1 | s8 | volume | Default volume; 64 in authored music samples. |
+| 0x13 | 1 | s8 | unknown13 | Copied to runtime descriptor; audible role unresolved. |
 | 0x14 | 0x80 | u8[] | predictorBook | 128-byte predictor book. |
 | 0x94 | Variable | u8[] | payload | Optional auxiliary table, then encoded audio. |
 
@@ -178,7 +195,18 @@ the sequencing/bank layer must be new. [evidence: nviewer source, viewer design]
 
 ### 2.5 Loading process
 
+The map loader selects one 0x5C-byte internal-map record, inflates the bundle's
+primary file, computes `secondaryBase` from its aligned stored size, then fixes up
+secondary table extents and internal pointers. Each secondary file can be fetched
+and decoded independently; the eight primary-map tables are authoritative for
+the files needed by that map. [evidence: disassembly, deterministic decoding]
+
 ### 2.6 Revision differences
+
+Only the USA revision-0 image was audited. No offset or format compatibility is
+claimed for other revisions. The shipped credits contain `$September 2, 2000`
+at ROM `0xD1990`; this is a data string, not a verified build timestamp.
+[evidence: ROM bytes]
 
 ## 3. Level data
 
@@ -253,7 +281,8 @@ Thirty-three are the standalone models documented in *Separately cataloged share
 Ninety-nine have no such absolute-start reference. They occur in nine physical runs.
 The first, `0xD9340–0xDD034`, contains obviously live-looking biographies, dialogue,
 menu text and credits, demonstrating why absence of a literal pointer cannot prove
-unused status. Other candidate runs are recorded in `env_unused/orphan_audit.json`.
+unused status. The remaining runs have not been proved unreachable by relative
+addressing or computed references.
 [evidence: ROM bytes, deterministic decoding]
 
 ### 3.2 Level container
@@ -414,10 +443,21 @@ Pattern payload:
 | 0x04 | 4 | u32 | packedSize | Packed size. |
 | 0x08 | Variable | u8[] | stream | Boss's custom LZ/RLE stream. |
 
- The decoder consumes MSB-first 16-bit controls: 0 is a literal; 1 is
-either a 12-bit backward distance plus `(lowNibble+3)` copy length, or, with zero
-distance, `(next12+16)` repeats of the following byte. Leading `0x80` means an
-uncompressed remainder. All 14 payloads decode to their exact sizes. [evidence: disassembly, deterministic decoding]
+The stream begins with a mode byte. Retail streams all use `0x40` for the
+compressed path; `0x80` selects a raw remainder. Compressed data starts with
+MSB-first 16-bit controls: 0 is a literal; 1 is either a 12-bit backward
+distance plus `(lowNibble+3)` copy length, or, with zero distance,
+`(next12+16)` repeats of the following byte. All 14 payloads decode to their
+exact sizes. The [Boss pattern LZ/RLE format](compression/boss-pattern.md)
+specifies token bytes and provides a reference decoder and encoder. [evidence:
+disassembly, deterministic decoding]
+
+For the USA revision-0 ROM, the 14 packed streams total 78,155 retail bytes
+and 309,984 decoded bytes. The reference encoder produces 49,784 bytes over
+the same corpus and roundtrips every stream. The largest retail stream, song 5
+at ROM `0xBC4238`, repacks from 9,883 to 5,791 bytes in about 0.20 seconds.
+These sizes exclude the eight-byte payload header and alignment padding.
+[evidence: deterministic decoding and independent roundtrip]
 
 Cells use XM packed-cell syntax: note, instrument, volume, effect, parameter. If bit
 7 of the first byte is set, bits 0–4 select which fields follow; otherwise all five
@@ -494,6 +534,15 @@ by 32. The historical viewer displays this frame as `(-x,z,y)`; axis conversion 
 viewer convention, not a stored field. [evidence: deterministic decoding, upstream source]
 
 ### 3.4 Display lists and render state
+
+Each material index addresses three parallel display lists: setup state,
+texture-image load, and palette load. Their RDP commands set tile format and
+sampling state, load the image into TMEM, and optionally load a TLUT. Track and
+sky faces use the same material-table mechanism. Geometry topology is stored
+as source face records rather than recovered from triangle commands. A viewer
+must interpret the material lists to reconstruct TMEM and combine, alpha, and
+depth state; ignoring the lists loses the authored surface appearance.
+[evidence: ROM bytes, disassembly]
 
 ### 3.5 Textures and materials
 
@@ -691,7 +740,7 @@ has a separate UV array. Their face tail replaces map UVs:
 |---:|---:|---|---|---|
 | 0x10 | 16 | u8[] | cornerAttributes | Packed per-corner attributes; exact UV/lighting meaning unresolved. |
 
- The first material bundle
+The first material bundle
 has 42, 46, 47 or 48 slots; the second has four. Their setup/palette tables are null,
 so some render state is resident/shared rather than self-contained. [evidence: deterministic decoding, open question]
 
@@ -813,7 +862,21 @@ mark the camera placement as viewer-derived. [evidence: open question, viewer de
 
 ### 4.1 Placement records
 
+The primary-map header at `+0x324/+0x328` gives the scenery-record pointer
+and count. Its 179 records across thirteen maps are 0x28 bytes each; their
+geometry, root transform, and animation fields are specified under *Map-resident
+scenery*. The separately stored 33 vehicle records form a model catalog, not
+per-course placements. [evidence: deterministic decoding]
+
 ### 4.2 Object and model formats
+
+Scenery uses the same `GeometryMeta`, face, and material layouts as track meshes.
+Its root transform can attach recursive child nodes; the current static decode
+establishes base translation but not every transform component. Vehicle model
+records reuse `GeometryMeta` with a distinct packed per-corner face tail, so
+they must not be rendered through the track-mesh UV path. The two catalog-omitted
+plane models below share the standalone geometry format. [evidence: ROM bytes,
+deterministic decoding]
 
 #### Two strong omitted model assets
 
@@ -833,11 +896,32 @@ two structurally valid model-format assets omitted from the adjacent catalog.
 
 ### 4.3 Skeletons and animation
 
+No bone/skinning format was established for track or sky geometry. All 179
+scenery records have at least one 0x20-byte animation header (995 total);
+`+0x14/+0x18` in a scenery record select that header array and count. The
+retail program caches the header whose transform matches the root. Keyframe
+channels, rotation/scale terms, and interpolation remain unresolved, so static
+placement should not be described as complete animation support. [evidence:
+disassembly, deterministic decoding]
+
 ### 4.4 Behaviors, triggers, and scripted objects
+
+The map contains tilt-line, probable coin-group, probable booster-group, and
+unresolved placement-group arrays; their known coordinates and pointers are
+specified under *Other map arrays*. Their game behavior is not proved by the
+static record shapes. The dormant fourth path-file channel has no files in
+this ROM. [evidence: deterministic decoding, hypothesis]
 
 ## 5. Audio
 
 ### 5.1 Audio storage and banks
+
+The contiguous audio allocation at `0x92DDC0–0xBCD31C` contains 85 SFX
+resources, three complete sample banks with sparse overlays, three instrument
+maps, fourteen metadata objects, and fourteen packed pattern payloads. The
+resident tables beginning at ROM `0xBE3F0`, plus `0xC39E0`, locate these resources;
+the table addresses and bank extents are given below. [evidence: ROM bytes,
+disassembly, deterministic decoding]
 
 ### 5.2 Sequence format and driver
 
@@ -867,7 +951,7 @@ alignment gaps. [evidence: ROM bytes, deterministic decoding]
 
 The 13 rows at `0xC39E0` provide up to six ordered `(song, bankMode)` choices. All 18
 combinations of race songs 0–5 and modes 0–2 occur; duplicates deliberately affect
-random weighting. Exact rows are in `audio/race_music.tsv`. [evidence: disassembly, deterministic decoding]
+random weighting. The complete rows follow. [evidence: disassembly, deterministic decoding]
 
 | internal map | ordered authored choices (`song/bank`) |
 |---|---|
@@ -906,6 +990,13 @@ SFX are not hidden music/stingers and need not be exposed in the music player.
 [evidence: ROM bytes, disassembly, deterministic decoding]
 
 ### 5.3 Instruments and sample encoding
+
+Each bank mode has 11 instrument note maps of 96 sample-slot bytes. The base
+bank is loaded before its sparse overlay; an overlay record with flag `0x80`
+retains the base slot. Sample records carry a 128-byte VADPCM predictor book
+at `+0x14` and 9-byte frames yielding 16 PCM samples. The bank extents and
+sample-record fields are specified under *Audio sample storage*. No separate
+music sample codec was identified. [evidence: disassembly, deterministic decoding]
 
 ### 5.4 Music catalog and loop points
 
@@ -953,15 +1044,37 @@ to the `OPPONENTS` racer-profile formatter; slot 13 is tied to the `MIDWAY STAFF
 
 ### 6.1 Unreferenced assets
 
-This section follows the completed core spec as required. “Unreferenced” below is
-always scoped to the stated test; absence of an absolute pointer alone is not proof
-of runtime impossibility.
+An aligned exact-word scan finds no direct ROM-start reference for 99 of 324
+containers outside the map and vehicle catalogs. This is only a bounded
+negative result: relative addressing and computed/range loaders can still
+reach them. The run `0xD9340–0xDD034` contains biographies, dialogue, menu
+text, and credits, illustrating that caveat. The strongest model-format
+candidates are the two IA-alpha planes at `0x9147D0` and `0x914BC0`, neither
+listed in the adjacent model catalog. Their interpretation as shadows or decals
+remains a hypothesis. [evidence: ROM bytes, deterministic decoding]
 
 ### 6.2 Cut or inaccessible levels
 
+No extra map archive was established. The thirteen table entries are all valid,
+tile the map-bundle span without gaps, and cover the public selector's eleven
+courses plus two unique multiplayer environments. Internal `Test Track` is
+public `Nautical Adventure`; `No Track` and `Stunt Bowl` both select Four
+Player 1. This is not evidence of a hidden fourteenth map. [evidence: ROM
+bytes, deterministic decoding]
+
 ### 6.3 Debug features
 
+The compiled command dispatcher can adjust `fogBaseLevel` and sky oscillation,
+as described under *Compiled environment controls*. No retail menu/controller
+path to those cases was established. The `Day`, `Night`, and `Morning` strings
+and records are present, but their consumer is unknown; do not present them as
+verified selectable environment modes. [evidence: ROM bytes, disassembly]
+
 ### 6.4 Prototype or revision-specific content
+
+No prototype ROM or second retail revision was available for comparison. The
+fourth path-file channel is structurally present but empty in all thirteen
+maps; by itself it does not establish cut content. [evidence: ROM bytes]
 
 ## 7. nviewer implementation
 
@@ -1046,56 +1159,39 @@ enough. [viewer design]
 
 ### 7.2 Supported features
 
+The map and file tables expose all 13 unique physical environments, all 1,808
+secondary files, track meshes, skydomes, base scenery geometry, hidden collision,
+and path/marker overlays. The audio tables expose all 14 tracker slots with the
+18 authored race-song/palette combinations. These are implementable data paths,
+not a claim that an nviewer Stunt Racer loader already exists. [viewer design]
+
 ### 7.3 Approximations and omissions
+
+The first pass may leave scenery animation, vehicle corner attributes, and the
+camera-projected atmosphere effect approximate. Static course data establishes
+asset extents and topology, but no in-race emulator frame has yet validated
+camera placement or final compositing. Keep these omissions explicit in the
+viewer and do not present a guessed linear-fog distance as a retail value.
+[evidence: emulator observation, viewer design]
 
 ## 8. Verification and remaining work
 
 ### 8.1 Verification evidence
 
-#### Reproducible evidence
+Verified from ROM bytes and bounded structural decoders: all 2,211 strict
+chunked-zlib containers; 13 complete map bundles; 1,808 secondary-file records;
+all 713 track meshes, 355 collision files, 1,726 material slots, and 33 vehicle
+records. Every referenced asset extent, geometry index, and texture load was
+checked against its containing file. The 14 music payloads decode to their
+declared sizes; all pattern references/cells, three bank modes, and 85 SFX
+extents were checked against their tables.
 
-| artifact | coverage |
-|---|---|
-| ROM extraction, `fs/index.json` | strict codec scan, all map/subfile/car catalogs and bounds |
-| `fs/main.dis` | complete initialized resident image disassembly |
-| ROM analysis, `levels/summary.json` | all 13 maps, 1,808 secondary entries, 58,940 render faces, 1,726 materials, collision links and placements |
-| ROM analysis, `levels/vehicles.json` | all 33 vehicles, both compressed extents, 99 raw palette extents, geometry and exact texture-copy totals |
-| ROM analysis, `levels/direct_catalogs.json` | one aligned reference pass over 324 outside containers and structural classification of 225 referenced files |
-| ROM extraction | all environment/skydome fields and hashes |
-| ROM analysis | all 143 sky material images and all fog byte maps |
-| ROM analysis | bounded uncataloged-container reference audit |
-| audio analysis | 14 songs, three bank modes, 85 SFX, patterns/cells/effects/loops |
-| `emulator/gliden64_1/NOTES.md`, `selected/title.png` | exact GLideN64/HLE launch and boot/title frame; explicit non-validation of gameplay claims |
-
-Generated JSON/TSV output is authoritative where the prose omits long per-asset
-tables. Re-running the environment and orphan tools produced byte-identical outputs;
-all specialist analyzers completed with bounds/index invariants intact.
-[evidence: deterministic decoding]
-
-#### Emulator evidence and limitation
-
-The first fresh session booted far enough for Glide64mk2 to reject custom graphics
-ucode CRC `844B55B5`; it produced no screenshot. A second fresh session using the
-installed z64 video and CXD4 RSP LLE plugins exited immediately before logging or
-drawing. [evidence: emulator observation]
-
-A third, separately authorized fresh session used GLideN64 and retained RSP-HLE.
-The equivalent current setting is
-`M64P_GFX_PLUGIN="$PWD/emu/install/lib/mupen64plus/mupen64plus-video-GLideN64.so"`.
-GLideN64
-rev.41c7ba27 rendered a correct 320×240 legal/title frame after startup black. A
-second frame about 105 seconds later was byte-identical. The preserved frame is
-`emulator/gliden64_1/selected/title.png`, SHA-256
-`1aa960682208b325a0411f83f94f34c84f36a17c808469024c5a068fc360118e`.
-[evidence: emulator observation]
-
-The game did not advance in this bounded run: two START submissions drained, but
-`input.status` remained `idle polls=0`, no menu/race frame appeared, and mupen64plus
-used roughly one CPU core. The exact launch, config, timestamps, hashes and shutdown
-audit are preserved in `emulator/gliden64_1/NOTES.md`. Thus this verifies boot/title
-rendering only; it does **not** dynamically validate public course ordering/names,
-skydomes, atmosphere, camera, FOV, RAM map loads or audio. Those claims remain based
-on retail bytes, code and exhaustive decoded-structure checks. [evidence: emulator observation, open question]
+Disassembly establishes the linked-image address mapping, catalog consumers,
+decompressor, sky/environment call chain, tracker timing, and order/restart
+logic. GLideN64 with RSP-HLE rendered the legal/title screen, but did not reach
+gameplay. The emulation observation therefore does not validate course views,
+camera placement, atmosphere, or in-race audio. Those claims retain the ROM-byte
+and code evidence stated at their respective sections.
 
 ### 8.2 Known unknowns
 
@@ -1122,3 +1218,7 @@ on retail bytes, code and exhaustive decoded-structure checks. [evidence: emulat
 - Obtain in-race runtime or hardware captures for final course/environment comparison.
 
 ### 8.3 References
+
+- [Chunked-zlib container and reference codec](compression/chunked-zlib.md).
+- [Boss pattern LZ/RLE and reference codec](compression/boss-pattern.md).
+- [Historical Stunt Racer 64 ROM viewer source](https://github.com/hack64-net/rotm/tree/9b84d3b5e13fb9795896850ad8e2c53bb34afb4e/stunt_racer_64), used as a documented lead; the claims above were checked against the retail ROM and executable.

@@ -32,6 +32,31 @@ CODEC(erz2_decode); CODEC(erz2_encode);
 
 using Codec = int(const uint8_t *, size_t, uint8_t *, size_t, size_t *);
 
+std::vector<uint8_t> decode(const uint8_t *, size_t, size_t);
+std::vector<uint8_t> encode(const std::vector<uint8_t> &, unsigned);
+
+static int boss_pattern_decode(const uint8_t *src, size_t size, uint8_t *dst,
+                               size_t cap, size_t *used) {
+    try {
+        auto out = decode(src, size, cap);
+        if (out.size() > cap) return -1;
+        std::memcpy(dst, out.data(), out.size());
+        *used = out.size();
+        return 0;
+    } catch (...) { return -1; }
+}
+
+static int boss_pattern_encode(const uint8_t *src, size_t size, uint8_t *dst,
+                               size_t cap, size_t *used) {
+    try {
+        auto out = encode(std::vector<uint8_t>(src, src + size), 4096);
+        if (out.size() > cap) return -1;
+        std::memcpy(dst, out.data(), out.size());
+        *used = out.size();
+        return 0;
+    } catch (...) { return -1; }
+}
+
 static uint32_t be32(const uint8_t *p) {
     return uint32_t(p[0]) << 24 | uint32_t(p[1]) << 16 | uint32_t(p[2]) << 8 | p[3];
 }
@@ -104,6 +129,7 @@ static std::pair<Codec *, Codec *> codec(const char *name) {
     PAIR("rare1172-u32", rare1172_u32_decode, rare1172_u32_encode);
     PAIR("rare1173", rare1173_decode, rare1173_encode);
     PAIR("chunked-zlib", chunked_zlib_decode, chunked_zlib_encode);
+    PAIR("boss-pattern", boss_pattern_decode, boss_pattern_encode);
     PAIR("hudson1", hudson1_decode, hudson1_encode);
     PAIR("hudson4", hudson4_decode, hudson4_encode);
     PAIR("rush1-lzss", rush1_lzss_decode, rush1_lzss_encode);

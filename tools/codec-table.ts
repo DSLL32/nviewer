@@ -31,13 +31,14 @@ const samples: Sample[] = [
   { codec: 'rare1173', game: 'Perfect Dark', rom: 'Perfect Dark (U) (V1.0) [!].z64', offset: 0x3050, retail: 178722, decoded: 356240, scope: 'valid ROM tags' },
   { codec: 'raw-deflate', game: 'Rush 2049', rom: 'San Francisco Rush 2049 (U) [!].z64', offset: 0x6E3080, retail: 714357, decoded: 1578064, scope: 'Rush 2049/Gex file indexes and main images' },
   { codec: 'chunked-zlib', game: 'Stunt Racer 64', rom: 'Stunt Racer 64 (U) [!].z64', offset: 0x3885A0, retail: 301186, decoded: 737520, scope: 'all 2,211 valid containers' },
+  { codec: 'boss-pattern', game: 'Stunt Racer 64', rom: 'Stunt Racer 64 (U) [!].z64', offset: 0xBC4238, retail: 9883, decoded: 34240, scope: 'all 14 music pattern streams' },
   { codec: 'rush1-lzss', game: 'San Francisco Rush', rom: 'San Francisco Rush - Extreme Racing (U) (M3) [!].z64', offset: 0x2354C0, retail: 570270, decoded: 1052128, scope: 'Rush 1 A/B pointers and main image' },
   { codec: 'rush2049-lzss', game: 'Rush 2049', rom: 'San Francisco Rush 2049 (U) [!].z64', offset: 0x399370, retail: 90821, decoded: 219288, scope: 'Rush 2049 type-1 file table' },
   { codec: 'cmpr', game: "Yoshi's Story", rom: 'Yoshi Story (J) [!].z64', offset: 0x7F3E70, retail: 163042, decoded: 230144, scope: 'all 702 CMPR records' },
   { codec: 'lzari', game: 'BattleTanx', rom: 'BattleTanx (U) [!].z64', offset: 0x4E46E0, retail: 168526, decoded: 284096, scope: 'BattleTanx/Global Assault file indexes' },
 ];
 
-const cpp = ['mio0', 'yaz0', 'yay0', 'rush_lzss', 'smsr', 'rnc', 'airboarder_lh5', 'vpk0', 'erz2'];
+const cpp = ['mio0', 'yaz0', 'yay0', 'rush_lzss', 'smsr', 'rnc', 'airboarder_lh5', 'vpk0', 'erz2', 'boss_pattern'];
 const c = ['lzari', 'deflate', 'chunked_zlib'];
 function run(command: string, args: string[]): void {
   const result = spawnSync(command, args, { cwd: root, encoding: 'utf8' });

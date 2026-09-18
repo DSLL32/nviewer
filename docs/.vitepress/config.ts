@@ -59,6 +59,7 @@ export default defineConfig({
           { text: 'Hudson LZSS', link: '/compression/hudson-lzss' },
           { text: 'Raw DEFLATE and Rare wrappers', link: '/compression/raw-deflate' },
           { text: 'Chunked zlib', link: '/compression/chunked-zlib' },
+          { text: 'Boss pattern LZ/RLE', link: '/compression/boss-pattern' },
           { text: 'Rush LZSS', link: '/compression/rush-lzss' },
           { text: 'LZARI', link: '/compression/lzari' },
           { text: 'RNC', link: '/compression/rnc' },
