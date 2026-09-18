@@ -31,6 +31,7 @@ export function Landing({ busy, error, onPick, onPickBbgames }: LandingProps) {
             <li>Yoshi's Story (J)</li>
             <li>Star Fox 64 (U) (V1.0, V1.1)</li>
             <li>Spider-Man (U)</li>
+            <li>Stunt Racer 64 (U) (revision 0)</li>
             <li>Star Wars: Shadows of the Empire (U V1.0–V1.2, E)</li>
             <li>The World Is Not Enough (U/E)</li>
             <li>GoldenEye 007 (U)</li>
