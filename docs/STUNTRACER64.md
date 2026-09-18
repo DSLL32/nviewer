@@ -595,6 +595,13 @@ it as 32×30 with linear row addressing smears the source artwork. The viewer
 applies both rules to every material, not only this example. [evidence: ROM
 display-list words, bounded decoding, viewer render]
 
+For `G_SETTILE` mirror-plus-clamp (`cm = 3`), the clamp rectangle may span
+more than one mask period. The sampler mirrors each successive period within
+that finite rectangle. A Creepy Carnie road strip uses a 128-texel S mask
+and a 256-texel clamp rectangle, yielding two mirrored diamonds; treating
+the mode as ordinary clamp repeats the edge texel over its second half.
+[evidence: ROM display-list words, viewer render]
+
 Final tile-0 formats across all material slots are:
 
 | format | slots |
