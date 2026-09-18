@@ -11,6 +11,7 @@ import { openGex3 } from './gex/gex3';
 import { openGex64 } from './gex/gex64';
 import { openGoldenEye } from './goldeneye/goldeneye';
 import { openMarioKart64 } from './mk64/mk64';
+import { openMarioParty } from './marioparty/marioparty';
 import { openOffRoadChallenge } from './offroad/offroad';
 import { openPilotwings } from './pilotwings/pilotwings';
 import { openPokemonSnap } from './pokemonsnap/pokemonsnap';
@@ -91,6 +92,12 @@ export function openRom(bytes: Uint8Array): Game {
     case 'NKTP':
     case 'NKTJ':
       throw new Error(`Mario Kart 64 (${code === 'NKTP' ? 'E' : 'J'}) is not supported: only Mario Kart 64 (U) (V1.0) is.`);
+    case 'CLBJ':
+      if (rom[0x3f] !== 0) throw new Error(`Mario Party (J) revision ${rom[0x3f]} is not supported: only revision 0 is.`);
+      return openMarioParty(rom);
+    case 'CLBE':
+    case 'NLBP':
+      throw new Error(`Mario Party (${code === 'CLBE' ? 'U' : 'E'}) is not supported: only Mario Party (J) revision 0 is.`);
     case 'NOFE':
     case 'NOFP':
       return openOffRoadChallenge(rom);
@@ -137,6 +144,7 @@ export function openRom(bytes: Uint8Array): Game {
         'Off Road Challenge (U/E), ' +
         'Pokémon Snap (U), ' +
         'Mario Kart 64 (U) (V1.0), ' +
+        'Mario Party (J) (revision 0), ' +
         'Pilotwings 64 (U/E/J), Spider-Man (U), Star Wars: Shadows of the Empire (U V1.0–V1.2/E), ' +
         'The World Is Not Enough (U/E), Perfect Dark (U) (V1.0), ' +
         'The Legend of Zelda: Ocarina of Time and Majora\'s Mask.');

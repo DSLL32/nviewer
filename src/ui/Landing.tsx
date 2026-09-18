@@ -38,6 +38,7 @@ export function Landing({ busy, error, onPick, onPickBbgames }: LandingProps) {
             <li>Air Boarder 64 (J/E)</li>
             <li>Banjo-Kazooie (U) (V1.0)</li>
             <li>Mario Kart 64 (U) (V1.0)</li>
+            <li>Mario Party (J) (revision 0)</li>
             <li>Pilotwings 64 (U/E/J)</li>
             <li>Perfect Dark (U) (V1.0)</li>
             <li>The Legend of Zelda: Ocarina of Time, Majora's Mask (retail and debug)</li>
