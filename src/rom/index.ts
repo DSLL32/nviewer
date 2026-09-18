@@ -27,6 +27,7 @@ import { openShadowsOfTheEmpire } from './shadows/shadows';
 import { openSpiderMan } from './spiderman/spiderman';
 import { openStuntRacer64 } from './stuntracer64/stuntracer64';
 import { openTwine } from './twine/twine';
+import { openVigilante8 } from './vigilante8/vigilante8';
 import type { Game } from './types';
 import { isZeldaAlpha, openZeldaAlpha } from './zelda/alpha';
 import { findZeldaBuild } from './zelda/fs';
@@ -128,6 +129,9 @@ export function openRom(bytes: Uint8Array): Game {
     case 'NR3E':
       if (rom[0x3f] !== 0) throw new Error(`Stunt Racer 64 (U) revision ${rom[0x3f]} is not supported: only revision 0 is.`);
       return openStuntRacer64(rom);
+    case 'NV8E':
+      if (rom[0x3f] !== 0) throw new Error(`Vigilante 8 (U) revision ${rom[0x3f]} is not supported: only revision 0 is.`);
+      return openVigilante8(rom);
     case 'NSWE':
     case 'NSWP':
       return openShadowsOfTheEmpire(rom);
@@ -156,7 +160,7 @@ export function openRom(bytes: Uint8Array): Game {
         'Pokémon Snap (U), ' +
         'Mario Kart 64 (U) (V1.0), ' +
         'Mario Party (J) (revision 0), ' +
-        'Pilotwings 64 (U/E/J), Spider-Man (U), Stunt Racer 64 (U) (revision 0), Star Wars: Shadows of the Empire (U V1.0–V1.2/E), ' +
+        'Pilotwings 64 (U/E/J), Spider-Man (U), Stunt Racer 64 (U) (revision 0), Vigilante 8 (U) (revision 0), Star Wars: Shadows of the Empire (U V1.0–V1.2/E), ' +
         'The World Is Not Enough (U/E), Perfect Dark (U) (V1.0), ' +
         'The Legend of Zelda: Ocarina of Time and Majora\'s Mask.');
     }
