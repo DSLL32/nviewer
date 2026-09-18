@@ -26,7 +26,10 @@ export interface CruisnTextureInfo {
 
 export function readCruisnTextureInfo(data: Uint8Array): CruisnTextureInfo {
   requireBytes(data, 0, 8, 'texture header');
-  const width = data[0] * 2, height = data[1] * 2;
+  // Pixel rows are four header-width units long. Treating the two header
+  // bytes as half-width/half-height interleaves pairs of rows and produces
+  // conspicuous striping in CI8 road and billboard textures.
+  const width = data[0] * 4, height = data[1];
   const mode = u16(data, 2), paletteAssetID = u32(data, 4);
   if (!width || !height || (mode !== 0 && mode !== 1))
     throw new Error(`Cruis'n USA invalid texture ${width}×${height}, mode ${mode}`);
@@ -58,8 +61,8 @@ export function decodeCruisnTexture(data: Uint8Array, paletteData?: Uint8Array, 
     format: mode === 0 ? 'RGBA5551' : `CI8/RGBA5551 palette ${paletteIndex}` };
 }
 
-/** The caller supplies render state and ST scaling. Stored ST is signed 10.5 fixed,
- * so normalized UV scales are 1 / (32 * texture width/height). */
+/** The caller supplies render state and ST scaling. Stored ST is signed 10.5 fixed;
+ * the course scene's G_TEXTURE scale 0x8000 halves both axes. */
 export interface CruisnMaterial {
   texture: number;
   blend: BlendMode;
@@ -73,18 +76,20 @@ export interface CruisnMaterial {
   color?: readonly [number, number, number, number];
 }
 
-/** Decode the exact class-0x10/0x20 mesh grammar; positions remain in stored coordinate units. */
+// The four bytes after the counts belong to the header. Golden Gate mesh
+// 0x11C5's vertices at +8 match its live G_VTX buffer byte-for-byte.
+/** Decode the class-0x10/0x20 mesh grammar into native Vtx axes. */
 export function decodeCruisnMesh(data: Uint8Array,
                                  resolveMaterial: (assetID: number, flags: number) => CruisnMaterial,
                                  name: string): Mesh {
   requireBytes(data, 0, 18, 'mesh header');
   const positionCount = data[0] + 1, secondaryCount = data[1] + 1;
   const primitiveUnits = u16(data, 2);
-  const positionAt = 4, secondaryAt = positionAt + positionCount * 6;
-  const metadataAt = secondaryAt + secondaryCount * 4;
-  requireBytes(data, metadataAt, 4, 'mesh arrays');
+  const positionAt = 8, secondaryAt = positionAt + positionCount * 6;
+  const batchAt = secondaryAt + secondaryCount * 4;
+  requireBytes(data, batchAt, 0, 'mesh arrays');
   const batches: Batch[] = [];
-  let at = metadataAt + 4, units = 0, radius = 0;
+  let at = batchAt, units = 0, radius = 0;
   while (units < primitiveUnits) {
     requireBytes(data, at, 6, 'material batch');
     const shifted = (at & 2) !== 0;
@@ -126,6 +131,6 @@ export function decodeCruisnMesh(data: Uint8Array,
   if (at !== data.length)
     throw new Error(`Cruis'n USA mesh has ${data.length - at} trailing bytes`);
   return { name, radius, batches, info: { positionCount, secondaryCount,
-    primitiveUnits, metadata0: s16(data, metadataAt), metadata1: s16(data, metadataAt + 2),
+    primitiveUnits, headerWord: u32(data, 4),
     triSource: 'triangle byte offset within mesh asset' } };
 }

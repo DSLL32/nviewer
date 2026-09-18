@@ -1,4 +1,4 @@
-import type { Game, Instance, Level, LevelInfo, Marker, Mesh, Texture } from '../types';
+import type { Game, Instance, Level, LevelInfo, Marker, Mesh, Texture, WrapMode } from '../types';
 import { emptyBounds } from '../util';
 import { decodeCruisnMesh, decodeCruisnTexture, readCruisnTextureInfo, type CruisnMaterial } from './assets';
 import { parseCatalog, type CruisnCatalog } from './catalog';
@@ -48,7 +48,9 @@ function placementMatrix(frame: PathFrame, p: CruisnPlacement): Float32Array {
   const x = frame.x + c * p.x / 65536 + s * p.z / 65536;
   const y = frame.y + p.y / 65536;
   const z = frame.z - s * p.x / 65536 + c * p.z / 65536;
-  const angle = frame.angle - (p.yaw & 0xffff) * TWO_PI / 0x10000;
+  // Scene placement yaw is added to the accumulated course frame. In the
+  // curved Golden Gate road, this makes successive authored mesh edges meet.
+  const angle = frame.angle + (p.yaw & 0xffff) * TWO_PI / 0x10000;
   const a = Math.cos(angle) * SCALE, b = Math.sin(angle) * SCALE;
   return new Float32Array([a, 0, -b, 0, 0, SCALE, 0, 0, b, 0, a, 0, x, y, z, 1]);
 }
@@ -83,25 +85,37 @@ function loadCourse(catalog: CruisnCatalog, index: number): Level {
   const root = parseCourse(catalog, index);
   const meshes: Mesh[] = [], textures: Texture[] = [], instances: Instance[] = [];
   const bounds = emptyBounds();
-  const meshMap = new Map<number, number>(), textureMap = new Map<number, number>();
+  const meshMap = new Map<number, number>(), textureMap = new Map<string, number>();
+  const decodedTextures = new Map<number, Texture>();
   const textureCutout = new Map<number, boolean>();
   const meshBoxes = new Map<number, Level['bounds']>();
   const material = (assetID: number, flags: number): CruisnMaterial => {
     if ((flags & 4) !== 0) return { texture: -1, blend: 'opaque', depthTest: true, depthWrite: true,
       cullBack: false, uvScaleS: 0, uvScaleT: 0 };
-    let texture = textureMap.get(assetID);
+    // The game's tile builder starts with clamp and independently enables
+    // repeat/mirror from these material bits; mirror takes precedence.
+    const wrapS: WrapMode = flags & 0x08 ? 'mirror' : flags & 0x02 ? 'repeat' : 'clamp';
+    const wrapT: WrapMode = flags & 0x10 ? 'mirror' : flags & 0x20 ? 'repeat' : 'clamp';
+    const key = `${assetID}:${wrapS}:${wrapT}`;
+    let texture = textureMap.get(key);
     if (texture === undefined) {
-      const data = catalog.asset(assetID), info = readCruisnTextureInfo(data);
-      const palette = info.mode === 1 ? catalog.asset(info.paletteAssetID) : undefined;
-      const decoded = decodeCruisnTexture(data, palette);
-      decoded.source = `catalog asset ${hex(assetID)}` + (info.paletteAssetID ? `, palette ${hex(info.paletteAssetID)}` : '');
-      texture = textures.push(decoded) - 1;
-      textureMap.set(assetID, texture);
-      textureCutout.set(assetID, decoded.rgba.some((value, i) => i % 4 === 3 && value < 255));
+      let decoded = decodedTextures.get(assetID);
+      if (!decoded) {
+        const data = catalog.asset(assetID), info = readCruisnTextureInfo(data);
+        const palette = info.mode === 1 ? catalog.asset(info.paletteAssetID) : undefined;
+        decoded = decodeCruisnTexture(data, palette);
+        decoded.source = `catalog asset ${hex(assetID)}` + (info.paletteAssetID ? `, palette ${hex(info.paletteAssetID)}` : '');
+        decodedTextures.set(assetID, decoded);
+        textureCutout.set(assetID, decoded.rgba.some((value, i) => i % 4 === 3 && value < 255));
+      }
+      texture = textures.push({ ...decoded, wrapS, wrapT }) - 1;
+      textureMap.set(key, texture);
     }
     const tex = textures[texture];
-    return { texture, blend: textureCutout.get(assetID) ? 'cutout' : 'opaque', depthTest: true, depthWrite: true,
-      cullBack: false, uvScaleS: 1 / (32 * tex.width), uvScaleT: 1 / (32 * tex.height) };
+    // Material bit 0 selects TEXEL0 alpha; otherwise the native combiner uses
+    // primitive alpha, so palette-alpha-zero texels remain opaque black.
+    return { texture, blend: flags & 1 && textureCutout.get(assetID) ? 'cutout' : 'opaque', depthTest: true, depthWrite: true,
+      cullBack: false, uvScaleS: 1 / (64 * tex.width), uvScaleT: 1 / (64 * tex.height) };
   };
   const getMesh = (assetID: number): number => {
     const known = meshMap.get(assetID);
@@ -129,7 +143,7 @@ function loadCourse(catalog: CruisnCatalog, index: number): Level {
         drawScene(p.child.scene, { x: frame.x + SCALE * (c * px + s * pz),
           y: frame.y + SCALE * py,
           z: frame.z + SCALE * (-s * px + c * pz),
-          angle: frame.angle - (p.yaw & 0xffff) * TWO_PI / 0x10000 }, rootSection, depth + 1);
+          angle: frame.angle + (p.yaw & 0xffff) * TWO_PI / 0x10000 }, rootSection, depth + 1);
         continue;
       }
       const mesh = getMesh(p.child.assetID), matrix = placementMatrix(frame, p);
@@ -162,14 +176,16 @@ function loadCourse(catalog: CruisnCatalog, index: number): Level {
   const next = path.find((p) => Math.hypot(p.position[0] - start[0], p.position[2] - start[2]) > 1)?.position;
   const length = next ? Math.hypot(next[0] - start[0], next[2] - start[2]) : 1;
   const forward: [number, number] = next ? [(next[0] - start[0]) / length, (next[2] - start[2]) / length] : [0, -1];
+  // Viewer-only starting view along the first authored section, not a claim
+  // about the game's chase-camera settings.
   return { id: `cruisnusa-${index}`, info: LEVELS[index], meshes, textures, instances,
     layers: [
       { name: 'Course geometry', kind: 'main', instances: instances.map((_, i) => i) },
       { name: 'Course sections', kind: 'markers', instances: [], visibleByDefault: false },
     ],
     markers: path, skies: sky, unplaced: [skyIndex], bounds,
-    camera: { eye: [start[0] - forward[0] * 700, start[1] + 300, start[2] - forward[1] * 700],
-      target: [start[0] + forward[0] * 1500, start[1], start[2] + forward[1] * 1500], fovY: 55 },
+    camera: { eye: [start[0] - forward[0] * 100, start[1] + 80, start[2] - forward[1] * 100],
+      target: [start[0] + forward[0] * 1200, start[1], start[2] + forward[1] * 1200], fovY: 55 },
     clearColor: [134, 174, 220] };
 }
 
