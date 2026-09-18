@@ -1,0 +1,4345 @@
+{
+  "scenes": [
+    {
+      "key": "memory_match",
+      "ovl": 0,
+      "name": "Memory Match",
+      "kind": "battle",
+      "group": "1-Player",
+      "listed": true,
+      "parts": [
+        {
+          "id": "18/0",
+          "flags": 153,
+          "role": "static"
+        },
+        {
+          "id": "18/10",
+          "flags": 185,
+          "role": "static"
+        },
+        {
+          "id": "18/11",
+          "flags": 185,
+          "role": "static"
+        },
+        {
+          "id": "18/14",
+          "flags": 221,
+          "role": "hidden",
+          "scl": [
+            5,
+            5,
+            5
+          ],
+          "note": "objxf 0x800fa55c scale 5; blue untextured octagon (MAP1 floor), H: not visible in game"
+        }
+      ],
+      "camera": {
+        "center": [
+          -5,
+          -30,
+          0
+        ],
+        "rot": [
+          -41.39,
+          0,
+          0
+        ],
+        "zoom": 1556,
+        "fov": 45,
+        "near": 80,
+        "far": 4000,
+        "source": "ovl0 0x800f7070..0x800f70bc"
+      },
+      "lights": {
+        "ambient": [
+          160,
+          160,
+          160
+        ],
+        "dirs": [
+          {
+            "dir": [
+              -96,
+              100,
+              26
+            ],
+            "color": null
+          },
+          {
+            "dir": [
+              0,
+              0,
+              100
+            ],
+            "color": [
+              64,
+              64,
+              64
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "key": "chance_time",
+      "ovl": 1,
+      "name": "Chance Time",
+      "kind": "other",
+      "group": "Board events",
+      "listed": false,
+      "parts": [
+        {
+          "id": "31/1",
+          "flags": 1721,
+          "role": "static"
+        },
+        {
+          "id": "19/0",
+          "flags": 665,
+          "role": "prop",
+          "pos": [
+            -140,
+            0,
+            1400
+          ],
+          "scl": [
+            0.53,
+            1,
+            0.53
+          ]
+        },
+        {
+          "id": "19/0",
+          "flags": 665,
+          "role": "prop",
+          "pos": [
+            0,
+            0,
+            1400
+          ],
+          "scl": [
+            0.53,
+            1,
+            0.53
+          ]
+        },
+        {
+          "id": "19/0",
+          "flags": 665,
+          "role": "prop",
+          "pos": [
+            140,
+            0,
+            1400
+          ],
+          "scl": [
+            0.53,
+            1,
+            0.53
+          ]
+        },
+        {
+          "id": "19/1",
+          "flags": 1673,
+          "role": "prop",
+          "pos": [
+            -140,
+            230,
+            1400
+          ],
+          "rot": [
+            90,
+            0,
+            0
+          ],
+          "scl": [
+            0.8,
+            0.8,
+            0.8
+          ]
+        },
+        {
+          "id": "19/1",
+          "flags": 1673,
+          "role": "prop",
+          "pos": [
+            0,
+            230,
+            1400
+          ],
+          "rot": [
+            90,
+            0,
+            0
+          ],
+          "scl": [
+            0.8,
+            0.8,
+            0.8
+          ]
+        },
+        {
+          "id": "19/1",
+          "flags": 1673,
+          "role": "prop",
+          "pos": [
+            140,
+            230,
+            1400
+          ],
+          "rot": [
+            90,
+            0,
+            0
+          ],
+          "scl": [
+            0.8,
+            0.8,
+            0.8
+          ]
+        },
+        {
+          "id": "10/114",
+          "flags": 1673,
+          "role": "hidden",
+          "pos": [
+            -250,
+            0,
+            1700
+          ],
+          "scl": [
+            0.9,
+            0.9,
+            0.9
+          ]
+        },
+        {
+          "id": "10/104",
+          "flags": 1673,
+          "role": "hidden",
+          "pos": [
+            90,
+            0,
+            1520
+          ],
+          "scl": [
+            1.35,
+            1.35,
+            1.35
+          ]
+        }
+      ],
+      "camera": {
+        "center": [
+          0,
+          230,
+          1400
+        ],
+        "rot": [
+          -10,
+          0,
+          0
+        ],
+        "zoom": 1200,
+        "fov": 20,
+        "near": 80,
+        "far": 8000,
+        "source": "H: camera built at run time; eye chosen by hand"
+      },
+      "lights": {
+        "ambient": [
+          64,
+          64,
+          64
+        ],
+        "dirs": [
+          {
+            "dir": [
+              -72,
+              16,
+              94
+            ],
+            "color": null
+          }
+        ]
+      }
+    },
+    {
+      "key": "slot_machine",
+      "ovl": 2,
+      "name": "Slot Machine",
+      "kind": "battle",
+      "group": "1-Player",
+      "listed": true,
+      "parts": [
+        {
+          "id": "20/1",
+          "flags": 185,
+          "role": "static"
+        },
+        {
+          "id": "20/14",
+          "flags": 1049,
+          "role": "static",
+          "pos": [
+            -500,
+            0,
+            300
+          ],
+          "rot": [
+            0,
+            180,
+            0
+          ],
+          "note": "ModelRot/Pos 0x800f63e8/0x800f6418"
+        },
+        {
+          "id": "20/14",
+          "flags": 1049,
+          "role": "static",
+          "pos": [
+            500,
+            0,
+            300
+          ],
+          "note": "ModelPos 0x800f6400"
+        },
+        {
+          "id": "20/16",
+          "flags": 217,
+          "role": "hidden",
+          "pos": [
+            400,
+            0,
+            -450
+          ],
+          "scl": [
+            1,
+            1.375,
+            1
+          ]
+        },
+        {
+          "id": "20/16",
+          "flags": 217,
+          "role": "hidden",
+          "pos": [
+            -400,
+            0,
+            -450
+          ],
+          "scl": [
+            1,
+            1.375,
+            1
+          ]
+        }
+      ],
+      "camera": {
+        "center": [
+          0,
+          400,
+          -100
+        ],
+        "rot": [
+          0,
+          0,
+          0
+        ],
+        "zoom": 1200,
+        "fov": 45,
+        "near": 80,
+        "far": 8000,
+        "source": "ovl2 0x800f6b3c..0x800f6b80"
+      }
+    },
+    {
+      "key": "buried_treasure",
+      "ovl": 3,
+      "name": "Buried Treasure",
+      "kind": "battle",
+      "group": "4-Player",
+      "listed": false,
+      "parts": [
+        {
+          "id": "21/5",
+          "flags": 153,
+          "role": "prop",
+          "rot": [
+            0,
+            -30,
+            0
+          ],
+          "scl": [
+            0.25,
+            0.25,
+            0.25
+          ]
+        }
+      ],
+      "camera": {
+        "center": [
+          0,
+          0,
+          -100
+        ],
+        "rot": [
+          0,
+          0,
+          0
+        ],
+        "zoom": 2000,
+        "fov": 5,
+        "near": 80,
+        "far": 4000,
+        "source": "ovl3 0x800f7bbc.."
+      }
+    },
+    {
+      "key": "treasure_divers",
+      "ovl": 4,
+      "name": "Treasure Divers",
+      "kind": "battle",
+      "group": "4-Player",
+      "listed": true,
+      "parts": [
+        {
+          "id": "22/0",
+          "flags": 729,
+          "role": "static",
+          "scl": [
+            2,
+            2,
+            2
+          ],
+          "note": "ModelScale 0x800f6518"
+        }
+      ],
+      "camera": {
+        "center": [
+          0,
+          800,
+          -72
+        ],
+        "rot": [
+          2.9249,
+          0,
+          0
+        ],
+        "zoom": 2194.856,
+        "fov": 45,
+        "near": 80,
+        "far": 8000,
+        "source": "ovl4 0x800f98a0.."
+      },
+      "lights": {
+        "ambient": [
+          128,
+          128,
+          128
+        ],
+        "dirs": [
+          {
+            "dir": [
+              0,
+              128,
+              128
+            ],
+            "color": null
+          }
+        ]
+      }
+    },
+    {
+      "key": "shell_game",
+      "ovl": 5,
+      "name": "Shell Game",
+      "kind": "battle",
+      "group": "1-Player",
+      "listed": true,
+      "parts": [
+        {
+          "id": "23/0",
+          "flags": 153,
+          "role": "static"
+        },
+        {
+          "id": "23/6",
+          "flags": 185,
+          "role": "static"
+        },
+        {
+          "id": "23/4",
+          "flags": 221,
+          "role": "hidden",
+          "scl": [
+            5,
+            5,
+            5
+          ],
+          "note": "MAP1 floor octagon, H: not visible"
+        },
+        {
+          "id": "23/2",
+          "flags": 185,
+          "role": "prop",
+          "pos": [
+            0,
+            0,
+            -140
+          ],
+          "scl": [
+            1.5,
+            1.5,
+            1.5
+          ],
+          "note": "H: x computed per shell"
+        }
+      ],
+      "camera": {
+        "center": [
+          -5.5,
+          -81,
+          0
+        ],
+        "rot": [
+          -34.26,
+          0,
+          0
+        ],
+        "zoom": 1328,
+        "fov": 45,
+        "near": 80,
+        "far": 4000,
+        "source": "ovl5 0x800f649c.."
+      },
+      "fog": {
+        "near": 933,
+        "far": 1026,
+        "color": [
+          255,
+          200,
+          200
+        ]
+      },
+      "lights": {
+        "ambient": [
+          160,
+          120,
+          120
+        ],
+        "dirs": [
+          {
+            "dir": [
+              -96,
+              100,
+              26
+            ],
+            "color": null
+          }
+        ]
+      }
+    },
+    {
+      "key": "unused_same_game",
+      "ovl": 6,
+      "name": "Unused mini-game (SAME GAME)",
+      "kind": "battle",
+      "group": "Unused",
+      "listed": true,
+      "parts": [
+        {
+          "id": "24/0",
+          "flags": 169,
+          "role": "static"
+        }
+      ],
+      "camera": {
+        "center": [
+          300,
+          80,
+          -400
+        ],
+        "rot": [
+          -10,
+          180,
+          0
+        ],
+        "zoom": 300,
+        "fov": 45,
+        "near": 80,
+        "far": 8000,
+        "source": "ovl6 constants"
+      },
+      "lights": {
+        "ambient": [
+          128,
+          128,
+          128
+        ],
+        "dirs": [
+          {
+            "dir": [
+              0,
+              64,
+              192
+            ],
+            "color": null
+          }
+        ]
+      }
+    },
+    {
+      "key": "hot_bob_omb",
+      "ovl": 7,
+      "name": "Hot Bob-omb",
+      "kind": "battle",
+      "group": "4-Player",
+      "listed": true,
+      "parts": [
+        {
+          "id": "25/0",
+          "flags": 153,
+          "role": "static",
+          "pos": [
+            0,
+            0,
+            -100
+          ]
+        },
+        {
+          "id": "25/1",
+          "flags": 153,
+          "role": "static",
+          "pos": [
+            0,
+            0,
+            -100
+          ]
+        },
+        {
+          "id": "25/3",
+          "flags": 153,
+          "role": "static",
+          "pos": [
+            0,
+            0,
+            -100
+          ]
+        },
+        {
+          "id": "25/4",
+          "flags": 153,
+          "role": "static",
+          "pos": [
+            0,
+            0,
+            -100
+          ]
+        },
+        {
+          "id": "25/2",
+          "flags": 153,
+          "role": "static",
+          "pos": [
+            -50,
+            0,
+            -50
+          ],
+          "note": "H: y computed"
+        },
+        {
+          "id": "25/2",
+          "flags": 153,
+          "role": "static",
+          "pos": [
+            50,
+            0,
+            -200
+          ],
+          "note": "H: y computed"
+        },
+        {
+          "id": "25/2",
+          "flags": 153,
+          "role": "static",
+          "pos": [
+            -900,
+            0,
+            0
+          ],
+          "note": "H: y computed"
+        }
+      ],
+      "camera": {
+        "center": [
+          -180,
+          3500,
+          -180
+        ],
+        "rot": [
+          300,
+          13,
+          0
+        ],
+        "zoom": 500,
+        "fov": 33,
+        "near": 80,
+        "far": 4000,
+        "source": "ovl7 first constants (intro camera)"
+      }
+    },
+    {
+      "key": "unused_yoshi_tongue",
+      "ovl": 8,
+      "name": "Unused mini-game (YOSI NO SHITAAWASE)",
+      "kind": "battle",
+      "group": "Unused",
+      "listed": true,
+      "parts": [
+        {
+          "id": "26/0",
+          "flags": 649,
+          "role": "static"
+        },
+        {
+          "id": "26/1",
+          "flags": 649,
+          "role": "static",
+          "pos": [
+            0,
+            0,
+            -25
+          ]
+        },
+        {
+          "id": "26/2",
+          "flags": 649,
+          "role": "static"
+        }
+      ]
+    },
+    {
+      "key": "pipe_maze",
+      "ovl": 9,
+      "name": "Pipe Maze",
+      "kind": "battle",
+      "group": "1 vs 3",
+      "listed": true,
+      "parts": [
+        {
+          "id": "27/0",
+          "flags": 665,
+          "role": "static"
+        },
+        {
+          "id": "27/3",
+          "flags": 649,
+          "role": "static",
+          "pos": [
+            -900,
+            3400,
+            -970
+          ]
+        }
+      ],
+      "camera": {
+        "center": [
+          0,
+          200,
+          -200
+        ],
+        "rot": [
+          0,
+          0,
+          0
+        ],
+        "zoom": 2500,
+        "fov": 36,
+        "near": 80,
+        "far": 8000,
+        "source": "ovl9 0x800f5b.."
+      }
+    },
+    {
+      "key": "ghost_guess",
+      "ovl": 10,
+      "name": "Ghost Guess",
+      "kind": "battle",
+      "group": "1-Player",
+      "listed": true,
+      "parts": [
+        {
+          "id": "28/1",
+          "flags": 729,
+          "role": "static"
+        },
+        {
+          "id": "28/0",
+          "flags": 733,
+          "role": "hidden",
+          "scl": [
+            5,
+            5,
+            5
+          ],
+          "note": "MAP1 floor octagon, H: not visible"
+        }
+      ],
+      "camera": {
+        "center": [
+          0,
+          100,
+          0
+        ],
+        "rot": [
+          -10,
+          0,
+          0
+        ],
+        "zoom": 300,
+        "fov": 45,
+        "near": 80,
+        "far": 8000,
+        "source": "ovl10 constants (close-up)"
+      }
+    },
+    {
+      "key": "musical_mushroom",
+      "ovl": 11,
+      "name": "Musical Mushroom",
+      "kind": "battle",
+      "group": "4-Player",
+      "listed": true,
+      "parts": [
+        {
+          "id": "29/0",
+          "flags": 665,
+          "role": "static"
+        },
+        {
+          "id": "29/5",
+          "flags": 6797,
+          "role": "static"
+        }
+      ],
+      "camera": {
+        "center": [
+          0,
+          0,
+          145
+        ],
+        "rot": [
+          310,
+          0,
+          0
+        ],
+        "zoom": 1160,
+        "fov": 30,
+        "near": 80,
+        "far": 8000,
+        "source": "ovl11 constants"
+      },
+      "clear": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "pedal_power",
+      "ovl": 12,
+      "name": "Pedal Power",
+      "kind": "battle",
+      "group": "1-Player",
+      "listed": true,
+      "parts": [
+        {
+          "id": "30/0",
+          "flags": 153,
+          "role": "static"
+        },
+        {
+          "id": "30/1",
+          "flags": 1689,
+          "role": "static"
+        },
+        {
+          "id": "30/2",
+          "flags": 153,
+          "role": "static"
+        },
+        {
+          "id": "30/3",
+          "flags": 153,
+          "role": "static"
+        },
+        {
+          "id": "0/20",
+          "flags": 153,
+          "role": "static"
+        },
+        {
+          "id": "30/8",
+          "flags": 153,
+          "role": "static",
+          "pos": [
+            0,
+            -25,
+            0
+          ]
+        },
+        {
+          "id": "30/4",
+          "flags": 153,
+          "role": "static"
+        },
+        {
+          "id": "30/6",
+          "flags": 153,
+          "role": "static"
+        },
+        {
+          "id": "30/9",
+          "flags": 153,
+          "role": "static"
+        },
+        {
+          "id": "30/10",
+          "flags": 153,
+          "role": "static",
+          "pos": [
+            0,
+            0,
+            100
+          ]
+        },
+        {
+          "id": "30/11",
+          "flags": 153,
+          "role": "static",
+          "pos": [
+            -25,
+            0,
+            75
+          ],
+          "scl": [
+            2.5,
+            1,
+            1
+          ]
+        },
+        {
+          "id": "25/2",
+          "flags": 153,
+          "role": "static",
+          "pos": [
+            -480,
+            0,
+            -50
+          ]
+        },
+        {
+          "id": "30/5",
+          "flags": 1673,
+          "role": "prop",
+          "pos": [
+            -405,
+            -350,
+            125
+          ],
+          "scl": [
+            2,
+            2,
+            2
+          ]
+        },
+        {
+          "id": "10/136",
+          "flags": 1609,
+          "role": "prop",
+          "pos": [
+            400,
+            250,
+            600
+          ],
+          "rot": [
+            0,
+            -45,
+            0
+          ],
+          "scl": [
+            1.2,
+            1.2,
+            1.2
+          ]
+        }
+      ],
+      "camera": {
+        "center": [
+          50,
+          200,
+          -100
+        ],
+        "rot": [
+          0,
+          0,
+          0
+        ],
+        "zoom": 1750,
+        "fov": 30,
+        "near": 80,
+        "far": 8000,
+        "source": "ovl12 0x800f5ab4.."
+      },
+      "clear": [
+        0,
+        15,
+        0
+      ],
+      "lights": {
+        "ambient": [
+          128,
+          128,
+          128
+        ],
+        "dirs": [
+          {
+            "dir": [
+              -43,
+              -18,
+              -110
+            ],
+            "color": null
+          },
+          {
+            "dir": [
+              9,
+              -17,
+              118
+            ],
+            "color": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "dir": [
+              -43,
+              -18,
+              -110
+            ],
+            "color": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "key": "crazy_cutter",
+      "ovl": 13,
+      "name": "Crazy Cutter",
+      "kind": "battle",
+      "group": "4-Player",
+      "listed": false,
+      "parts": [
+        {
+          "id": "31/6",
+          "flags": 1673,
+          "role": "static"
+        }
+      ]
+    },
+    {
+      "key": "face_lift",
+      "ovl": 14,
+      "name": "Face Lift",
+      "kind": "battle",
+      "group": "4-Player",
+      "listed": false,
+      "parts": [
+        {
+          "id": "32/2",
+          "flags": 665,
+          "role": "static"
+        },
+        {
+          "id": "32/1",
+          "flags": 665,
+          "role": "static"
+        }
+      ],
+      "camera": {
+        "center": [
+          0,
+          0,
+          0
+        ],
+        "rot": [
+          0,
+          0,
+          0
+        ],
+        "zoom": 2200,
+        "fov": 5,
+        "near": 100,
+        "far": 3000,
+        "source": "ovl14 constants"
+      },
+      "lights": {
+        "ambient": [
+          120,
+          120,
+          120
+        ],
+        "dirs": [
+          {
+            "dir": [
+              -100,
+              100,
+              100
+            ],
+            "color": null
+          },
+          {
+            "dir": [
+              0,
+              0,
+              100
+            ],
+            "color": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "dir": [
+              0,
+              0,
+              100
+            ],
+            "color": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "key": "whack_a_plant",
+      "ovl": 15,
+      "name": "Whack-a-Plant",
+      "kind": "battle",
+      "group": "1-Player",
+      "listed": true,
+      "parts": [
+        {
+          "id": "33/0",
+          "flags": 131737,
+          "role": "static"
+        },
+        {
+          "id": "0/21",
+          "flags": 132761,
+          "role": "prop",
+          "pos": [
+            -240,
+            0,
+            -240
+          ],
+          "note": "one pipe; the other pipes by code"
+        },
+        {
+          "id": "33/2",
+          "flags": 1689,
+          "role": "prop",
+          "pos": [
+            -430,
+            0,
+            -430
+          ]
+        }
+      ],
+      "lights": {
+        "ambient": [
+          44,
+          44,
+          64
+        ],
+        "dirs": [
+          {
+            "dir": [
+              100,
+              80,
+              100
+            ],
+            "color": null
+          },
+          {
+            "dir": [
+              100,
+              80,
+              100
+            ],
+            "color": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "dir": [
+              100,
+              80,
+              100
+            ],
+            "color": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "key": "bash_n_cash",
+      "ovl": 16,
+      "name": "Bash 'n' Cash",
+      "kind": "battle",
+      "group": "1 vs 3",
+      "listed": true,
+      "parts": [
+        {
+          "id": "34/0",
+          "flags": 669,
+          "role": "static"
+        },
+        {
+          "id": "25/0",
+          "flags": 665,
+          "role": "static"
+        },
+        {
+          "id": "25/3",
+          "flags": 2713,
+          "role": "static"
+        },
+        {
+          "id": "25/4",
+          "flags": 2713,
+          "role": "static"
+        },
+        {
+          "id": "34/1",
+          "flags": 2713,
+          "role": "static"
+        }
+      ],
+      "camera": {
+        "center": [
+          15,
+          0,
+          -105
+        ],
+        "rot": [
+          327.25,
+          0,
+          0
+        ],
+        "zoom": 1880,
+        "fov": 30,
+        "near": 80,
+        "far": 8000,
+        "source": "ovl16 constants"
+      },
+      "clear": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "bowl_over",
+      "ovl": 17,
+      "name": "Bowl Over",
+      "kind": "battle",
+      "group": "1 vs 3",
+      "listed": true,
+      "parts": [
+        {
+          "id": "35/3",
+          "flags": 153,
+          "role": "static"
+        },
+        {
+          "id": "35/0",
+          "flags": 153,
+          "role": "static"
+        },
+        {
+          "id": "35/1",
+          "flags": 153,
+          "role": "static"
+        },
+        {
+          "id": "35/2",
+          "flags": 153,
+          "role": "prop",
+          "pos": [
+            -332.5,
+            5,
+            -4700
+          ],
+          "note": "one pin row piece; clones by code"
+        }
+      ],
+      "lights": {
+        "ambient": [
+          64,
+          64,
+          64
+        ],
+        "dirs": [
+          {
+            "dir": [
+              42,
+              90,
+              51
+            ],
+            "color": null
+          }
+        ]
+      }
+    },
+    {
+      "key": "ground_pound",
+      "ovl": 18,
+      "name": "Ground Pound",
+      "kind": "battle",
+      "group": "1-Player",
+      "listed": true,
+      "parts": [
+        {
+          "id": "55/0",
+          "flags": 1689,
+          "role": "static"
+        },
+        {
+          "id": "29/4",
+          "flags": 1689,
+          "role": "prop",
+          "pos": [
+            265,
+            10,
+            -660
+          ],
+          "scl": [
+            1.6,
+            1.6,
+            1.6
+          ]
+        },
+        {
+          "id": "29/4",
+          "flags": 1689,
+          "role": "prop",
+          "pos": [
+            -875,
+            10,
+            865
+          ],
+          "scl": [
+            0.6,
+            0.6,
+            0.6
+          ]
+        }
+      ]
+    },
+    {
+      "key": "balloon_burst",
+      "ovl": 19,
+      "name": "Balloon Burst",
+      "kind": "battle",
+      "group": "4-Player",
+      "listed": true,
+      "parts": [
+        {
+          "id": "37/0",
+          "flags": 665,
+          "role": "static"
+        }
+      ],
+      "lights": {
+        "ambient": [
+          94,
+          94,
+          94
+        ],
+        "dirs": [
+          {
+            "dir": [
+              100,
+              100,
+              100
+            ],
+            "color": null
+          },
+          {
+            "dir": [
+              100,
+              100,
+              100
+            ],
+            "color": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "dir": [
+              100,
+              100,
+              100
+            ],
+            "color": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "key": "coin_block_blitz",
+      "ovl": 20,
+      "name": "Coin Block Blitz",
+      "kind": "battle",
+      "group": "4-Player",
+      "listed": true,
+      "parts": [
+        {
+          "id": "38/0",
+          "flags": 1689,
+          "role": "static"
+        },
+        {
+          "id": "38/1",
+          "flags": 2201,
+          "role": "prop",
+          "note": "H: position computed"
+        }
+      ],
+      "camera": {
+        "center": [
+          -100,
+          -100,
+          -185
+        ],
+        "rot": [
+          -40.5,
+          25.25,
+          0
+        ],
+        "zoom": 3510,
+        "fov": 20,
+        "near": 2500,
+        "far": 6000,
+        "source": "ovl20 constants"
+      },
+      "clear": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "coin_block_bash",
+      "ovl": 21,
+      "name": "Coin Block Bash",
+      "kind": "battle",
+      "group": "1 vs 3",
+      "listed": true,
+      "parts": [
+        {
+          "id": "39/0",
+          "flags": 153,
+          "role": "static"
+        },
+        {
+          "id": "39/3",
+          "flags": 189,
+          "role": "static"
+        }
+      ],
+      "camera": {
+        "center": [
+          -65,
+          -100,
+          -75
+        ],
+        "rot": [
+          -42,
+          29,
+          0
+        ],
+        "zoom": 3650,
+        "fov": 20,
+        "near": 80,
+        "far": 4500,
+        "source": "ovl21 constants"
+      },
+      "lights": {
+        "ambient": [
+          100,
+          100,
+          100
+        ],
+        "dirs": [
+          {
+            "dir": [
+              200,
+              200,
+              500
+            ],
+            "color": null
+          }
+        ]
+      }
+    },
+    {
+      "key": "skateboard_scamper",
+      "ovl": 22,
+      "name": "Skateboard Scamper",
+      "kind": "battle",
+      "group": "4-Player",
+      "listed": true,
+      "parts": [
+        {
+          "id": "40/7",
+          "flags": 133257,
+          "role": "static",
+          "pos": [
+            -600,
+            0,
+            9400
+          ],
+          "note": "RAM slot 2 (objxf 0x800f75d4 gives z 9500 before the update)"
+        },
+        {
+          "id": "40/4",
+          "flags": 132249,
+          "role": "static",
+          "pos": [
+            0,
+            300,
+            9600
+          ]
+        },
+        {
+          "id": "40/5",
+          "flags": 132253,
+          "role": "static",
+          "pos": [
+            0,
+            300,
+            -10000
+          ]
+        },
+        {
+          "id": "40/0",
+          "flags": 133257,
+          "role": "static",
+          "pos": [
+            0,
+            300,
+            8500
+          ],
+          "note": "floor section, objxf"
+        },
+        {
+          "id": "40/0",
+          "flags": 133257,
+          "role": "static",
+          "pos": [
+            0,
+            300,
+            7500
+          ],
+          "note": "floor section, objxf"
+        },
+        {
+          "id": "40/0",
+          "flags": 133257,
+          "role": "static",
+          "pos": [
+            0,
+            300,
+            6500
+          ],
+          "note": "floor section, objxf"
+        },
+        {
+          "id": "40/0",
+          "flags": 133257,
+          "role": "static",
+          "pos": [
+            0,
+            300,
+            5350
+          ],
+          "note": "floor section, objxf"
+        },
+        {
+          "id": "40/0",
+          "flags": 133257,
+          "role": "static",
+          "pos": [
+            0,
+            300,
+            4350
+          ],
+          "note": "floor section, objxf"
+        },
+        {
+          "id": "40/0",
+          "flags": 133257,
+          "role": "static",
+          "pos": [
+            0,
+            300,
+            3200
+          ],
+          "note": "floor section, objxf"
+        },
+        {
+          "id": "40/8",
+          "flags": 133273,
+          "role": "prop",
+          "pos": [
+            225,
+            300,
+            5200
+          ],
+          "note": "Thwomp ModelPos"
+        },
+        {
+          "id": "40/8",
+          "flags": 133273,
+          "role": "prop",
+          "pos": [
+            75,
+            300,
+            5200
+          ],
+          "note": "Thwomp ModelPos"
+        },
+        {
+          "id": "40/8",
+          "flags": 133273,
+          "role": "prop",
+          "pos": [
+            -75,
+            300,
+            5200
+          ],
+          "note": "Thwomp ModelPos"
+        },
+        {
+          "id": "40/8",
+          "flags": 133273,
+          "role": "prop",
+          "pos": [
+            -225,
+            300,
+            5200
+          ],
+          "note": "Thwomp ModelPos"
+        },
+        {
+          "id": "40/8",
+          "flags": 133273,
+          "role": "prop",
+          "pos": [
+            225,
+            300,
+            4200
+          ],
+          "note": "Thwomp ModelPos"
+        },
+        {
+          "id": "40/8",
+          "flags": 133273,
+          "role": "prop",
+          "pos": [
+            75,
+            300,
+            4200
+          ],
+          "note": "Thwomp ModelPos"
+        },
+        {
+          "id": "40/8",
+          "flags": 133273,
+          "role": "prop",
+          "pos": [
+            -75,
+            300,
+            4200
+          ],
+          "note": "Thwomp ModelPos"
+        },
+        {
+          "id": "40/8",
+          "flags": 133273,
+          "role": "prop",
+          "pos": [
+            -225,
+            300,
+            4200
+          ],
+          "note": "Thwomp ModelPos"
+        },
+        {
+          "id": "40/8",
+          "flags": 133273,
+          "role": "prop",
+          "pos": [
+            225,
+            200,
+            5925
+          ],
+          "note": "Thwomp ModelPos"
+        },
+        {
+          "id": "40/8",
+          "flags": 133273,
+          "role": "prop",
+          "pos": [
+            75,
+            200,
+            5925
+          ],
+          "note": "Thwomp ModelPos"
+        },
+        {
+          "id": "40/8",
+          "flags": 133273,
+          "role": "prop",
+          "pos": [
+            -75,
+            200,
+            5925
+          ],
+          "note": "Thwomp ModelPos"
+        },
+        {
+          "id": "40/8",
+          "flags": 133273,
+          "role": "prop",
+          "pos": [
+            -225,
+            200,
+            5925
+          ],
+          "note": "Thwomp ModelPos"
+        }
+      ],
+      "camera": {
+        "center": [
+          -205,
+          525,
+          9400
+        ],
+        "rot": [
+          325,
+          149.7,
+          0
+        ],
+        "zoom": 1000,
+        "fov": 20,
+        "near": 80,
+        "far": 8000,
+        "source": "RAM e1_emu/ram/mg_skate.bin at the start (constants 0x800f7678..: Center (-225,525,9400) CRot (325,150,0) CZoom 1000)"
+      },
+      "clear": [
+        0,
+        0,
+        0
+      ],
+      "lights": {
+        "ambient": [
+          255,
+          255,
+          255
+        ],
+        "dirs": [
+          {
+            "dir": [
+              -69,
+              69,
+              69
+            ],
+            "color": null
+          },
+          {
+            "dir": [
+              69,
+              69,
+              69
+            ],
+            "color": [
+              32,
+              32,
+              32
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "key": "box_mountain_mayhem",
+      "ovl": 23,
+      "name": "Box Mountain Mayhem",
+      "kind": "battle",
+      "group": "4-Player",
+      "listed": true,
+      "parts": [
+        {
+          "id": "0/11",
+          "flags": 665,
+          "role": "static"
+        }
+      ],
+      "camera": {
+        "center": [
+          0,
+          0,
+          0
+        ],
+        "rot": [
+          -90,
+          0,
+          0
+        ],
+        "zoom": 1859,
+        "fov": 25,
+        "near": 80,
+        "far": 8000,
+        "source": "CZoom/CRot.x constants; H: Center 0"
+      }
+    },
+    {
+      "key": "platform_peril",
+      "ovl": 24,
+      "name": "Platform Peril",
+      "kind": "battle",
+      "group": "4-Player",
+      "listed": false,
+      "parts": [
+        {
+          "id": "42/2",
+          "flags": 153,
+          "role": "static"
+        },
+        {
+          "id": "42/0",
+          "flags": 153,
+          "role": "static"
+        },
+        {
+          "id": "42/1",
+          "flags": 153,
+          "role": "static"
+        },
+        {
+          "id": "42/3",
+          "flags": 153,
+          "role": "static"
+        },
+        {
+          "id": "42/8",
+          "flags": 153,
+          "role": "static"
+        }
+      ],
+      "camera": {
+        "center": [
+          100,
+          121,
+          200
+        ],
+        "rot": [
+          320.7,
+          405,
+          0
+        ],
+        "zoom": 1500,
+        "fov": 30,
+        "near": 80,
+        "far": 8000,
+        "source": "ovl24 0x800f6470.."
+      }
+    },
+    {
+      "key": "teetering_towers",
+      "ovl": 25,
+      "name": "Teetering Towers",
+      "kind": "battle",
+      "group": "1-Player",
+      "listed": true,
+      "parts": [
+        {
+          "id": "43/2",
+          "flags": 153,
+          "role": "static"
+        },
+        {
+          "id": "43/0",
+          "flags": 665,
+          "role": "static",
+          "pos": [
+            0,
+            250,
+            -6350.5
+          ],
+          "scl": [
+            1.5,
+            1.5,
+            1.5
+          ],
+          "note": "ModelPos/Scale"
+        },
+        {
+          "id": "43/1",
+          "flags": 665,
+          "role": "static",
+          "pos": [
+            0,
+            250,
+            -6350.5
+          ]
+        }
+      ],
+      "clear": [
+        0,
+        0,
+        10
+      ],
+      "lights": {
+        "ambient": [
+          255,
+          255,
+          255
+        ],
+        "dirs": [
+          {
+            "dir": [
+              0,
+              36,
+              -114
+            ],
+            "color": null
+          },
+          {
+            "dir": [
+              0,
+              100,
+              65
+            ],
+            "color": [
+              0,
+              255,
+              140
+            ]
+          },
+          {
+            "dir": [
+              0,
+              -35,
+              114
+            ],
+            "color": [
+              0,
+              175,
+              255
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "key": "mushroom_mix_up",
+      "ovl": 26,
+      "name": "Mushroom Mix-Up",
+      "kind": "battle",
+      "group": "4-Player",
+      "listed": true,
+      "parts": [
+        {
+          "id": "44/3",
+          "flags": 6297,
+          "role": "static",
+          "pos": [
+            0,
+            150,
+            -300
+          ]
+        },
+        {
+          "id": "44/2",
+          "flags": 2201,
+          "role": "prop",
+          "pos": [
+            500,
+            100,
+            -250
+          ],
+          "note": "one mushroom; others by code"
+        }
+      ],
+      "camera": {
+        "center": [
+          4,
+          188,
+          -219
+        ],
+        "rot": [
+          309,
+          0,
+          0
+        ],
+        "zoom": 2766,
+        "fov": 16,
+        "near": 100,
+        "far": 5000,
+        "source": "ovl26 constants"
+      },
+      "clear": [
+        32,
+        160,
+        80
+      ]
+    },
+    {
+      "key": "hammer_drop",
+      "ovl": 27,
+      "name": "Hammer Drop",
+      "kind": "battle",
+      "group": "4-Player",
+      "listed": true,
+      "parts": [
+        {
+          "id": "51/1",
+          "flags": 1693,
+          "role": "static"
+        },
+        {
+          "id": "23/0",
+          "flags": 1689,
+          "role": "static"
+        },
+        {
+          "id": "23/6",
+          "flags": 1689,
+          "role": "static"
+        },
+        {
+          "id": "56/2",
+          "flags": 1165,
+          "role": "static"
+        },
+        {
+          "id": "56/3",
+          "flags": 1165,
+          "role": "static"
+        },
+        {
+          "id": "46/0",
+          "flags": 1689,
+          "role": "prop",
+          "pos": [
+            -50,
+            2380,
+            100
+          ],
+          "scl": [
+            0.4,
+            0.4,
+            0.4
+          ]
+        }
+      ]
+    },
+    {
+      "key": "grab_bag",
+      "ovl": 28,
+      "name": "Grab Bag",
+      "kind": "battle",
+      "group": "4-Player",
+      "listed": true,
+      "parts": [
+        {
+          "id": "47/12",
+          "flags": 665,
+          "role": "static"
+        },
+        {
+          "id": "25/4",
+          "flags": 665,
+          "role": "static"
+        },
+        {
+          "id": "25/3",
+          "flags": 665,
+          "role": "static"
+        },
+        {
+          "id": "34/1",
+          "flags": 665,
+          "role": "static",
+          "pos": [
+            0,
+            190,
+            0
+          ]
+        }
+      ],
+      "camera": {
+        "center": [
+          -10,
+          0,
+          -105
+        ],
+        "rot": [
+          -36,
+          0,
+          0
+        ],
+        "zoom": 1880,
+        "fov": 30,
+        "near": 80,
+        "far": 8000,
+        "source": "ovl28 constants"
+      },
+      "clear": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "bobsled_run",
+      "ovl": 29,
+      "name": "Bobsled Run",
+      "kind": "battle",
+      "group": "2 vs 2",
+      "listed": true,
+      "parts": [
+        {
+          "id": "48/6",
+          "flags": 8857,
+          "role": "static"
+        },
+        {
+          "id": "48/0",
+          "flags": 139417,
+          "role": "static"
+        },
+        {
+          "id": "48/1",
+          "flags": 139481,
+          "role": "static"
+        },
+        {
+          "id": "48/2",
+          "flags": 8409,
+          "role": "static"
+        },
+        {
+          "id": "48/3",
+          "flags": 139481,
+          "role": "static"
+        },
+        {
+          "id": "48/4",
+          "flags": 131225,
+          "role": "static"
+        },
+        {
+          "id": "48/5",
+          "flags": 139421,
+          "role": "static",
+          "pos": [
+            0,
+            10,
+            0
+          ]
+        },
+        {
+          "id": "48/7",
+          "flags": 133833,
+          "role": "prop",
+          "pos": [
+            2800,
+            10500,
+            -4000
+          ]
+        },
+        {
+          "id": "48/8",
+          "flags": 133833,
+          "role": "prop",
+          "pos": [
+            3200,
+            10500,
+            -4000
+          ]
+        }
+      ],
+      "fog": {
+        "near": 990,
+        "far": 1000,
+        "color": [
+          0,
+          0,
+          50
+        ]
+      },
+      "clear": [
+        0,
+        0,
+        50
+      ],
+      "lights": {
+        "ambient": [
+          128,
+          128,
+          176
+        ],
+        "dirs": [
+          {
+            "dir": [
+              0,
+              0,
+              100
+            ],
+            "color": null
+          }
+        ]
+      }
+    },
+    {
+      "key": "bumper_balls",
+      "ovl": 30,
+      "name": "Bumper Balls",
+      "kind": "battle",
+      "group": "4-Player",
+      "listed": true,
+      "parts": [
+        {
+          "id": "49/0",
+          "flags": 131721,
+          "role": "static"
+        },
+        {
+          "id": "56/2",
+          "flags": 1165,
+          "role": "static"
+        },
+        {
+          "id": "56/3",
+          "flags": 1165,
+          "role": "static"
+        },
+        {
+          "id": "49/2",
+          "flags": 1693,
+          "role": "static"
+        }
+      ],
+      "camera": {
+        "center": [
+          0,
+          0,
+          -140
+        ],
+        "rot": [
+          328,
+          0,
+          0
+        ],
+        "zoom": 3000,
+        "fov": 20,
+        "near": 80,
+        "far": 8000,
+        "source": "RAM e1_emu/ram/mg_bumper.bin"
+      },
+      "clear": [
+        0,
+        32,
+        128
+      ],
+      "lights": {
+        "ambient": [
+          44,
+          44,
+          64
+        ],
+        "dirs": [
+          {
+            "dir": [
+              100,
+              80,
+              100
+            ],
+            "color": null
+          },
+          {
+            "dir": [
+              100,
+              80,
+              100
+            ],
+            "color": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "dir": [
+              100,
+              80,
+              100
+            ],
+            "color": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "key": "tightrope_treachery",
+      "ovl": 31,
+      "name": "TightRope Treachery",
+      "kind": "battle",
+      "group": "1 vs 3",
+      "listed": true,
+      "parts": [
+        {
+          "id": "0/8",
+          "flags": 6809,
+          "role": "static",
+          "pos": [
+            0,
+            -600,
+            -800
+          ],
+          "scl": [
+            1.22,
+            1.22,
+            1.22
+          ]
+        },
+        {
+          "id": "50/0",
+          "flags": 665,
+          "role": "static",
+          "pos": [
+            0,
+            0,
+            500
+          ]
+        },
+        {
+          "id": "50/3",
+          "flags": 665,
+          "role": "static",
+          "pos": [
+            0,
+            100,
+            -900
+          ],
+          "scl": [
+            0.5,
+            0.5,
+            0.5
+          ]
+        }
+      ],
+      "clear": [
+        140,
+        255,
+        255
+      ]
+    },
+    {
+      "key": "knock_block_tower",
+      "ovl": 32,
+      "name": "Knock Block Tower",
+      "kind": "battle",
+      "group": "1-Player",
+      "listed": true,
+      "parts": [
+        {
+          "id": "51/1",
+          "flags": 1693,
+          "role": "static"
+        },
+        {
+          "id": "23/0",
+          "flags": 1689,
+          "role": "static"
+        },
+        {
+          "id": "23/6",
+          "flags": 1689,
+          "role": "static"
+        },
+        {
+          "id": "51/2",
+          "flags": 1693,
+          "role": "static"
+        },
+        {
+          "id": "51/0",
+          "flags": 2713,
+          "role": "prop",
+          "pos": [
+            0,
+            150,
+            0
+          ]
+        }
+      ],
+      "camera": {
+        "center": [
+          40,
+          0,
+          -1375
+        ],
+        "rot": [
+          340.75,
+          -6.75,
+          0
+        ],
+        "zoom": 3380,
+        "fov": 30,
+        "near": 80,
+        "far": 8000,
+        "source": "ovl32 constants"
+      },
+      "fog": {
+        "near": 933,
+        "far": 1026,
+        "color": [
+          255,
+          200,
+          200
+        ]
+      },
+      "clear": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "tipsy_tourney",
+      "ovl": 33,
+      "name": "Tipsy Tourney",
+      "kind": "battle",
+      "group": "4-Player",
+      "listed": true,
+      "parts": [
+        {
+          "id": "52/0",
+          "flags": 133337,
+          "role": "static",
+          "pos": [
+            1000,
+            0,
+            0
+          ]
+        },
+        {
+          "id": "52/0",
+          "flags": 133337,
+          "role": "static",
+          "pos": [
+            -1000,
+            0,
+            0
+          ]
+        },
+        {
+          "id": "52/0",
+          "flags": 133337,
+          "role": "static",
+          "pos": [
+            3000,
+            0,
+            0
+          ]
+        },
+        {
+          "id": "52/0",
+          "flags": 133337,
+          "role": "static",
+          "pos": [
+            -3000,
+            0,
+            0
+          ]
+        },
+        {
+          "id": "52/1",
+          "flags": 2185,
+          "role": "static",
+          "pos": [
+            1000,
+            5,
+            0
+          ]
+        },
+        {
+          "id": "52/1",
+          "flags": 2185,
+          "role": "static",
+          "pos": [
+            -1000,
+            5,
+            0
+          ]
+        },
+        {
+          "id": "52/1",
+          "flags": 2185,
+          "role": "static",
+          "pos": [
+            3000,
+            5,
+            0
+          ]
+        },
+        {
+          "id": "52/1",
+          "flags": 2185,
+          "role": "static",
+          "pos": [
+            -3000,
+            5,
+            0
+          ]
+        }
+      ],
+      "camera": {
+        "center": [
+          1000,
+          500,
+          600
+        ],
+        "rot": [
+          320,
+          0,
+          0
+        ],
+        "zoom": 750,
+        "fov": 20,
+        "near": 80,
+        "far": 8000,
+        "source": "CenterM/CRotM/CZoomM[0] (player 1 view)"
+      }
+    },
+    {
+      "key": "bombs_away",
+      "ovl": 34,
+      "name": "Bombs Away",
+      "kind": "battle",
+      "group": "4-Player",
+      "listed": true,
+      "parts": [
+        {
+          "id": "53/1",
+          "flags": 153,
+          "role": "static"
+        },
+        {
+          "id": "53/0",
+          "flags": 153,
+          "role": "static",
+          "pos": [
+            0,
+            -20,
+            700
+          ]
+        },
+        {
+          "id": "53/2",
+          "flags": 153,
+          "role": "static",
+          "pos": [
+            0,
+            -30,
+            0
+          ]
+        },
+        {
+          "id": "53/4",
+          "flags": 153,
+          "role": "static",
+          "pos": [
+            0,
+            -30,
+            0
+          ]
+        },
+        {
+          "id": "53/8",
+          "flags": 153,
+          "role": "prop",
+          "pos": [
+            0,
+            -80,
+            0
+          ],
+          "scl": [
+            0.8,
+            0.8,
+            0.8
+          ]
+        }
+      ],
+      "camera": {
+        "center": [
+          0,
+          0,
+          0
+        ],
+        "rot": [
+          -21,
+          0,
+          0
+        ],
+        "zoom": 1400,
+        "fov": 45,
+        "near": 80,
+        "far": 4000,
+        "source": "ovl34 constants"
+      },
+      "lights": {
+        "ambient": [
+          100,
+          100,
+          100
+        ],
+        "dirs": [
+          {
+            "dir": [
+              0,
+              1000,
+              5000
+            ],
+            "color": null
+          }
+        ]
+      }
+    },
+    {
+      "key": "crane_game",
+      "ovl": 35,
+      "name": "Crane Game",
+      "kind": "battle",
+      "group": "1 vs 3",
+      "listed": true,
+      "parts": [
+        {
+          "id": "54/0",
+          "flags": 219,
+          "role": "static"
+        },
+        {
+          "id": "54/11",
+          "flags": 169,
+          "role": "static"
+        }
+      ],
+      "camera": {
+        "center": [
+          0,
+          420,
+          300
+        ],
+        "rot": [
+          -35,
+          0,
+          0
+        ],
+        "zoom": 2200,
+        "fov": 30,
+        "near": 80,
+        "far": 8000,
+        "source": "ovl35 constants"
+      },
+      "lights": {
+        "ambient": [
+          128,
+          128,
+          128
+        ],
+        "dirs": [
+          {
+            "dir": [
+              0,
+              64,
+              192
+            ],
+            "color": null
+          }
+        ]
+      }
+    },
+    {
+      "key": "coin_shower_flower",
+      "ovl": 36,
+      "name": "Coin Shower Flower",
+      "kind": "battle",
+      "group": "1 vs 3",
+      "listed": true,
+      "parts": [
+        {
+          "id": "56/1",
+          "flags": 153,
+          "role": "static"
+        },
+        {
+          "id": "56/2",
+          "flags": 1177,
+          "role": "static"
+        },
+        {
+          "id": "56/3",
+          "flags": 1177,
+          "role": "static",
+          "pos": [
+            0,
+            -5,
+            0
+          ]
+        },
+        {
+          "id": "56/0",
+          "flags": 153,
+          "role": "static",
+          "pos": [
+            0,
+            80,
+            0
+          ]
+        }
+      ],
+      "camera": {
+        "center": [
+          8,
+          310,
+          23
+        ],
+        "rot": [
+          322.9,
+          0,
+          0
+        ],
+        "zoom": 1000,
+        "fov": 25,
+        "near": 80,
+        "far": 8000,
+        "source": "ovl36 constants"
+      }
+    },
+    {
+      "key": "slot_car_derby_track_1",
+      "ovl": 37,
+      "name": "Slot Car Derby (track 1)",
+      "kind": "battle",
+      "group": "4-Player",
+      "listed": true,
+      "parts": [
+        {
+          "id": "57/8",
+          "flags": 697,
+          "role": "static",
+          "scl": [
+            2,
+            2,
+            2
+          ]
+        },
+        {
+          "id": "57/9",
+          "flags": 665,
+          "role": "static",
+          "scl": [
+            2,
+            2,
+            2
+          ]
+        }
+      ],
+      "lights": {
+        "ambient": [
+          136,
+          136,
+          136
+        ],
+        "dirs": [
+          {
+            "dir": [
+              0,
+              2000,
+              2000
+            ],
+            "color": null
+          }
+        ]
+      }
+    },
+    {
+      "key": "slot_car_derby_track_2",
+      "ovl": 37,
+      "name": "Slot Car Derby (track 2)",
+      "kind": "battle",
+      "group": "4-Player",
+      "listed": true,
+      "parts": [
+        {
+          "id": "57/10",
+          "flags": 697,
+          "role": "static",
+          "scl": [
+            2,
+            2,
+            2
+          ]
+        },
+        {
+          "id": "57/11",
+          "flags": 665,
+          "role": "static",
+          "scl": [
+            2,
+            2,
+            2
+          ]
+        }
+      ],
+      "lights": {
+        "ambient": [
+          136,
+          136,
+          136
+        ],
+        "dirs": [
+          {
+            "dir": [
+              0,
+              2000,
+              2000
+            ],
+            "color": null
+          }
+        ]
+      }
+    },
+    {
+      "key": "mario_bandstand",
+      "ovl": 38,
+      "name": "Mario Bandstand",
+      "kind": "battle",
+      "group": "4-Player",
+      "listed": true,
+      "parts": [
+        {
+          "id": "58/0",
+          "flags": 665,
+          "role": "static"
+        },
+        {
+          "id": "58/1",
+          "flags": 665,
+          "role": "static",
+          "pos": [
+            0,
+            580,
+            360
+          ]
+        },
+        {
+          "id": "58/6",
+          "flags": 665,
+          "role": "static",
+          "pos": [
+            -600,
+            0,
+            380
+          ]
+        },
+        {
+          "id": "58/6",
+          "flags": 665,
+          "role": "static",
+          "pos": [
+            600,
+            0,
+            380
+          ]
+        },
+        {
+          "id": "20/14",
+          "flags": 1689,
+          "role": "static",
+          "pos": [
+            -500,
+            0,
+            330
+          ],
+          "rot": [
+            0,
+            180,
+            0
+          ]
+        },
+        {
+          "id": "20/14",
+          "flags": 1689,
+          "role": "static",
+          "pos": [
+            500,
+            0,
+            330
+          ]
+        }
+      ],
+      "camera": {
+        "center": [
+          0,
+          220,
+          0
+        ],
+        "rot": [
+          0,
+          0,
+          0
+        ],
+        "zoom": 1000,
+        "fov": 25,
+        "near": 80,
+        "far": 8000,
+        "source": "CZoom, Center.y constants; H: rest 0"
+      },
+      "clear": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "key": "desert_dash",
+      "ovl": 39,
+      "name": "Desert Dash",
+      "kind": "battle",
+      "group": "2 vs 2",
+      "listed": true,
+      "parts": [
+        {
+          "id": "59/0",
+          "flags": 153,
+          "role": "static"
+        }
+      ],
+      "fog": {
+        "near": 948,
+        "far": 1036,
+        "color": [
+          255,
+          85,
+          85
+        ]
+      },
+      "lights": {
+        "ambient": [
+          160,
+          80,
+          80
+        ],
+        "dirs": [
+          {
+            "dir": [
+              -96,
+              100,
+              26
+            ],
+            "color": null
+          }
+        ]
+      }
+    },
+    {
+      "key": "shy_guy_says",
+      "ovl": 40,
+      "name": "Shy Guy Says",
+      "kind": "battle",
+      "group": "4-Player",
+      "listed": true,
+      "parts": [
+        {
+          "id": "53/1",
+          "flags": 153,
+          "role": "static"
+        },
+        {
+          "id": "60/1",
+          "flags": 1177,
+          "role": "static",
+          "pos": [
+            0,
+            100,
+            100
+          ],
+          "rot": [
+            0,
+            180,
+            0
+          ],
+          "scl": [
+            0.8,
+            0.8,
+            0.8
+          ],
+          "note": "H: object transform shared with the captain"
+        }
+      ],
+      "camera": {
+        "center": [
+          0,
+          191.2,
+          0.2
+        ],
+        "rot": [
+          -14.5,
+          0,
+          0
+        ],
+        "zoom": 1069,
+        "fov": 30,
+        "near": 80,
+        "far": 4000,
+        "source": "ovl40 constants"
+      },
+      "lights": {
+        "ambient": [
+          255,
+          255,
+          255
+        ],
+        "dirs": [
+          {
+            "dir": [
+              -96,
+              100,
+              26
+            ],
+            "color": null
+          }
+        ]
+      }
+    },
+    {
+      "key": "limbo_dance",
+      "ovl": 41,
+      "name": "Limbo Dance",
+      "kind": "battle",
+      "group": "1-Player",
+      "listed": false,
+      "parts": [
+        {
+          "id": "59/4",
+          "flags": 153,
+          "role": "static",
+          "pos": [
+            0,
+            -40,
+            0
+          ],
+          "rot": [
+            0,
+            270,
+            0
+          ],
+          "scl": [
+            0.65,
+            0.65,
+            0.65
+          ]
+        }
+      ],
+      "camera": {
+        "center": [
+          0,
+          150,
+          0
+        ],
+        "rot": [
+          -10,
+          0,
+          0
+        ],
+        "zoom": 900,
+        "fov": 45,
+        "near": 80,
+        "far": 8000,
+        "source": "ovl41 constants"
+      },
+      "fog": {
+        "near": 930,
+        "far": 970,
+        "color": [
+          0,
+          0,
+          2
+        ]
+      },
+      "lights": {
+        "ambient": [
+          255,
+          255,
+          255
+        ],
+        "dirs": [
+          {
+            "dir": [
+              -96,
+              100,
+              26
+            ],
+            "color": null
+          }
+        ]
+      }
+    },
+    {
+      "key": "bombsketball",
+      "ovl": 42,
+      "name": "Bombsketball",
+      "kind": "battle",
+      "group": "2 vs 2",
+      "listed": true,
+      "parts": [
+        {
+          "id": "62/0",
+          "flags": 1689,
+          "role": "static"
+        },
+        {
+          "id": "62/8",
+          "flags": 1673,
+          "role": "static"
+        },
+        {
+          "id": "62/2",
+          "flags": 665,
+          "role": "static"
+        },
+        {
+          "id": "62/3",
+          "flags": 669,
+          "role": "static"
+        },
+        {
+          "id": "62/7",
+          "flags": 669,
+          "role": "static"
+        }
+      ],
+      "camera": {
+        "center": [
+          0,
+          60,
+          -300
+        ],
+        "rot": [
+          360,
+          32,
+          0
+        ],
+        "zoom": 400,
+        "fov": 45,
+        "near": 80,
+        "far": 8000,
+        "source": "ovl42 constants"
+      }
+    },
+    {
+      "key": "cast_aways",
+      "ovl": 43,
+      "name": "Cast Aways",
+      "kind": "battle",
+      "group": "4-Player",
+      "listed": true,
+      "parts": [
+        {
+          "id": "63/0",
+          "flags": 1177,
+          "role": "static"
+        },
+        {
+          "id": "63/1",
+          "flags": 5273,
+          "role": "static"
+        }
+      ],
+      "clear": [
+        33,
+        66,
+        214
+      ],
+      "lights": {
+        "ambient": [
+          120,
+          120,
+          120
+        ],
+        "dirs": [
+          {
+            "dir": [
+              -100,
+              100,
+              100
+            ],
+            "color": null
+          },
+          {
+            "dir": [
+              -100,
+              100,
+              100
+            ],
+            "color": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "dir": [
+              -100,
+              100,
+              100
+            ],
+            "color": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "key": "key_pa_way",
+      "ovl": 44,
+      "name": "Key-pa-Way",
+      "kind": "battle",
+      "group": "4-Player",
+      "listed": true,
+      "parts": [
+        {
+          "id": "64/18",
+          "flags": 649,
+          "role": "static"
+        },
+        {
+          "id": "64/17",
+          "flags": 13,
+          "role": "prop",
+          "note": "light-shaft effect"
+        },
+        {
+          "id": "64/16",
+          "flags": 13,
+          "role": "prop",
+          "note": "light-shaft effect"
+        },
+        {
+          "id": "64/14",
+          "flags": 665,
+          "role": "static"
+        },
+        {
+          "id": "64/15",
+          "flags": 649,
+          "role": "static"
+        },
+        {
+          "id": "64/19",
+          "flags": 131741,
+          "role": "static",
+          "pos": [
+            0,
+            0,
+            -15
+          ]
+        }
+      ],
+      "camera": {
+        "eye": [
+          0,
+          250,
+          500
+        ],
+        "target": [
+          0,
+          250,
+          -700
+        ],
+        "fov": 45,
+        "near": 80,
+        "far": 8000,
+        "source": "CamLookAt constants at 0x800fe230 (stack vectors)"
+      },
+      "lights": {
+        "ambient": [
+          128,
+          128,
+          120
+        ],
+        "dirs": [
+          {
+            "dir": [
+              100,
+              80,
+              100
+            ],
+            "color": null
+          },
+          {
+            "dir": [
+              0,
+              80,
+              -1000
+            ],
+            "color": [
+              255,
+              255,
+              240
+            ]
+          },
+          {
+            "dir": [
+              100,
+              80,
+              100
+            ],
+            "color": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "key": "running_of_the_bulb",
+      "ovl": 45,
+      "name": "Running of the Bulb",
+      "kind": "battle",
+      "group": "4-Player",
+      "listed": true,
+      "parts": [
+        {
+          "id": "65/1",
+          "flags": 649,
+          "role": "static"
+        },
+        {
+          "id": "65/2",
+          "flags": 1689,
+          "role": "static",
+          "pos": [
+            0,
+            1,
+            0
+          ]
+        },
+        {
+          "id": "65/4",
+          "flags": 1689,
+          "role": "static"
+        },
+        {
+          "id": "65/8",
+          "flags": 6297,
+          "role": "static"
+        },
+        {
+          "id": "65/10",
+          "flags": 1049,
+          "role": "hidden"
+        }
+      ],
+      "lights": {
+        "ambient": [
+          0,
+          0,
+          0
+        ],
+        "dirs": [
+          {
+            "dir": [
+              0,
+              100,
+              0
+            ],
+            "color": null
+          },
+          {
+            "dir": [
+              -16,
+              97,
+              -68
+            ],
+            "color": [
+              160,
+              90,
+              202
+            ]
+          },
+          {
+            "dir": [
+              100,
+              80,
+              100
+            ],
+            "color": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "key": "hot_rope_jump",
+      "ovl": 46,
+      "name": "Hot Rope Jump",
+      "kind": "battle",
+      "group": "4-Player",
+      "listed": false,
+      "parts": []
+    },
+    {
+      "key": "handcar_havoc",
+      "ovl": 47,
+      "name": "Handcar Havoc",
+      "kind": "battle",
+      "group": "2 vs 2",
+      "listed": true,
+      "parts": [
+        {
+          "id": "67/0",
+          "flags": 1673,
+          "role": "static"
+        },
+        {
+          "id": "67/8",
+          "flags": 1673,
+          "role": "static"
+        },
+        {
+          "id": "40/7",
+          "flags": 1673,
+          "role": "static",
+          "scl": [
+            3,
+            1,
+            3
+          ]
+        },
+        {
+          "id": "67/10",
+          "flags": 1673,
+          "role": "static",
+          "scl": [
+            7.5,
+            1,
+            7.5
+          ]
+        }
+      ],
+      "fog": {
+        "near": 970,
+        "far": 1000,
+        "color": [
+          0,
+          0,
+          0
+        ]
+      },
+      "clear": [
+        0,
+        0,
+        0
+      ],
+      "lights": {
+        "ambient": [
+          0,
+          0,
+          0
+        ],
+        "dirs": [
+          {
+            "dir": [
+              42,
+              -107,
+              32
+            ],
+            "color": null
+          },
+          {
+            "dir": [
+              -19,
+              -114,
+              31
+            ],
+            "color": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "dir": [
+              -114,
+              33,
+              16
+            ],
+            "color": [
+              255,
+              255,
+              0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "key": "deep_sea_divers",
+      "ovl": 48,
+      "name": "Deep Sea Divers",
+      "kind": "battle",
+      "group": "2 vs 2",
+      "listed": true,
+      "parts": [
+        {
+          "id": "68/2",
+          "flags": 729,
+          "role": "static"
+        }
+      ],
+      "camera": {
+        "center": [
+          0,
+          -580,
+          -110
+        ],
+        "rot": [
+          2.9249,
+          0,
+          0
+        ],
+        "zoom": 21000,
+        "fov": 10,
+        "near": 2000,
+        "far": 32000,
+        "source": "ovl48 constants"
+      },
+      "lights": {
+        "ambient": [
+          128,
+          128,
+          128
+        ],
+        "dirs": [
+          {
+            "dir": [
+              0,
+              128,
+              128
+            ],
+            "color": null
+          }
+        ]
+      }
+    },
+    {
+      "key": "piranhas_pursuit",
+      "ovl": 49,
+      "name": "Piranha's Pursuit",
+      "kind": "battle",
+      "group": "1 vs 3",
+      "listed": true,
+      "parts": [
+        {
+          "id": "69/0",
+          "flags": 153,
+          "role": "static"
+        },
+        {
+          "id": "69/6",
+          "flags": 153,
+          "role": "static"
+        },
+        {
+          "id": "69/3",
+          "flags": 153,
+          "role": "static"
+        },
+        {
+          "id": "69/4",
+          "flags": 153,
+          "role": "static"
+        }
+      ],
+      "lights": {
+        "ambient": [
+          64,
+          64,
+          64
+        ],
+        "dirs": [
+          {
+            "dir": [
+              0,
+              0,
+              100
+            ],
+            "color": null
+          }
+        ]
+      }
+    },
+    {
+      "key": "tug_o_war",
+      "ovl": 50,
+      "name": "Tug o' War",
+      "kind": "battle",
+      "group": "1 vs 3",
+      "listed": true,
+      "parts": [
+        {
+          "id": "70/0",
+          "flags": 665,
+          "role": "static",
+          "pos": [
+            0,
+            0,
+            -100
+          ]
+        },
+        {
+          "id": "70/1",
+          "flags": 1672,
+          "role": "prop",
+          "pos": [
+            0,
+            -5,
+            -80
+          ],
+          "note": "rope pose 1 of 32 (70/1-32)"
+        }
+      ]
+    },
+    {
+      "key": "paddle_battle",
+      "ovl": 51,
+      "name": "Paddle Battle",
+      "kind": "battle",
+      "group": "1 vs 3",
+      "listed": true,
+      "parts": [
+        {
+          "id": "71/0",
+          "flags": 8345,
+          "role": "static",
+          "pos": [
+            0,
+            0,
+            7500
+          ]
+        },
+        {
+          "id": "71/1",
+          "flags": 8345,
+          "role": "static",
+          "pos": [
+            0,
+            0,
+            2500
+          ]
+        },
+        {
+          "id": "71/2",
+          "flags": 8345,
+          "role": "static",
+          "pos": [
+            0,
+            0,
+            -2495
+          ]
+        },
+        {
+          "id": "71/3",
+          "flags": 8345,
+          "role": "static",
+          "pos": [
+            0,
+            0,
+            -7490
+          ]
+        },
+        {
+          "id": "71/4",
+          "flags": 8329,
+          "role": "static",
+          "pos": [
+            0,
+            0,
+            7500
+          ]
+        },
+        {
+          "id": "71/5",
+          "flags": 8329,
+          "role": "static",
+          "pos": [
+            0,
+            0,
+            2500
+          ]
+        },
+        {
+          "id": "71/6",
+          "flags": 8329,
+          "role": "static",
+          "pos": [
+            0,
+            0,
+            -2497
+          ]
+        },
+        {
+          "id": "71/7",
+          "flags": 8329,
+          "role": "static",
+          "pos": [
+            0,
+            -3,
+            -7485
+          ]
+        }
+      ],
+      "fog": {
+        "near": 989,
+        "far": 1000,
+        "color": [
+          240,
+          248,
+          255
+        ]
+      },
+      "lights": {
+        "ambient": [
+          48,
+          48,
+          48
+        ],
+        "dirs": [
+          {
+            "dir": [
+              0,
+              0,
+              -100
+            ],
+            "color": null
+          },
+          {
+            "dir": [
+              0,
+              100,
+              25
+            ],
+            "color": [
+              255,
+              255,
+              255
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "key": "bumper_ball_maze_1",
+      "ovl": 52,
+      "name": "Bumper Ball Maze 1",
+      "kind": "battle",
+      "group": "1-Player",
+      "listed": true,
+      "parts": [
+        {
+          "id": "72/0",
+          "flags": 649,
+          "role": "static",
+          "note": "table 0x800F9F30[i]"
+        },
+        {
+          "id": "56/3",
+          "flags": 1165,
+          "role": "static"
+        }
+      ],
+      "clear": [
+        0,
+        32,
+        128
+      ],
+      "lights": {
+        "ambient": [
+          44,
+          44,
+          64
+        ],
+        "dirs": [
+          {
+            "dir": [
+              100,
+              80,
+              100
+            ],
+            "color": null
+          },
+          {
+            "dir": [
+              100,
+              80,
+              100
+            ],
+            "color": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "dir": [
+              100,
+              80,
+              100
+            ],
+            "color": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "key": "bumper_ball_maze_2",
+      "ovl": 52,
+      "name": "Bumper Ball Maze 2",
+      "kind": "battle",
+      "group": "1-Player",
+      "listed": true,
+      "parts": [
+        {
+          "id": "72/1",
+          "flags": 649,
+          "role": "static",
+          "note": "table 0x800F9F30[i]"
+        },
+        {
+          "id": "56/3",
+          "flags": 1165,
+          "role": "static"
+        }
+      ],
+      "clear": [
+        0,
+        32,
+        128
+      ],
+      "lights": {
+        "ambient": [
+          44,
+          44,
+          64
+        ],
+        "dirs": [
+          {
+            "dir": [
+              100,
+              80,
+              100
+            ],
+            "color": null
+          },
+          {
+            "dir": [
+              100,
+              80,
+              100
+            ],
+            "color": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "dir": [
+              100,
+              80,
+              100
+            ],
+            "color": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "key": "bumper_ball_maze_3",
+      "ovl": 52,
+      "name": "Bumper Ball Maze 3",
+      "kind": "battle",
+      "group": "1-Player",
+      "listed": true,
+      "parts": [
+        {
+          "id": "72/2",
+          "flags": 649,
+          "role": "static",
+          "note": "table 0x800F9F30[i]"
+        },
+        {
+          "id": "56/3",
+          "flags": 1165,
+          "role": "static"
+        }
+      ],
+      "clear": [
+        0,
+        32,
+        128
+      ],
+      "lights": {
+        "ambient": [
+          44,
+          44,
+          64
+        ],
+        "dirs": [
+          {
+            "dir": [
+              100,
+              80,
+              100
+            ],
+            "color": null
+          },
+          {
+            "dir": [
+              100,
+              80,
+              100
+            ],
+            "color": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "dir": [
+              100,
+              80,
+              100
+            ],
+            "color": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "key": "mushroom_village",
+      "ovl": 105,
+      "name": "Mushroom Village",
+      "kind": "hub",
+      "group": "Mushroom Village",
+      "listed": true,
+      "parts": [
+        {
+          "id": "9/25",
+          "flags": 649,
+          "role": "static"
+        },
+        {
+          "id": "9/0",
+          "flags": 649,
+          "role": "static",
+          "pos": [
+            0,
+            378,
+            0
+          ]
+        },
+        {
+          "id": "9/27",
+          "flags": 649,
+          "role": "static",
+          "pos": [
+            -900,
+            95,
+            50
+          ],
+          "rot": [
+            0,
+            45,
+            0
+          ]
+        },
+        {
+          "id": "9/28",
+          "flags": 649,
+          "role": "static",
+          "pos": [
+            1325,
+            34.5,
+            450
+          ]
+        },
+        {
+          "id": "9/30",
+          "flags": 649,
+          "role": "static",
+          "pos": [
+            190,
+            315,
+            -1350
+          ]
+        },
+        {
+          "id": "9/29",
+          "flags": 649,
+          "role": "static",
+          "pos": [
+            -400,
+            35,
+            985
+          ],
+          "rot": [
+            0,
+            75,
+            0
+          ]
+        },
+        {
+          "id": "10/243",
+          "flags": 649,
+          "role": "static",
+          "pos": [
+            681,
+            -100,
+            324
+          ]
+        },
+        {
+          "id": "9/31",
+          "flags": 649,
+          "role": "static"
+        },
+        {
+          "id": "9/26",
+          "flags": 665,
+          "role": "static"
+        },
+        {
+          "id": "7/10",
+          "flags": 131769,
+          "role": "prop",
+          "pos": [
+            291,
+            0,
+            2234
+          ],
+          "rot": [
+            0,
+            45,
+            0
+          ],
+          "scl": [
+            3,
+            3,
+            3
+          ]
+        }
+      ],
+      "camera": {
+        "center": [
+          54.9103,
+          59.2266,
+          61.4782
+        ],
+        "rot": [
+          341,
+          28,
+          0
+        ],
+        "zoom": 7120,
+        "fov": 20,
+        "near": 80,
+        "far": 13000,
+        "source": "ovl105 constants"
+      },
+      "clear": [
+        64,
+        240,
+        255
+      ],
+      "lights": {
+        "ambient": [
+          120,
+          120,
+          120
+        ],
+        "dirs": [
+          {
+            "dir": [
+              -100,
+              100,
+              100
+            ],
+            "color": null
+          },
+          {
+            "dir": [
+              -100,
+              100,
+              100
+            ],
+            "color": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "dir": [
+              0,
+              0,
+              100
+            ],
+            "color": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "key": "opening_path",
+      "ovl": 97,
+      "name": "Opening (path to the pipe)",
+      "kind": "other",
+      "group": "Mushroom Village",
+      "listed": true,
+      "parts": [
+        {
+          "id": "14/1",
+          "flags": 665,
+          "role": "static"
+        },
+        {
+          "id": "14/0",
+          "flags": 665,
+          "role": "static"
+        },
+        {
+          "id": "14/2",
+          "flags": 665,
+          "role": "static"
+        },
+        {
+          "id": "14/3",
+          "flags": 665,
+          "role": "static"
+        }
+      ],
+      "clear": [
+        255,
+        255,
+        255
+      ],
+      "lights": {
+        "ambient": [
+          120,
+          120,
+          120
+        ],
+        "dirs": [
+          {
+            "dir": [
+              -100,
+              100,
+              100
+            ],
+            "color": null
+          },
+          {
+            "dir": [
+              0,
+              0,
+              100
+            ],
+            "color": [
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "dir": [
+              0,
+              0,
+              100
+            ],
+            "color": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "key": "staff_roll_village",
+      "ovl": 99,
+      "name": "Staff roll village",
+      "kind": "other",
+      "group": "Mushroom Village",
+      "listed": false,
+      "parts": [
+        {
+          "id": "15/0",
+          "flags": 665,
+          "role": "static"
+        }
+      ]
+    },
+    {
+      "key": "debug_testing_room",
+      "ovl": 112,
+      "name": "Testing room (debug)",
+      "kind": "other",
+      "group": "Unused",
+      "listed": true,
+      "parts": [
+        {
+          "id": "56/4",
+          "flags": 153,
+          "role": "static"
+        },
+        {
+          "id": "56/0",
+          "flags": 2201,
+          "role": "static"
+        },
+        {
+          "id": "56/8",
+          "flags": 2201,
+          "role": "static",
+          "pos": [
+            -1500,
+            75,
+            1200
+          ]
+        },
+        {
+          "id": "56/6",
+          "flags": 2201,
+          "role": "static",
+          "pos": [
+            0,
+            125,
+            1700
+          ]
+        },
+        {
+          "id": "56/12",
+          "flags": 2201,
+          "role": "static",
+          "pos": [
+            -1600,
+            0,
+            2000
+          ]
+        }
+      ],
+      "camera": {
+        "center": [
+          8,
+          110,
+          -86
+        ],
+        "rot": [
+          312.7,
+          0,
+          0
+        ],
+        "zoom": 2616,
+        "fov": 30,
+        "near": 80,
+        "far": 8000,
+        "source": "ovl112 constants"
+      }
+    }
+  ]
+}
