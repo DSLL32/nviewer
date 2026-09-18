@@ -129,7 +129,12 @@ Research complete (spec under `docs/`, implementation pending):
 | Glover | `r49/glover/` |
 | Stunt Racer 64 | `r49/stuntracer64/` |
 
-Research in progress (spec unfinished or under review): none currently.
+Research in progress (spec unfinished or under review):
+
+| Game | Research |
+|---|---|
+| Vigilante 8 | `r49/vigilante8/` |
+| Vigilante 8: 2nd Offense | `r49/vigilante8_2/` |
 
 Shared:
  - `r49/impl/`: per-agent check directories (`ge_core`, `pd_obj`, `zelda_mus`,
