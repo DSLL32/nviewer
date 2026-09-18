@@ -21,7 +21,7 @@ marked **Verified by disassembly** were checked against its MIPS program.
 | Sample encoding | Nintendo 9-byte-frame VADPCM in two unindexed wave-table banks. |
 | Levels | 11 indexed terrain `.EXP`/`.DLL` pairs. |
 | Memory requirement | Base 4 MiB; boot initializes the stack at `0x803FFFF0`. |
-| Viewer support | Research only; no Vigilante 8 loader or music player yet. |
+| Viewer support | USA revision 0: eleven static arena scenes, panoramas and fifteen music entries; collision and dynamic objects omitted. Post-implementation tests were skipped at user direction. |
 
 ### 1.2 ROM identification
 
@@ -645,31 +645,28 @@ orphan object. **Verified from decoded bytes and the complete directory.**
 
 ### 7.1 Module mapping
 
-A future `src/rom/vigilante8/` loader would pair archive parsing with the
-shared LZSS codec and libmus player. The asset container and display-list
-records are structurally known; world-space placement, collision, and
-animation remain harder.
-
-| Module responsibility | Suggested location | Difficulty |
-|---|---|---|
-| Archive lookup and LZSS | `src/rom/vigilante8/archive.ts` plus shared codec | Low; complete directory and compression grammar. |
-| `FORM`/`TERR` and XOBF models/textures | `src/rom/vigilante8/level.ts` | Medium; structures decoded, scene placement/projection pending. |
-| Terrain, paths, collision | `src/rom/vigilante8/terrain.ts` | High; height scale, material bits, physical rules unresolved. |
-| Music adapter | `src/rom/vigilante8/music.ts` using `src/rom/music/libmus.ts` | Low–medium; stream format renders, mixer settings unverified. |
+The implementation is split between the embedded directory and LZSS reader
+(`src/rom/vigilante8/fs.ts`), `FORM`/`TERR`, XOBF and F3DEX2 scene decoding
+(`level.ts`), arena assembly (`vigilante8.ts`), and a shared-libmus audio
+adapter (`music.ts`).
 
 ### 7.2 Supported features
 
-No Vigilante 8 loader is present in nviewer at the time of this specification.
-ROM identification, file extraction, LZSS decompression, level-title
-enumeration, and selected image decodes have been verified externally to the
-viewer.
+The viewer accepts `NV8E` revision 0 and lists all eleven indexed arenas.
+The loader builds static XOBF model instances from scene-node hierarchy,
+decodes model display lists and textures, and displays the `XBGM` panorama.
+The music box lists fifteen `SOUNDS` sequences. These implementation claims
+are from source inspection only; no post-implementation checks or renders
+were run, at the user's request.
 
 ### 7.3 Approximations and omissions
 
-Any future static viewer will need to distinguish level geometry from dynamic
-vehicles/projectiles and level-script effects. No approximation is presented
-as verified here; model, collision, animation, camera, and audio gaps are
-listed under their respective format sections.
+Scene-node translations use the structurally supported 1/256 scale, but the
+runtime transform and the node rotation field are not code-verified. The
+starting camera and cylindrical sky projection are viewer approximations.
+`ZONE`/`ZMAP` collision, dynamic vehicles/projectiles, object bindings and
+`JUNC`/`RSEG` routes are omitted. The music player uses neutral dry mixer
+settings because game-specific volume and reverb remain unmeasured.
 
 ## 8. Verification and remaining work
 

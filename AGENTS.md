@@ -114,6 +114,7 @@ Implemented (spec under `docs/`):
 | Spider-Man | `r49/spiderman/` | |
 | Stunt Racer 64 | `r49/stuntracer64/` | |
 | Cruis'n USA | `r49/cruisn_usa/` | scenery and music; collision/traffic unresolved |
+| Vigilante 8 | `r49/vigilante8/` | static scenes and music; post-implementation tests skipped |
 | Mario Kart 64 | `r49/mk64/` | archive course audit: `r49/mk64/archive_cut/` |
 | Mario Party (J) | `r49/mparty/` | |
 | Perfect Dark | `r49/pd/` | |
@@ -129,7 +130,6 @@ Research complete (spec under `docs/`, implementation pending):
 | Game | Research |
 |---|---|
 | Glover | `r49/glover/` |
-| Vigilante 8 | `r49/vigilante8/` |
 | Vigilante 8: 2nd Offense | `r49/vigilante8_2/` |
 
 Research in progress (spec unfinished or under review):
