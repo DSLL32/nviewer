@@ -29,6 +29,7 @@ link with `-lz`.
 | [Headerless raw DEFLATE](./raw-deflate.md) | [Gex 64](../GEX64.md), [Gex 3](../GEX3.md), [Rush 2049](../SAN_FRANCISCO_RUSH_2049.md) | Same codec |
 | [Chunked zlib](./chunked-zlib.md) | [Stunt Racer 64](../STUNTRACER64.md) | Decoder and encoder, zlib |
 | [Boss pattern LZ/RLE](./boss-pattern.md) | [Stunt Racer 64](../STUNTRACER64.md) | Decoder and encoder |
+| [FLA2](./fla2.md) | [Glover](../GLOVER.md) | Decoder and encoder |
 | [Hudson LZSS](./hudson-lzss.md), 1 KiB ring | [Bomberman 64](../BOMBERMAN64.md), [The Second Attack!](../BOMBERMAN64_SECOND_ATTACK.md) | C++ template |
 | [Hudson LZSS](./hudson-lzss.md), 4 KiB ring | [Bomberman Hero](../BOMBERMAN_HERO.md) | Same template |
 | [Rush LZSS](./rush-lzss.md) | [San Francisco Rush](../SAN_FRANCISCO_RUSH.md), [Rush 2049](../SAN_FRANCISCO_RUSH_2049.md) | Both variants: decoder and encoder |

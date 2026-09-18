@@ -7,6 +7,7 @@ questions. Shared codecs are documented under [Compression](./compression/).
 ## Games
 
 - [Air Boarder 64](./AIRBOARDER64.md)
+- [Banjo-Kazooie](./BANJOKAZOOIE.md)
 - [BattleTanx](./BATTLETANX.md)
 - [BattleTanx: Global Assault](./BATTLETANX_GLOBAL_ASSAULT.md)
 - [Bomberman 64](./BOMBERMAN64.md)
@@ -15,6 +16,7 @@ questions. Shared codecs are documented under [Compression](./compression/).
 - [A Bug's Life](./BUGSLIFE.md)
 - [Gex 3: Deep Cover Gecko](./GEX3.md)
 - [Gex 64: Enter the Gecko](./GEX64.md)
+- [Glover](./GLOVER.md)
 - [GoldenEye 007](./GOLDENEYE.md)
 - [Mario Kart 64](./MARIOKART64.md)
 - [Off Road Challenge](./OFFROADCHALLENGE.md)
@@ -24,6 +26,7 @@ questions. Shared codecs are documented under [Compression](./compression/).
 - [San Francisco Rush: Extreme Racing](./SAN_FRANCISCO_RUSH.md)
 - [San Francisco Rush 2049](./SAN_FRANCISCO_RUSH_2049.md)
 - [Spider-Man](./SPIDERMAN.md)
+- [Star Wars: Shadows of the Empire](./SHADOWS_OF_THE_EMPIRE.md)
 - [Star Fox 64](./STARFOX.md)
 - [Stunt Racer 64](./STUNTRACER64.md)
 - [Yoshi's Story](./YOSHISTORY.md)

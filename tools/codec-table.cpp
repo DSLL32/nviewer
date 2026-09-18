@@ -27,6 +27,8 @@ CODEC(airboarder_lh5_decode); CODEC(airboarder_lh5_encode);
 CODEC(vpk0_decode);
 int vpk0_encode(const uint8_t *, size_t, uint8_t *, size_t, size_t *, unsigned);
 CODEC(erz2_decode); CODEC(erz2_encode);
+int fla2_decode(const uint8_t *, size_t, uint8_t *, size_t, size_t *, size_t *);
+CODEC(fla2_encode);
 #undef CODEC
 }
 
@@ -55,6 +57,13 @@ static int boss_pattern_encode(const uint8_t *src, size_t size, uint8_t *dst,
         *used = out.size();
         return 0;
     } catch (...) { return -1; }
+}
+
+static int fla2_checked_decode(const uint8_t *src, size_t size, uint8_t *dst,
+                               size_t cap, size_t *used) {
+    size_t consumed = 0;
+    if (fla2_decode(src, size, dst, cap, used, &consumed)) return -1;
+    return consumed == size ? 0 : -1;
 }
 
 static uint32_t be32(const uint8_t *p) {
@@ -130,6 +139,7 @@ static std::pair<Codec *, Codec *> codec(const char *name) {
     PAIR("rare1173", rare1173_decode, rare1173_encode);
     PAIR("chunked-zlib", chunked_zlib_decode, chunked_zlib_encode);
     PAIR("boss-pattern", boss_pattern_decode, boss_pattern_encode);
+    PAIR("fla2", fla2_checked_decode, fla2_encode);
     PAIR("hudson1", hudson1_decode, hudson1_encode);
     PAIR("hudson4", hudson4_decode, hudson4_encode);
     PAIR("rush1-lzss", rush1_lzss_decode, rush1_lzss_encode);
