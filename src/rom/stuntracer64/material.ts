@@ -137,20 +137,21 @@ export function decodeMaterials(primary: Uint8Array, bundleOffset: number, textu
     // image. On a repeating axis the tile mask defines that period; only a
     // clamped axis is bounded by the rectangle. The six-tile mip materials
     // often declare a rectangle two texels shorter than the full base level.
-    const width = tile.maskS
-      ? (tile.cmS & 2) ? Math.min(sampleWidth, 1 << tile.maskS) : 1 << tile.maskS
-      : sampleWidth;
-    const height = tile.maskT
-      ? (tile.cmT & 2) ? Math.min(sampleHeight, 1 << tile.maskT) : 1 << tile.maskT
-      : sampleHeight;
-    if (!rowBytes || !width || !height || width > 256 || height > 256 ||
+    const baseWidth = tile.maskS ? 1 << tile.maskS : sampleWidth;
+    const baseHeight = tile.maskT ? 1 << tile.maskT : sampleHeight;
+    // A clamped tile may have a rectangle *wider* than its mask period. RDP
+    // clamps to the rectangle, then wraps or mirrors within the mask period.
+    // Bake that finite interval because Texture can express only one wrap mode.
+    const width = (tile.cmS & 2) ? sampleWidth : baseWidth;
+    const height = (tile.cmT & 2) ? sampleHeight : baseHeight;
+    if (!rowBytes || !width || !height || width > 1024 || height > 1024 ||
         image.off < 0 || image.off + image.bytes > primary.length || image.bytes > 4096) {
       throw new Error(`Stunt Racer material ${i} has invalid TMEM tile extent`);
     }
     if (palette && palette.off + palette.count * 2 > primary.length) {
       throw new Error(`Stunt Racer material ${i} has invalid palette extent`);
     }
-    const key = `${image.off}:${image.bytes}:${tile.tmem}:${rowBytes}:${width}:${height}:${tile.format}:${bpp}:${tile.palette}:${palette?.off ?? -1}:${palette?.count ?? 0}`;
+    const key = `${image.off}:${image.bytes}:${tile.tmem}:${rowBytes}:${width}:${height}:${tile.cmS}:${tile.cmT}:${tile.maskS}:${tile.maskT}:${tile.format}:${bpp}:${tile.palette}:${palette?.off ?? -1}:${palette?.count ?? 0}`;
     let texture = cache.get(key);
     if (texture === undefined) {
       const rgba = new Uint8Array(width * height * 4);
@@ -161,22 +162,29 @@ export function decodeMaterials(primary: Uint8Array, bundleOffset: number, textu
       const tmem = new Uint8Array(4096);
       tmem.set(primary.subarray(image.off, image.off + image.bytes));
       const addressMask = palette ? 0x7ff : 0xfff;
+      const sampleCoord = (coordinate: number, mask: number, mode: number): number => {
+        if (!mask) return coordinate;
+        const period = 1 << mask, part = Math.floor(coordinate / period);
+        const within = coordinate % period;
+        return (mode & 1) && (part & 1) ? period - 1 - within : within;
+      };
       for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
-        const byteInRow = Math.floor(x * bpp / 8);
-        const p = (tile.tmem * 8 + y * rowBytes + (byteInRow ^ ((y & 1) ? 4 : 0))) & addressMask;
+        const sx = sampleCoord(x, tile.maskS, tile.cmS), sy = sampleCoord(y, tile.maskT, tile.cmT);
+        const byteInRow = Math.floor(sx * bpp / 8);
+        const p = (tile.tmem * 8 + sy * rowBytes + (byteInRow ^ ((sy & 1) ? 4 : 0))) & addressMask;
         const dst = (y * width + x) * 4;
         if (tile.format === 0 && bpp === 16) {
           rgba16(tmem, p, rgba, dst);
         } else if (tile.format === 2 && (bpp === 4 || bpp === 8)) {
           if (!palette) throw new Error(`Stunt Racer CI material ${i} has no TLUT`);
-          const index = bpp === 4 ? ((x & 1) ? tmem[p] & 15 : tmem[p] >>> 4) + tile.palette * 16 : tmem[p];
+          const index = bpp === 4 ? ((sx & 1) ? tmem[p] & 15 : tmem[p] >>> 4) + tile.palette * 16 : tmem[p];
           if (index >= palette.count) throw new Error(`Stunt Racer CI material ${i} exceeds TLUT`);
           rgba16(primary, palette.off + index * 2, rgba, dst);
         } else if (tile.format === 3 && bpp === 8) {
           rgba[dst] = rgba[dst + 1] = rgba[dst + 2] = (tmem[p] >>> 4) * 17;
           rgba[dst + 3] = (tmem[p] & 15) * 17;
         } else if (tile.format === 4 && bpp === 4) {
-          rgba[dst] = rgba[dst + 1] = rgba[dst + 2] = ((x & 1) ? tmem[p] & 15 : tmem[p] >>> 4) * 17;
+          rgba[dst] = rgba[dst + 1] = rgba[dst + 2] = ((sx & 1) ? tmem[p] & 15 : tmem[p] >>> 4) * 17;
           rgba[dst + 3] = 255;
         } else {
           throw new Error(`Stunt Racer material ${i} unsupported texture format ${tile.format}/${bpp}`);
