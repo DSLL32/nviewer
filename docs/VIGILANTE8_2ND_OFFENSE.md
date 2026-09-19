@@ -451,7 +451,17 @@ parser at relative `0x1C2C` adds 44 to `xobfBank` and indexes the loaded-resourc
 table at `0x8020EE00`. It resolves `name` first through the level DLL's class
 registry and then through the resident fallback registry. Resident constructor
 `0x80148254` passes the selected XOBF and `xobfRoot` to graph constructor
-`0x80141E44`.
+`0x80141E44`. After construction, the parser overwrites the selected runtime
+root's archived translation and angles with the `HEAD` world pose and invokes
+`0x80142B44` to rebuild its matrix. The archived local transform therefore
+applies only to descendants, not to the selected root itself.
+
+A live Steel Mill RAM check confirms the path. `MPost` root 11's archived
+translation `{0x00010000, 0xFFFC0001, 0x0002263C}` becomes
+`{0x03A30000, 0x002A0000, 0x05720000}` in both runtime translation slots;
+the latter is its `HEAD` position with exactly `0x00100000` removed from Y.
+`BridgeL` root 22 independently exhibits the same replacement. No archived
+root offset or additional position scale survives the matrix rebuild.
 
 Construction instantiates only the selected root, not its root-level sibling.
 It recursively instantiates the root's child list and follows sibling links
@@ -666,7 +676,7 @@ materials.
 | Level container | Eight `EXP` files parse as complete `FORM/TERR`; child walk ends at exact decoded size. |
 | Geometry | XOBF section offsets and first HARBOR model's vertex-count/span/display-list consistency checked from decoded bytes; node fields, 24.8 translation and transform construction checked against resident disassembly. |
 | Object binding | `LOAD.DLL` relative `0x1C2C`, resident `0x80148254`/`0x80141E44`, all `FORM/OBJ` bank/root fields, and the level-DLL name registries establish deterministic selected-root construction. |
-| Object placement | All eight arenas rendered offline with authored world poses; scaled assembly bounds coincide with occupied terrain bounds, without unrelated XOBF roots at the origin. |
+| Object placement | `LOAD.DLL`'s OBJ parser was traced through selected-root construction, root-pose overwrite and matrix rebuild; live Steel Mill RAM confirmed exact replacement for `MPost` and `BridgeL`. All eight arenas were rendered offline; placed assembly bounds coincide with occupied terrain bounds without unrelated roots or duplicate root-pivot offsets. |
 | Lighting state | Entry-state dependency established by scanning the first vertex load of every HARBOR and OILFIELD model and by later explicit `D9` lighting toggles. |
 | Visible terrain | ZMAP/ZONE position and height conversion, the 2-unit render grid, XTIN loader, UV-orientation table, triangle selection, XBMP atlas and COLS ramp checked from decoded bytes and sequel disassembly; all eight surfaces rendered coherently offline. |
 | Terrain collision | ZMAP pointer-grid population, ZONE unpacking, one-unit grid, height scaling and interpolation checked in the sequel's level overlay and resident disassembly. |

@@ -217,8 +217,8 @@ function appendPlacement(
   if (!bank || placement.root >= bank.nodes.length) return [];
   const placed: number[] = [], visited = new Set<number>();
   const parent = nodeMatrix(placement.position, placement.angles);
-  const stack: Array<{ index: number; parent: Float32Array; siblings: boolean }> = [
-    { index: placement.root, parent, siblings: false },
+  const stack: Array<{ index: number; parent: Float32Array; siblings: boolean; root: boolean }> = [
+    { index: placement.root, parent, siblings: false, root: true },
   ];
   while (stack.length) {
     const entry = stack.pop()!;
@@ -228,11 +228,15 @@ function appendPlacement(
     // The selected root is singular. Once traversal enters its child list,
     // sibling links enumerate the remaining pieces of that assembly.
     if (entry.siblings && node.sibling !== 0xffff)
-      stack.push({ index: node.sibling, parent: entry.parent, siblings: true });
+      stack.push({ index: node.sibling, parent: entry.parent, siblings: true, root: false });
     if (node.disabled) continue;
-    const world = multiplyMatrix(entry.parent, nodeMatrix(node.position, node.angles));
+    // LOAD.DLL overwrites the selected runtime root's archived translation and
+    // angles with the OBJ HEAD pose before rebuilding its matrix. Descendants
+    // retain and compose their archived local transforms.
+    const world = entry.root ? entry.parent
+      : multiplyMatrix(entry.parent, nodeMatrix(node.position, node.angles));
     if (node.child !== 0xffff)
-      stack.push({ index: node.child, parent: world, siblings: true });
+      stack.push({ index: node.child, parent: world, siblings: true, root: false });
     const mesh = bank.models[node.model];
     if (mesh === undefined || !level.meshes[mesh].batches.length) continue;
     usedMeshes.add(mesh);
