@@ -1,5 +1,6 @@
 import { runDisplayList } from '../displaylist';
 import type { Batch, Level, Mesh, Texture } from '../types';
+import { appendVigilante8Collision } from './collision';
 
 const IDENTITY = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
 
@@ -44,6 +45,34 @@ function meshRadius(batches: Batch[]): number {
   return Math.sqrt(radius2);
 }
 
+function nodeMatrix(position: [number, number, number], angles: [number, number, number]): Float32Array {
+  const radians = Math.PI * 2 / 0x1000;
+  const sa = Math.sin(angles[0] * radians), ca = Math.cos(angles[0] * radians);
+  const sb = Math.sin(angles[1] * radians), cb = Math.cos(angles[1] * radians);
+  const sc = Math.sin(angles[2] * radians), cc = Math.cos(angles[2] * radians);
+  // Exact matrix built by the game's 0x8012FAA8 node-transform routine. X
+  // reflection on both sides converts it to the viewer's handedness.
+  const r00 = sc * sa * sb + cc * cb, r01 = cc * sa * sb - sc * cb, r02 = ca * sb;
+  const r10 = sc * ca, r11 = cc * ca, r12 = -sa;
+  const r20 = sc * sa * cb - cc * sb, r21 = cc * sa * cb + sc * sb, r22 = ca * cb;
+  return new Float32Array([
+    r00, -r10, -r20, 0,
+    -r01, r11, r21, 0,
+    -r02, r12, r22, 0,
+    -position[0], position[1], position[2], 1,
+  ]);
+}
+
+function multiplyMatrix(a: Float32Array, b: Float32Array): Float32Array {
+  const out = new Float32Array(16);
+  for (let column = 0; column < 4; column++) for (let row = 0; row < 4; row++) {
+    let value = 0;
+    for (let i = 0; i < 4; i++) value += a[i * 4 + row] * b[column * 4 + i];
+    out[column * 4 + row] = value;
+  }
+  return out;
+}
+
 function appendBank(bytes: Uint8Array, bin: Chunk, level: Level, bankIndex: number): number[] {
   const base = bin.data, dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const modelCount = dv.getUint32(base), modelSection = base + dv.getUint32(base + 4);
@@ -82,7 +111,10 @@ function appendBank(bytes: Uint8Array, bin: Chunk, level: Level, bankIndex: numb
     const at = base + 0x1c + i * 28;
     return {
       model: dv.getUint16(at) & 0xff,
-      position: [dv.getInt32(at + 4) / 256, dv.getInt32(at + 8) / 256, dv.getInt32(at + 12) / 256] as [number, number, number],
+      position: [dv.getInt32(at + 4) / 0x10000, dv.getInt32(at + 8) / 0x10000,
+        dv.getInt32(at + 12) / 0x10000] as [number, number, number],
+      angles: [dv.getUint16(at + 16) & 0xfff, dv.getUint16(at + 18) & 0xfff,
+        dv.getUint16(at + 20) & 0xfff] as [number, number, number],
       sibling: dv.getUint16(at + 24), child: dv.getUint16(at + 26), at,
     };
   });
@@ -93,21 +125,19 @@ function appendBank(bytes: Uint8Array, bin: Chunk, level: Level, bankIndex: numb
   }
   const roots = nodes.map((_, i) => i).filter((i) => !referred.has(i));
   const placed: number[] = [], visited = new Set<number>();
-  const stack = roots.reverse().map((index) => ({ index, parent: [0, 0, 0] as [number, number, number] }));
+  const stack: { index: number; parent: Float32Array }[] =
+    roots.reverse().map((index) => ({ index, parent: IDENTITY }));
   while (stack.length) {
     const { index, parent } = stack.pop()!;
     if (index >= nodes.length || visited.has(index)) continue;
     visited.add(index);
     const node = nodes[index];
-    const world: [number, number, number] = [parent[0] + node.position[0], parent[1] + node.position[1], parent[2] + node.position[2]];
+    const world = multiplyMatrix(parent, nodeMatrix(node.position, node.angles));
     if (node.sibling !== 0xffff) stack.push({ index: node.sibling, parent });
     if (node.child !== 0xffff) stack.push({ index: node.child, parent: world });
     if (node.model >= models.length || !level.meshes[models[node.model]].batches.length) continue;
-    const matrix = IDENTITY.slice();
-    // F3DEX positions are mirrored into the viewer's handedness, so their translations are too.
-    matrix[12] = -world[0]; matrix[13] = world[1]; matrix[14] = world[2];
     placed.push(level.instances.push({
-      name: `Bank ${bankIndex + 1} node ${index}`, mesh: models[node.model], matrix,
+      name: `Bank ${bankIndex + 1} node ${index}`, mesh: models[node.model], matrix: world,
       info: { bank: bankIndex, node: index, model: node.model, record: `0x${node.at.toString(16)}` },
     }) - 1);
   }
@@ -160,7 +190,10 @@ function updateBounds(level: Level, instances: number[]): void {
   for (const index of instances) {
     const instance = level.instances[index], matrix = instance.matrix;
     for (const batch of level.meshes[instance.mesh].batches) for (let i = 0; i < batch.positions.length; i += 3) {
-      const x = batch.positions[i] + matrix[12], y = batch.positions[i + 1] + matrix[13], z = batch.positions[i + 2] + matrix[14];
+      const px = batch.positions[i], py = batch.positions[i + 1], pz = batch.positions[i + 2];
+      const x = matrix[0] * px + matrix[4] * py + matrix[8] * pz + matrix[12];
+      const y = matrix[1] * px + matrix[5] * py + matrix[9] * pz + matrix[13];
+      const z = matrix[2] * px + matrix[6] * py + matrix[10] * pz + matrix[14];
       level.bounds.min[0] = Math.min(level.bounds.min[0], x); level.bounds.max[0] = Math.max(level.bounds.max[0], x);
       level.bounds.min[1] = Math.min(level.bounds.min[1], y); level.bounds.max[1] = Math.max(level.bounds.max[1], y);
       level.bounds.min[2] = Math.min(level.bounds.min[2], z); level.bounds.max[2] = Math.max(level.bounds.max[2], z);
@@ -179,6 +212,8 @@ export function decodeVigilante8Level(bytes: Uint8Array, level: Level): void {
     placed.push(...appendBank(bytes, bin, level, i));
   }
   level.layers!.push({ name: 'scenery', kind: 'main', instances: placed });
+  appendVigilante8Collision(bytes, top.find((chunk) => chunk.tag === 'ZMAP'),
+    top.filter((chunk) => chunk.tag === 'ZONE'), level);
   updateBounds(level, placed);
   const sky = top.find((chunk) => chunk.tag === 'XBGM');
   if (sky) appendSky(bytes, sky, level);

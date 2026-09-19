@@ -15,13 +15,13 @@ marked **Verified by disassembly** were checked against its MIPS program.
 | Graphics microcode | F3DEX FIFO 2.06, identified by its embedded RSP version string. |
 | Geometry | IFF `FORM`/`TERR` terrain `.EXP` plus per-level MIPS `.DLL` behavior overlays. |
 | Textures | Indexed terrain/sky bitmaps with RGBA5551 palettes; embedded and standalone JPEGs for previews and slides. |
-| Collision | Terrain has 64×64 packed samples in `ZONE` chunks, indexed by `ZMAP`; exact surface and object-collision rules remain open. |
+| Collision | Runtime height surface: 32×32 `ZMAP` of 64×64-sample `ZONE` tiles, with 1-unit X/Z spacing, 1/32-unit height scale, and fixed diagonal interpolation. Object-shape collision remains unresolved. |
 | Music driver | libmus-compatible version `0x215` sequencer; 15 indexed songs. |
 | Audio microcode | **Unknown**. |
 | Sample encoding | Nintendo 9-byte-frame VADPCM in two unindexed wave-table banks. |
 | Levels | 11 indexed terrain `.EXP`/`.DLL` pairs. |
 | Memory requirement | Base 4 MiB; boot initializes the stack at `0x803FFFF0`. |
-| Viewer support | USA revision 0: eleven static arena scenes, panoramas and fifteen music entries; collision and dynamic objects omitted. Post-implementation tests were skipped at user direction. |
+| Viewer support | USA revision 0: eleven static arena scenes, panoramas, hidden terrain-collision layers, and fifteen music entries; dynamic objects omitted. |
 
 ### 1.2 ROM identification
 
@@ -242,21 +242,20 @@ zero-vertex placeholders. **Verified from all model index bounds.**
 | `0x0C` | 12 | u8[12] | unknown_0C | Three metadata words not interpreted. |
 | `vertexDataOffset` | `16 × vertexCount` | Vtx[] | vertices | Standard N64 signed XYZ, flag, ST, and RGBA fields. |
 
-The terrain itself has `ZONE` chunks, each `0x4000` bytes. Interpreting them
-as 64×64 BE32 words, the upper 16 bits form a smooth, seam-continuous
-height-like field; the lower 16 bits vary independently and remain
-unidentified. This is a strongly supported **Hypothesis**, not yet a
-code-verified height scale or collision rule. The `0x800`-byte `ZMAP` is a
-sparse one-based index: its only nonzero bytes are exactly `1…N`, matching
-the N `ZONE` chunks (N is 4, 6, or 9). **Verified across all eleven maps.**
+The terrain itself has `ZONE` chunks, each `0x4000` bytes. Each is a 64×64
+array of packed BE32 samples in X-major order. The `0x800`-byte `ZMAP` is a
+32×32 BE16 array of one-based zone IDs in Z-major, X-minor order; zero selects
+the initialized default tile. Every map contains exactly the IDs `1…N`,
+matching its N `ZONE` chunks (N is 4, 6, or 9). **Verified across all eleven
+maps from ROM bytes; layout and axes verified by disassembly and live RAM.**
 
 | Offset | Size | Type | Field | Description |
 |---:|---:|---|---|---|
-| `0x00` | `0x800` | u8[2048] | zoneIndexMap | Sparse zero/one-based zone IDs; observed grouping has 64-byte row stride. |
+| `0x00` | `0x800` | u16[32][32] | zoneIndexMap | BE16 one-based `ZONE` IDs indexed as `[zBlock][xBlock]`; zero selects the default tile. |
 
 | Offset | Size | Type | Field | Description |
 |---:|---:|---|---|---|
-| `0x00` | `0x4000` | u32[4096] | zoneSamples | 64×64 packed upper/lower 16-bit samples. |
+| `0x00` | `0x4000` | u32[64][64] | zoneSamples | BE32 packed samples indexed as `[localX][localZ]`. |
 
 ### 3.4 Display lists and render state
 
@@ -314,12 +313,36 @@ to an eight-byte boundary.
 
 ### 3.6 Collision
 
-The upper 16 bits of each packed `ZONE` sample form a seam-continuous terrain
-height field, a strong geometry/collision candidate. However, the runtime
-height scale, coordinate origin, interpolation, and use for vehicle contact
-have not been proved by code or RAM observation. Do not assume each sample
-is a world-space vertex without that mapping. **Verified structural pattern;
-runtime interpretation is a hypothesis.**
+The runtime expands each active `ZONE` into a `0x3000`-byte buffer: 4096 BE16
+values copied from each source sample's upper half, followed by 4096 material
+bytes copied from the source sample's low byte. A live Oil Fields capture
+matched every height and material value in all six active zones. The
+intervening source byte is not retained in this runtime representation.
+**Verified by ROM/RAM comparison and disassembly.**
+
+| Source offset | Size | Type | Field | Runtime interpretation |
+|---:|---:|---|---|---|
+| `0x00` | 2 | u16 | heightAndShade | Low 11 bits are height; high 5 bits select renderer metadata. |
+| `0x02` | 1 | u8 | unknown_02 | Not retained in the expanded height/material buffer. |
+| `0x03` | 1 | u8 | material | Index into 24-byte runtime material records. |
+
+For world coordinates `(X,Z)`, the game selects
+`ZMAP[floor(Z/64)][floor(X/64)]`; the local sample is
+`ZONE[X mod 64][Z mod 64]`. A sample is positioned at
+`(X, (heightAndShade & 0x07ff) / 32, Z)`. The terrain matrix independently
+uses scale `(1, 1/32, 1)`. A zero ZMAP cell uses a default tile initialized to
+height/metadata value `0x45ff` and material zero. **Verified by disassembly and
+a live height-query breakpoint.**
+
+Each grid cell is split along `xFraction + zFraction = 1`. The lower triangle
+uses corners `(x,z)`, `(x+1,z)`, `(x,z+1)`; the upper triangle uses
+`(x+1,z+1)`, `(x,z+1)`, `(x+1,z)`. The height-query routine performs linear
+interpolation over those same triangles. **Verified by disassembly.**
+
+The resident terrain initializer, height query, material query, and renderer
+begin at `0x8013F520`, `0x8013F698`, `0x8013F884`, and `0x8013FDA8`,
+respectively. The runtime pointer grid is based at `0x801A8F80`, with its
+first terrain-cell pointer at `+0x80`.
 
 The XOBF shape section has 823 indexed records in 22 banks. The scene-node
 `shapeIndex` field references every shape record **exactly once** within its
@@ -345,9 +368,9 @@ first shape spans `(-1724,-3568,-1962)` to `(1724,0,1962)`, consistent
 with a local-space bounding box. Another node-associated shape's X bounds,
 `−716816…+716951`, divided by 256 approximate its model vertices'
 `−2800…+2800` X range. Signed 24.8 fixed-point is therefore a
-**Hypothesis** for these bounds and scene-node coordinates, not yet
-code-verified. **Verified from decoded record and vertex bounds; use as
-physical collision bounds remains a hypothesis.**
+**Hypothesis** for these shape bounds, not yet code-verified. **Verified from
+decoded record and vertex bounds; use as physical collision bounds remains a
+hypothesis.**
 
 | Offset | Size | Type | Field | Description |
 |---:|---:|---|---|---|
@@ -449,19 +472,24 @@ cross-links. The low eight bits of the word at `+0x00` are a valid model
 index in 6,928 nodes, `0xFF` in 198, and special out-of-range values in two
 Casino City nodes. The `+0x02` word is either `0xFFFF` (6,305 nodes) or an
 in-range shape index (823 nodes), with every shape referenced exactly once.
-Graph topology is structurally verified; runtime traversal and object
-binding remain **Unknown**. A 1/256 fixed-point coordinate scale is
-structurally supported as noted under collision, but not code-verified.
+The runtime builds each local transform from three 12-bit-turn angles and
+signed 16.16 translations, then recursively composes `parent × local` for a
+first child while retaining the parent transform for a sibling. The transform
+builder is at `0x8012FAA8`; the local-matrix wrapper at `0x80137410` copies the
+three translation words without scaling. **Verified from ROM bytes and
+disassembly.** Object binding remains **Unknown**.
 
 | Offset | Size | Type | Field | Description |
 |---:|---:|---|---|---|
 | `0x00` | 2 | u16 | modelAndFlags | Low byte usually model index; exact flags unknown. |
 | `0x02` | 2 | u16 | shapeIndex | Shape index or `0xFFFF`. |
-| `0x04` | 4 | s32 | x | Node X coordinate; unit scale unknown. |
-| `0x08` | 4 | s32 | y | Node Y coordinate; unit scale unknown. |
-| `0x0C` | 4 | s32 | z | Node Z coordinate; unit scale unknown. |
-| `0x10` | 4 | u32 | transformOrRotation | Meaning not fully established. |
-| `0x14` | 4 | u32 | unknown_14 | Uninterpreted. |
+| `0x04` | 4 | s32 | x | Signed 16.16 local X translation. |
+| `0x08` | 4 | s32 | y | Signed 16.16 local Y translation. |
+| `0x0C` | 4 | s32 | z | Signed 16.16 local Z translation. |
+| `0x10` | 2 | u16 | angleA | Low 12 bits, one turn = 4096. |
+| `0x12` | 2 | u16 | angleB | Low 12 bits, one turn = 4096. |
+| `0x14` | 2 | u16 | angleC | Low 12 bits, one turn = 4096. |
+| `0x16` | 2 | u16 | auxiliary | Runtime use not established. |
 | `0x18` | 2 | u16 | nextSibling | Forward node index or `0xFFFF`. |
 | `0x1A` | 2 | u16 | firstChild | Next record's index or `0xFFFF`. |
 
@@ -647,26 +675,25 @@ orphan object. **Verified from decoded bytes and the complete directory.**
 
 The implementation is split between the embedded directory and LZSS reader
 (`src/rom/vigilante8/fs.ts`), `FORM`/`TERR`, XOBF and F3DEX2 scene decoding
-(`level.ts`), arena assembly (`vigilante8.ts`), and a shared-libmus audio
-adapter (`music.ts`).
+(`level.ts`), terrain collision (`collision.ts`), arena assembly
+(`vigilante8.ts`), and a shared-libmus audio adapter (`music.ts`).
 
 ### 7.2 Supported features
 
 The viewer accepts `NV8E` revision 0 and lists all eleven indexed arenas.
 The loader builds static XOBF model instances from scene-node hierarchy,
 decodes model display lists and textures, and displays the `XBGM` panorama.
-The music box lists fifteen `SOUNDS` sequences. These implementation claims
-are from source inspection only; no post-implementation checks or renders
-were run, at the user's request.
+It also builds the code-verified `ZMAP`/`ZONE` surface as a hidden collision
+layer. The music box lists fifteen `SOUNDS` sequences.
 
 ### 7.3 Approximations and omissions
 
-Scene-node translations use the structurally supported 1/256 scale, but the
-runtime transform and the node rotation field are not code-verified. The
-starting camera and cylindrical sky projection are viewer approximations.
-`ZONE`/`ZMAP` collision, dynamic vehicles/projectiles, object bindings and
-`JUNC`/`RSEG` routes are omitted. The music player uses neutral dry mixer
-settings because game-specific volume and reverb remain unmeasured.
+Scene-node translations, rotations, and parent/child composition follow the
+resident transform code. The starting camera and cylindrical sky projection
+are viewer approximations. Dynamic vehicles/projectiles, object-shape
+collision, object bindings and `JUNC`/`RSEG` routes are omitted. The music
+player uses neutral dry mixer settings because game-specific volume and
+reverb remain unmeasured.
 
 ## 8. Verification and remaining work
 
@@ -679,18 +706,18 @@ settings because game-specific volume and reverb remain unmeasured.
 | LZSS | 66 indexed streams decoded to advertised sizes while consuming exact stored payloads. |
 | Level containers | Eleven `FORM`/`TERR` roots; top-level lengths equal decoded sizes; HEAD object counts match every map's object forms. |
 | Models/textures/nodes | 65 XOBF banks: 2,364 model records and 2,103 textures satisfy exact size formulas; the 22 terrain banks' 7,128 scene nodes satisfy graph-link constraints. |
-| Terrain index | Every `ZMAP` has exactly the IDs of its 4/6/9 `ZONE` chunks; upper sample halves are seam-continuous. |
+| Terrain index and collision | Every `ZMAP` has exactly the IDs of its 4/6/9 `ZONE` chunks. Disassembly establishes axes, scale, sampling and triangulation; all six Oil Fields source zones matched their expanded live RAM buffers exactly. |
 | Image formats | Eleven terrain bitmaps and sky panoramas satisfy texture bounds; Oil Fields panorama matches a captured attract-demo backdrop. |
 | Audio | Both banks' 249 wave records and all 15 song files parse; every song produced nonzero PCM and valid loop bounds in the shared player. |
 | Hidden-level descriptor | Missing `V9HARBOR` asset established from full index; normal-menu bound proved by MIPS disassembly. |
 
 ### 8.2 Known unknowns
 
-The terrain height scale/origin, lower packed-sample bits, exact collision
-rules, overlay relocation ABI, environment/fog controls, dynamic object
-bindings, vehicle animation, game-specific audio mixer settings, audio
-microcode ID, and runtime reachability of residual controller/debug strings
-remain open. Other regional revisions have not been compared.
+The source sample's byte at `+0x02`, XOBF shape-record collision rules,
+overlay relocation ABI, environment/fog controls, dynamic object bindings,
+vehicle animation, game-specific audio mixer settings, audio microcode ID,
+and runtime reachability of residual controller/debug strings remain open.
+Other regional revisions have not been compared.
 
 ### 8.3 References
 
