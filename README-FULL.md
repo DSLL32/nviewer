@@ -5,7 +5,7 @@ A browser viewer for the levels of these N64 games (USA versions): *San Francisc
 *Bomberman Hero*, *BattleTanx*, *BattleTanx: Global Assault*, *Gex 64: Enter the Gecko*,
 *Gex 3: Deep Cover Gecko*, *Yoshi's Story* (Japan), *Star Fox 64* (V1.0 and V1.1), *GoldenEye 007*,
 *Banjo-Kazooie* (USA V1.0),
-*Off Road Challenge* (USA and Europe), *Air Boarder 64* (Japan and Europe), *Pilotwings 64* (USA, Europe and Japan), *Pokémon Snap*, *A Bug's Life* (USA and Europe), *Spider-Man*, *Stunt Racer 64* (USA), *Cruis'n USA* (USA V1.0; scenery and music, without collision or traffic), *Vigilante 8* and *Vigilante 8: 2nd Offense* (USA; untested static scenes and music), *Star Wars: Shadows of the Empire* (USA V1.0–V1.2 and Europe), *007: The World Is Not Enough* (USA and Europe),
+*Off Road Challenge* (USA and Europe), *Air Boarder 64* (Japan and Europe), *Pilotwings 64* (USA, Europe and Japan), *Pokémon Snap*, *A Bug's Life* (USA and Europe), *Spider-Man*, *Stunt Racer 64* (USA), *Cruis'n USA* (USA V1.0; scenery and music, without collision or traffic), *Vigilante 8* and *Vigilante 8: 2nd Offense* (USA; static scenes, terrain collision and music), *Star Wars: Shadows of the Empire* (USA V1.0–V1.2 and Europe), *007: The World Is Not Enough* (USA and Europe),
 *Mario Kart 64* (USA, V1.0), *Mario Party* (Japan), *Perfect Dark* (V1.0), and *The Legend of Zelda: Ocarina of Time* and
 *Majora's Mask* (retail and debug builds, plus the 1997 Ocarina of Time prototype preserved on an F-Zero X development
 cartridge). Load one or more ROMs, pick a level in the sidebar, and fly around freely, with
@@ -139,10 +139,10 @@ Z shows or hides collision · Shift+F collision wireframe · the View panel can 
     - `cruisnusa.ts`, `sky.ts`: course placement, path markers and sky panorama
     - `music.ts`: 14 WESS sequences
   - `vigilante8/`: Vigilante 8 (USA; format notes in `docs/VIGILANTE8.md`)
-    - `fs.ts`, `level.ts`: archive/LZSS, terrain model banks, textures and scene nodes
+    - `fs.ts`, `level.ts`, `collision.ts`: archive/LZSS, terrain model banks, textures, scene nodes and terrain collision
     - `vigilante8.ts`, `music.ts`: 11 arenas and 15 libmus songs
   - `vigilante8_2/`: Vigilante 8: 2nd Offense (USA; format notes in `docs/VIGILANTE8_2ND_OFFENSE.md`)
-    - `fs.ts`, `level.ts`: six-group archive, sequel XOBF model banks, textures and scene nodes
+    - `fs.ts`, `level.ts`: six-group archive, sequel XOBF model banks, textures, scene nodes and terrain collision
     - `vigilante8_2.ts`, `music.ts`: eight arenas and 36 libmus-compatible cues
   - `shadows/`: Shadows of the Empire (USA V1.0–V1.2 and Europe; format notes in `docs/SHADOWS_OF_THE_EMPIRE.md`)
     - `archive.ts`, `codecs.ts`: Ogre scene catalog, LZHUF and intro LZSS decoding
