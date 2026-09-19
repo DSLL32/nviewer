@@ -135,7 +135,9 @@ Research complete (spec under `docs/`, implementation pending):
 
 Research in progress (spec unfinished or under review):
 
-None currently.
+| Game | Research |
+|---|---|
+| Kirby 64: The Crystal Shards | `r49/kirby64/` |
 
 Shared:
  - `r49/impl/`: per-agent check directories (`ge_core`, `pd_obj`, `zelda_mus`,
