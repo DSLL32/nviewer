@@ -50,35 +50,30 @@ function meshRadius(batches: Batch[]): number {
   return Math.sqrt(radius2);
 }
 
-function nodeMatrix(position: [number, number, number], angles: [number, number, number]): typeof IDENTITY {
-  const radians = Math.PI * 2 / 0x1000;
-  const sa = Math.sin(angles[0] * radians), ca = Math.cos(angles[0] * radians);
-  const sb = Math.sin(angles[1] * radians), cb = Math.cos(angles[1] * radians);
-  const sc = Math.sin(angles[2] * radians), cc = Math.cos(angles[2] * radians);
-  // Exact matrix built by the game's 0x8013B930 XOBF-node routine. The X
-  // reflection on both sides converts it to the viewer's handedness.
-  const r00 = sc * sa * sb + cc * cb, r01 = cc * sa * sb - sc * cb, r02 = ca * sb;
-  const r10 = sc * ca, r11 = cc * ca, r12 = -sa;
-  const r20 = sc * sa * cb - cc * sb, r21 = cc * sa * cb + sc * sb, r22 = ca * cb;
-  return new Float32Array([
-    r00, -r10, -r20, 0,
-    -r01, r11, r21, 0,
-    -r02, r12, r22, 0,
-    -position[0], position[1], position[2], 1,
-  ]);
-}
-
-function multiplyMatrix(a: Float32Array, b: Float32Array): typeof IDENTITY {
-  const out = new Float32Array(16);
-  for (let column = 0; column < 4; column++) for (let row = 0; row < 4; row++) {
-    let value = 0;
-    for (let i = 0; i < 4; i++) value += a[i * 4 + row] * b[column * 4 + i];
-    out[column * 4 + row] = value;
+function mirrorBatchesY(batches: Batch[]): void {
+  const swap = (array: Float32Array | Uint8Array, width: number, a: number, b: number) => {
+    for (let component = 0; component < width; component++) {
+      const ai = a * width + component, bi = b * width + component, value = array[ai];
+      array[ai] = array[bi]; array[bi] = value;
+    }
+  };
+  for (const batch of batches) {
+    for (let vertex = 0; vertex < batch.positions.length / 3; vertex++)
+      batch.positions[vertex * 3 + 1] = -batch.positions[vertex * 3 + 1];
+    // X was reflected by the display-list decoder. The Y reflection restores
+    // the source handedness, so undo the decoder's winding correction.
+    for (let vertex = 0; vertex < batch.positions.length / 3; vertex += 3) {
+      swap(batch.positions, 3, vertex + 1, vertex + 2);
+      swap(batch.uvs, 2, vertex + 1, vertex + 2);
+      swap(batch.colors, 4, vertex + 1, vertex + 2);
+      if (batch.unlitColors) swap(batch.unlitColors, 4, vertex + 1, vertex + 2);
+      for (const colors of batch.lightingColors ?? []) swap(colors, 4, vertex + 1, vertex + 2);
+      if (batch.uvs1) swap(batch.uvs1, 2, vertex + 1, vertex + 2);
+    }
   }
-  return out;
 }
 
-function appendBank(bytes: Uint8Array, bin: Chunk, level: Level, bankIndex: number): number[] {
+function appendBank(bytes: Uint8Array, bin: Chunk, level: Level, bankIndex: number): void {
   const base = bin.data;
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const modelCount = dv.getUint32(base);
@@ -87,7 +82,6 @@ function appendBank(bytes: Uint8Array, bin: Chunk, level: Level, bankIndex: numb
   const modelSection = base + dv.getUint32(base + 4);
   const textureCount = dv.getUint32(base + 16);
   const textureSection = base + dv.getUint32(base + 20);
-  const nodeCount = dv.getUint32(base + 24);
   const textureBase = textureCount ? textureSection + dv.getUint32(textureSection) : 0;
   const textureKeys = new Map<string, number>();
   const models: number[] = [];
@@ -117,6 +111,7 @@ function appendBank(bytes: Uint8Array, bin: Chunk, level: Level, bankIndex: numb
         lighting: { lights: [], ambient: [255, 255, 255] },
         combiner: true, decals: true,
       }, record + displayListOffset);
+      mirrorBatchesY(batches);
     }
     const mesh: Mesh = {
       name: `Bank ${bankIndex + 1} model ${i}`,
@@ -126,48 +121,11 @@ function appendBank(bytes: Uint8Array, bin: Chunk, level: Level, bankIndex: numb
     models.push(level.meshes.push(mesh) - 1);
   }
 
-  const nodes = Array.from({ length: nodeCount }, (_, index) => {
-    const at = base + 0x1c + index * 28;
-    const modelWord = dv.getUint16(at);
-    return {
-      model: modelWord & 0x7ff,
-      disabled: (modelWord & 0x8000) !== 0,
-      position: [dv.getInt32(at + 4) / 0x10000, dv.getInt32(at + 8) / 0x10000,
-        dv.getInt32(at + 12) / 0x10000] as [number, number, number],
-      angles: [dv.getUint16(at + 16) & 0xfff, dv.getUint16(at + 18) & 0xfff,
-        dv.getUint16(at + 20) & 0xfff] as [number, number, number],
-      sibling: dv.getUint16(at + 24),
-      child: dv.getUint16(at + 26),
-      at,
-    };
-  });
-  const referred = new Set<number>();
-  for (const node of nodes) {
-    if (node.sibling !== 0xffff) referred.add(node.sibling);
-    if (node.child !== 0xffff) referred.add(node.child);
-  }
-  const roots = nodes.map((_, index) => index).filter((index) => !referred.has(index));
-  const placed: number[] = [], visited = new Set<number>();
-  const stack = roots.reverse().map((index) => ({ index, parent: IDENTITY }));
-  while (stack.length) {
-    const { index, parent } = stack.pop()!;
-    if (index >= nodes.length || visited.has(index)) continue;
-    visited.add(index);
-    const node = nodes[index];
-    if (node.sibling !== 0xffff) stack.push({ index: node.sibling, parent });
-    // The runtime constructor reads the first word as signed. Negative nodes
-    // are disabled alternatives: their sibling chain remains live, but the
-    // node and its child subtree are not instantiated.
-    if (node.disabled) continue;
-    const world = multiplyMatrix(parent, nodeMatrix(node.position, node.angles));
-    if (node.child !== 0xffff) stack.push({ index: node.child, parent: world });
-    if (node.model >= models.length || !level.meshes[models[node.model]].batches.length) continue;
-    placed.push(level.instances.push({
-      name: `Bank ${bankIndex + 1} node ${index}`, mesh: models[node.model], matrix: world,
-      info: { bank: bankIndex, node: index, model: node.model, record: `0x${node.at.toString(16)}` },
-    }) - 1);
-  }
-  return placed;
+  // XOBF graphs describe model-local assemblies. Arena-world placements are
+  // the named FORM/OBJ records, whose name-to-model lookup is not decoded yet.
+  // Keep the model assets available without piling every archetype at its
+  // local origin as if the graph itself were the arena scene.
+  level.unplaced.push(...models);
 }
 
 function rgba5551(value: number): [number, number, number, number] {
@@ -219,13 +177,79 @@ function appendSky(bytes: Uint8Array, skyChunk: Chunk, level: Level): void {
   level.skies = [{ name: 'Panoramic sky', mesh }];
 }
 
-function appendCollision(bytes: Uint8Array, top: Chunk[], level: Level): void {
+interface TerrainSample {
+  height: number;
+  color: number;
+  material: number;
+}
+
+interface TerrainMaterial {
+  skip: boolean;
+  diagonal: boolean;
+  uv: readonly number[];
+}
+
+interface TerrainData {
+  samples: Map<number, TerrainSample>;
+  colors: Array<[number, number, number, number]>;
+  materials: TerrainMaterial[];
+  texture: number;
+  zones: number;
+}
+
+const TERRAIN_UV_ORIENTATIONS = new Uint8Array([
+  0, 31, 31, 31, 0, 0, 31, 0,
+  31, 31, 0, 31, 31, 0, 0, 0,
+  0, 0, 0, 31, 31, 0, 31, 31,
+  0, 31, 0, 0, 31, 31, 31, 0,
+  31, 0, 0, 0, 31, 31, 0, 31,
+  0, 0, 31, 0, 0, 31, 31, 31,
+  31, 31, 31, 0, 0, 31, 0, 0,
+  31, 0, 31, 31, 0, 0, 0, 31,
+]);
+
+function decodeTerrain(bytes: Uint8Array, top: Chunk[], level: Level): TerrainData | undefined {
   const zmap = top.find((chunk) => chunk.tag === 'ZMAP');
   const zones = top.filter((chunk) => chunk.tag === 'ZONE');
-  if (!zmap || zmap.end - zmap.data !== 0x800 || !zones.length) return;
+  const bitmap = top.find((chunk) => chunk.tag === 'XBMP');
+  const xtin = top.find((chunk) => chunk.tag === 'XTIN');
+  const cols = top.find((chunk) => chunk.tag === 'COLS');
+  if (!zmap || zmap.end - zmap.data !== 0x800 || !zones.length || !bitmap || !xtin || !cols)
+    return undefined;
+  if (xtin.end - xtin.data !== 256 * 36 || cols.end - cols.data < 20)
+    throw new Error('Invalid Vigilante 8: 2nd Offense terrain material data');
 
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const heights = new Map<number, number>();
+  const texture = level.textures.push(
+    decodeIndexedBitmap(bytes, bitmap.data, `XBMP 0x${bitmap.start.toString(16)}`),
+  ) - 1;
+  const textureInfo = level.textures[texture];
+  const materials: TerrainMaterial[] = [];
+  for (let i = 0; i < 256; i++) {
+    const at = xtin.data + i * 36;
+    const flags = dv.getUint16(at);
+    const tile = bytes[at + 2], orientationAndFlags = bytes[at + 3];
+    const orientation = orientationAndFlags & 7;
+    const source = TERRAIN_UV_ORIENTATIONS.subarray(orientation * 8, orientation * 8 + 8);
+    const u0 = (tile & 15) * 32, v0 = (tile >>> 4) * 32;
+    const uv = Array.from(source, (value, index) => {
+      const texel = (index & 1 ? v0 : u0) + value - 0.5;
+      return texel / (index & 1 ? textureInfo.height : textureInfo.width);
+    });
+    materials.push({ skip: (flags & 0x10) !== 0, diagonal: (orientationAndFlags & 8) !== 0, uv });
+  }
+
+  const colors: Array<[number, number, number, number]> = [];
+  for (let i = 0; i < 32; i++) {
+    const color: [number, number, number, number] = [0, 0, 0, 255];
+    for (let component = 0; component < 3; component++) {
+      const from = bytes[cols.data + 12 + component], to = bytes[cols.data + 16 + component];
+      color[component] = from + Math.trunc((to - from) * i / 31);
+    }
+    colors.push(color);
+  }
+
+  const samples = new Map<number, TerrainSample>();
   const key = (x: number, z: number) => x * 2048 + z;
   for (let tileZ = 0; tileZ < 32; tileZ++) for (let tileX = 0; tileX < 32; tileX++) {
     const zoneId = dv.getUint16(zmap.data + (tileZ * 32 + tileX) * 2);
@@ -235,23 +259,74 @@ function appendCollision(bytes: Uint8Array, top: Chunk[], level: Level): void {
       throw new Error(`Invalid Vigilante 8: 2nd Offense ZMAP zone ${zoneId}`);
     for (let localX = 0; localX < 64; localX++) for (let localZ = 0; localZ < 64; localZ++) {
       const packed = dv.getUint32(zone.data + (localX * 64 + localZ) * 4);
-      const height = (((packed >>> 16) - 0x200) & 0x7ff) / 32;
-      heights.set(key(tileX * 64 + localX, tileZ * 64 + localZ), height);
+      samples.set(key(tileX * 64 + localX, tileZ * 64 + localZ), {
+        height: (((packed >>> 16) - 0x200) & 0x7ff) / 32,
+        color: (packed >>> 11) & 31,
+        material: packed & 0xff,
+      });
     }
   }
+  return { samples, colors, materials, texture, zones: zones.length };
+}
+
+function appendTerrain(terrain: TerrainData, level: Level): number[] {
+  const { samples, colors: palette, materials } = terrain;
+  const key = (x: number, z: number) => x * 2048 + z;
+  const positions: number[] = [], uvs: number[] = [], colors: number[] = [];
+  const vertex = (x: number, z: number, sample: TerrainSample, uv: readonly number[], corner: number) => {
+    positions.push(-x, -sample.height, z);
+    uvs.push(uv[corner * 2], uv[corner * 2 + 1]);
+    colors.push(...palette[sample.color]);
+  };
+  for (const [packed, a] of samples) {
+    const x = Math.floor(packed / 2048), z = packed % 2048;
+    if ((x & 1) || (z & 1)) continue;
+    const b = samples.get(key(x + 2, z));
+    const c = samples.get(key(x, z + 2));
+    const d = samples.get(key(x + 2, z + 2));
+    if (!b || !c || !d) continue;
+    const material = materials[a.material];
+    if (!material || material.skip) continue;
+    if (material.diagonal) {
+      vertex(x, z, a, material.uv, 0); vertex(x + 2, z, b, material.uv, 1);
+      vertex(x + 2, z + 2, d, material.uv, 3);
+      vertex(x + 2, z + 2, d, material.uv, 3); vertex(x, z + 2, c, material.uv, 2);
+      vertex(x, z, a, material.uv, 0);
+    } else {
+      vertex(x, z, a, material.uv, 0); vertex(x + 2, z, b, material.uv, 1);
+      vertex(x, z + 2, c, material.uv, 2);
+      vertex(x + 2, z + 2, d, material.uv, 3); vertex(x, z + 2, c, material.uv, 2);
+      vertex(x + 2, z, b, material.uv, 1);
+    }
+  }
+  if (!positions.length) return [];
+  const batches: Batch[] = [{
+    texture: terrain.texture, blend: 'opaque', depthTest: true, depthWrite: true, cullBack: true,
+    positions: new Float32Array(positions), uvs: new Float32Array(uvs), colors: new Uint8Array(colors),
+  }];
+  const mesh = level.meshes.push({
+    name: 'ZONE visible terrain', radius: meshRadius(batches), batches,
+    info: { source: 'ZMAP/ZONE/XBMP/XTIN/COLS', zones: terrain.zones, triangles: positions.length / 9 },
+  }) - 1;
+  return [level.instances.push({ name: 'ZONE visible terrain', mesh, matrix: IDENTITY.slice() }) - 1];
+}
+
+function appendCollision(terrain: TerrainData, level: Level): void {
+  const { samples } = terrain;
+  const key = (x: number, z: number) => x * 2048 + z;
 
   const positions: number[] = [], uvs: number[] = [], colors: number[] = [];
-  const vertex = (x: number, z: number, y: number) => {
-    // Display-list vertices are reflected on X to enter the viewer's handedness.
-    positions.push(-x, y, z);
+  const vertex = (x: number, z: number, sample: TerrainSample) => {
+    // Reflect the game's X/right and Y/down axes into the viewer's frame.
+    positions.push(-x, -sample.height, z);
     uvs.push(0, 0);
     colors.push(64, 224, 255, 128);
   };
-  for (const [packed, h00] of heights) {
+  for (const [packed, h00] of samples) {
     const x = Math.floor(packed / 2048), z = packed % 2048;
-    const h10 = heights.get(key(x + 1, z));
-    const h01 = heights.get(key(x, z + 1));
-    const h11 = heights.get(key(x + 1, z + 1));
+    const h10 = samples.get(key(x + 1, z));
+    const h01 = samples.get(key(x, z + 1));
+    const h11 = samples.get(key(x + 1, z + 1));
     if (h10 === undefined || h01 === undefined || h11 === undefined) continue;
     // The game's height query divides the cell on the xFraction + zFraction = 1
     // diagonal: (00,10,01) and (11,01,10).
@@ -265,7 +340,7 @@ function appendCollision(bytes: Uint8Array, top: Chunk[], level: Level): void {
   }];
   const mesh = level.meshes.push({
     name: 'ZONE terrain collision', radius: meshRadius(batches), batches,
-    info: { source: 'ZMAP/ZONE', zones: zones.length, triangles: positions.length / 9 },
+    info: { source: 'ZMAP/ZONE', zones: terrain.zones, triangles: positions.length / 9 },
   }) - 1;
   const instance = level.instances.push({ name: 'ZONE terrain collision', mesh, matrix: IDENTITY.slice() }) - 1;
   level.layers!.push({
@@ -296,15 +371,18 @@ export function decodeVigilante8SecondOffenseLevel(bytes: Uint8Array, level: Lev
     throw new Error('Invalid Vigilante 8: 2nd Offense TERR FORM');
   const top = chunks(bytes, 12, bytes.length);
   const banks = top.filter((chunk) => chunk.tag === 'FORM' && chunk.type === 'XOBF');
-  const placed: number[] = [];
   for (let i = 0; i < banks.length; i++) {
     const bin = chunks(bytes, banks[i].data + 4, banks[i].end).find((chunk) => chunk.tag === 'BIN ');
     if (!bin) throw new Error('Vigilante 8: 2nd Offense XOBF has no BIN chunk');
-    placed.push(...appendBank(bytes, bin, level, i));
+    appendBank(bytes, bin, level, i);
   }
-  level.layers!.push({ name: 'scenery', kind: 'main', instances: placed });
-  updateBounds(level, placed);
-  appendCollision(bytes, top, level);
+  const terrain = decodeTerrain(bytes, top, level);
+  if (terrain) {
+    const terrainInstances = appendTerrain(terrain, level);
+    level.layers!.push({ name: 'terrain', kind: 'main', instances: terrainInstances });
+    updateBounds(level, terrainInstances);
+    appendCollision(terrain, level);
+  }
   const sky = top.find((chunk) => chunk.tag === 'XBGM');
   if (sky) appendSky(bytes, sky, level);
 }

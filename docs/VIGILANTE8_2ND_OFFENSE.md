@@ -15,13 +15,13 @@ unresolved rendering and gameplay behavior is identified explicitly.
 | Graphics microcode | `RSP Gfx ucode F3DEX fifo 2.08` (embedded identification string). |
 | Geometry | `FORM/TERR` level file; two `FORM/XOBF` model banks with F3DEX2 display lists and 16-byte N64 vertices. |
 | Textures | 16 JPEG preview strips per arena; indexed RGBA5551-palette sky/terrain images; XOBF CI4, CI8, RGBA16, RGBA32, and 8-bit intensity/alpha-class images. |
-| Collision | `ZMAP` selects 64×64 `ZONE` height tiles; the runtime uses 16.16 horizontal coordinates, 1/32-unit heights, and a fixed two-triangle cell split. |
+| Collision | `ZMAP` selects 64×64 `ZONE` height tiles; queries use 16.16 horizontal coordinates, 1/32-unit heights, and a fixed two-triangle cell split. |
 | Music driver | libmus-compatible `0x215` multichannel sequencer with counted and infinite repeats. |
 | Audio microcode | **Unknown**. |
 | Sample encoding | Nintendo 9-byte-frame VADPCM for the 86-entry music bank; the separate Luxo effects bank is not used by music wave maps. |
 | Levels | Eight indexed arena DLL/EXP pairs. |
 | Memory requirement | **Unknown**; audio setup has separate copied-bank and cartridge-bank paths. |
-| Viewer support | USA revision 0: eight static arena scenes, panoramas, hidden terrain-collision layers, and 36 music entries; dynamic objects are omitted. |
+| Viewer support | USA revision 0: eight textured terrain surfaces, panoramas, hidden terrain-collision layers, and 36 music entries; placed objects are omitted. |
 
 ### 1.2 ROM identification
 
@@ -199,11 +199,15 @@ that pad. Loaders must therefore honor the stored section offset.
 | `0x18` | 4 | u32 | `fixedRecordCount` | Number of following 28-byte records. |
 | `0x1C` | `28 × fixedRecordCount` | u8[][28] | `sceneNodes` | Hierarchical model instances. |
 
-The 28-byte records form a forward-linked scene graph. Position is signed
-16.16 fixed-point. Each orientation component is a 12-bit turn, where
+The 28-byte records form forward-linked model graphs. They are not arena-world
+placement records: the separately named `FORM/OBJ ` records supply world
+positions. Position within an XOBF graph is signed 24.8 fixed-point. Each
+orientation component is a 12-bit turn, where
 `0x1000` is one revolution. Resident routine `0x8013B930` converts the three
 components into the node's local 3×3 matrix, and the scene traversal composes
-that local transform with its parent's transform. The low 11 bits of the
+that local transform with its parent's transform. Resident spatial routine
+`0x80144754` subtracts these translations and shifts right by eight, proving
+the fractional width. The low 11 bits of the
 first word select a first-section model; `0x7FF` means no model. Constructor
 `0x80141C30` maps source bit 11 to runtime flag `0x10`. Recursive constructor
 `0x80141E44` reads the word as signed: a negative node is not instantiated and
@@ -215,9 +219,9 @@ decoded records and resident disassembly.
 |---:|---:|---|---|---|
 | `0x00` | 2 | u16 | `modelAndFlags` | Low 11 bits are the first-section model index (`0x7FF` = none); bit 11 maps to runtime flag `0x10`; bit 15 disables this node and child subtree. Other flag bits are not named. |
 | `0x02` | 2 | s16 | `shapeIndex` | Middle-section record index, or `-1`. |
-| `0x04` | 4 | s32 | `translateX` | Signed 16.16 local translation. |
-| `0x08` | 4 | s32 | `translateY` | Signed 16.16 local translation. |
-| `0x0C` | 4 | s32 | `translateZ` | Signed 16.16 local translation. |
+| `0x04` | 4 | s32 | `translateX` | Signed 24.8 local translation. |
+| `0x08` | 4 | s32 | `translateY` | Signed 24.8 local translation. |
+| `0x0C` | 4 | s32 | `translateZ` | Signed 24.8 local translation. |
 | `0x10` | 2 | u16 | `angleA` | Low 12 bits are a turn fraction. |
 | `0x12` | 2 | u16 | `angleB` | Low 12 bits are a turn fraction. |
 | `0x14` | 2 | u16 | `angleC` | Low 12 bits are a turn fraction. |
@@ -235,7 +239,9 @@ model records. Its offsets resolve within the section. A model record begins:
 | `0x08` | 4 | u32 | `displayListOffset` | Relative to model start. |
 | `0x0C` | 4 | u32 | `unknown_0C` | Meaning not established. |
 | `0x10` | 4 | u32 | `unknown_10` | Meaning not established. |
-| `0x14` | 4 | u32 | `unknown_14` | Meaning not established. |
+| `0x14` | 1 | u8 | `translationShift` | Fractional-bit conversion used when the renderer builds the RSP matrix; 8 in every arena model. |
+| `0x15` | 1 | u8 | `unknown_15` | Meaning not established. |
+| `0x16` | 2 | u16 | `radius` | Model extent used by runtime spatial tests. |
 | `vertexDataOffset` | `16 × vertexCount` | u8[][16] | `vertices` | Standard N64 vertex records. |
 
 The first HARBOR model has 245 vertices, vertex offset `0x598`, and display
@@ -248,9 +254,12 @@ with kind `1`, and 1,379 of those have a 32-byte span containing six signed
 32-bit values consistent with minimum and maximum XYZ bounds. The remaining
 44 begin with kind `2`; their nested shape grammar is not established.
 Whether the section is used for collision, culling, or both is not yet proved.
-Verified from decoded ROM bytes and the scene-node construction and transform
-routines in the resident executable. The stage's complete visual mesh has
-not been independently compared with a trustworthy retail capture.
+Verified from decoded ROM bytes and the model-node construction, transform and
+spatial routines in the resident executable. Directly treating each XOBF root
+as an arena instance is disproved by coordinates: HARBOR's XOBF roots span
+thousands of units around the origin, while its terrain and all 217
+`FORM/OBJ ` placements occupy approximately X `832–958`, Z `1216–1406`.
+The name-to-model binding needed to place those assemblies remains unresolved.
 
 ### 3.4 Display lists and render state
 
@@ -273,6 +282,8 @@ substitute for 3D materials.
 
 `XBMP` begins with the common eight-byte texture header, followed by a
 512-byte big-endian RGBA5551 palette and a 320×128 8-bit-index bitmap.
+It is the visible terrain atlas, arranged as 32×32-texel tiles (ten columns
+by four rows).
 `XBGM` has a four-byte prefix before that same header: the header begins at
 payload `+4`, its palette begins at `+12`, and its bitmap is 256×92. Raw
 HARBOR and OILFIELD payloads contain `0x0201`, 256 palette entries, and
@@ -307,8 +318,45 @@ Vigilante 8, although record-size grammar is shared. Segment 1 display-list
 addresses resolve against the current model's vertex array; segment 2
 texture-image addresses resolve against the first image record, excluding
 the offset table. This address interpretation is verified on the first
-models. Actual arena light colours and directions remain to be established
-from the `SUNA`/`COLS` environment data or runtime state.
+models.
+
+`XTIN` is the terrain-material table. Its `0x2400`-byte payload contains 256
+records of 36 bytes. The sequel loader at overlay-relative `0x6238` converts
+each record to its 24-byte runtime form; this is distinct from the original
+game's 40-byte source record.
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 2 | u16 | `flags` | Bit 4 suppresses terrain triangles for this material. |
+| `0x02` | 1 | u8 | `atlasTile` | Low nibble is the 32-texel atlas column; high nibble is the row. |
+| `0x03` | 1 | u8 | `orientationAndFlags` | Low three bits select a UV orientation; bit 3 selects the triangle diagonal; bit 4 maps to another runtime flag. |
+| `0x04` | 12 | u16[6] | `renderState` | Copied to the runtime material; individual fields are not named. |
+| `0x10` | 20 | u8[20] | `unusedByTerrainLoader` | Not read by the verified visual-terrain conversion. |
+
+The resident orientation table supplies four atlas-local corner coordinates
+`A`, `B`, `C`, and `D`; values are texels within a 32×32 tile:
+
+| Orientation | A | B | C | D |
+|---:|---|---|---|---|
+| 0 | `(0,31)` | `(31,31)` | `(0,0)` | `(31,0)` |
+| 1 | `(31,31)` | `(0,31)` | `(31,0)` | `(0,0)` |
+| 2 | `(0,0)` | `(0,31)` | `(31,0)` | `(31,31)` |
+| 3 | `(0,31)` | `(0,0)` | `(31,31)` | `(31,0)` |
+| 4 | `(31,0)` | `(0,0)` | `(31,31)` | `(0,31)` |
+| 5 | `(0,0)` | `(31,0)` | `(0,31)` | `(31,31)` |
+| 6 | `(31,31)` | `(31,0)` | `(0,31)` | `(0,0)` |
+| 7 | `(31,0)` | `(31,31)` | `(0,0)` | `(0,31)` |
+
+The emitted S/T value is `(tileOrigin + corner − 0.5)` texels. With diagonal
+bit 3 clear, a terrain quad emits `(A,B,C)` and `(D,C,B)`; when set it emits
+`(A,B,D)` and `(D,C,A)`. The visible renderer samples the height field every
+two world units, whereas collision retains every one-unit sample.
+
+`COLS` supplies the terrain vertex-colour ramp. The renderer makes 32 opaque
+colours by linearly interpolating RGB from `COLS + 0x0C` to `COLS + 0x10`,
+using integer truncation. The source ZONE record's upper five colour bits
+select this ramp. Actual XOBF light colours and directions remain to be
+established from `SUNA` or runtime state.
 
 ### 3.6 Collision
 
@@ -326,8 +374,8 @@ A source `ZONE` is a 64×64 array of the following four-byte records in
 | Offset | Size | Type | Field | Description |
 |---:|---:|---|---|---|
 | `0x00` | 2 | u16 | `biasedHeight` | Runtime height bits are `(biasedHeight − 0x200) & 0x7FF`. |
-| `0x02` | 1 | u8 | `materialBits` | Top five bits become runtime height-word bits 11–15; low three bits are ignored by the unpacker. |
-| `0x03` | 1 | u8 | `attribute` | Copied to the parallel runtime attribute plane. |
+| `0x02` | 1 | u8 | `colourBits` | Top five bits become runtime height-word bits 11–15 and index the `COLS` ramp; low three bits are ignored by the unpacker. |
+| `0x03` | 1 | u8 | `material` | Copied to the parallel runtime attribute plane and selects an `XTIN` record for rendering. |
 
 The stage-overlay unpacker at relative address `0x6470` expands each source
 record into a 64×64 `u16` height/material plane followed by a 64×64 `u8`
@@ -338,21 +386,20 @@ giving triangles `(00,10,01)` and `(11,01,10)`. These facts are verified by
 sequel disassembly and decoded arena bytes; they do not rely on first-game
 inference.
 
-The upper five material bits select a resident material table, and the
-parallel byte feeds a separate attribute lookup; their complete gameplay
-meanings are not named here. Each arena also contains one `BSP ` chunk plus
+The source material byte selects the visual `XTIN` record; its additional
+gameplay/physics meaning is not named here. Each arena also contains one `BSP ` chunk plus
 `JUNC` and `RSEG` route records. Those structures may provide object or route
 collision beyond the verified terrain height field, but their roles remain
 unresolved.
 
 ### 3.7 Environment, sky, fog, and lighting
 
-`XBGM` contains the indexed sky image. The `SUNA` and `COLS` chunks are
-plausible sun/color parameters from their tags and fixed sizes (`0x10` and
-`0x20`), but their rendering semantics are **hypotheses**. Fog controls,
-light direction/intensity, horizon mapping, and animation have not been
-validated in a trustworthy in-game frame. The `HEAD` chunk is `0x1A` bytes
-in HARBOR, but its field meanings remain unknown.
+`XBGM` contains the indexed sky image. `COLS` supplies the verified terrain
+colour ramp described above. `SUNA` is plausibly a sun/light record from its
+tag and fixed `0x10`-byte size, but its semantics remain a **hypothesis**.
+Fog controls, XOBF light direction/intensity, horizon mapping, and animation
+have not been validated in a trustworthy in-game frame. The `HEAD` chunk is
+`0x1A` bytes in HARBOR, but its field meanings remain unknown.
 
 ### 3.8 Cameras and paths
 
@@ -395,8 +442,11 @@ ranges with occupied ZMAP tiles establishes the X, Y, Z order shown below.
 Placed objects can refer to XOBF model banks; shared `SHARED/COMMON.EXP`,
 `ARMS.EXP`, and `HOTRODS.EXP` provide further compressed resources. The
 second XOBF bank is byte-identical across seven arenas; ROUTE66 differs.
-This establishes deliberate sharing, not exact object class mappings.
-The exact `HEAD`/`BSPI` linkage remains unknown.
+This establishes deliberate sharing, not exact object class mappings. Arena
+placement coordinates line up with the occupied ZMAP tiles and terrain
+heights—for example, HARBOR's `Lighthouse` is at
+`(850.03,44.41,1246.98)`—while XOBF graph origins do not. The exact
+name-to-XOBF and `HEAD`/`BSPI` linkage remains unknown.
 
 ### 4.3 Skeletons and animation
 
@@ -547,24 +597,26 @@ classified as cut solely because its name sounds developmental.
 ### 7.1 Module mapping
 
 `src/rom/vigilante8_2/fs.ts` reads the six-group directory and reuses the
-first game's LZSS decoder. `level.ts` walks `FORM/TERR`, decodes the XOBF
-header, scene-node transforms, indexed models/textures and F3DEX2 lists,
-applies the constructor's disabled-node semantics, assembles static instances,
-builds ZMAP/ZONE terrain collision, and renders `XBGM` as a panoramic sky.
+first game's LZSS decoder. `level.ts` walks `FORM/TERR`, decodes XOBF assets,
+the XBMP/XTIN/COLS visible terrain, full-resolution ZMAP/ZONE collision, and
+`XBGM` as a panoramic sky. XOBF meshes remain unplaced until the verified
+`FORM/OBJ` name-to-model binding is known.
 `vigilante8_2.ts` exposes the eight arenas; `music.ts` adapts all 36 indexed
 sequences to the shared libmus renderer.
 
 ### 7.2 Supported features
 
 The viewer accepts `NVGE` revision 0 and lists all eight indexed arenas.
-It builds a static scenery layer from the XOBF banks, a hidden-by-default
-terrain-collision layer from ZMAP/ZONE, and offers 36 `MUSIC` cues.
+It builds a visible terrain layer from ZMAP/ZONE, XBMP, XTIN, and COLS, a
+separate hidden-by-default full-resolution collision layer, and offers 36
+`MUSIC` cues.
 
 ### 7.3 Approximations and omissions
 
 The starting camera and cylindrical sky projection are viewer approximations.
-The terrain layer covers the height-query surface only; `BSP ` structures,
-`FORM/OBJ` binding, animations, scripts, fog and routes are omitted. The music
+The visible terrain reproduces the verified static height/material surface;
+`BSP ` structures, `FORM/OBJ` model binding, animations, scripts, fog and
+routes are omitted. The music
 player uses neutral dry mixer settings because game-specific volume/reverb
 have not been measured. The JPEG preview strips are not used as in-game
 materials.
@@ -579,17 +631,18 @@ materials.
 | Directory | All six groups, 167 file records, bounds, non-overlap, and alignment checked against ROM bytes. |
 | Compression | 98/98 independent decodes reach declared size and exact indexed end; all 98 shared-reference re-encodes round-trip byte-identically after decoding. |
 | Level container | Eight `EXP` files parse as complete `FORM/TERR`; child walk ends at exact decoded size. |
-| Geometry | XOBF section offsets and first HARBOR model's vertex-count/span/display-list consistency checked from decoded bytes; node fields and transform construction checked against resident disassembly. |
-| Scene selection | Signed disabled-node test, sibling continuation, child-subtree omission and low-11-bit model selection checked at resident `0x80141E44` and `0x80141C30`; applying it leaves 39–82 scenery instances and 123–184 batches per arena. |
+| Geometry | XOBF section offsets and first HARBOR model's vertex-count/span/display-list consistency checked from decoded bytes; node fields, 24.8 translation and transform construction checked against resident disassembly. |
+| XOBF placement scope | HARBOR XOBF-root bounds compared with every `FORM/OBJ` position and occupied terrain bounds; direct arena placement of the roots is rejected rather than displayed. |
 | Lighting state | Entry-state dependency established by scanning the first vertex load of every HARBOR and OILFIELD model and by later explicit `D9` lighting toggles. |
-| Terrain collision | ZMAP pointer-grid population, ZONE unpacking, height scaling and interpolation checked in the sequel's level overlay and resident disassembly. |
+| Visible terrain | ZMAP/ZONE position and height conversion, the 2-unit render grid, XTIN loader, UV-orientation table, triangle selection, XBMP atlas and COLS ramp checked from decoded bytes and sequel disassembly; all eight surfaces rendered coherently offline. |
+| Terrain collision | ZMAP pointer-grid population, ZONE unpacking, one-unit grid, height scaling and interpolation checked in the sequel's level overlay and resident disassembly. |
 | Object catalog | All eight placement counts and `HEAD` names scanned from decoded chunks. |
 | Music | 36/36 indexed sequences decode; file/title pointer tables and repeat opcode handlers checked by disassembly. |
 | Runtime frame | Title logo captured only. Renderer combinations gave black or corrupted later frames, so no arena/frame-accurate validation is claimed. |
 
 ### 8.2 Known unknowns
 
-The principal blockers for full-fidelity viewing are exact `SUNA`/`COLS`
+The principal blockers for full-fidelity viewing are exact `SUNA`/XOBF
 lighting, middle-section interpretation, non-terrain collision structures,
 environment parameters, placement-to-model associations, and animation. For audio, game-side mixer
 gain, reverb, output rate and playback fidelity remain unmeasured. A reliable game
