@@ -16,6 +16,7 @@ CODEC(raw_deflate_decode); CODEC(raw_deflate_encode);
 CODEC(rare1172_decode); CODEC(rare1172_encode);
 CODEC(rare1172_u32_decode); CODEC(rare1172_u32_encode);
 CODEC(rare1173_decode); CODEC(rare1173_encode);
+CODEC(rare_dkr_decode); CODEC(rare_dkr_encode);
 CODEC(chunked_zlib_decode); CODEC(chunked_zlib_encode);
 CODEC(rush1_lzss_decode); CODEC(rush1_lzss_encode);
 CODEC(rush2049_lzss_decode); CODEC(rush2049_lzss_encode);
@@ -137,6 +138,7 @@ static std::pair<Codec *, Codec *> codec(const char *name) {
     PAIR("rare1172", rare1172_decode, rare1172_encode);
     PAIR("rare1172-u32", rare1172_u32_decode, rare1172_u32_encode);
     PAIR("rare1173", rare1173_decode, rare1173_encode);
+    PAIR("rare-dkr", rare_dkr_decode, rare_dkr_encode);
     PAIR("chunked-zlib", chunked_zlib_decode, chunked_zlib_encode);
     PAIR("boss-pattern", boss_pattern_decode, boss_pattern_encode);
     PAIR("fla2", fla2_checked_decode, fla2_encode);

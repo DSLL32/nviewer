@@ -26,6 +26,7 @@ link with `-lz`.
 | [Rare `1172` + raw DEFLATE](./raw-deflate.md) | [GoldenEye 007](../GOLDENEYE.md) | Decoder and encoder, zlib |
 | [Rare `1172` + u32 size + raw DEFLATE](./raw-deflate.md) | [Banjo-Kazooie](../BANJOKAZOOIE.md) | Same codec, distinct wrapper |
 | [Rare `1173` + raw DEFLATE](./raw-deflate.md) | [Perfect Dark](../PERFECTDARK.md) | Same codec |
+| [Rare DKR + raw DEFLATE](./raw-deflate.md) | [Jet Force Gemini](../JETFORCEGEMINI.md), Diddy Kong Racing | Same codec, little-endian size and level wrapper |
 | [Headerless raw DEFLATE](./raw-deflate.md) | [Gex 64](../GEX64.md), [Gex 3](../GEX3.md), [Rush 2049](../SAN_FRANCISCO_RUSH_2049.md) | Same codec |
 | [Chunked zlib](./chunked-zlib.md) | [Stunt Racer 64](../STUNTRACER64.md) | Decoder and encoder, zlib |
 | [Boss pattern LZ/RLE](./boss-pattern.md) | [Stunt Racer 64](../STUNTRACER64.md) | Decoder and encoder |

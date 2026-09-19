@@ -1,4 +1,4 @@
-/* RFC 1951 raw DEFLATE and Rare's 1172/1173 wrappers. Link with -lz.
+/* RFC 1951 raw DEFLATE and Rare wrappers. Link with -lz.
  * All functions return 0 on success, -1 on invalid input or insufficient space.
  * Source and destination buffers must not overlap.
  */
@@ -125,4 +125,30 @@ int rare1173_encode(const uint8_t *src, size_t size, uint8_t *dst,
 int rare1173_encode_retail_size(const uint8_t *src, size_t size, uint8_t *dst,
                                 size_t cap, size_t *written) {
     return rare1173_encode_profile(src, size, dst, cap, written, 9);
+}
+
+/* Diddy Kong Racing / Jet Force Gemini: LE decoded size, level, raw DEFLATE.
+ * The level byte is metadata; the game decoder skips it. Trailing archive
+ * padding is accepted. The caller supplies all input/output storage; zlib
+ * manages only its internal state.
+ */
+int rare_dkr_decode(const uint8_t *src, size_t size, uint8_t *dst,
+                    size_t cap, size_t *written) {
+    if (!src || !dst || !written || size < 5) return -1;
+    size_t expected = (size_t)src[3] << 24 | src[2] << 16 | src[1] << 8 | src[0];
+    if (expected > cap || inflate_raw(src + 5, size - 5, dst, expected, written))
+        return -1;
+    return *written == expected ? 0 : -1;
+}
+
+int rare_dkr_encode(const uint8_t *src, size_t size, uint8_t *dst,
+                    size_t cap, size_t *written) {
+    if (!src || !dst || !written || size > UINT32_MAX || cap < 5) return -1;
+    size_t payload;
+    if (deflate_raw(src, size, dst + 5, cap - 5, &payload, 9, 6)) return -1;
+    dst[0] = size; dst[1] = size >> 8;
+    dst[2] = size >> 16; dst[3] = size >> 24;
+    dst[4] = 9;
+    *written = payload + 5;
+    return 0;
 }

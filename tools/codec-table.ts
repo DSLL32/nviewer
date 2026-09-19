@@ -29,6 +29,7 @@ const samples: Sample[] = [
   { codec: 'rare1172', game: 'GoldenEye 007', rom: 'GoldenEye 007 (U) [!].z64', offset: 0x21990, retail: 71760, decoded: 247120, scope: 'valid ROM tags' },
   { codec: 'rare1172-u32', game: 'Banjo-Kazooie U 1.0', rom: 'Banjo-Kazooie (U) (V1.0) [!].z64', offset: 0x9981C8, retail: 231555, decoded: 495668, scope: 'U 1.0 asset table' },
   { codec: 'rare1173', game: 'Perfect Dark', rom: 'Perfect Dark (U) (V1.0) [!].z64', offset: 0x3050, retail: 178722, decoded: 356240, scope: 'valid ROM tags' },
+  { codec: 'rare-dkr', game: 'Jet Force Gemini U', rom: 'Jet Force Gemini (U) [!].z64', offset: 0xEEE9C0, retail: 93982, decoded: 197440, scope: 'JFG U screen/scene/model tables (1,207 streams)' },
   { codec: 'raw-deflate', game: 'Rush 2049', rom: 'San Francisco Rush 2049 (U) [!].z64', offset: 0x6E3080, retail: 714357, decoded: 1578064, scope: 'Rush 2049/Gex file indexes and main images' },
   { codec: 'chunked-zlib', game: 'Stunt Racer 64', rom: 'Stunt Racer 64 (U) [!].z64', offset: 0x3885A0, retail: 301186, decoded: 737520, scope: 'all 2,211 valid containers' },
   { codec: 'boss-pattern', game: 'Stunt Racer 64', rom: 'Stunt Racer 64 (U) [!].z64', offset: 0xBC4238, retail: 9883, decoded: 34240, scope: 'all 14 music pattern streams' },
