@@ -11,6 +11,21 @@ interface Chunk {
   type?: string;
 }
 
+interface XobfNode {
+  model: number;
+  disabled: boolean;
+  position: [number, number, number];
+  angles: [number, number, number];
+  sibling: number;
+  child: number;
+  at: number;
+}
+
+interface XobfBank {
+  models: number[];
+  nodes: XobfNode[];
+}
+
 function text(bytes: Uint8Array, offset: number, size: number): string {
   return String.fromCharCode(...bytes.subarray(offset, offset + size));
 }
@@ -50,6 +65,33 @@ function meshRadius(batches: Batch[]): number {
   return Math.sqrt(radius2);
 }
 
+function nodeMatrix(position: [number, number, number], angles: [number, number, number]): typeof IDENTITY {
+  const radians = Math.PI * 2 / 0x1000;
+  const sa = Math.sin(angles[0] * radians), ca = Math.cos(angles[0] * radians);
+  const sb = Math.sin(angles[1] * radians), cb = Math.cos(angles[1] * radians);
+  const sc = Math.sin(angles[2] * radians), cc = Math.cos(angles[2] * radians);
+  const r00 = sc * sa * sb + cc * cb, r01 = cc * sa * sb - sc * cb, r02 = ca * sb;
+  const r10 = sc * ca, r11 = cc * ca, r12 = -sa;
+  const r20 = sc * sa * cb - cc * sb, r21 = cc * sa * cb + sc * sb, r22 = ca * cb;
+  // H R H and H t, H = diag(-1,-1,+1), converts the game's Y-down frame.
+  return new Float32Array([
+    r00, r10, -r20, 0,
+    r01, r11, -r21, 0,
+    -r02, -r12, r22, 0,
+    -position[0], -position[1], position[2], 1,
+  ]);
+}
+
+function multiplyMatrix(a: Float32Array, b: Float32Array): typeof IDENTITY {
+  const out = new Float32Array(16);
+  for (let column = 0; column < 4; column++) for (let row = 0; row < 4; row++) {
+    let value = 0;
+    for (let i = 0; i < 4; i++) value += a[i * 4 + row] * b[column * 4 + i];
+    out[column * 4 + row] = value;
+  }
+  return out;
+}
+
 function mirrorBatchesY(batches: Batch[]): void {
   const swap = (array: Float32Array | Uint8Array, width: number, a: number, b: number) => {
     for (let component = 0; component < width; component++) {
@@ -73,7 +115,7 @@ function mirrorBatchesY(batches: Batch[]): void {
   }
 }
 
-function appendBank(bytes: Uint8Array, bin: Chunk, level: Level, bankIndex: number): void {
+function appendBank(bytes: Uint8Array, bin: Chunk, level: Level, bankIndex: number): XobfBank {
   const base = bin.data;
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const modelCount = dv.getUint32(base);
@@ -82,6 +124,7 @@ function appendBank(bytes: Uint8Array, bin: Chunk, level: Level, bankIndex: numb
   const modelSection = base + dv.getUint32(base + 4);
   const textureCount = dv.getUint32(base + 16);
   const textureSection = base + dv.getUint32(base + 20);
+  const nodeCount = dv.getUint32(base + 24);
   const textureBase = textureCount ? textureSection + dv.getUint32(textureSection) : 0;
   const textureKeys = new Map<string, number>();
   const models: number[] = [];
@@ -91,6 +134,7 @@ function appendBank(bytes: Uint8Array, bin: Chunk, level: Level, bankIndex: numb
     const vertexCount = dv.getUint32(record);
     const vertexOffset = dv.getUint32(record + 4);
     const displayListOffset = dv.getUint32(record + 8);
+    const vertexShift = bytes[record + 20];
     let batches: Batch[] = [];
     if (vertexCount && displayListOffset) {
       const vertexBase = record + vertexOffset;
@@ -103,7 +147,7 @@ function appendBank(bytes: Uint8Array, bin: Chunk, level: Level, bankIndex: numb
       batches = runDisplayList({
         buf: bytes, ucode: 'f3dex2', resolve, resolveImage: resolve,
         textures: level.textures, textureKeys, keyPrefix: `v8-2/${bankIndex}/`,
-        vertexScale: 1, mirrorX: true, cullBackByDefault: true,
+        vertexScale: 2 ** -vertexShift, mirrorX: true, cullBackByDefault: true,
         // The arena renderer enters XOBF lists with lighting enabled. Lists
         // then toggle it with G_GEOMETRYMODE; without a lighting context the
         // signed normal bytes are mistaken for authored RGB vertex colours.
@@ -121,11 +165,87 @@ function appendBank(bytes: Uint8Array, bin: Chunk, level: Level, bankIndex: numb
     models.push(level.meshes.push(mesh) - 1);
   }
 
-  // XOBF graphs describe model-local assemblies. Arena-world placements are
-  // the named FORM/OBJ records, whose name-to-model lookup is not decoded yet.
-  // Keep the model assets available without piling every archetype at its
-  // local origin as if the graph itself were the arena scene.
-  level.unplaced.push(...models);
+  const nodes = Array.from({ length: nodeCount }, (_, index): XobfNode => {
+    const at = base + 0x1c + index * 28;
+    const modelWord = dv.getUint16(at);
+    return {
+      model: modelWord & 0x7ff,
+      disabled: (modelWord & 0x8000) !== 0,
+      // Source graph translations are 24.8 local coordinates. The bank's
+      // shift-8 model matrix scales that complete local frame by another 1/256.
+      position: [dv.getInt32(at + 4) / 0x10000, dv.getInt32(at + 8) / 0x10000,
+        dv.getInt32(at + 12) / 0x10000],
+      angles: [dv.getUint16(at + 16) & 0xfff, dv.getUint16(at + 18) & 0xfff,
+        dv.getUint16(at + 20) & 0xfff],
+      sibling: dv.getUint16(at + 24), child: dv.getUint16(at + 26), at,
+    };
+  });
+  return { models, nodes };
+}
+
+interface ObjectPlacement {
+  name: string;
+  type: number;
+  flags: number;
+  position: [number, number, number];
+  angles: [number, number, number];
+  bank: number;
+  root: number;
+  at: number;
+}
+
+function decodePlacement(bytes: Uint8Array, form: Chunk): ObjectPlacement | undefined {
+  const head = chunks(bytes, form.data + 4, form.end).find((chunk) => chunk.tag === 'HEAD');
+  if (!head || head.end - head.data < 34) return undefined;
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const name = text(bytes, head.data + 34, head.end - head.data - 34).replace(/\0.*$/, '');
+  return {
+    name, type: bytes[head.data + 1], flags: dv.getUint32(head.data + 4),
+    position: [dv.getInt32(head.data + 8) / 0x10000,
+      dv.getInt32(head.data + 12) / 0x10000 - 16,
+      dv.getInt32(head.data + 16) / 0x10000],
+    angles: [dv.getUint16(head.data + 20) & 0xfff, dv.getUint16(head.data + 22) & 0xfff,
+      dv.getUint16(head.data + 24) & 0xfff],
+    bank: dv.getInt16(head.data + 26), root: dv.getUint16(head.data + 28), at: head.start,
+  };
+}
+
+function appendPlacement(
+  placement: ObjectPlacement, banks: XobfBank[], level: Level, usedMeshes: Set<number>,
+): number[] {
+  const bank = banks[placement.bank];
+  if (!bank || placement.root >= bank.nodes.length) return [];
+  const placed: number[] = [], visited = new Set<number>();
+  const parent = nodeMatrix(placement.position, placement.angles);
+  const stack: Array<{ index: number; parent: Float32Array; siblings: boolean }> = [
+    { index: placement.root, parent, siblings: false },
+  ];
+  while (stack.length) {
+    const entry = stack.pop()!;
+    if (entry.index >= bank.nodes.length || visited.has(entry.index)) continue;
+    visited.add(entry.index);
+    const node = bank.nodes[entry.index];
+    // The selected root is singular. Once traversal enters its child list,
+    // sibling links enumerate the remaining pieces of that assembly.
+    if (entry.siblings && node.sibling !== 0xffff)
+      stack.push({ index: node.sibling, parent: entry.parent, siblings: true });
+    if (node.disabled) continue;
+    const world = multiplyMatrix(entry.parent, nodeMatrix(node.position, node.angles));
+    if (node.child !== 0xffff)
+      stack.push({ index: node.child, parent: world, siblings: true });
+    const mesh = bank.models[node.model];
+    if (mesh === undefined || !level.meshes[mesh].batches.length) continue;
+    usedMeshes.add(mesh);
+    placed.push(level.instances.push({
+      name: `${placement.name} node ${entry.index}`, mesh, matrix: world,
+      info: {
+        name: placement.name, objectType: placement.type, flags: `0x${placement.flags.toString(16)}`,
+        bank: placement.bank, root: placement.root, node: entry.index,
+        placement: `0x${placement.at.toString(16)}`, record: `0x${node.at.toString(16)}`,
+      },
+    }) - 1);
+  }
+  return placed;
 }
 
 function rgba5551(value: number): [number, number, number, number] {
@@ -370,12 +490,29 @@ export function decodeVigilante8SecondOffenseLevel(bytes: Uint8Array, level: Lev
   if (text(bytes, 0, 4) !== 'FORM' || text(bytes, 8, 4) !== 'TERR')
     throw new Error('Invalid Vigilante 8: 2nd Offense TERR FORM');
   const top = chunks(bytes, 12, bytes.length);
-  const banks = top.filter((chunk) => chunk.tag === 'FORM' && chunk.type === 'XOBF');
-  for (let i = 0; i < banks.length; i++) {
-    const bin = chunks(bytes, banks[i].data + 4, banks[i].end).find((chunk) => chunk.tag === 'BIN ');
+  const bankForms = top.filter((chunk) => chunk.tag === 'FORM' && chunk.type === 'XOBF');
+  const banks: XobfBank[] = [];
+  for (let i = 0; i < bankForms.length; i++) {
+    const bin = chunks(bytes, bankForms[i].data + 4, bankForms[i].end).find((chunk) => chunk.tag === 'BIN ');
     if (!bin) throw new Error('Vigilante 8: 2nd Offense XOBF has no BIN chunk');
-    appendBank(bytes, bin, level, i);
+    banks.push(appendBank(bytes, bin, level, i));
   }
+  const staticObjects: number[] = [], dynamicObjects: number[] = [], usedMeshes = new Set<number>();
+  for (const form of top) {
+    if (form.tag !== 'FORM' || form.type !== 'OBJ ') continue;
+    const placement = decodePlacement(bytes, form);
+    if (!placement || placement.bank < 0) continue;
+    const instances = appendPlacement(placement, banks, level, usedMeshes);
+    const dynamic = placement.type === 4 || placement.type === 5 ||
+      /^(?:I_|PU_|Q_)/.test(placement.name);
+    (dynamic ? dynamicObjects : staticObjects).push(...instances);
+  }
+  if (staticObjects.length) level.layers!.push({ name: 'objects', kind: 'objects', instances: staticObjects });
+  if (dynamicObjects.length)
+    level.layers!.push({ name: 'dynamic objects', kind: 'objects', instances: dynamicObjects });
+  updateBounds(level, [...staticObjects, ...dynamicObjects]);
+  for (const bank of banks) for (const mesh of bank.models)
+    if (!usedMeshes.has(mesh)) level.unplaced.push(mesh);
   const terrain = decodeTerrain(bytes, top, level);
   if (terrain) {
     const terrainInstances = appendTerrain(terrain, level);

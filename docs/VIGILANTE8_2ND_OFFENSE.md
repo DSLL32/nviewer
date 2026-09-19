@@ -21,7 +21,7 @@ unresolved rendering and gameplay behavior is identified explicitly.
 | Sample encoding | Nintendo 9-byte-frame VADPCM for the 86-entry music bank; the separate Luxo effects bank is not used by music wave maps. |
 | Levels | Eight indexed arena DLL/EXP pairs. |
 | Memory requirement | **Unknown**; audio setup has separate copied-bank and cartridge-bank paths. |
-| Viewer support | USA revision 0: eight textured terrain surfaces, panoramas, hidden terrain-collision layers, and 36 music entries; placed objects are omitted. |
+| Viewer support | USA revision 0: eight textured terrain surfaces, authored static and initial-state dynamic object placements, panoramas, hidden terrain-collision layers, and 36 music entries. |
 
 ### 1.2 ROM identification
 
@@ -200,8 +200,11 @@ that pad. Loaders must therefore honor the stored section offset.
 | `0x1C` | `28 × fixedRecordCount` | u8[][28] | `sceneNodes` | Hierarchical model instances. |
 
 The 28-byte records form forward-linked model graphs. They are not arena-world
-placement records: the separately named `FORM/OBJ ` records supply world
-positions. Position within an XOBF graph is signed 24.8 fixed-point. Each
+placement records: the separately named `FORM/OBJ ` records select one graph
+root and supply its world pose. Position within an XOBF graph is signed 24.8
+fixed-point; the model coordinate shift described below scales the complete
+local frame by another 1/256, making the effective world translation
+`raw / 65536`. Each
 orientation component is a 12-bit turn, where
 `0x1000` is one revolution. Resident routine `0x8013B930` converts the three
 components into the node's local 3×3 matrix, and the scene traversal composes
@@ -239,7 +242,7 @@ model records. Its offsets resolve within the section. A model record begins:
 | `0x08` | 4 | u32 | `displayListOffset` | Relative to model start. |
 | `0x0C` | 4 | u32 | `unknown_0C` | Meaning not established. |
 | `0x10` | 4 | u32 | `unknown_10` | Meaning not established. |
-| `0x14` | 1 | u8 | `translationShift` | Fractional-bit conversion used when the renderer builds the RSP matrix; 8 in every arena model. |
+| `0x14` | 1 | u8 | `coordinateShift` | Binary shift applied when the renderer builds the RSP matrix; 8 in every arena model, giving 1/256-scale local vertices and node translations. |
 | `0x15` | 1 | u8 | `unknown_15` | Meaning not established. |
 | `0x16` | 2 | u16 | `radius` | Model extent used by runtime spatial tests. |
 | `vertexDataOffset` | `16 × vertexCount` | u8[][16] | `vertices` | Standard N64 vertex records. |
@@ -255,11 +258,12 @@ with kind `1`, and 1,379 of those have a 32-byte span containing six signed
 44 begin with kind `2`; their nested shape grammar is not established.
 Whether the section is used for collision, culling, or both is not yet proved.
 Verified from decoded ROM bytes and the model-node construction, transform and
-spatial routines in the resident executable. Directly treating each XOBF root
-as an arena instance is disproved by coordinates: HARBOR's XOBF roots span
-thousands of units around the origin, while its terrain and all 217
-`FORM/OBJ ` placements occupy approximately X `832–958`, Z `1216–1406`.
-The name-to-model binding needed to place those assemblies remains unresolved.
+spatial routines in the resident executable. Directly treating every XOBF root
+as an arena instance is disproved by coordinates and by the constructor path.
+The level loader instead selects one bank/root pair from each `FORM/OBJ `
+record, as detailed under *Placement records*. HARBOR's terrain and all 217 placements occupy
+approximately X `832–958`, Z `1216–1406`; the selected, scaled assemblies fit
+those bounds without the unrelated-root pile-up produced by whole-bank drawing.
 
 ### 3.4 Display lists and render state
 
@@ -422,32 +426,60 @@ runtime descriptor name, not by itself proof of debug-only content.
 The `HEAD` payload starts with a 34-byte fixed prefix followed by a raw
 ASCII name of `payloadSize − 34` bytes. Names are not NUL-terminated inside
 the payload; an odd-size IFF pad often provides a following zero byte. The
-three signed 32-bit coordinate values are 16.16 fixed-point. Comparing their
-ranges with occupied ZMAP tiles establishes the X, Y, Z order shown below.
+three signed 32-bit coordinate values are 16.16 fixed-point. The loader
+subtracts `0x00100000` (16 world units) from source Y before constructing the
+object. Comparing the resulting poses with occupied ZMAP tiles establishes
+the X, Y, Z order shown below.
 
 | Offset | Size | Type | Field | Description |
 |---:|---:|---|---|---|
-| `0x00` | 2 | u16 | `unknown_00` | Object class or flags; semantic role unresolved. |
-| `0x02` | 2 | s16 | `unknown_02` | May be `-1`; role unresolved. |
-| `0x04` | 2 | u16 | `unknown_04` | Role unresolved. |
-| `0x06` | 2 | u16 | `unknown_06` | Role unresolved. |
+| `0x00` | 1 | u8 | `unknown_00` | Copied by the loader; role unresolved. |
+| `0x01` | 1 | u8 | `constructionType` | Selects one of seven resident object-construction paths (`0–6`). |
+| `0x02` | 2 | u16 | `objectId` | Runtime object/link identifier; `0xFFFF` is common. |
+| `0x04` | 4 | u32 | `flags` | Runtime behavior/render flags; individual bits are not fully named. |
 | `0x08` | 4 | s32 | `positionX` | Signed 16.16 runtime X coordinate. |
-| `0x0C` | 4 | s32 | `positionY` | Signed 16.16 height coordinate. |
+| `0x0C` | 4 | s32 | `positionY` | Signed 16.16 source Y; runtime Y is this value minus `0x00100000`. |
 | `0x10` | 4 | s32 | `positionZ` | Signed 16.16 runtime Z coordinate. |
-| `0x14` | 14 | u16[7] | `unknown_14` | Additional flags/orientation/model association. |
+| `0x14` | 6 | u16[3] | `angles` | Three 12-bit turn fractions; `0x1000` is one revolution. |
+| `0x1A` | 2 | s16 | `xobfBank` | `0` or `1` selects the arena's first or second XOBF; `-1` constructs no XOBF model. |
+| `0x1C` | 2 | u16 | `xobfRoot` | Node index at which construction begins. |
+| `0x1E` | 4 | u32 | `unknown_1E` | Additional constructor value; complete semantics unresolved. |
 | `0x22` | Variable | char[] | `name` | Raw ASCII, length is `payloadSize − 0x22`. |
+
+The exact binding path is verified in the decoded `LOAD.DLL` overlay. Its OBJ
+parser at relative `0x1C2C` adds 44 to `xobfBank` and indexes the loaded-resource
+table at `0x8020EE00`. It resolves `name` first through the level DLL's class
+registry and then through the resident fallback registry. Resident constructor
+`0x80148254` passes the selected XOBF and `xobfRoot` to graph constructor
+`0x80141E44`.
+
+Construction instantiates only the selected root, not its root-level sibling.
+It recursively instantiates the root's child list and follows sibling links
+within that list. A node whose first word is negative is skipped together with
+its children, while traversal continues with its sibling. This reproduces the
+retail selection of multi-part assemblies and conditional alternatives.
 
 ### 4.2 Object and model formats
 
-Placed objects can refer to XOBF model banks; shared `SHARED/COMMON.EXP`,
+Placed objects refer directly to the two arena XOBF model banks as described
+above; shared `SHARED/COMMON.EXP`,
 `ARMS.EXP`, and `HOTRODS.EXP` provide further compressed resources. The
 second XOBF bank is byte-identical across seven arenas; ROUTE66 differs.
-This establishes deliberate sharing, not exact object class mappings. Arena
-placement coordinates line up with the occupied ZMAP tiles and terrain
-heights—for example, HARBOR's `Lighthouse` is at
-`(850.03,44.41,1246.98)`—while XOBF graph origins do not. The exact
-name-to-XOBF and `HEAD`/`BSPI` linkage remains unknown.
+This establishes deliberate sharing. Arena placement coordinates line up with
+the occupied ZMAP tiles and terrain heights—for example, HARBOR's source
+`Lighthouse` pose is `(850.03,44.41,1246.98)` and selects bank 0/root 10.
+The optional `BSPI` linkage remains unknown.
 
+Construction types 4 and 5 take explicitly behavior-oriented resident paths.
+Type 4 covers moving machinery or vehicles such as `CraneSmall`, `Barge`,
+`CargoTruck`, trains, `ForkLift`, `LaunchVehicle`, and `Orca`. Type 5 covers
+pickups, quest items, destructibles and triggered models such as `I_RocktL`,
+`Q_SupplyBox`, `Q_Bomb`, `Glacier`, and `Meteor_small`; it invokes the resolved
+class callback during construction. Type 6 `LightModel` records have bank
+`-1` and construct lighting helpers without XOBF geometry. These classes are
+genuinely runtime-controlled; a static viewer can show only their authored
+initial pose. Type 0 contains most buildings and props, although individual
+type-0 classes can still be destructible or scripted.
 ### 4.3 Skeletons and animation
 
 Vehicle DLLs and XOBF resources exist in `SHARED`; skeletal and animation
@@ -599,8 +631,9 @@ classified as cut solely because its name sounds developmental.
 `src/rom/vigilante8_2/fs.ts` reads the six-group directory and reuses the
 first game's LZSS decoder. `level.ts` walks `FORM/TERR`, decodes XOBF assets,
 the XBMP/XTIN/COLS visible terrain, full-resolution ZMAP/ZONE collision, and
-`XBGM` as a panoramic sky. XOBF meshes remain unplaced until the verified
-`FORM/OBJ` name-to-model binding is known.
+`XBGM` as a panoramic sky. It follows the retail `FORM/OBJ` bank/root binding,
+node-selection rules, local transforms and world poses to assemble buildings,
+props, pickups and initial-state dynamic objects.
 `vigilante8_2.ts` exposes the eight arenas; `music.ts` adapts all 36 indexed
 sequences to the shared libmus renderer.
 
@@ -608,15 +641,15 @@ sequences to the shared libmus renderer.
 
 The viewer accepts `NVGE` revision 0 and lists all eight indexed arenas.
 It builds a visible terrain layer from ZMAP/ZONE, XBMP, XTIN, and COLS, a
-separate hidden-by-default full-resolution collision layer, and offers 36
-`MUSIC` cues.
+static-object layer, a separately toggleable dynamic-object layer, a hidden
+full-resolution collision layer, and 36 `MUSIC` cues.
 
 ### 7.3 Approximations and omissions
 
 The starting camera and cylindrical sky projection are viewer approximations.
 The visible terrain reproduces the verified static height/material surface;
-`BSP ` structures, `FORM/OBJ` model binding, animations, scripts, fog and
-routes are omitted. The music
+`BSP ` structures, runtime object motion/state changes, animations, scripts,
+fog and routes are omitted. The music
 player uses neutral dry mixer settings because game-specific volume/reverb
 have not been measured. The JPEG preview strips are not used as in-game
 materials.
@@ -632,7 +665,8 @@ materials.
 | Compression | 98/98 independent decodes reach declared size and exact indexed end; all 98 shared-reference re-encodes round-trip byte-identically after decoding. |
 | Level container | Eight `EXP` files parse as complete `FORM/TERR`; child walk ends at exact decoded size. |
 | Geometry | XOBF section offsets and first HARBOR model's vertex-count/span/display-list consistency checked from decoded bytes; node fields, 24.8 translation and transform construction checked against resident disassembly. |
-| XOBF placement scope | HARBOR XOBF-root bounds compared with every `FORM/OBJ` position and occupied terrain bounds; direct arena placement of the roots is rejected rather than displayed. |
+| Object binding | `LOAD.DLL` relative `0x1C2C`, resident `0x80148254`/`0x80141E44`, all `FORM/OBJ` bank/root fields, and the level-DLL name registries establish deterministic selected-root construction. |
+| Object placement | All eight arenas rendered offline with authored world poses; scaled assembly bounds coincide with occupied terrain bounds, without unrelated XOBF roots at the origin. |
 | Lighting state | Entry-state dependency established by scanning the first vertex load of every HARBOR and OILFIELD model and by later explicit `D9` lighting toggles. |
 | Visible terrain | ZMAP/ZONE position and height conversion, the 2-unit render grid, XTIN loader, UV-orientation table, triangle selection, XBMP atlas and COLS ramp checked from decoded bytes and sequel disassembly; all eight surfaces rendered coherently offline. |
 | Terrain collision | ZMAP pointer-grid population, ZONE unpacking, one-unit grid, height scaling and interpolation checked in the sequel's level overlay and resident disassembly. |
@@ -644,7 +678,7 @@ materials.
 
 The principal blockers for full-fidelity viewing are exact `SUNA`/XOBF
 lighting, middle-section interpretation, non-terrain collision structures,
-environment parameters, placement-to-model associations, and animation. For audio, game-side mixer
+environment parameters, runtime object behavior, and animation. For audio, game-side mixer
 gain, reverb, output rate and playback fidelity remain unmeasured. A reliable game
 capture is needed to validate sky projection, lighting, fog, camera, and
 debug-feature reachability.
