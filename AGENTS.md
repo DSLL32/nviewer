@@ -132,12 +132,11 @@ Research complete (spec under `docs/`, implementation pending):
 |---|---|
 | Glover | `r49/glover/` |
 | Jet Force Gemini | `r49/jfg/` |
+| Kirby 64: The Crystal Shards | `r49/kirby64/` |
 
 Research in progress (spec unfinished or under review):
 
-| Game | Research |
-|---|---|
-| Kirby 64: The Crystal Shards | `r49/kirby64/` |
+None currently.
 
 Shared:
  - `r49/impl/`: per-agent check directories (`ge_core`, `pd_obj`, `zelda_mus`,
