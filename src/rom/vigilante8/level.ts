@@ -50,17 +50,40 @@ function nodeMatrix(position: [number, number, number], angles: [number, number,
   const sa = Math.sin(angles[0] * radians), ca = Math.cos(angles[0] * radians);
   const sb = Math.sin(angles[1] * radians), cb = Math.cos(angles[1] * radians);
   const sc = Math.sin(angles[2] * radians), cc = Math.cos(angles[2] * radians);
-  // Exact matrix built by the game's 0x8012FAA8 node-transform routine. X
-  // reflection on both sides converts it to the viewer's handedness.
+  // Exact matrix built by the game's 0x8012FAA8 node-transform routine.
+  // Reflecting X/Y on both sides converts its handed, Y-down frame to the viewer.
   const r00 = sc * sa * sb + cc * cb, r01 = cc * sa * sb - sc * cb, r02 = ca * sb;
   const r10 = sc * ca, r11 = cc * ca, r12 = -sa;
   const r20 = sc * sa * cb - cc * sb, r21 = cc * sa * cb + sc * sb, r22 = ca * cb;
   return new Float32Array([
-    r00, -r10, -r20, 0,
-    -r01, r11, r21, 0,
-    -r02, r12, r22, 0,
-    -position[0], position[1], position[2], 1,
+    r00, r10, -r20, 0,
+    r01, r11, -r21, 0,
+    -r02, -r12, r22, 0,
+    -position[0], -position[1], position[2], 1,
   ]);
+}
+
+function mirrorBatchesY(batches: Batch[]): void {
+  const swap = (array: Float32Array | Uint8Array, width: number, a: number, b: number) => {
+    for (let component = 0; component < width; component++) {
+      const ai = a * width + component, bi = b * width + component, value = array[ai];
+      array[ai] = array[bi]; array[bi] = value;
+    }
+  };
+  for (const batch of batches) {
+    for (let vertex = 0; vertex < batch.positions.length / 3; vertex++)
+      batch.positions[vertex * 3 + 1] = -batch.positions[vertex * 3 + 1];
+    // X is already reflected by the display-list decoder. The second
+    // reflection reverses winding, so restore its OpenGL-facing order.
+    for (let vertex = 0; vertex < batch.positions.length / 3; vertex += 3) {
+      swap(batch.positions, 3, vertex + 1, vertex + 2);
+      swap(batch.uvs, 2, vertex + 1, vertex + 2);
+      swap(batch.colors, 4, vertex + 1, vertex + 2);
+      if (batch.unlitColors) swap(batch.unlitColors, 4, vertex + 1, vertex + 2);
+      for (const colors of batch.lightingColors ?? []) swap(colors, 4, vertex + 1, vertex + 2);
+      if (batch.uvs1) swap(batch.uvs1, 2, vertex + 1, vertex + 2);
+    }
+  }
 }
 
 function multiplyMatrix(a: Float32Array, b: Float32Array): Float32Array {
@@ -97,7 +120,14 @@ function appendBank(bytes: Uint8Array, bin: Chunk, level: Level, bankIndex: numb
         buf: bytes, ucode: 'f3dex2', resolve, resolveImage: resolve,
         textures: level.textures, textureKeys, keyPrefix: `v8/${bankIndex}/`,
         vertexScale: 1, mirrorX: true, cullBackByDefault: true,
+        // The arena renderer enters XOBF lists with lighting enabled. Lists
+        // then toggle it with G_GEOMETRYMODE; without a lighting context the
+        // signed normal bytes are mistaken for authored RGB vertex colours.
+        geometryMode: 0x20401,
+        lighting: { lights: [], ambient: [255, 255, 255] },
+        combiner: true, decals: true,
       }, record + dlOffset);
+      mirrorBatchesY(batches);
     }
     const mesh: Mesh = {
       name: `Bank ${bankIndex + 1} model ${i}`,
@@ -109,10 +139,14 @@ function appendBank(bytes: Uint8Array, bin: Chunk, level: Level, bankIndex: numb
 
   const nodes = Array.from({ length: nodeCount }, (_, i) => {
     const at = base + 0x1c + i * 28;
+    const modelWord = dv.getUint16(at);
     return {
-      model: dv.getUint16(at) & 0xff,
-      position: [dv.getInt32(at + 4) / 0x10000, dv.getInt32(at + 8) / 0x10000,
-        dv.getInt32(at + 12) / 0x10000] as [number, number, number],
+      model: modelWord & 0x7ff,
+      disabled: (modelWord & 0x8000) !== 0,
+      // The custom transform uses signed 24.8 positions (0x80138394 converts
+      // world-coordinate differences to integers with sra 8).
+      position: [dv.getInt32(at + 4) / 0x100, dv.getInt32(at + 8) / 0x100,
+        dv.getInt32(at + 12) / 0x100] as [number, number, number],
       angles: [dv.getUint16(at + 16) & 0xfff, dv.getUint16(at + 18) & 0xfff,
         dv.getUint16(at + 20) & 0xfff] as [number, number, number],
       sibling: dv.getUint16(at + 24), child: dv.getUint16(at + 26), at,
@@ -132,8 +166,12 @@ function appendBank(bytes: Uint8Array, bin: Chunk, level: Level, bankIndex: numb
     if (index >= nodes.length || visited.has(index)) continue;
     visited.add(index);
     const node = nodes[index];
-    const world = multiplyMatrix(parent, nodeMatrix(node.position, node.angles));
     if (node.sibling !== 0xffff) stack.push({ index: node.sibling, parent });
+    // The runtime constructor tests this word as signed. Negative nodes are
+    // disabled alternatives: it may continue their sibling chain, but never
+    // instantiates the node or descends into its child subtree.
+    if (node.disabled) continue;
+    const world = multiplyMatrix(parent, nodeMatrix(node.position, node.angles));
     if (node.child !== 0xffff) stack.push({ index: node.child, parent: world });
     if (node.model >= models.length || !level.meshes[models[node.model]].batches.length) continue;
     placed.push(level.instances.push({
@@ -149,7 +187,7 @@ function rgba5551(value: number): [number, number, number, number] {
   return [five(value >>> 11), five((value >>> 6) & 31), five((value >>> 1) & 31), value & 1 ? 255 : 0];
 }
 
-function decodeIndexedBitmap(bytes: Uint8Array, offset: number, source: string): Texture {
+function decodeIndexedBitmap(bytes: Uint8Array, offset: number, source: string, forceOpaque = false): Texture {
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const format = dv.getUint16(offset), paletteCount = dv.getUint16(offset + 2);
   const width = dv.getUint16(offset + 4), height = dv.getUint16(offset + 6);
@@ -158,28 +196,69 @@ function decodeIndexedBitmap(bytes: Uint8Array, offset: number, source: string):
   for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
     const index = bytes[pixels + y * ((width + 7) & ~7) + x];
     const color = rgba5551(dv.getUint16(offset + 8 + index * 2));
+    if (forceOpaque) color[3] = 255;
     rgba.set(color, (y * width + x) * 4);
   }
   return { width, height, rgba, wrapS: 'repeat', wrapT: 'clamp', format: 'CI8/RGBA16', source };
 }
 
 function appendSky(bytes: Uint8Array, skyChunk: Chunk, level: Level): void {
-  const texture = level.textures.push(decodeIndexedBitmap(bytes, skyChunk.data + 4, `XBGM 0x${skyChunk.start.toString(16)}`)) - 1;
-  const pos: number[] = [], uv: number[] = [], color: number[] = [];
-  const segments = 32, radius = 1000, low = -420, high = 420;
-  const vertex = (i: number, y: number, v: number) => {
-    const a = i / segments * Math.PI * 2;
-    pos.push(Math.sin(a) * radius, y, -Math.cos(a) * radius);
-    uv.push(i / segments, v); color.push(255, 255, 255, 255);
+  // XBGM palettes deliberately leave every RGBA5551 alpha bit clear; the
+  // game's opaque panorama pass ignores it.
+  const skyTexture = decodeIndexedBitmap(
+    bytes, skyChunk.data + 4, `XBGM 0x${skyChunk.start.toString(16)}`, true,
+  );
+  const texture = level.textures.push(skyTexture) - 1;
+  const sidePos: number[] = [], sideUv: number[] = [], sideColor: number[] = [];
+  const segments = 32, radius = 1000;
+  // Preserve the bitmap's pixel aspect around one cylindrical turn. Flat caps
+  // using its edge-row colours close the panorama above and below without
+  // stretching the picture towards a pole.
+  const halfHeight = Math.PI * radius * skyTexture.height / skyTexture.width;
+  const sideVertex = (i: number, y: number) => {
+    const longitude = i / segments * Math.PI * 2;
+    sidePos.push(Math.sin(longitude) * radius, y, -Math.cos(longitude) * radius);
+    sideUv.push(i / segments, 0.5 - y / (2 * halfHeight));
+    sideColor.push(255, 255, 255, 255);
   };
   for (let i = 0; i < segments; i++) {
-    vertex(i, low, 1); vertex(i + 1, low, 1); vertex(i + 1, high, 0);
-    vertex(i, low, 1); vertex(i + 1, high, 0); vertex(i, high, 0);
+    sideVertex(i, -halfHeight); sideVertex(i + 1, -halfHeight); sideVertex(i + 1, halfHeight);
+    sideVertex(i, -halfHeight); sideVertex(i + 1, halfHeight); sideVertex(i, halfHeight);
   }
+
+  const edgeColor = (y: number): [number, number, number, number] => {
+    let r = 0, g = 0, b = 0;
+    for (let x = 0; x < skyTexture.width; x++) {
+      const at = (y * skyTexture.width + x) * 4;
+      r += skyTexture.rgba[at]; g += skyTexture.rgba[at + 1]; b += skyTexture.rgba[at + 2];
+    }
+    return [Math.round(r / skyTexture.width), Math.round(g / skyTexture.width),
+      Math.round(b / skyTexture.width), 255];
+  };
+  const capBatch = (y: number, rgba: [number, number, number, number]): Batch => {
+    const positions: number[] = [], uvs: number[] = [], colors: number[] = [];
+    const vertex = (x: number, z: number) => {
+      positions.push(x, y, z); uvs.push(0, 0); colors.push(...rgba);
+    };
+    for (let i = 0; i < segments; i++) {
+      const a = i / segments * Math.PI * 2, b = (i + 1) / segments * Math.PI * 2;
+      vertex(0, 0);
+      vertex(Math.sin(a) * radius, -Math.cos(a) * radius);
+      vertex(Math.sin(b) * radius, -Math.cos(b) * radius);
+    }
+    return { texture: -1, blend: 'opaque', depthTest: false, depthWrite: false, cullBack: false,
+      positions: new Float32Array(positions), uvs: new Float32Array(uvs), colors: new Uint8Array(colors) };
+  };
+  // XBGM is camera-relative. The exact game's screen-space projection and
+  // the signed XBGM prefix remain unknown.
   const mesh = level.meshes.push({
-    name: 'Panoramic sky', radius: Math.hypot(radius, high),
-    batches: [{ texture, blend: 'opaque', depthTest: false, depthWrite: false, cullBack: false,
-      positions: new Float32Array(pos), uvs: new Float32Array(uv), colors: new Uint8Array(color) }],
+    name: 'Panoramic sky', radius: Math.hypot(radius, halfHeight),
+    batches: [
+      { texture, blend: 'opaque', depthTest: false, depthWrite: false, cullBack: false,
+        positions: new Float32Array(sidePos), uvs: new Float32Array(sideUv), colors: new Uint8Array(sideColor) },
+      capBatch(halfHeight, edgeColor(0)),
+      capBatch(-halfHeight, edgeColor(skyTexture.height - 1)),
+    ],
     info: { chunk: 'XBGM', offset: `0x${skyChunk.start.toString(16)}` },
   }) - 1;
   level.unplaced.push(mesh);

@@ -239,7 +239,9 @@ zero-vertex placeholders. **Verified from all model index bounds.**
 | `0x00` | 4 | u32 | vertexCount | Number of N64 `Vtx` records. |
 | `0x04` | 4 | u32 | vertexDataOffset | Model-relative vertex-array start. |
 | `0x08` | 4 | u32 | displayListOffset | Model-relative F3DEX2 command start; zero for no list. |
-| `0x0C` | 12 | u8[12] | unknown_0C | Three metadata words not interpreted. |
+| `0x0C` | 8 | u8[8] | unknown_0C | Two metadata words not interpreted. |
+| `0x14` | 1 | u8 | coordinateShift | Left shift applied to 24.8 node translation when emitting the 16.16 RSP matrix; normally 8. |
+| `0x15` | 3 | u8[3] | unknown_15 | Remaining model metadata. |
 | `vertexDataOffset` | `16 × vertexCount` | Vtx[] | vertices | Standard N64 signed XYZ, flag, ST, and RGBA fields. |
 
 The terrain itself has `ZONE` chunks, each `0x4000` bytes. Each is a 64×64
@@ -257,6 +259,12 @@ maps from ROM bytes; layout and axes verified by disassembly and live RAM.**
 |---:|---:|---|---|---|
 | `0x00` | `0x4000` | u32[64][64] | zoneSamples | BE32 packed samples indexed as `[localX][localZ]`. |
 
+The terrain renderer writes the sample height directly to the vertex's second
+coordinate, while above-ground XOBF structures extend into negative values on
+that axis; the renderer does not insert a later sign change. This is the
+opposite of nviewer's Y-up basis. **Verified by resident-code disassembly,
+model bounds, and a Casino City gameplay frame.**
+
 ### 3.4 Display lists and render state
 
 Model records contain F3DEX2 display lists directly, using the embedded
@@ -269,8 +277,12 @@ palette, `0x02000028` for its pixels, and `0x020008B8` for texture 2's
 palette. **Verified by display-list disassembly and section offsets.**
 
 Of 2,364 models, 2,118 begin their list at `0x18`, 215 have no list,
-and 31 use later offsets. Render-state choices are in those lists; the
-game's camera/projection setup and dynamic overrides remain **Unknown**.
+and 31 use later offsets. Terrain lists inherit `G_LIGHTING` from the arena
+renderer and toggle it with `G_GEOMETRYMODE`; lit `Vtx` color bytes are signed
+surface normals rather than authored RGB. The common textured combiner uses
+`TEXEL0 × SHADE`. Resident routine `0x801377C4` constructs three directional
+lights, but the exact `SUNA`/`COLS` mapping to those lights remains
+**Unknown**. **Verified by display-list and resident-code disassembly.**
 
 ### 3.5 Textures and materials
 
@@ -289,6 +301,11 @@ structures; the Oil Fields panorama matches the refinery silhouettes and
 bright horizon in a captured attract-demo frame. `XLSC` holds 320×112 JFIF
 menu preview imagery. **Verified from decoded bytes, decoded image renders,
 and an emulator frame for Oil Fields.**
+
+All 256 palette entries in every one of the eleven `XBGM` images have their
+RGBA5551 alpha bit clear. The game's dedicated backdrop pass nevertheless
+draws the panorama opaquely; the bit is not transparency for this use.
+**Verified from all panorama palettes and the captured Oil Fields frame.**
 
 The `XBMP` payload starts directly with this eight-byte texture header;
 `XBGM` has an additional signed 32-bit field before the same header. Its
@@ -386,7 +403,7 @@ hypothesis.**
 
 ### 3.7 Environment, sky, fog, and lighting
 
-The `XBGM` indexed image supplies a painted backdrop with distant scenery;
+The `XBGM` indexed image supplies an opaque painted backdrop with distant scenery;
 Oil Fields' decoded image matches the refinery silhouettes and cloudy
 sunset in an attract-demo frame. Every terrain has `SUNA` (`0x10` payload
 bytes) and `COLS` (`0x1C` bytes). `COLS` contains seven four-byte entries
@@ -468,24 +485,35 @@ eleven arenas have 28-byte stride. The graph links at `+0x18` and
 none). Every first-child index is exactly its parent's index plus one
 (1,396/1,396), all 5,525 sibling indexes point forward, and walking these
 links partitions each bank into contiguous preorder trees without cycles or
-cross-links. The low eight bits of the word at `+0x00` are a valid model
-index in 6,928 nodes, `0xFF` in 198, and special out-of-range values in two
-Casino City nodes. The `+0x02` word is either `0xFFFF` (6,305 nodes) or an
+cross-links. The low eleven bits of the word at `+0x00` select the model when
+the signed word is nonnegative; negative records are disabled scene
+alternatives. The `+0x02` word is either `0xFFFF` (6,305 nodes) or an
 in-range shape index (823 nodes), with every shape referenced exactly once.
-The runtime builds each local transform from three 12-bit-turn angles and
-signed 16.16 translations, then recursively composes `parent × local` for a
-first child while retaining the parent transform for a sibling. The transform
-builder is at `0x8012FAA8`; the local-matrix wrapper at `0x80137410` copies the
-three translation words without scaling. **Verified from ROM bytes and
-disassembly.** Object binding remains **Unknown**.
+The runtime treats `modelAndFlags` as signed before constructing a node. A
+negative word disables that node and its child subtree while traversal may
+continue at its next sibling. Otherwise bits `0–10` select the model;
+bit `0x0800` becomes a runtime flag whose later meaning is unresolved. The
+runtime builds each local transform from three 12-bit-turn angles and signed
+24.8 translations, then recursively composes `parent × local` for a first
+child while retaining the parent transform for a sibling. The constructor at
+`0x80137028` implements the signed gate and model mask, the transform builder
+is at `0x8012FAA8`, and the local-matrix wrapper at `0x80137410` copies the
+three translation words without scaling. Immediately before RSP-matrix
+emission, `0x801310CC` shifts each translation left by the model descriptor's
+`coordinateShift`; the descriptor constructor copies that value from model
+record byte `+0x14`. It is 8 for 237 of Casino City's 238 models. Thus the
+ordinary source translation is signed 24.8 and becomes 16.16 only at matrix
+emission. The sole shift-9 Casino model has zero node translation. A live
+Casino bank and its source nodes matched byte-for-byte in RAM. **Verified
+from ROM bytes, disassembly, and RAM.** Object binding remains **Unknown**.
 
 | Offset | Size | Type | Field | Description |
 |---:|---:|---|---|---|
-| `0x00` | 2 | u16 | modelAndFlags | Low byte usually model index; exact flags unknown. |
+| `0x00` | 2 | u16 | modelAndFlags | Negative disables this node and child subtree; bits `0–10` are model index; bit `0x0800` maps to an unresolved runtime flag. |
 | `0x02` | 2 | u16 | shapeIndex | Shape index or `0xFFFF`. |
-| `0x04` | 4 | s32 | x | Signed 16.16 local X translation. |
-| `0x08` | 4 | s32 | y | Signed 16.16 local Y translation. |
-| `0x0C` | 4 | s32 | z | Signed 16.16 local Z translation. |
+| `0x04` | 4 | s32 | x | Signed 24.8 local X translation. |
+| `0x08` | 4 | s32 | y | Signed 24.8 local Y translation. |
+| `0x0C` | 4 | s32 | z | Signed 24.8 local Z translation. |
 | `0x10` | 2 | u16 | angleA | Low 12 bits, one turn = 4096. |
 | `0x12` | 2 | u16 | angleB | Low 12 bits, one turn = 4096. |
 | `0x14` | 2 | u16 | angleC | Low 12 bits, one turn = 4096. |
@@ -682,15 +710,19 @@ The implementation is split between the embedded directory and LZSS reader
 
 The viewer accepts `NV8E` revision 0 and lists all eleven indexed arenas.
 The loader builds static XOBF model instances from scene-node hierarchy,
-decodes model display lists and textures, and displays the `XBGM` panorama.
+omits disabled alternate node subtrees, decodes model display lists and
+textures, and displays the `XBGM` panorama opaquely despite its clear palette
+alpha bits. Lighting-enabled vertices use a neutral ambient approximation
+instead of exposing their signed normals as RGB.
 It also builds the code-verified `ZMAP`/`ZONE` surface as a hidden collision
 layer. The music box lists fifteen `SOUNDS` sequences.
 
 ### 7.3 Approximations and omissions
 
-Scene-node translations, rotations, and parent/child composition follow the
-resident transform code. The starting camera and cylindrical sky projection
-are viewer approximations. Dynamic vehicles/projectiles, object-shape
+Scene-node selection, translations, rotations, and parent/child composition
+follow the resident transform code. The loader reflects both XOBF and terrain
+Y coordinates into the viewer's Y-up basis. The starting camera, neutral lighting,
+and capped cylindrical sky projection are viewer approximations. Dynamic vehicles/projectiles, object-shape
 collision, object bindings and `JUNC`/`RSEG` routes are omitted. The music
 player uses neutral dry mixer settings because game-specific volume and
 reverb remain unmeasured.
@@ -705,9 +737,9 @@ reverb remain unmeasured.
 | Directory | 126 bounds-checked files; every successor begins at four-byte alignment after its predecessor. |
 | LZSS | 66 indexed streams decoded to advertised sizes while consuming exact stored payloads. |
 | Level containers | Eleven `FORM`/`TERR` roots; top-level lengths equal decoded sizes; HEAD object counts match every map's object forms. |
-| Models/textures/nodes | 65 XOBF banks: 2,364 model records and 2,103 textures satisfy exact size formulas; the 22 terrain banks' 7,128 scene nodes satisfy graph-link constraints. |
+| Models/textures/nodes | 65 XOBF banks: 2,364 model records and 2,103 textures satisfy exact size formulas; the 22 terrain banks' 7,128 scene nodes satisfy graph-link constraints. Resident-code disassembly verifies the signed-node gate, 11-bit model index, 24.8 transforms, inherited lighting, and signed-normal interpretation. |
 | Terrain index and collision | Every `ZMAP` has exactly the IDs of its 4/6/9 `ZONE` chunks. Disassembly establishes axes, scale, sampling and triangulation; all six Oil Fields source zones matched their expanded live RAM buffers exactly. |
-| Image formats | Eleven terrain bitmaps and sky panoramas satisfy texture bounds; Oil Fields panorama matches a captured attract-demo backdrop. |
+| Image formats | Eleven terrain bitmaps and sky panoramas satisfy texture bounds; all 2,816 panorama palette entries have clear alpha bits, while the Oil Fields panorama appears opaque and matches a captured attract-demo backdrop. |
 | Audio | Both banks' 249 wave records and all 15 song files parse; every song produced nonzero PCM and valid loop bounds in the shared player. |
 | Hidden-level descriptor | Missing `V9HARBOR` asset established from full index; normal-menu bound proved by MIPS disassembly. |
 

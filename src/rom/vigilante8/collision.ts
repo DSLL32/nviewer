@@ -45,9 +45,10 @@ export function appendVigilante8Collision(
   const positions: number[] = [], uvs: number[] = [], colors: number[] = [], triSource: number[] = [];
   let radius = 0;
   const vertex = (x: number, z: number, y: number) => {
-    // XOBF display-list vertices are reflected on X for the viewer, so the
-    // game's terrain coordinates use the same handedness conversion.
-    positions.push(-x, y, z);
+    // The game writes (X, height, Z) directly to terrain Vtx records and
+    // authors structures above ground at negative Y. Reflect X/Y together
+    // with XOBF geometry to obtain the viewer's Y-up frame.
+    positions.push(-x, -y, z);
     uvs.push(0, 0);
     colors.push(64, 224, 255, 128);
     radius = Math.max(radius, Math.hypot(x, y, z));
