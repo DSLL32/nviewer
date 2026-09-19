@@ -110,6 +110,12 @@ function appendBank(bytes: Uint8Array, bin: Chunk, level: Level, bankIndex: numb
         buf: bytes, ucode: 'f3dex2', resolve, resolveImage: resolve,
         textures: level.textures, textureKeys, keyPrefix: `v8-2/${bankIndex}/`,
         vertexScale: 1, mirrorX: true, cullBackByDefault: true,
+        // The arena renderer enters XOBF lists with lighting enabled. Lists
+        // then toggle it with G_GEOMETRYMODE; without a lighting context the
+        // signed normal bytes are mistaken for authored RGB vertex colours.
+        geometryMode: 0x20401,
+        lighting: { lights: [], ambient: [255, 255, 255] },
+        combiner: true, decals: true,
       }, record + displayListOffset);
     }
     const mesh: Mesh = {
@@ -122,8 +128,10 @@ function appendBank(bytes: Uint8Array, bin: Chunk, level: Level, bankIndex: numb
 
   const nodes = Array.from({ length: nodeCount }, (_, index) => {
     const at = base + 0x1c + index * 28;
+    const modelWord = dv.getUint16(at);
     return {
-      model: dv.getUint16(at) & 0xff,
+      model: modelWord & 0x7ff,
+      disabled: (modelWord & 0x8000) !== 0,
       position: [dv.getInt32(at + 4) / 0x10000, dv.getInt32(at + 8) / 0x10000,
         dv.getInt32(at + 12) / 0x10000] as [number, number, number],
       angles: [dv.getUint16(at + 16) & 0xfff, dv.getUint16(at + 18) & 0xfff,
@@ -146,8 +154,12 @@ function appendBank(bytes: Uint8Array, bin: Chunk, level: Level, bankIndex: numb
     if (index >= nodes.length || visited.has(index)) continue;
     visited.add(index);
     const node = nodes[index];
-    const world = multiplyMatrix(parent, nodeMatrix(node.position, node.angles));
     if (node.sibling !== 0xffff) stack.push({ index: node.sibling, parent });
+    // The runtime constructor reads the first word as signed. Negative nodes
+    // are disabled alternatives: their sibling chain remains live, but the
+    // node and its child subtree are not instantiated.
+    if (node.disabled) continue;
+    const world = multiplyMatrix(parent, nodeMatrix(node.position, node.angles));
     if (node.child !== 0xffff) stack.push({ index: node.child, parent: world });
     if (node.model >= models.length || !level.meshes[models[node.model]].batches.length) continue;
     placed.push(level.instances.push({

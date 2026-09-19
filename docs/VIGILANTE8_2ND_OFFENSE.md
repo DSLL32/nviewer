@@ -203,14 +203,17 @@ The 28-byte records form a forward-linked scene graph. Position is signed
 16.16 fixed-point. Each orientation component is a 12-bit turn, where
 `0x1000` is one revolution. Resident routine `0x8013B930` converts the three
 components into the node's local 3×3 matrix, and the scene traversal composes
-that local transform with its parent's transform. The low byte of the first
-word selects a first-section model; the high byte contains flags. Verified
-from decoded records and resident disassembly.
+that local transform with its parent's transform. The low 11 bits of the
+first word select a first-section model; `0x7FF` means no model. Constructor
+`0x80141C30` maps source bit 11 to runtime flag `0x10`. Recursive constructor
+`0x80141E44` reads the word as signed: a negative node is not instantiated and
+its child subtree is skipped, but traversal continues at its sibling. This is
+essential scene selection, not optional visibility culling. Verified from
+decoded records and resident disassembly.
 
 | Offset | Size | Type | Field | Description |
 |---:|---:|---|---|---|
-| `0x00` | 1 | u8 | `flags` | Node flags; individual bits are not fully named. |
-| `0x01` | 1 | u8 | `modelIndex` | First-section model index; `0xFF` means no drawn model. |
+| `0x00` | 2 | u16 | `modelAndFlags` | Low 11 bits are the first-section model index (`0x7FF` = none); bit 11 maps to runtime flag `0x10`; bit 15 disables this node and child subtree. Other flag bits are not named. |
 | `0x02` | 2 | s16 | `shapeIndex` | Middle-section record index, or `-1`. |
 | `0x04` | 4 | s32 | `translateX` | Signed 16.16 local translation. |
 | `0x08` | 4 | s32 | `translateY` | Signed 16.16 local translation. |
@@ -253,9 +256,13 @@ not been independently compared with a trustworthy retail capture.
 
 The embedded RSP string identifies F3DEX fifo 2.08. XOBF model records
 contain direct F3DEX2 command streams, including `E7` pipe sync, `E2` render
-state, `01` vertex loads, and `05`/`06` triangle commands. Exact per-material
-blend and texture state remains to be decoded. Do not assume display-list
-bytes are generic F3D or a custom triangle-list format.
+state, `01` vertex loads, and `05`/`06` triangle commands. The arena renderer
+enters these lists with `G_LIGHTING` enabled; none of 171 HARBOR or 117
+OILFIELD models enables lighting before its first vertex load, while later
+`D9` commands explicitly clear or set it. The vertex RGB bytes at lit loads
+are therefore signed normals, not authored colours. The lists also supply
+their own combiner, depth, alpha and decal transitions. Do not assume
+display-list bytes are generic F3D or a custom triangle-list format.
 
 ### 3.5 Textures and materials
 
@@ -300,7 +307,8 @@ Vigilante 8, although record-size grammar is shared. Segment 1 display-list
 addresses resolve against the current model's vertex array; segment 2
 texture-image addresses resolve against the first image record, excluding
 the offset table. This address interpretation is verified on the first
-models; complete material-state handling remains to be implemented.
+models. Actual arena light colours and directions remain to be established
+from the `SUNA`/`COLS` environment data or runtime state.
 
 ### 3.6 Collision
 
@@ -541,8 +549,8 @@ classified as cut solely because its name sounds developmental.
 `src/rom/vigilante8_2/fs.ts` reads the six-group directory and reuses the
 first game's LZSS decoder. `level.ts` walks `FORM/TERR`, decodes the XOBF
 header, scene-node transforms, indexed models/textures and F3DEX2 lists,
-assembles static instances, builds ZMAP/ZONE terrain collision, and renders
-`XBGM` as a panoramic sky.
+applies the constructor's disabled-node semantics, assembles static instances,
+builds ZMAP/ZONE terrain collision, and renders `XBGM` as a panoramic sky.
 `vigilante8_2.ts` exposes the eight arenas; `music.ts` adapts all 36 indexed
 sequences to the shared libmus renderer.
 
@@ -572,6 +580,8 @@ materials.
 | Compression | 98/98 independent decodes reach declared size and exact indexed end; all 98 shared-reference re-encodes round-trip byte-identically after decoding. |
 | Level container | Eight `EXP` files parse as complete `FORM/TERR`; child walk ends at exact decoded size. |
 | Geometry | XOBF section offsets and first HARBOR model's vertex-count/span/display-list consistency checked from decoded bytes; node fields and transform construction checked against resident disassembly. |
+| Scene selection | Signed disabled-node test, sibling continuation, child-subtree omission and low-11-bit model selection checked at resident `0x80141E44` and `0x80141C30`; applying it leaves 39–82 scenery instances and 123–184 batches per arena. |
+| Lighting state | Entry-state dependency established by scanning the first vertex load of every HARBOR and OILFIELD model and by later explicit `D9` lighting toggles. |
 | Terrain collision | ZMAP pointer-grid population, ZONE unpacking, height scaling and interpolation checked in the sequel's level overlay and resident disassembly. |
 | Object catalog | All eight placement counts and `HEAD` names scanned from decoded chunks. |
 | Music | 36/36 indexed sequences decode; file/title pointer tables and repeat opcode handlers checked by disassembly. |
@@ -579,9 +589,9 @@ materials.
 
 ### 8.2 Known unknowns
 
-The principal blockers for full-fidelity viewing are XOBF material-state and
-middle-section interpretation, non-terrain collision structures, environment
-parameters, placement-to-model associations, and animation. For audio, game-side mixer
+The principal blockers for full-fidelity viewing are exact `SUNA`/`COLS`
+lighting, middle-section interpretation, non-terrain collision structures,
+environment parameters, placement-to-model associations, and animation. For audio, game-side mixer
 gain, reverb, output rate and playback fidelity remain unmeasured. A reliable game
 capture is needed to validate sky projection, lighting, fog, camera, and
 debug-feature reachability.
