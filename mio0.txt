@@ -1,0 +1,66 @@
+Mario Kart 64 (U) [!] — retail MIO0 decoder disassembly
+
+ROM: US V1.0, header title "MARIOKART64", game code NKTE, revision 0;
+CRC1 0x3E5055B6, CRC2 0x2E92DA52;
+SHA-1 579c48e211ae952530ffc8738709f078d5dd215e.
+
+Extracted range: ROM 0x040CD0-0x040D68 (0x98 bytes, end exclusive);
+runtime 0x800400D0-0x80040168.
+
+Extraction command:
+  dd if='Mario Kart 64 (U) [!].z64' of=mio0decode.bin bs=1 skip=$((0x40CD0)) count=$((0x98)) status=none
+Objdump command:
+  mips-linux-gnu-objdump -D -EB -b binary -m mips:4300 --adjust-vma=0x800400d0 mio0decode.bin
+
+Boundary evidence: retail call sites at 0x800013C4 and 0x80005260 use
+`jal 0x800400D0`; the extracted code returns at 0x80040160 with delay slot
+0x80040164.  0x80040168-0x8004016F are zero padding, followed by data at
+0x80040170 and a separate function at 0x80040174.
+
+Verbatim objdump output
+-----------------------
+
+mio0decode.bin:     file format binary
+
+
+Disassembly of section .data:
+
+00000000800400d0 <.data>:
+    800400d0:	8c870008 	lw	a3,8(a0)
+    800400d4:	8c99000c 	lw	t9,12(a0)
+    800400d8:	8c980004 	lw	t8,4(a0)
+    800400dc:	00e43820 	add	a3,a3,a0
+    800400e0:	0324c820 	add	t9,t9,a0
+    800400e4:	00003025 	move	a2,zero
+    800400e8:	20840010 	addi	a0,a0,16
+    800400ec:	0305c020 	add	t8,t8,a1
+    800400f0:	54c00005 	bnezl	a2,0x80040108
+    800400f4:	0100482a 	slt	t1,t0,zero
+    800400f8:	8c880000 	lw	t0,0(a0)
+    800400fc:	24060020 	li	a2,32
+    80040100:	20840004 	addi	a0,a0,4
+    80040104:	0100482a 	slt	t1,t0,zero
+    80040108:	51200007 	beqzl	t1,0x80040128
+    8004010c:	94ea0000 	lhu	t2,0(a3)
+    80040110:	832a0000 	lb	t2,0(t9)
+    80040114:	23390001 	addi	t9,t9,1
+    80040118:	20a50001 	addi	a1,a1,1
+    8004011c:	1000000d 	b	0x80040154
+    80040120:	a0aaffff 	sb	t2,-1(a1)
+    80040124:	94ea0000 	lhu	t2,0(a3)
+    80040128:	20e70002 	addi	a3,a3,2
+    8004012c:	000a5b02 	srl	t3,t2,0xc
+    80040130:	314a0fff 	andi	t2,t2,0xfff
+    80040134:	00aa4822 	sub	t1,a1,t2
+    80040138:	216b0003 	addi	t3,t3,3
+    8004013c:	812affff 	lb	t2,-1(t1)
+    80040140:	216bffff 	addi	t3,t3,-1
+    80040144:	21290001 	addi	t1,t1,1
+    80040148:	20a50001 	addi	a1,a1,1
+    8004014c:	1560fffb 	bnez	t3,0x8004013c
+    80040150:	a0aaffff 	sb	t2,-1(a1)
+    80040154:	00084040 	sll	t0,t0,0x1
+    80040158:	14b8ffe5 	bne	a1,t8,0x800400f0
+    8004015c:	20c6ffff 	addi	a2,a2,-1
+    80040160:	03e00008 	jr	ra
+    80040164:	00000000 	nop
