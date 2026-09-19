@@ -1,6 +1,7 @@
 import { runDisplayList } from '../displaylist';
-import type { Batch, Level, Mesh, Texture } from '../types';
+import type { Batch, Level, Mesh } from '../types';
 import { appendVigilante8Collision } from './collision';
+import { appendVigilante8Terrain, decodeVigilante8Bitmap, readVigilante8Terrain } from './terrain';
 
 const IDENTITY = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
 
@@ -96,7 +97,10 @@ function multiplyMatrix(a: Float32Array, b: Float32Array): Float32Array {
   return out;
 }
 
-function appendBank(bytes: Uint8Array, bin: Chunk, level: Level, bankIndex: number): number[] {
+function appendBank(bytes: Uint8Array, bin: Chunk, level: Level, bankIndex: number, rootIndices: number[]): number[] {
+  // Avoid decoding and transferring an entire archetype bank when no
+  // source-backed OBJ placement selects one of its roots.
+  if (!rootIndices.length) return [];
   const base = bin.data, dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const modelCount = dv.getUint32(base), modelSection = base + dv.getUint32(base + 4);
   const textureCount = dv.getUint32(base + 16), textureSection = base + dv.getUint32(base + 20);
@@ -152,15 +156,9 @@ function appendBank(bytes: Uint8Array, bin: Chunk, level: Level, bankIndex: numb
       sibling: dv.getUint16(at + 24), child: dv.getUint16(at + 26), at,
     };
   });
-  const referred = new Set<number>();
-  for (const node of nodes) {
-    if (node.sibling !== 0xffff) referred.add(node.sibling);
-    if (node.child !== 0xffff) referred.add(node.child);
-  }
-  const roots = nodes.map((_, i) => i).filter((i) => !referred.has(i));
   const placed: number[] = [], visited = new Set<number>();
   const stack: { index: number; parent: Float32Array }[] =
-    roots.reverse().map((index) => ({ index, parent: IDENTITY }));
+    [...rootIndices].reverse().map((index) => ({ index, parent: IDENTITY }));
   while (stack.length) {
     const { index, parent } = stack.pop()!;
     if (index >= nodes.length || visited.has(index)) continue;
@@ -182,30 +180,10 @@ function appendBank(bytes: Uint8Array, bin: Chunk, level: Level, bankIndex: numb
   return placed;
 }
 
-function rgba5551(value: number): [number, number, number, number] {
-  const five = (v: number) => (v << 3) | (v >>> 2);
-  return [five(value >>> 11), five((value >>> 6) & 31), five((value >>> 1) & 31), value & 1 ? 255 : 0];
-}
-
-function decodeIndexedBitmap(bytes: Uint8Array, offset: number, source: string, forceOpaque = false): Texture {
-  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const format = dv.getUint16(offset), paletteCount = dv.getUint16(offset + 2);
-  const width = dv.getUint16(offset + 4), height = dv.getUint16(offset + 6);
-  if (format !== 0x0201) throw new Error(`Unsupported Vigilante 8 bitmap format 0x${format.toString(16)}`);
-  const pixels = offset + ((8 + paletteCount * 2 + 7) & ~7), rgba = new Uint8Array(width * height * 4);
-  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
-    const index = bytes[pixels + y * ((width + 7) & ~7) + x];
-    const color = rgba5551(dv.getUint16(offset + 8 + index * 2));
-    if (forceOpaque) color[3] = 255;
-    rgba.set(color, (y * width + x) * 4);
-  }
-  return { width, height, rgba, wrapS: 'repeat', wrapT: 'clamp', format: 'CI8/RGBA16', source };
-}
-
 function appendSky(bytes: Uint8Array, skyChunk: Chunk, level: Level): void {
   // XBGM palettes deliberately leave every RGBA5551 alpha bit clear; the
   // game's opaque panorama pass ignores it.
-  const skyTexture = decodeIndexedBitmap(
+  const skyTexture = decodeVigilante8Bitmap(
     bytes, skyChunk.data + 4, `XBGM 0x${skyChunk.start.toString(16)}`, true,
   );
   const texture = level.textures.push(skyTexture) - 1;
@@ -288,12 +266,22 @@ export function decodeVigilante8Level(bytes: Uint8Array, level: Level): void {
   for (let i = 0; i < banks.length; i++) {
     const bin = chunks(bytes, banks[i].data + 4, banks[i].end).find((chunk) => chunk.tag === 'BIN ');
     if (!bin) throw new Error('Vigilante 8 XOBF has no BIN chunk');
-    placed.push(...appendBank(bytes, bin, level, i));
+    // XOBF roots are object archetypes. The runtime passes a selected root
+    // index from each OBJ's DLL handler to 0x80137028; no archive root is an
+    // implicit world instance. Drawing every root at its authored pivot is
+    // what previously piled unrelated structures over the arena. OBJ/DLL
+    // placement remains outside the static terrain viewer's scope.
+    placed.push(...appendBank(bytes, bin, level, i, []));
   }
   level.layers!.push({ name: 'scenery', kind: 'main', instances: placed });
-  appendVigilante8Collision(bytes, top.find((chunk) => chunk.tag === 'ZMAP'),
-    top.filter((chunk) => chunk.tag === 'ZONE'), level);
-  updateBounds(level, placed);
+  const surface = readVigilante8Terrain(bytes, top.find((chunk) => chunk.tag === 'ZMAP'),
+    top.filter((chunk) => chunk.tag === 'ZONE'));
+  const terrain = appendVigilante8Terrain(bytes, surface,
+    top.find((chunk) => chunk.tag === 'XBMP'), top.find((chunk) => chunk.tag === 'TINF'),
+    top.find((chunk) => chunk.tag === 'COLS'), level);
+  level.layers!.push({ name: 'terrain', kind: 'main', instances: terrain });
+  appendVigilante8Collision(surface, level);
+  updateBounds(level, [...terrain, ...placed]);
   const sky = top.find((chunk) => chunk.tag === 'XBGM');
   if (sky) appendSky(bytes, sky, level);
 }

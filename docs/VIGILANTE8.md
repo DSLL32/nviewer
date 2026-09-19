@@ -21,7 +21,7 @@ marked **Verified by disassembly** were checked against its MIPS program.
 | Sample encoding | Nintendo 9-byte-frame VADPCM in two unindexed wave-table banks. |
 | Levels | 11 indexed terrain `.EXP`/`.DLL` pairs. |
 | Memory requirement | Base 4 MiB; boot initializes the stack at `0x803FFFF0`. |
-| Viewer support | USA revision 0: eleven static arena scenes, panoramas, hidden terrain-collision layers, and fifteen music entries; dynamic objects omitted. |
+| Viewer support | USA revision 0: eleven textured height-field arenas, panoramas, hidden terrain-collision layers, and fifteen music entries; OBJ/DLL-instantiated XOBF objects omitted. |
 
 ### 1.2 ROM identification
 
@@ -259,11 +259,15 @@ maps from ROM bytes; layout and axes verified by disassembly and live RAM.**
 |---:|---:|---|---|---|
 | `0x00` | `0x4000` | u32[64][64] | zoneSamples | BE32 packed samples indexed as `[localX][localZ]`. |
 
-The terrain renderer writes the sample height directly to the vertex's second
-coordinate, while above-ground XOBF structures extend into negative values on
-that axis; the renderer does not insert a later sign change. This is the
-opposite of nviewer's Y-up basis. **Verified by resident-code disassembly,
-model bounds, and a Casino City gameplay frame.**
+The loader removes a `0x200` stored-height bias and copies the upper five bits
+of source byte 2 into the runtime height word. The renderer writes global X/Z
+sample coordinates and the resulting eleven-bit height directly to N64
+vertices, then submits a matrix with scale `(1, 1/32, 1)` and no translation.
+An Oil Fields capture emitted `(956,1524,1212)` for stored sample
+`07 F4 7C F5`: `0x7F4 - 0x200 = 1524`, and `0x7C >> 3 = 15` selected shade 15.
+Above-ground XOBF structures extend into negative values on the second axis;
+nviewer reflects that Y-down basis into Y-up. **Verified by resident-code
+disassembly and live display-list, matrix, and RAM captures.**
 
 ### 3.4 Display lists and render state
 
@@ -295,8 +299,39 @@ layout below, with formats `0x0200` CI4 (1,790), `0x0201` CI8 (264),
 bytes. **Verified from all record bounds; individual texture appearance has
 not been exhaustively rendered.**
 
-`XBMP` is a top-down indexed terrain-color bitmap, 288 or 320 pixels wide and
-128 high. `XBGM` is a 256×92 indexed panorama painted with sky and distant
+`XBMP` is the terrain CI8 atlas, 288 or 320 pixels wide and 128 high. It is a
+9×4 or 10×4 array of 32×32 tiles. `TINF` contains 256 fixed 40-byte material
+records. Runtime material construction selects the atlas tile from
+`u/32 + atlasColumns × (v/32)`, selects one of eight exact UV permutations
+from the low three bits at `+0x06`, and selects the terrain-cell diagonal from
+bit 3. The renderer loads the selected 32×32 tile and uses S/T values −16 and
+976, corresponding to texel centers −0.5 and 30.5. **Verified by disassembly,
+all eleven decoded atlases, and a live Oil Fields runtime-material and display-list capture.**
+
+| Offset | Size | Type | Field | Description |
+|---:|---:|---|---|---|
+| `0x00` | 2 | u16 | unknown_00 | Material flags not yet interpreted. |
+| `0x02` | 2 | u16 | atlasU | Tile origin in pixels; multiple of 32. |
+| `0x04` | 2 | u16 | atlasV | Tile origin in pixels; multiple of 32. |
+| `0x06` | 2 | u16 | orientation | Low 3 bits select UV orientation; bit 3 selects the visual diagonal. |
+| `0x08` | 32 | u8[32] | unknown_08 | Remaining material state. |
+
+The four UV corners in this table correspond to vertices 0=`(x,z)`,
+1=`(x+1,z)`, 2=`(x,z+1)`, and 3=`(x+1,z+1)`, in tile texel coordinates.
+
+| Orientation | Vertex 0 | Vertex 1 | Vertex 2 | Vertex 3 |
+|---:|---|---|---|---|
+| 0 | `(0,31)` | `(31,31)` | `(0,0)` | `(31,0)` |
+| 1 | `(31,31)` | `(0,31)` | `(31,0)` | `(0,0)` |
+| 2 | `(0,0)` | `(0,31)` | `(31,0)` | `(31,31)` |
+| 3 | `(0,31)` | `(0,0)` | `(31,31)` | `(31,0)` |
+| 4 | `(31,0)` | `(0,0)` | `(31,31)` | `(0,31)` |
+| 5 | `(0,0)` | `(31,0)` | `(0,31)` | `(31,31)` |
+| 6 | `(31,31)` | `(31,0)` | `(0,31)` | `(0,0)` |
+| 7 | `(31,0)` | `(31,31)` | `(0,0)` | `(0,31)` |
+
+Diagonal zero emits `(0,1,2)` and `(3,2,1)`; diagonal one emits `(0,1,3)`
+and `(3,2,0)`. `XBGM` is a 256×92 indexed panorama painted with sky and distant
 structures; the Oil Fields panorama matches the refinery silhouettes and
 bright horizon in a captured attract-demo frame. `XLSC` holds 320×112 JFIF
 menu preview imagery. **Verified from decoded bytes, decoded image renders,
@@ -331,22 +366,23 @@ to an eight-byte boundary.
 ### 3.6 Collision
 
 The runtime expands each active `ZONE` into a `0x3000`-byte buffer: 4096 BE16
-values copied from each source sample's upper half, followed by 4096 material
-bytes copied from the source sample's low byte. A live Oil Fields capture
-matched every height and material value in all six active zones. The
-intervening source byte is not retained in this runtime representation.
+values constructed from each source sample's biased height and shade index,
+followed by 4096 material bytes copied from the source sample's low byte. A
+live Oil Fields capture matched every resulting height/shade and material
+value in all six active zones. The lower three bits of source byte 2 are not
+retained in this runtime representation.
 **Verified by ROM/RAM comparison and disassembly.**
 
 | Source offset | Size | Type | Field | Runtime interpretation |
 |---:|---:|---|---|---|
-| `0x00` | 2 | u16 | heightAndShade | Low 11 bits are height; high 5 bits select renderer metadata. |
-| `0x02` | 1 | u8 | unknown_02 | Not retained in the expanded height/material buffer. |
+| `0x00` | 2 | u16 | biasedHeight | Subtract `0x200`; the low 11 bits become runtime height. |
+| `0x02` | 1 | u8 | shadeAndFlags | Upper five bits become the runtime shade index; lower three bits are not retained. |
 | `0x03` | 1 | u8 | material | Index into 24-byte runtime material records. |
 
 For world coordinates `(X,Z)`, the game selects
 `ZMAP[floor(Z/64)][floor(X/64)]`; the local sample is
 `ZONE[X mod 64][Z mod 64]`. A sample is positioned at
-`(X, (heightAndShade & 0x07ff) / 32, Z)`. The terrain matrix independently
+`(X, ((biasedHeight - 0x200) & 0x07ff) / 32, Z)`. The terrain matrix independently
 uses scale `(1, 1/32, 1)`. A zero ZMAP cell uses a default tile initialized to
 height/metadata value `0x45ff` and material zero. **Verified by disassembly and
 a live height-query breakpoint.**
@@ -408,11 +444,14 @@ Oil Fields' decoded image matches the refinery silhouettes and cloudy
 sunset in an attract-demo frame. Every terrain has `SUNA` (`0x10` payload
 bytes) and `COLS` (`0x1C` bytes). `COLS` contains seven four-byte entries
 whose first three bytes are color-like RGB values; the fourth varies and
-cannot safely be called alpha. Their mapping to ambient light, sun color,
-fog, or other effects remains **Unknown**. The first signed word of `XBGM`
+cannot generally be called alpha. The terrain initializer creates its
+32-entry shade table by floor-interpolating RGB from `COLS` record 3 to
+record 4, with output alpha forced to 255; source sample byte 2's upper five
+bits select that table. Other `COLS` and `SUNA` mappings remain **Unknown**.
+The first signed word of `XBGM`
 varies from −16 to +12; vertical backdrop placement is a **Hypothesis**,
 not a proven scroll rule. **Verified from decoded bytes and the Oil Fields
-emulator frame.**
+emulator frame, runtime shade table, and emitted terrain vertices.**
 
 `COLS` has seven records of four bytes each. The first three bytes are
 color-like channels; the fourth is an uninterpreted control byte.
@@ -475,6 +514,15 @@ position scale is a hypothesis.**
 (82) are among the observed names; 253 distinct names occur. Placement-to-
 model binding, kind semantics beyond the `LGHT` association, and transform
 fields remain **Unknown pending code/RAM validation**.
+
+An XOBF bank can contain many independent scene-tree roots. These are model
+archetypes, not implicit world placements: the generic object constructor at
+`0x8013BCE8` calls the selected object's `.DLL` handler, obtains a root index,
+and passes that index to the recursive XOBF constructor at `0x80137028`.
+The second XOBF bank is byte-identical in all eleven arenas, independently
+excluding its roots from arena-specific static placement. **Verified by
+resident-code disassembly, per-bank graph structure, and all eleven decoded
+environments.**
 
 ### 4.2 Object and model formats
 
@@ -703,29 +751,30 @@ orphan object. **Verified from decoded bytes and the complete directory.**
 
 The implementation is split between the embedded directory and LZSS reader
 (`src/rom/vigilante8/fs.ts`), `FORM`/`TERR`, XOBF and F3DEX2 scene decoding
-(`level.ts`), terrain collision (`collision.ts`), arena assembly
+(`level.ts`), visible terrain decoding (`terrain.ts`), terrain collision (`collision.ts`), arena assembly
 (`vigilante8.ts`), and a shared-libmus audio adapter (`music.ts`).
 
 ### 7.2 Supported features
 
 The viewer accepts `NV8E` revision 0 and lists all eleven indexed arenas.
-The loader builds static XOBF model instances from scene-node hierarchy,
-omits disabled alternate node subtrees, decodes model display lists and
-textures, and displays the `XBGM` panorama opaquely despite its clear palette
-alpha bits. Lighting-enabled vertices use a neutral ambient approximation
-instead of exposing their signed normals as RGB.
-It also builds the code-verified `ZMAP`/`ZONE` surface as a hidden collision
-layer. The music box lists fifteen `SOUNDS` sequences.
+The loader renders the complete code-verified `ZMAP`/`ZONE` height surface
+with its `XBMP` atlas, `TINF` material orientation and diagonal, and
+`COLS`-derived vertex shading. The same source surface supplies a separate
+hidden physical-collision layer. It displays the `XBGM` panorama opaquely
+despite its clear palette alpha bits. The music box lists fifteen `SOUNDS`
+sequences.
 
 ### 7.3 Approximations and omissions
 
-Scene-node selection, translations, rotations, and parent/child composition
-follow the resident transform code. The loader reflects both XOBF and terrain
-Y coordinates into the viewer's Y-up basis. The starting camera, neutral lighting,
-and capped cylindrical sky projection are viewer approximations. Dynamic vehicles/projectiles, object-shape
-collision, object bindings and `JUNC`/`RSEG` routes are omitted. The music
-player uses neutral dry mixer settings because game-specific volume and
-reverb remain unmeasured.
+The loader reflects terrain Y coordinates into the viewer's Y-up basis. The
+starting camera and capped cylindrical sky projection are viewer
+approximations. XOBF formats are understood, but the viewer does not decode
+or draw a bank without a source placement: resolving each `OBJ ` name through
+its level `.DLL` handler remains unimplemented. Thus buildings, props, dynamic
+vehicles/projectiles, and object-shape collision are omitted rather than
+shown piled at archetype pivots. `JUNC`/`RSEG` routes are also omitted. The
+music player uses neutral dry mixer settings because game-specific volume
+and reverb remain unmeasured.
 
 ## 8. Verification and remaining work
 
@@ -737,16 +786,16 @@ reverb remain unmeasured.
 | Directory | 126 bounds-checked files; every successor begins at four-byte alignment after its predecessor. |
 | LZSS | 66 indexed streams decoded to advertised sizes while consuming exact stored payloads. |
 | Level containers | Eleven `FORM`/`TERR` roots; top-level lengths equal decoded sizes; HEAD object counts match every map's object forms. |
-| Models/textures/nodes | 65 XOBF banks: 2,364 model records and 2,103 textures satisfy exact size formulas; the 22 terrain banks' 7,128 scene nodes satisfy graph-link constraints. Resident-code disassembly verifies the signed-node gate, 11-bit model index, 24.8 transforms, inherited lighting, and signed-normal interpretation. |
-| Terrain index and collision | Every `ZMAP` has exactly the IDs of its 4/6/9 `ZONE` chunks. Disassembly establishes axes, scale, sampling and triangulation; all six Oil Fields source zones matched their expanded live RAM buffers exactly. |
+| Models/textures/nodes | 65 XOBF banks: 2,364 model records and 2,103 textures satisfy exact size formulas; the 22 terrain banks' 7,128 scene nodes satisfy graph-link constraints. Resident-code disassembly verifies the signed-node gate, 11-bit model index, 24.8 transforms, inherited lighting, signed-normal interpretation, and per-object root selection. |
+| Terrain index, rendering and collision | Every `ZMAP` has exactly the IDs of its 4/6/9 `ZONE` chunks. Disassembly establishes axes, scale, physical sampling and triangulation; all six Oil Fields source zones matched their expanded live RAM buffers. A live render capture verifies emitted XYZ, the `(1,1/32,1)` matrix, XBMP atlas, all TINF UV orientations and diagonals, and the COLS shade table. Offline renders load all eleven terrain surfaces. |
 | Image formats | Eleven terrain bitmaps and sky panoramas satisfy texture bounds; all 2,816 panorama palette entries have clear alpha bits, while the Oil Fields panorama appears opaque and matches a captured attract-demo backdrop. |
 | Audio | Both banks' 249 wave records and all 15 song files parse; every song produced nonzero PCM and valid loop bounds in the shared player. |
 | Hidden-level descriptor | Missing `V9HARBOR` asset established from full index; normal-menu bound proved by MIPS disassembly. |
 
 ### 8.2 Known unknowns
 
-The source sample's byte at `+0x02`, XOBF shape-record collision rules,
-overlay relocation ABI, environment/fog controls, dynamic object bindings,
+The source sample's low three bits at `+0x02`, XOBF shape-record collision rules,
+overlay relocation ABI, remaining environment/fog controls, dynamic object bindings,
 vehicle animation, game-specific audio mixer settings, audio microcode ID,
 and runtime reachability of residual controller/debug strings remain open.
 Other regional revisions have not been compared.
