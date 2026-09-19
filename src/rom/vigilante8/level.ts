@@ -13,6 +13,18 @@ interface Chunk {
   type?: string;
 }
 
+interface ObjectPlacement {
+  index: number;
+  name: string;
+  bank: number;
+  root: number;
+  matrix: Float32Array;
+  source: number;
+  kind: number;
+  flags: number;
+  nameKey: number;
+}
+
 function text(bytes: Uint8Array, offset: number, size: number): string {
   return String.fromCharCode(...bytes.subarray(offset, offset + size));
 }
@@ -97,10 +109,14 @@ function multiplyMatrix(a: Float32Array, b: Float32Array): Float32Array {
   return out;
 }
 
-function appendBank(bytes: Uint8Array, bin: Chunk, level: Level, bankIndex: number, rootIndices: number[]): number[] {
-  // Avoid decoding and transferring an entire archetype bank when no
-  // source-backed OBJ placement selects one of its roots.
-  if (!rootIndices.length) return [];
+function appendBank(
+  bytes: Uint8Array,
+  bin: Chunk,
+  level: Level,
+  bankIndex: number,
+  placements: ObjectPlacement[],
+): number[] {
+  if (!placements.length) return [];
   const base = bin.data, dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const modelCount = dv.getUint32(base), modelSection = base + dv.getUint32(base + 4);
   const textureCount = dv.getUint32(base + 16), textureSection = base + dv.getUint32(base + 20);
@@ -111,6 +127,7 @@ function appendBank(bytes: Uint8Array, bin: Chunk, level: Level, bankIndex: numb
   for (let i = 0; i < modelCount; i++) {
     const [record, recordEnd] = sectionRecord(dv, modelSection, i, modelCount);
     const vertexCount = dv.getUint32(record), vertexOffset = dv.getUint32(record + 4), dlOffset = dv.getUint32(record + 8);
+    const coordinateShift = dv.getUint8(record + 20);
     let batches: Batch[] = [];
     if (vertexCount && dlOffset) {
       const vertexBase = record + vertexOffset;
@@ -123,7 +140,9 @@ function appendBank(bytes: Uint8Array, bin: Chunk, level: Level, bankIndex: numb
       batches = runDisplayList({
         buf: bytes, ucode: 'f3dex2', resolve, resolveImage: resolve,
         textures: level.textures, textureKeys, keyPrefix: `v8/${bankIndex}/`,
-        vertexScale: 1, mirrorX: true, cullBackByDefault: true,
+        // Model vertices use the descriptor's binary-point shift. The RSP
+        // matrix path carries the same shift at runtime node +0x1E.
+        vertexScale: 1 / (1 << coordinateShift), mirrorX: true, cullBackByDefault: true,
         // The arena renderer enters XOBF lists with lighting enabled. Lists
         // then toggle it with G_GEOMETRYMODE; without a lighting context the
         // signed normal bytes are mistaken for authored RGB vertex colours.
@@ -136,7 +155,10 @@ function appendBank(bytes: Uint8Array, bin: Chunk, level: Level, bankIndex: numb
     const mesh: Mesh = {
       name: `Bank ${bankIndex + 1} model ${i}`,
       radius: meshRadius(batches), batches,
-      info: { bank: bankIndex, model: i, record: `0x${record.toString(16)}`, bytes: recordEnd - record },
+      info: {
+        bank: bankIndex, model: i, record: `0x${record.toString(16)}`,
+        bytes: recordEnd - record, coordinateShift,
+      },
     };
     models.push(level.meshes.push(mesh) - 1);
   }
@@ -147,37 +169,82 @@ function appendBank(bytes: Uint8Array, bin: Chunk, level: Level, bankIndex: numb
     return {
       model: modelWord & 0x7ff,
       disabled: (modelWord & 0x8000) !== 0,
-      // The custom transform uses signed 24.8 positions (0x80138394 converts
-      // world-coordinate differences to integers with sra 8).
-      position: [dv.getInt32(at + 4) / 0x100, dv.getInt32(at + 8) / 0x100,
-        dv.getInt32(at + 12) / 0x100] as [number, number, number],
+      // XOBF descendant translations are signed 16.16. The object constructor
+      // copies them unchanged and the hierarchy compositor uses them as such;
+      // model coordinateShift applies to vertices independently.
+      position: [dv.getInt32(at + 4) / 0x10000, dv.getInt32(at + 8) / 0x10000,
+        dv.getInt32(at + 12) / 0x10000] as [number, number, number],
       angles: [dv.getUint16(at + 16) & 0xfff, dv.getUint16(at + 18) & 0xfff,
         dv.getUint16(at + 20) & 0xfff] as [number, number, number],
       sibling: dv.getUint16(at + 24), child: dv.getUint16(at + 26), at,
     };
   });
-  const placed: number[] = [], visited = new Set<number>();
-  const stack: { index: number; parent: Float32Array }[] =
-    [...rootIndices].reverse().map((index) => ({ index, parent: IDENTITY }));
-  while (stack.length) {
-    const { index, parent } = stack.pop()!;
-    if (index >= nodes.length || visited.has(index)) continue;
-    visited.add(index);
-    const node = nodes[index];
-    if (node.sibling !== 0xffff) stack.push({ index: node.sibling, parent });
-    // The runtime constructor tests this word as signed. Negative nodes are
-    // disabled alternatives: it may continue their sibling chain, but never
-    // instantiates the node or descends into its child subtree.
-    if (node.disabled) continue;
-    const world = multiplyMatrix(parent, nodeMatrix(node.position, node.angles));
-    if (node.child !== 0xffff) stack.push({ index: node.child, parent: world });
-    if (node.model >= models.length || !level.meshes[models[node.model]].batches.length) continue;
-    placed.push(level.instances.push({
-      name: `Bank ${bankIndex + 1} node ${index}`, mesh: models[node.model], matrix: world,
-      info: { bank: bankIndex, node: index, model: node.model, record: `0x${node.at.toString(16)}` },
-    }) - 1);
+  const placed: number[] = [];
+  for (const placement of placements) {
+    const visited = new Set<number>();
+    const stack: { index: number; parent: Float32Array; followSibling: boolean; root: boolean }[] = [
+      { index: placement.root, parent: IDENTITY, followSibling: false, root: true },
+    ];
+    while (stack.length) {
+      const { index, parent, followSibling, root } = stack.pop()!;
+      if (index >= nodes.length || visited.has(index)) continue;
+      visited.add(index);
+      const node = nodes[index];
+      // 0x80137028 never follows the selected root's sibling. Child calls set
+      // flag 1 and therefore do continue each child's sibling chain.
+      if (followSibling && node.sibling !== 0xffff)
+        stack.push({ index: node.sibling, parent, followSibling: true, root: false });
+      // Negative nodes are disabled alternatives: their sibling can survive,
+      // but neither the node nor its child subtree is constructed.
+      if (node.disabled) continue;
+      // LOAD.DLL replaces the selected root's XOBF transform with FORM/OBJ's
+      // authored world transform; descendants retain their local transforms.
+      const world = root ? placement.matrix : multiplyMatrix(parent, nodeMatrix(node.position, node.angles));
+      if (node.child !== 0xffff)
+        stack.push({ index: node.child, parent: world, followSibling: true, root: false });
+      if (node.model >= models.length || !level.meshes[models[node.model]].batches.length) continue;
+      placed.push(level.instances.push({
+        name: root ? `${placement.name} #${placement.index}` : `${placement.name} #${placement.index} node ${index}`,
+        mesh: models[node.model], matrix: world,
+        info: {
+          object: placement.name, objectIndex: placement.index, objectRecord: `0x${placement.source.toString(16)}`,
+          bank: bankIndex, node: index, model: node.model, record: `0x${node.at.toString(16)}`,
+        },
+      }) - 1);
+    }
   }
   return placed;
+}
+
+function objectPlacements(bytes: Uint8Array, objects: Chunk[]): ObjectPlacement[] {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const out: ObjectPlacement[] = [];
+  for (let index = 0; index < objects.length; index++) {
+    const object = objects[index];
+    const head = chunks(bytes, object.data + 4, object.end).find((chunk) => chunk.tag === 'HEAD');
+    if (!head || head.end - head.data < 34) continue;
+    const kind = dv.getUint16(head.data), type = bytes[head.data + 1];
+    const bank = dv.getInt16(head.data + 26);
+    // LOAD.DLL's HEAD switch constructs XOBF roots for types 0 and 2..4.
+    // Type 5 is a deferred item/placeholder record; type 6 is a light.
+    if (bank < 0 || type === 1 || type >= 5) continue;
+    const position: [number, number, number] = [
+      dv.getInt32(head.data + 8) / 0x10000,
+      (dv.getInt32(head.data + 12) - 0x100000) / 0x10000,
+      dv.getInt32(head.data + 16) / 0x10000,
+    ];
+    const angles: [number, number, number] = [
+      dv.getUint16(head.data + 20) & 0xfff,
+      dv.getUint16(head.data + 22) & 0xfff,
+      dv.getUint16(head.data + 24) & 0xfff,
+    ];
+    out.push({
+      index, name: text(bytes, head.data + 34, head.end - head.data - 34), bank,
+      root: dv.getUint16(head.data + 28), matrix: nodeMatrix(position, angles),
+      source: object.start, kind, flags: dv.getUint32(head.data + 4), nameKey: dv.getUint16(head.data + 32),
+    });
+  }
+  return out;
 }
 
 function appendSky(bytes: Uint8Array, skyChunk: Chunk, level: Level): void {
@@ -262,16 +329,12 @@ export function decodeVigilante8Level(bytes: Uint8Array, level: Level): void {
   if (text(bytes, 0, 4) !== 'FORM' || text(bytes, 8, 4) !== 'TERR') throw new Error('Invalid Vigilante 8 TERR FORM');
   const top = chunks(bytes, 12, bytes.length);
   const banks = top.filter((chunk) => chunk.tag === 'FORM' && chunk.type === 'XOBF');
+  const placements = objectPlacements(bytes, top.filter((chunk) => chunk.tag === 'FORM' && chunk.type === 'OBJ '));
   const placed: number[] = [];
   for (let i = 0; i < banks.length; i++) {
     const bin = chunks(bytes, banks[i].data + 4, banks[i].end).find((chunk) => chunk.tag === 'BIN ');
     if (!bin) throw new Error('Vigilante 8 XOBF has no BIN chunk');
-    // XOBF roots are object archetypes. The runtime passes a selected root
-    // index from each OBJ's DLL handler to 0x80137028; no archive root is an
-    // implicit world instance. Drawing every root at its authored pivot is
-    // what previously piled unrelated structures over the arena. OBJ/DLL
-    // placement remains outside the static terrain viewer's scope.
-    placed.push(...appendBank(bytes, bin, level, i, []));
+    placed.push(...appendBank(bytes, bin, level, i, placements.filter((placement) => placement.bank === i)));
   }
   level.layers!.push({ name: 'scenery', kind: 'main', instances: placed });
   const surface = readVigilante8Terrain(bytes, top.find((chunk) => chunk.tag === 'ZMAP'),
@@ -282,6 +345,41 @@ export function decodeVigilante8Level(bytes: Uint8Array, level: Level): void {
   level.layers!.push({ name: 'terrain', kind: 'main', instances: terrain });
   appendVigilante8Collision(surface, level);
   updateBounds(level, [...terrain, ...placed]);
+  // Frame the authored playfield, not off-map dormant objects. Ski Resort,
+  // for example, contains a valid tree placement roughly 900 units beyond
+  // its ZMAP footprint; the game culls it, but including it in the initial
+  // view would make the arena unreadably small.
+  const terrainBounds = {
+    min: [Infinity, Infinity, Infinity],
+    max: [-Infinity, -Infinity, -Infinity],
+  };
+  for (const index of terrain) {
+    const instance = level.instances[index], matrix = instance.matrix;
+    for (const batch of level.meshes[instance.mesh].batches) for (let i = 0; i < batch.positions.length; i += 3) {
+      const x = matrix[0] * batch.positions[i] + matrix[4] * batch.positions[i + 1]
+        + matrix[8] * batch.positions[i + 2] + matrix[12];
+      const y = matrix[1] * batch.positions[i] + matrix[5] * batch.positions[i + 1]
+        + matrix[9] * batch.positions[i + 2] + matrix[13];
+      const z = matrix[2] * batch.positions[i] + matrix[6] * batch.positions[i + 1]
+        + matrix[10] * batch.positions[i + 2] + matrix[14];
+      terrainBounds.min[0] = Math.min(terrainBounds.min[0], x);
+      terrainBounds.min[1] = Math.min(terrainBounds.min[1], y);
+      terrainBounds.min[2] = Math.min(terrainBounds.min[2], z);
+      terrainBounds.max[0] = Math.max(terrainBounds.max[0], x);
+      terrainBounds.max[1] = Math.max(terrainBounds.max[1], y);
+      terrainBounds.max[2] = Math.max(terrainBounds.max[2], z);
+    }
+  }
+  if (terrainBounds.min.every(Number.isFinite) && terrainBounds.max.every(Number.isFinite)) {
+    const center = [0, 1, 2].map((axis) =>
+      (terrainBounds.min[axis] + terrainBounds.max[axis]) / 2) as [number, number, number];
+    const span = Math.max(...[0, 1, 2].map((axis) => terrainBounds.max[axis] - terrainBounds.min[axis]), 100);
+    level.camera = {
+      eye: [center[0], center[1] + span * 0.32, center[2] + span * 0.46],
+      target: center,
+      fovY: 60,
+    };
+  }
   const sky = top.find((chunk) => chunk.tag === 'XBGM');
   if (sky) appendSky(bytes, sky, level);
 }

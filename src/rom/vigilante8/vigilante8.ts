@@ -31,14 +31,16 @@ function loadLevel(fs: Vigilante8Fs, index: number): Level {
   decodeVigilante8Level(fs.file('TERRAIN', `${arena[0]}.EXP`), level);
   if (!level.bounds.min.every(Number.isFinite) || !level.bounds.max.every(Number.isFinite))
     throw new Error(`Vigilante 8 ${arena[1]} has no renderable scenery`);
-  const center: [number, number, number] = [0, 1, 2].map((axis) =>
-    (level.bounds.min[axis] + level.bounds.max[axis]) / 2) as [number, number, number];
-  const span = Math.max(...[0, 1, 2].map((axis) => level.bounds.max[axis] - level.bounds.min[axis]), 100);
-  level.camera = {
-    eye: [center[0], center[1] + span * 0.32, center[2] + span * 0.46],
-    target: center,
-    fovY: 60,
-  };
+  if (!level.camera) {
+    const center: [number, number, number] = [0, 1, 2].map((axis) =>
+      (level.bounds.min[axis] + level.bounds.max[axis]) / 2) as [number, number, number];
+    const span = Math.max(...[0, 1, 2].map((axis) => level.bounds.max[axis] - level.bounds.min[axis]), 100);
+    level.camera = {
+      eye: [center[0], center[1] + span * 0.32, center[2] + span * 0.46],
+      target: center,
+      fovY: 60,
+    };
+  }
   return level;
 }
 

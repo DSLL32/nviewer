@@ -21,7 +21,7 @@ marked **Verified by disassembly** were checked against its MIPS program.
 | Sample encoding | Nintendo 9-byte-frame VADPCM in two unindexed wave-table banks. |
 | Levels | 11 indexed terrain `.EXP`/`.DLL` pairs. |
 | Memory requirement | Base 4 MiB; boot initializes the stack at `0x803FFFF0`. |
-| Viewer support | USA revision 0: eleven textured height-field arenas, panoramas, hidden terrain-collision layers, and fifteen music entries; OBJ/DLL-instantiated XOBF objects omitted. |
+| Viewer support | USA revision 0: eleven textured height-field arenas, source-placed XOBF scenery and pickups, panoramas, hidden terrain-collision layers, and fifteen music entries. |
 
 ### 1.2 ROM identification
 
@@ -240,7 +240,7 @@ zero-vertex placeholders. **Verified from all model index bounds.**
 | `0x04` | 4 | u32 | vertexDataOffset | Model-relative vertex-array start. |
 | `0x08` | 4 | u32 | displayListOffset | Model-relative F3DEX2 command start; zero for no list. |
 | `0x0C` | 8 | u8[8] | unknown_0C | Two metadata words not interpreted. |
-| `0x14` | 1 | u8 | coordinateShift | Left shift applied to 24.8 node translation when emitting the 16.16 RSP matrix; normally 8. |
+| `0x14` | 1 | u8 | coordinateShift | Binary-point shift for model coordinates; normally 8. Vertices are divided by `2^coordinateShift` to obtain arena units. |
 | `0x15` | 3 | u8[3] | unknown_15 | Remaining model metadata. |
 | `vertexDataOffset` | `16 × vertexCount` | Vtx[] | vertices | Standard N64 signed XYZ, flag, ST, and RGBA fields. |
 
@@ -490,39 +490,50 @@ are not yet interpreted. **Verified across all eleven maps.**
 
 Each object `HEAD` payload is a 34-byte binary prefix followed by a printable
 ASCII object-type name of length `payloadSize − 34`, with no NUL inside the
-payload. Its position-like signed words at `+0x08/+0x0C/+0x10` have
-plausible 16.16 fixed-point magnitudes, but world-coordinate interpretation
-and axes are not yet code-verified. **Verified from all 2,436 record bounds;
-position scale is a hypothesis.**
+payload. The `LOAD.DLL` parser resolves that name first against the active
+level overlay and then against the resident/common handler table. An unknown
+name receives the generic handler at `0x8013C764`. Geometry selection does
+not depend on a handler returning a model: the record directly supplies the
+XOBF bank selector and selected root-node index. **Verified across all 2,436
+record bounds, by `LOAD.DLL` and resident-code disassembly, and by live Oil
+Fields constructor captures.**
 
 | Offset | Size | Type | Field | Description |
 |---:|---:|---|---|---|
-| `0x00` | 2 | u16 | kind | Observed 0, 4, 5, 6, 256, 260; all 82 `LGHT` objects are kind 6. |
-| `0x02` | 2 | u16 | unknown_02 | Uninterpreted. |
-| `0x04` | 2 | u16 | unknown_04 | Uninterpreted. |
-| `0x06` | 2 | u16 | unknown_06 | Uninterpreted. |
-| `0x08` | 4 | s32 | coordinateA | Position-like 16.16 candidate. |
-| `0x0C` | 4 | s32 | coordinateB | Position-like 16.16 candidate. |
-| `0x10` | 4 | s32 | coordinateC | Position-like 16.16 candidate. |
-| `0x14` | 4 | u32 | unknown_14 | Uninterpreted. |
-| `0x18` | 4 | u32 | unknown_18 | Uninterpreted. |
-| `0x1C` | 4 | u32 | unknown_1C | Uninterpreted. |
-| `0x20` | 2 | u16 | unknown_20 | Uninterpreted. |
+| `0x00` | 1 | u8 | kindHigh | High object-kind/control byte. |
+| `0x01` | 1 | u8 | kind | Constructor class: 0 and 2–4 construct an XOBF root; 1 has no geometry; 5 is deferred; 6 is a light. |
+| `0x02` | 2 | u16 | radiusOrMetadata | Copied to runtime object metadata; exact use depends on the handler. |
+| `0x04` | 4 | u32 | flags | Constructor flags; the loader masks these with `0xFFF867FE`. |
+| `0x08` | 4 | s32 | x | Authored world X in signed 16.16. |
+| `0x0C` | 4 | s32 | y | Authored world Y in signed 16.16; the loader subtracts `0x00100000` (16 units). |
+| `0x10` | 4 | s32 | z | Authored world Z in signed 16.16. |
+| `0x14` | 2 | s16 | angleX | Low 12 bits, one turn = 4096. |
+| `0x16` | 2 | s16 | angleY | Low 12 bits, one turn = 4096. |
+| `0x18` | 2 | s16 | angleZ | Low 12 bits, one turn = 4096. |
+| `0x1A` | 2 | s16 | modelBank | `−1` means no XOBF bank; 0 selects the arena bank; 1 selects the common pickup bank. Runtime resource slot is `20 + modelBank`. |
+| `0x1C` | 2 | u16 | rootNode | Selected root in that XOBF bank; `0xFFFF` when no model is attached. |
+| `0x1E` | 2 | u16 | reserved | Zero in the live Oil Fields records examined. |
+| `0x20` | 2 | u16 | nameKey | Name/handler key copied by the object loader. |
 | `0x22` | Variable | char[] | name | Remaining payload bytes, without terminator. |
 
 `PlaceHolder` (308), `I_Cannon` (165), `PU_Shield` (164), and `Light`
-(82) are among the observed names; 253 distinct names occur. Placement-to-
-model binding, kind semantics beyond the `LGHT` association, and transform
-fields remain **Unknown pending code/RAM validation**.
+(82) are among the observed names; 253 distinct names occur. `PlaceHolder`
+uses bank `−1` and root `0xFFFF`; common pickups use bank 1. The parser copies
+the world position, applies the fixed Y subtraction, and replaces the selected
+XOBF root's archive transform with the resulting pose. Its exact rotation is
+`Ry(angleY) × Rx(angleX) × Rz(angleZ)`. **Verified by disassembly and 105
+live Oil Fields objects; OilPump, sphere, pipe, rig, gate, pickup, placeholder,
+and lens-flare classes were correlated to their runtime nodes and handlers.**
 
 An XOBF bank can contain many independent scene-tree roots. These are model
-archetypes, not implicit world placements: the generic object constructor at
-`0x8013BCE8` calls the selected object's `.DLL` handler, obtains a root index,
-and passes that index to the recursive XOBF constructor at `0x80137028`.
-The second XOBF bank is byte-identical in all eleven arenas, independently
-excluding its roots from arena-specific static placement. **Verified by
-resident-code disassembly, per-bank graph structure, and all eleven decoded
-environments.**
+archetypes, not implicit world placements. The parser passes the record's
+bank and root fields to generic object constructor `0x8013BCE8`, which queries
+the resolved handler and then calls recursive XOBF constructor `0x80137028`.
+That constructor builds only the selected root and its child hierarchy; it
+does not continue through the selected root's sibling. The second XOBF bank
+is byte-identical in all eleven arenas because it supplies common pickups.
+**Verified by resident-code disassembly, live constructor arguments,
+per-bank graph structure, and all eleven decoded environments.**
 
 ### 4.2 Object and model formats
 
@@ -542,26 +553,36 @@ negative word disables that node and its child subtree while traversal may
 continue at its next sibling. Otherwise bits `0–10` select the model;
 bit `0x0800` becomes a runtime flag whose later meaning is unresolved. The
 runtime builds each local transform from three 12-bit-turn angles and signed
-24.8 translations, then recursively composes `parent × local` for a first
-child while retaining the parent transform for a sibling. The constructor at
+16.16 translations, then recursively composes `parent × local` for a first
+child while retaining the parent transform for a sibling. The model
+`coordinateShift` does not change the stored or runtime hierarchy format.
+The constructor at
 `0x80137028` implements the signed gate and model mask, the transform builder
 is at `0x8012FAA8`, and the local-matrix wrapper at `0x80137410` copies the
-three translation words without scaling. Immediately before RSP-matrix
-emission, `0x801310CC` shifts each translation left by the model descriptor's
-`coordinateShift`; the descriptor constructor copies that value from model
-record byte `+0x14`. It is 8 for 237 of Casino City's 238 models. Thus the
-ordinary source translation is signed 24.8 and becomes 16.16 only at matrix
-emission. The sole shift-9 Casino model has zero node translation. A live
-Casino bank and its source nodes matched byte-for-byte in RAM. **Verified
-from ROM bytes, disassembly, and RAM.** Object binding remains **Unknown**.
+three source words unchanged into the runtime node; compositor `0x80130394`
+then treats them as 16.16. Immediately before RSP-matrix emission,
+`0x801310CC` shifts those translation words left by the model descriptor's
+`coordinateShift` to express them in the same raw coordinate system as the
+model vertices. The enclosing object transform supplies the reciprocal
+`2^-coordinateShift` scale. Therefore a source translation word remains
+`word / 65536` in arena units, while a raw model vertex is
+`vertex / 2^coordinateShift`. Calling the source translation 24.8 would
+incorrectly confuse this temporary RSP/model-coordinate conversion with the
+stored format. The descriptor constructor copies `coordinateShift` from
+model record byte `+0x14`; it is 8 for 237 of Casino City's 238 models. The sole
+shift-9 Casino model has zero node translation. A live Casino bank and its
+source nodes matched byte-for-byte in RAM. Live Oil Fields descendants were
+runtime 16.16 values and their transform compositor at `0x80130394` produced
+`parent × local`; the selected root instead received the OBJ world pose.
+**Verified from ROM bytes, disassembly, and RAM.**
 
 | Offset | Size | Type | Field | Description |
 |---:|---:|---|---|---|
 | `0x00` | 2 | u16 | modelAndFlags | Negative disables this node and child subtree; bits `0–10` are model index; bit `0x0800` maps to an unresolved runtime flag. |
 | `0x02` | 2 | u16 | shapeIndex | Shape index or `0xFFFF`. |
-| `0x04` | 4 | s32 | x | Signed 24.8 local X translation. |
-| `0x08` | 4 | s32 | y | Signed 24.8 local Y translation. |
-| `0x0C` | 4 | s32 | z | Signed 24.8 local Z translation. |
+| `0x04` | 4 | s32 | x | Signed 16.16 local X translation. |
+| `0x08` | 4 | s32 | y | Signed 16.16 local Y translation. |
+| `0x0C` | 4 | s32 | z | Signed 16.16 local Z translation. |
 | `0x10` | 2 | u16 | angleA | Low 12 bits, one turn = 4096. |
 | `0x12` | 2 | u16 | angleB | Low 12 bits, one turn = 4096. |
 | `0x14` | 2 | u16 | angleC | Low 12 bits, one turn = 4096. |
@@ -572,16 +593,20 @@ from ROM bytes, disassembly, and RAM.** Object binding remains **Unknown**.
 ### 4.3 Skeletons and animation
 
 No complete skeleton/animation record has been verified. Static models and
-scene nodes can be decoded, but vehicle and moving-object animation are
-**Unknown**.
+the initial hierarchy of handler-controlled objects can be decoded, but
+vehicle and moving-object animation remain **Unknown**.
 
 ### 4.4 Behaviors, triggers, and scripted objects
 
 Terrain `.DLL` files are loadable MIPS overlays with named object routines.
 For example, decoded `SANDFACT.DLL` contains `M2_elevator_1`,
 `M2_Conveyor`, `factory_1`, and `factory_door` plus a function-offset table
-and MIPS code from offset `0x100`. **Verified by ROM bytes and disassembly.**
-The exact runtime ABI and trigger-record binding remain **Unknown**.
+and MIPS code from offset `0x100`. The loader resolves an OBJ name to the
+level-specific table first and to a resident/common table second. Custom
+handlers can modify or animate the object after its XOBF root is built;
+unknown names use the generic static handler. **Verified by ROM bytes,
+disassembly, and live handler pointers.** Handler command semantics, trigger
+records, destruction states, and animation remain **Unknown**.
 
 ## 5. Audio
 
@@ -760,21 +785,26 @@ The viewer accepts `NV8E` revision 0 and lists all eleven indexed arenas.
 The loader renders the complete code-verified `ZMAP`/`ZONE` height surface
 with its `XBMP` atlas, `TINF` material orientation and diagonal, and
 `COLS`-derived vertex shading. The same source surface supplies a separate
-hidden physical-collision layer. It displays the `XBGM` panorama opaquely
-despite its clear palette alpha bits. The music box lists fifteen `SOUNDS`
-sequences.
+hidden physical-collision layer. OBJ records of classes 0 and 2–4 instantiate
+their selected arena/common XOBF root at the authored pose, including enabled
+children and sibling chains below that root. This displays buildings, props,
+handler-controlled objects in their initial state, and common pickups. It
+displays the `XBGM` panorama opaquely despite its clear palette alpha bits.
+The music box lists fifteen `SOUNDS` sequences.
 
 ### 7.3 Approximations and omissions
 
 The loader reflects terrain Y coordinates into the viewer's Y-up basis. The
 starting camera and capped cylindrical sky projection are viewer
-approximations. XOBF formats are understood, but the viewer does not decode
-or draw a bank without a source placement: resolving each `OBJ ` name through
-its level `.DLL` handler remains unimplemented. Thus buildings, props, dynamic
-vehicles/projectiles, and object-shape collision are omitted rather than
-shown piled at archetype pivots. `JUNC`/`RSEG` routes are also omitted. The
-music player uses neutral dry mixer settings because game-specific volume
-and reverb remain unmeasured.
+approximations; camera framing uses the ZMAP playfield so distant off-map OBJ
+records do not shrink the default view. The viewer reconstructs the initial
+XOBF hierarchy but does not execute level `.DLL` handlers, so handler-driven
+animation, destruction/state changes, triggers, vehicles, projectiles, and
+special effects are not reproduced. Class-5 deferred placeholders and class-6
+lights have no static XOBF rendering; scenery illumination uses a neutral
+ambient approximation. Object-shape collision and `JUNC`/`RSEG` routes are
+also omitted. The music player uses neutral dry mixer settings because
+game-specific volume and reverb remain unmeasured.
 
 ## 8. Verification and remaining work
 
@@ -786,7 +816,8 @@ and reverb remain unmeasured.
 | Directory | 126 bounds-checked files; every successor begins at four-byte alignment after its predecessor. |
 | LZSS | 66 indexed streams decoded to advertised sizes while consuming exact stored payloads. |
 | Level containers | Eleven `FORM`/`TERR` roots; top-level lengths equal decoded sizes; HEAD object counts match every map's object forms. |
-| Models/textures/nodes | 65 XOBF banks: 2,364 model records and 2,103 textures satisfy exact size formulas; the 22 terrain banks' 7,128 scene nodes satisfy graph-link constraints. Resident-code disassembly verifies the signed-node gate, 11-bit model index, 24.8 transforms, inherited lighting, signed-normal interpretation, and per-object root selection. |
+| Models/textures/nodes | 65 XOBF banks: 2,364 model records and 2,103 textures satisfy exact size formulas; the 22 terrain banks' 7,128 scene nodes satisfy graph-link constraints. Resident-code disassembly verifies the signed-node gate, 11-bit model index, coordinate shift, inherited lighting, signed-normal interpretation, and selected-root traversal. All eleven arenas render with source-selected scenery and common-bank objects. |
+| Object placement | `LOAD.DLL` and resident disassembly establish every HEAD field used for placement. Live Oil Fields captures match the bank/root constructor arguments, Y adjustment, handler resolution, `Ry × Rx × Rz` root pose, and `parent × local` descendant composition. Offline renders verify terrain-relative placement across 4-, 6-, and 9-zone arenas. |
 | Terrain index, rendering and collision | Every `ZMAP` has exactly the IDs of its 4/6/9 `ZONE` chunks. Disassembly establishes axes, scale, physical sampling and triangulation; all six Oil Fields source zones matched their expanded live RAM buffers. A live render capture verifies emitted XYZ, the `(1,1/32,1)` matrix, XBMP atlas, all TINF UV orientations and diagonals, and the COLS shade table. Offline renders load all eleven terrain surfaces. |
 | Image formats | Eleven terrain bitmaps and sky panoramas satisfy texture bounds; all 2,816 panorama palette entries have clear alpha bits, while the Oil Fields panorama appears opaque and matches a captured attract-demo backdrop. |
 | Audio | Both banks' 249 wave records and all 15 song files parse; every song produced nonzero PCM and valid loop bounds in the shared player. |
@@ -795,8 +826,9 @@ and reverb remain unmeasured.
 ### 8.2 Known unknowns
 
 The source sample's low three bits at `+0x02`, XOBF shape-record collision rules,
-overlay relocation ABI, remaining environment/fog controls, dynamic object bindings,
-vehicle animation, game-specific audio mixer settings, audio microcode ID,
+overlay relocation ABI, remaining environment/fog controls, handler command and
+trigger semantics, object animation/destruction states, vehicle animation,
+game-specific audio mixer settings, audio microcode ID,
 and runtime reachability of residual controller/debug strings remain open.
 Other regional revisions have not been compared.
 
