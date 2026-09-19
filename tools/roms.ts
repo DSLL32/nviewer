@@ -35,6 +35,7 @@ export const ROM_FILES = [
   'Spider-Man (U) [!].z64',
   'Stunt Racer 64 (U) [!].z64',
   'Vigilante 8 (U) [!].z64',
+  'Vigilante 8 - 2nd Offense (U) [!].z64',
   'Star Wars - Shadows of the Empire (U) (V1.0) [!].z64',
   'Star Wars - Shadows of the Empire (U) (V1.1) [!].z64',
   'Star Wars - Shadows of the Empire (U) (V1.2) [!].z64',

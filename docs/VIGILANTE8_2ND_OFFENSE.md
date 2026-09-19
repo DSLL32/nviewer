@@ -16,12 +16,12 @@ unresolved rendering and gameplay behavior is identified explicitly.
 | Geometry | `FORM/TERR` level file; two `FORM/XOBF` model banks with F3DEX2 display lists and 16-byte N64 vertices. |
 | Textures | 16 JPEG preview strips per arena; indexed RGBA5551-palette sky/terrain images; XOBF CI4, CI8, RGBA16, RGBA32, and 8-bit intensity/alpha-class images. |
 | Collision | `ZONE` grids, `ZMAP`, and `BSP ` data are present; precise physical collision contract unverified. |
-| Music driver | Custom multichannel bytecode interpreter with counted and infinite repeat commands. |
+| Music driver | libmus-compatible `0x215` multichannel sequencer with counted and infinite repeats. |
 | Audio microcode | **Unknown**. |
-| Sample encoding | **Unknown**; two pointer-table banks address a raw wavetable region. |
+| Sample encoding | Nintendo 9-byte-frame VADPCM for the 86-entry music bank; the separate Luxo effects bank is not used by music wave maps. |
 | Levels | Eight indexed arena DLL/EXP pairs. |
 | Memory requirement | **Unknown**; audio setup has separate copied-bank and cartridge-bank paths. |
-| Viewer support | Not implemented; archive and static scene parsing are feasible, but material, collision, and audio sample details remain. |
+| Viewer support | USA revision 0: eight static arena scenes, panoramas and 36 music entries; collision and dynamic objects omitted. Post-implementation tests were skipped at user direction. |
 
 ### 1.2 ROM identification
 
@@ -257,10 +257,12 @@ JFIF JPEG; HARBOR's first image independently identifies as 320×96. All
 eight arenas have 16 such chunks. These are menu-preview strips, not a
 substitute for 3D materials.
 
-`XBMP` has a 320×128 8-bit-index bitmap with a 512-byte big-endian RGBA5551
-palette after an eight-byte prefix. `XBGM` has a 256×92 8-bit-index sky
-bitmap with the same palette format after a 12-byte prefix. Their exact
-field meanings in those prefixes remain unknown.
+`XBMP` begins with the common eight-byte texture header, followed by a
+512-byte big-endian RGBA5551 palette and a 320×128 8-bit-index bitmap.
+`XBGM` adds one four-byte field of unknown meaning before that same texture
+header, so its palette begins at payload `+12` and its bitmap is 256×92.
+Raw HARBOR and OILFIELD `XBGM` payloads have `0x0201`, 256 palette entries,
+and 256×92 dimensions at `+4`; `+12` is palette data. [evidence: ROM bytes]
 
 The third XOBF section begins with a relative-offset table. Its final two
 offsets coincide, so `section2Count − 1` actual image records occur. Across
@@ -389,7 +391,14 @@ these pairings:
 | 0 | `0x592C0` | `N64 PtrTablesV2` | 86 | `0x737C0` |
 | 1 | `0x5CEF0` | `Luxo-PtrTablesV2` | 238 | `0x15E0E0` |
 
-The two bank counts total 324 sound records. Setup at resident
+The two bank counts total 324 sound records. All 36 music sequences map only
+wave IDs `0–85` (82 distinct IDs), so they use the 86-entry N64 bank, not
+the 238-entry Luxo bank. All 86 music wave records are type 0, have predictor
+books, and address Nintendo 9-byte-frame VADPCM data from ROM `0x737D0`
+through `0x14E0DD`; 17 have loop records. [evidence: ROM bank and sequence
+bytes]
+
+Setup at resident
 `0x80137320–0x80137478` selects the bases and the bank parser at
 `0x8016C500` relocates sample pointers. The boot literal
 `Shared\Sounds.SND` points to a stub returning zero, so the absence of
@@ -398,28 +407,40 @@ that file from the directory is not evidence of missing audio data.
 ### 5.2 Sequence format and driver
 
 All 36 music files independently decode and consume exactly their indexed
-LZSS lengths. The decoded sequence starts with a custom header:
+LZSS lengths. Each decoded sequence uses the libmus-compatible `0x215`
+header. The fields match the repository's shared libmus parser. [evidence:
+all 36 decoded headers, resident opcode table]
 
 | Offset | Size | Type | Field | Description |
 |---:|---:|---|---|---|
-| `0x00` | 4 | u32 | `signature` | `0x00000215` in examined songs. |
+| `0x00` | 4 | u32 | `version` | `0x00000215` in all 36 songs. |
 | `0x04` | 4 | u32 | `channelCount` | 16 in `THEME.BIN`; 13 in `E_VIG.BIN`. |
-| `0x08` | 4 | u32 | `unknown_08` | Role unresolved. |
-| `0x0C` | 28 | u32[7] | `tableOffsets` | Relative offsets; exact table roles not yet typed. |
+| `0x08` | 4 | u32 | `waveMapCount` | Number of song-local wave IDs. |
+| `0x0C` | 4 | u32 | `eventTableOffset` | BE32 per-channel event-stream offsets. |
+| `0x10` | 4 | u32 | `volumeTableOffset` | Optional volume-stream offsets. |
+| `0x14` | 4 | u32 | `bendTableOffset` | Optional pitch-bend stream offsets. |
+| `0x18` | 4 | u32 | `envelopeTableOffset` | Envelope definitions. |
+| `0x1C` | 4 | u32 | `drumTableOffset` | Drum definitions. |
+| `0x20` | 4 | u32 | `waveMapOffset` | BE16 song-local to bank-wave IDs. |
+| `0x24` | 4 | u32 | `masterTrackOffset` | Master/tempo events. |
 | `0x28` | 4 | u32 | `relocationFlag` | Zero in on-ROM files; set by loader after rebasing. |
 
-The custom event interpreter is at resident `0x8016A624`, with an opcode
-handler table at ROM `0x71CB0`. Opcode `0x80` ends a channel. `0x95`
-pushes a repeat count and state; `0x96` decrements/rewinds, and count
-`0xFF` repeats indefinitely. Instrument, note, tempo, pan, and mixing
-commands require further decoding before a music player is implementable.
+The resident event interpreter at `0x8016A624` has a 45-entry table at ROM
+`0x71CB0`, covering every opcode `0x80–0xAC` recognized by the shared
+libmus renderer. Opcode `0x80` ends a channel. `0x95` opens a counted loop;
+`0x96` repeats it, and count `0xFF` repeats indefinitely. Game-specific
+mixer settings remain unmeasured; bytecode compatibility does not establish
+sample-for-sample playback fidelity.
 
 ### 5.3 Instruments and sample encoding
 
-The control-bank parser relocates sample pointers into the shared wavetable
-region. The exact sample codec, predictor tables, note mapping, and output
-resampling are not independently verified. Do not label the stored samples
-VADPCM solely because that encoding is common on Nintendo 64.
+The music control bank at `0x592C0` is `N64 PtrTablesV2`: header `+0x20`
+gives 86 wave records, `+0x24` and `+0x28` locate base-note and detune arrays,
+and `+0x2C` locates the wave-offset list. These match the shared
+`parseLibmusBank` contract. All 86 music records have predictor books and
+refer to Nintendo 9-byte-frame VADPCM spans; exact game-side master volume,
+reverb and output resampling remain **Unknown**. [evidence: ROM control bank,
+sequence wave maps]
 
 ### 5.4 Music catalog and loop points
 
@@ -489,25 +510,29 @@ classified as cut solely because its name sounds developmental.
 
 ### 7.1 Module mapping
 
-Suggested new `src/rom/vigilante8/` modules: directory/path indexing and
-shared LZSS wrapper; IFF/TERR walk; XOBF display-list/vertex decoding;
-paletted sky/terrain images; placement and route layers; separate music
-sequence/bank decoder. This is a design mapping, not existing support.
-The first Vigilante 8 uses the same LZSS grammar and can share a decoder.
+`src/rom/vigilante8_2/fs.ts` reads the six-group directory and reuses the
+first game's LZSS decoder. `level.ts` walks `FORM/TERR`, decodes the sequel's
+32-byte XOBF header, indexed models/textures and F3DEX2 lists, assembles
+static scene-node instances, and renders `XBGM` as a panoramic sky.
+`vigilante8_2.ts` exposes the eight arenas; `music.ts` adapts all 36 indexed
+sequences to the shared libmus renderer.
 
 ### 7.2 Supported features
 
-No viewer loader for this game is currently present. The ROM directory,
-all indexed LZSS files, level list, model-list boundaries, and placement
-names/counts have been statically verified and provide an implementation
-starting point.
+The viewer accepts `NVGE` revision 0 and lists all eight indexed arenas.
+It builds a static scenery layer from the XOBF banks and offers 36 `MUSIC`
+cues. These implementation claims are from source inspection only; no
+post-implementation checks, renders or playback checks were run, at the
+user's request.
 
 ### 7.3 Approximations and omissions
 
-A first implementation could show static XOBF geometry and palette-backed
-sky/overhead images, but should label collision, fog, animations, scripts,
-and audio playback incomplete until their formats are verified. Do not
-conflate the JPEG preview strips with in-game material textures.
+Scene-node translation fields and scale are not runtime-confirmed; unknown
+rotation/scale data are omitted. The starting camera and cylindrical sky
+projection are viewer approximations. Collision, `FORM/OBJ` binding,
+animations, scripts, fog and routes are omitted. The music player uses
+neutral dry mixer settings because game-specific volume/reverb have not been
+measured. The JPEG preview strips are not used as in-game materials.
 
 ## 8. Verification and remaining work
 
@@ -528,8 +553,8 @@ conflate the JPEG preview strips with in-game material textures.
 
 The principal blockers for full-fidelity viewing are XOBF material-state and
 middle-section interpretation, collision field semantics, environment parameters,
-placement-to-model associations, and animation. For audio, instrument
-mapping, sample encoding, and most event opcodes remain. A reliable game
+placement-to-model associations, and animation. For audio, game-side mixer
+gain, reverb, output rate and playback fidelity remain unmeasured. A reliable game
 capture is needed to validate sky projection, lighting, fog, camera, and
 debug-feature reachability.
 
