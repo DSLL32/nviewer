@@ -11,6 +11,7 @@ import { openCruisnUsa } from './cruisnusa/cruisnusa';
 import { openGex3 } from './gex/gex3';
 import { openGex64 } from './gex/gex64';
 import { openGoldenEye } from './goldeneye/goldeneye';
+import { openGlover } from './glover/glover';
 import { openKirby64 } from './kirby64/kirby64';
 import { openMarioKart64 } from './mk64/mk64';
 import { openMarioParty } from './marioparty/marioparty';
@@ -96,6 +97,11 @@ export function openRom(bytes: Uint8Array): Game {
       return openStarFox64(rom);
     case 'NGEE':
       return openGoldenEye(rom);
+    case 'NGVE':
+      if (rom[0x3f] !== 0) throw new Error(`Glover (U) revision ${rom[0x3f]} is not supported: only revision 0 is.`);
+      return openGlover(rom);
+    case 'NGVP':
+      throw new Error('Glover (E) is not supported: only Glover (U) revision 0 is.');
     case 'NK4E':
       if (rom[0x3f] !== 0) throw new Error(`Kirby 64: The Crystal Shards (U) revision ${rom[0x3f]} is not supported: only revision 0 is.`);
       return openKirby64(rom);
@@ -161,6 +167,7 @@ export function openRom(bytes: Uint8Array): Game {
         'Bomberman 64: The Second Attack! (U), Bomberman Hero (U), BattleTanx (U), BattleTanx: Global Assault (U), ' +
         "Cruis'n USA (U) (revision 0), " +
         'Gex 64: Enter the Gecko (U), Gex 3: Deep Cover Gecko (U), Yoshi\'s Story (J), Star Fox 64 (U), GoldenEye 007 (U), ' +
+        'Glover (U) (revision 0), ' +
         'Kirby 64: The Crystal Shards (U) (revision 0), ' +
         `A Bug's Life (U/E/F/G/I), ` +
         'Air Boarder 64 (J/E), ' +

@@ -39,6 +39,7 @@ export function Landing({ busy, error, onPick, onPickBbgames }: LandingProps) {
             <li>Star Wars: Shadows of the Empire (U V1.0–V1.2, E)</li>
             <li>The World Is Not Enough (U/E)</li>
             <li>GoldenEye 007 (U)</li>
+            <li>Glover (U) (revision 0)</li>
             <li>A Bug's Life (U/E/F/G/I)</li>
             <li>Air Boarder 64 (J/E)</li>
             <li>Banjo-Kazooie (U) (V1.0)</li>
