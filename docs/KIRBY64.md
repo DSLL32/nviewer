@@ -485,9 +485,9 @@ volumes have stride `0x18`:
 | `0x06` | `0x01` | `u8` | `flowDirection` | Direction code. |
 | `0x07` | `0x01` | `u8` | `flowSpeed` | Speed code. |
 | `0x08` | `0x04` | `f32` | `minX` | Inclusive X acceleration bound. |
-| `0x0C` | `0x04` | `f32` | `minY` | Inclusive Y bound. |
-| `0x10` | `0x04` | `f32` | `maxY` | Inclusive Y bound. |
-| `0x14` | `0x04` | `f32` | `maxX` | Exclusive X acceleration bound. |
+| `0x0C` | `0x04` | `f32` | `maxX` | Exclusive X acceleration bound. |
+| `0x10` | `0x04` | `f32` | `minY` | Inclusive Y bound. |
+| `0x14` | `0x04` | `f32` | `maxY` | Inclusive Y bound. |
 
 The four scalar bounds are not a box: Z and the exact convex boundary come
 from the plane equations. A collision viewer should render all triangles in a
@@ -505,20 +505,47 @@ The 70 selected lists contain 124 records.
 | Offset | Size | Type | Field | Description |
 |---:|---:|---|---|---|
 | `0x00` | `0x04` | `u32` | `imageId` | Packed bank/index image. |
-| `0x04` | `0x04` | `u32` | `type` | Backdrop/environment type. |
-| `0x08` | `0x08` | `u16[4]` | `parameters08` | Type-specific parameters. |
-| `0x10` | `0x0C` | `f32[3]` | `positionOrScale` | Type-specific vector. |
-| `0x1C` | `0x04` | `u32` | `parameter1C` | Type-specific value. |
+| `0x04` | `0x04` | `u32` | `type` | S2DEX view/camera type; the retail records use `0x0E`, `0x12`, and `0x16`. |
+| `0x08` | `0x02` | `u16` | `flags` | Tiling, transparency, and color-combiner flags. |
+| `0x0A` | `0x02` | `u16` | `colorId` | Index into the 0x0C-byte color table. |
+| `0x0C` | `0x02` | `s16` | `xOffset` | Screen-space X offset. |
+| `0x0E` | `0x02` | `s16` | `yOffset` | Screen-space Y offset. |
+| `0x10` | `0x04` | `f32` | `scaleX` | Horizontal sprite scale. |
+| `0x14` | `0x04` | `f32` | `scaleY` | Vertical sprite scale. |
+| `0x18` | `0x04` | `f32` | `motionX` | Horizontal scroll/parallax term. |
+| `0x1C` | `0x04` | `f32` | `motionY` | Vertical scroll/parallax term. |
 | `0x20` | `0x10` | `f32[4]` | `parameters20` | Type-specific values. |
 
-The consumer treats these as environment/sprite records; “skybox” is too
-narrow. Render each as a separate `backdrop` instance. Exact per-type semantics
-remain unknown.
+Verified by disassembly, these are S2DEX screen sprites, not world geometry.
+The retail gameplay camera clips them to the `[10,10]`–`[310,180]` active
+viewport inside the native 320x240 frame. The camera setup passes those four
+boundaries to the viewport builder; sprite setup initially adds its left/top to
+`xOffset` and `yOffset`. Flag `0x20` selects the translucent surface path. Flag `0x40` selects
+the primitive/environment interpolation combiner and `0x80` selects
+primitive-color modulation. Any of flag bits
+`0x105`, or a nonzero `motionX`, enables horizontal tiling; flag `0x200`, or a
+nonzero `motionY`, enables vertical tiling. The game creates render processes
+for types `0x0A`, `0x0E`, `0x12`, and `0x16`; the shipped lists contain one
+type-`0x0E`, 68 type-`0x12`, and 55 type-`0x16` records.
 
-The 0x0C-byte color table begins at ROM `0x0007C9DC`. Seven IDs occur. The
-per-frame code uses bytes 0–2 as clear RGB and forces alpha `0xFF`: ID 1
+Verified by disassembly and a live M31SEASIDE01 frame, a per-frame callback
+replaces the initial Y position with a camera-pitch/parallax phase derived from
+record fields at `0x20`–`0x2C`. In the live frame, the active viewport starts
+with cyan backdrop pixels at its top edge; the native ten-pixel black border is
+outside that viewport. The viewer composes the records into one screen-fixed
+320x240 backdrop, preserves their relative X/Y offsets, normalizes the shared
+static Y phase to the viewer's top edge, omits the native border, and freezes
+scrolling. Because a free camera can expose pixels that retail foreground
+geometry always covers, the viewer edge-extends record 0 (the list's base
+sprite) across the canvas before compositing the remaining offset detail
+records. This uses the base sprite's decoded and tinted edge texels rather than
+an area-specific fill color. Exact animated phase behavior remains unresolved.
+
+The 0x0C-byte color table begins at ROM `0x0007C9DC`. Seven area clear-color IDs
+occur. The per-frame code uses bytes 0–2 as clear RGB and forces alpha `0xFF`: ID 1
 `5A5A5A`, ID 5 `FFFFFF`, ID 19 `5087DC`, ID 51 `A0AABE`, ID 55 `6496FF`, ID
-57 `00BBFF`, and ID 127 `000000`. Meanings of bytes 3–11 remain unknown.
+57 `00BBFF`, and ID 127 `000000`. Backdrop sprites use bytes 0–2 as primitive
+RGB and bytes 3–5 as environment RGB; the remaining six bytes remain unknown.
 
 Fog setup at `0x800F716C` emits F3DEX2 fog-position state to display-list heads
 0 and 1. Zero-based world 1, level 2 (displayed 2-3) uses positions 102/1003;
@@ -1104,22 +1131,25 @@ owned transferable buffers.
 ### 7.2 Supported features
 
 An initial implementation can support all 181 area records, primary and
-secondary static geometry, backdrop geometry, exact display-list materials,
-collision meshes, ordinary fixed-table object models, labeled unresolved
-object markers, and all 63 music sequences.
+secondary static geometry, screen-composited S2DEX backdrops, exact display-list
+materials, collision and diagnostic water-volume meshes, ordinary fixed-table
+object models, labeled unresolved object markers, and all 63 music sequences.
 
 Every drawn instance must belong to a user-toggleable layer. Use `main` (or
-named geometry sections), `objects`, `backdrop`, `markers`, and a
-hidden-by-default `collision` layer. Do not put ordinary drawable geometry in
-the viewer's unlayered fallback.
+named geometry sections), `objects`, `markers`, hidden-by-default `water`, and
+hidden-by-default `collision` layers. Use the viewer's screen-fixed backdrop
+control for the composited S2DEX frame rather than a world-space instance. Do
+not put ordinary drawable geometry in the viewer's unlayered fallback.
 
 ### 7.3 Approximations and omissions
 
-Until their formats are completely verified, keep texture scrolling, skeletal
-animation, stage-overlay-specific actor visuals, exact path camera replay,
-water-volume meshes, fog/light tables, and particles explicit as unsupported
-or approximate. Never infer collision solidity from face winding alone; honor
-triangle sidedness and participation flags.
+Until their formats are completely verified, keep animated backdrop and texture
+scrolling, skeletal animation, stage-overlay-specific actor visuals, exact path
+camera replay, fog/light tables, and particles explicit as unsupported or
+approximate. Reconstructed water-volume meshes are diagnostic collision-bound
+extrusions and remain hidden by default; never treat them as authored render
+surfaces. Never infer collision solidity from face winding alone; honor triangle
+sidedness and participation flags.
 
 Implementation verification must include type checking, per-area hashes for
 all 181 areas, transferred `structuredClone` loads, layer checks, offline
