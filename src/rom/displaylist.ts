@@ -106,6 +106,9 @@ export interface DisplayListContext {
   // With directImages: for combiners that blend TEXEL0 and TEXEL1 by a constant (PRIM or ENV alpha, PRIM_LOD_FRAC)
   // in the first colour cycle, emit Batch.texture1, uvs1 and texMix. The folded vertex colour takes both texels as 1.
   secondTexture?: boolean;
+  // Glover labels CI4/CI8 render tiles as RGBA. With TEXTLUT enabled, the RDP
+  // nevertheless interprets their 4/8-bit texels as colour indices.
+  ciFromTlut?: boolean;
 }
 
 // Vertex coordinates are 1/16 of a world unit in both Rush games.
@@ -377,9 +380,10 @@ export function runDisplayList(ctx: DisplayListContext, start: number): Batch[] 
     const wrap = (cm: number): WrapMode => (cm & 2 ? 'clamp' : cm & 1 ? 'mirror' : 'repeat');
     const merged = ctx.tlutMode === 'merged';
     const paletteAt = ctx.tlutMode === 'slots' ? (st.palettes.get(t.pal) ?? st.palette) : st.palette;
-    const ci = t.fmt === ImFmt.CI && (merged ? st.tlutKey !== '' : paletteAt >= 0);
+    const ciFmt = t.fmt === ImFmt.CI || (ctx.ciFromTlut === true && st.textLut !== 0 && t.siz <= ImSiz.B8);
+    const ci = ciFmt && (merged ? st.tlutKey !== '' : paletteAt >= 0);
     const desc: TextureDesc = {
-      fmt: t.fmt as ImFmt, siz: t.siz as ImSiz, width: t.width, height: t.height,
+      fmt: (ciFmt ? ImFmt.CI : t.fmt) as ImFmt, siz: t.siz as ImSiz, width: t.width, height: t.height,
       mem: st.mem, tmem: t.tmem, line: t.siz === ImSiz.B32 ? t.line * 2 : t.line,
       palette: ci ? (merged ? st.tlut : buf.subarray(paletteAt, paletteAt + 512)) : null, tlut: st.textLut as Tlut,
     };
