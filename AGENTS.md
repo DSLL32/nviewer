@@ -116,6 +116,7 @@ Implemented (spec under `docs/`):
 | Cruis'n USA | `r49/cruisn_usa/` | scenery and music; collision/traffic unresolved |
 | Vigilante 8 | `r49/vigilante8/` | static scenes, terrain collision and music |
 | Vigilante 8: 2nd Offense | `r49/vigilante8_2/` | static scenes, terrain collision and music |
+| Kirby 64: The Crystal Shards | `r49/kirby64/` | all 181 areas, including the Copy tutorial and six hidden/test areas |
 | Mario Kart 64 | `r49/mk64/` | archive course audit: `r49/mk64/archive_cut/` |
 | Mario Party (J) | `r49/mparty/` | |
 | Perfect Dark | `r49/pd/` | |
@@ -132,7 +133,6 @@ Research complete (spec under `docs/`, implementation pending):
 |---|---|
 | Glover | `r49/glover/` |
 | Jet Force Gemini | `r49/jfg/` |
-| Kirby 64: The Crystal Shards | `r49/kirby64/` |
 
 Research in progress (spec unfinished or under review):
 
