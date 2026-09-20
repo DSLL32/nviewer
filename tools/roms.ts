@@ -18,6 +18,7 @@ export const ROM_FILES = [
   'Yoshi Story (J) [!].z64',
   'Star Fox 64 (U) (V1.1) [!].z64',
   'GoldenEye 007 (U) [!].z64',
+  'Kirby 64 - The Crystal Shards (U) [!].z64',
   'Banjo-Kazooie (U) (V1.0) [!].z64',
   "Bug's Life, A (U) [!].z64",
   "Cruis'n USA (U) (V1.0) [!].z64",

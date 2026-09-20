@@ -571,9 +571,9 @@ The path footer has stride 0x18:
 | Offset | Size | Type | Field | Description |
 |---:|---:|---|---|---|
 | `0x00` | `0x02` | `u16` | `flags` | Bit `0x0200` enables the optional matrix. |
-| `0x02` | `0x02` | `u16` | `unknown02` | Unknown. |
+| `0x02` | `0x02` | `u16` | `pathPointCount` | Number of point-major XYZ positions. |
 | `0x04` | `0x04` | `f32` | `sectionCount` | Number of path sections, stored as a float. |
-| `0x08` | `0x04` | `u32` | `positionsOffset` | Offset to the 3×N position matrix. |
+| `0x08` | `0x04` | `u32` | `positionsOffset` | Offset to `pathPointCount` consecutive point-major `f32[3]` XYZ positions. |
 | `0x0C` | `0x04` | `f32` | `pathLength` | Authored path length. |
 | `0x10` | `0x04` | `u32` | `boundariesOffset` | Offset to the section boundary array. |
 | `0x14` | `0x04` | `f32` | `unknown14` | Unknown. |
@@ -1094,7 +1094,7 @@ Recommended module ownership is:
 | `src/rom/kirby64/collision.ts` | Medium | Collision arrays, flags/types, dynamic groups, BSP metadata, and water volumes. |
 | `src/rom/kirby64/objects.ts` | High | Placements, fixed model selectors, bank-5 resources, markers, skeletons, and animation. |
 | `src/rom/kirby64/music.ts` | High | `S1` sequence archive, public-ID remap, instrument banks, compact events, and player adapter. |
-| `src/rom/kirby64/index.ts` | Low | `NK4E` detection, level catalog, open/load contract, and transfer-safe results. |
+| `src/rom/kirby64/kirby64.ts` | Low | Level catalog, open/load contract, music adapter, and transfer-safe results; `NK4E` detection is in `src/rom/index.ts`. |
 
 Shared `displaylist.ts` can parse F3DEX2 and `music/libultra.ts` can supply the
 Nintendo sequence/synthesis foundation if their exact command/event variants
