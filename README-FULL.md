@@ -4,9 +4,9 @@ A browser viewer for the levels of these N64 games (USA versions): *San Francisc
 *San Francisco Rush: Extreme Racing*, *Bomberman 64*, *Bomberman 64: The Second Attack!*,
 *Bomberman Hero*, *BattleTanx*, *BattleTanx: Global Assault*, *Gex 64: Enter the Gecko*,
 *Gex 3: Deep Cover Gecko*, *Yoshi's Story* (Japan), *Star Fox 64* (V1.0 and V1.1), *GoldenEye 007*,
-*Banjo-Kazooie* (USA V1.0),
+*Glover* (USA revision 0), *Banjo-Kazooie* (USA V1.0),
 *Off Road Challenge* (USA and Europe), *Air Boarder 64* (Japan and Europe), *Pilotwings 64* (USA, Europe and Japan), *Pokémon Snap*, *A Bug's Life* (USA and Europe), *Spider-Man*, *Stunt Racer 64* (USA), *Cruis'n USA* (USA V1.0; scenery and music, without collision or traffic), *Vigilante 8* and *Vigilante 8: 2nd Offense* (USA; static scenes, terrain collision and music), *Star Wars: Shadows of the Empire* (USA V1.0–V1.2 and Europe), *007: The World Is Not Enough* (USA and Europe),
-*Kirby 64: The Crystal Shards* (USA, revision 0), *Mario Kart 64* (USA, V1.0), *Mario Party* (Japan), *Perfect Dark* (V1.0), and *The Legend of Zelda: Ocarina of Time* and
+*Kirby 64: The Crystal Shards* (USA, revision 0), *Jet Force Gemini* (USA, revision 0), *Mario Kart 64* (USA, V1.0), *Mario Party* (Japan), *Perfect Dark* (V1.0), and *The Legend of Zelda: Ocarina of Time* and
 *Majora's Mask* (retail and debug builds, plus the 1997 Ocarina of Time prototype preserved on an F-Zero X development
 cartridge). Load one or more ROMs, pick a level in the sidebar, and fly around freely, with
 each game's soundtrack in the music box. ROMs are parsed entirely in the browser (in a Web Worker)
@@ -124,6 +124,12 @@ Z shows or hides collision · Shift+F collision wireframe · the View panel can 
     - `fs.ts`, `geometry.ts`: eight-bank archive, all 181 area records, primary/secondary F3DEX2 geometry and static materials
     - `level.ts`, `objects.ts`, `collision.ts`: bind-pose objects and markers, backdrops and environment metadata,
       collision and water layers; `music.ts`: 63 compressed-sequence tracks
+  - `glover/`: Glover (USA revision 0; format notes in `docs/GLOVER.md`)
+    - `fs.ts`, `fla2.ts`, `banks.ts`: FLA2-compressed bank index and decoded landscape resources
+    - `landscape.ts`, `level.ts`: 48 landscapes, static geometry, textures, collision and placements; `music/glover.ts`: 60 songs
+  - `jet_force_gemini/`: Jet Force Gemini (USA revision 0; format notes in `docs/JETFORCEGEMINI.md`)
+    - `fs.ts`, `level.ts`: Rare archive tables, static level geometry, textures, collision, placements, paths and environments
+    - `music.ts`: 89 selectable libultra compressed-MIDI sequences; `jet_force_gemini.ts`: game adapter
   - `marioparty/`: Mario Party (Japan; format notes in `docs/MARIOPARTY.md`)
     - `fs.ts`, `form.ts`, `hvq.ts`: mainfs, FORM geometry and collision, and HVQ image decoding
     - `boards.ts`, `scenes.ts`, `scene-recipes.json`: 15 boards and 59 static arena, hub and debug scenes; board paths and layers

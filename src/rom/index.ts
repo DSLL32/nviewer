@@ -12,6 +12,7 @@ import { openGex3 } from './gex/gex3';
 import { openGex64 } from './gex/gex64';
 import { openGoldenEye } from './goldeneye/goldeneye';
 import { openGlover } from './glover/glover';
+import { openJetForceGemini } from './jet_force_gemini/jet_force_gemini';
 import { openKirby64 } from './kirby64/kirby64';
 import { openMarioKart64 } from './mk64/mk64';
 import { openMarioParty } from './marioparty/marioparty';
@@ -102,6 +103,11 @@ export function openRom(bytes: Uint8Array): Game {
       return openGlover(rom);
     case 'NGVP':
       throw new Error('Glover (E) is not supported: only Glover (U) revision 0 is.');
+    case 'NJFE':
+      return openJetForceGemini(rom);
+    case 'NJFP':
+    case 'NJFJ':
+      throw new Error(`Jet Force Gemini (${code === 'NJFP' ? 'E' : 'J'}) is not supported: only the USA revision 0 release is.`);
     case 'NK4E':
       if (rom[0x3f] !== 0) throw new Error(`Kirby 64: The Crystal Shards (U) revision ${rom[0x3f]} is not supported: only revision 0 is.`);
       return openKirby64(rom);
@@ -169,6 +175,7 @@ export function openRom(bytes: Uint8Array): Game {
         'Gex 64: Enter the Gecko (U), Gex 3: Deep Cover Gecko (U), Yoshi\'s Story (J), Star Fox 64 (U), GoldenEye 007 (U), ' +
         'Glover (U) (revision 0), ' +
         'Kirby 64: The Crystal Shards (U) (revision 0), ' +
+        'Jet Force Gemini (U) (revision 0), ' +
         `A Bug's Life (U/E/F/G/I), ` +
         'Air Boarder 64 (J/E), ' +
         'Banjo-Kazooie (U) (V1.0), ' +
