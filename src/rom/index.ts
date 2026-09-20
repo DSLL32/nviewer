@@ -11,6 +11,7 @@ import { openCruisnUsa } from './cruisnusa/cruisnusa';
 import { openGex3 } from './gex/gex3';
 import { openGex64 } from './gex/gex64';
 import { openGoldenEye } from './goldeneye/goldeneye';
+import { openKirby64 } from './kirby64/kirby64';
 import { openMarioKart64 } from './mk64/mk64';
 import { openMarioParty } from './marioparty/marioparty';
 import { openOffRoadChallenge } from './offroad/offroad';
@@ -95,6 +96,9 @@ export function openRom(bytes: Uint8Array): Game {
       return openStarFox64(rom);
     case 'NGEE':
       return openGoldenEye(rom);
+    case 'NK4E':
+      if (rom[0x3f] !== 0) throw new Error(`Kirby 64: The Crystal Shards (U) revision ${rom[0x3f]} is not supported: only revision 0 is.`);
+      return openKirby64(rom);
     case 'NKTE':
       if (rom[0x3f] !== 0) throw new Error(`Mario Kart 64 (U) V1.${rom[0x3f]} is not supported: only the V1.0 ROM (revision 0) is.`);
       return openMarioKart64(rom);
@@ -157,6 +161,7 @@ export function openRom(bytes: Uint8Array): Game {
         'Bomberman 64: The Second Attack! (U), Bomberman Hero (U), BattleTanx (U), BattleTanx: Global Assault (U), ' +
         "Cruis'n USA (U) (revision 0), " +
         'Gex 64: Enter the Gecko (U), Gex 3: Deep Cover Gecko (U), Yoshi\'s Story (J), Star Fox 64 (U), GoldenEye 007 (U), ' +
+        'Kirby 64: The Crystal Shards (U) (revision 0), ' +
         `A Bug's Life (U/E/F/G/I), ` +
         'Air Boarder 64 (J/E), ' +
         'Banjo-Kazooie (U) (V1.0), ' +

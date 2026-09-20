@@ -31,6 +31,7 @@ export function Landing({ busy, error, onPick, onPickBbgames }: LandingProps) {
             <li>Gex 3: Deep Cover Gecko (U)</li>
             <li>Yoshi's Story (J)</li>
             <li>Star Fox 64 (U) (V1.0, V1.1)</li>
+            <li>Kirby 64: The Crystal Shards (U) (revision 0)</li>
             <li>Spider-Man (U)</li>
             <li>Stunt Racer 64 (U) (revision 0)</li>
             <li>Vigilante 8 (U) (revision 0)</li>
