@@ -20,6 +20,7 @@ export const ROM_FILES = [
   'GoldenEye 007 (U) [!].z64',
   'Kirby 64 - The Crystal Shards (U) [!].z64',
   'Glover (U) [!].z64',
+  'Jet Force Gemini (U) [!].z64',
   'Banjo-Kazooie (U) (V1.0) [!].z64',
   "Bug's Life, A (U) [!].z64",
   "Cruis'n USA (U) (V1.0) [!].z64",
