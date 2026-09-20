@@ -21,7 +21,7 @@ half-open.
 | Sample encoding | Nintendo VADPCM in standard `ALBankFile` banks |
 | Levels | 412 loadable level-header records selecting 301 level models |
 | Memory requirement | Base 4 MiB; the retail executable does not enable its dormant extended-memory branch |
-| Viewer support | Implementation pending; static meshes, textures, collision, placements, paths, environments, and music are mapped below |
+| Viewer support | Implemented: all 412 level records and 89 selectable music sequences. |
 
 Verified from ROM bytes and disassembly. The graphics task is identified by
 its command behavior and its GLideN64-recognized microcode CRC. The audio task
@@ -798,34 +798,38 @@ compared.
 
 ### 7.1 Module mapping
 
-Suggested modules are:
+Implementation modules are:
 
 | Module | Responsibility |
 |---|---|
 | `src/rom/jet_force_gemini/fs.ts` | ROM validation, top-level and secondary archive tables, Rare DKR wrapper |
-| `src/rom/jet_force_gemini/level.ts` | Level records, level models, textures, environments, placements, paths, collision |
+| `src/rom/jet_force_gemini/texture.ts` | 2D/3D texture pools, seven texel formats, wrapping and static base images |
+| `src/rom/jet_force_gemini/geometry.ts` | Level and direct object-model meshes, compact batches and collision |
+| `src/rom/jet_force_gemini/objects.ts` | Both placement lists, direct models, unresolved markers and ID-5 patrol paths |
+| `src/rom/jet_force_gemini/level.ts` | Level records, environments, skies, layer assembly and bounds |
 | `src/rom/jet_force_gemini/music.ts` | `ALBankFile`, `S1` archive, music configuration, catalog |
 | `src/rom/jet_force_gemini/jet_force_gemini.ts` | Game adapter and level/music entry points |
 
 ### 7.2 Supported features
 
-Viewer implementation is pending. The decoded formats support the following
-initial feature set:
+The viewer implements:
 
 - all 412 level records, with shared model IDs preserved;
 - every static level segment and compact batch;
-- all audited texture formats, address modes, mip levels, and static frames;
+- all audited texture formats and address modes, using each texture's static
+  base image while retaining mip/frame metadata for diagnostics;
 - collision derived from render triangles and placed in a hidden-by-default
   `collision` layer;
 - both ROM lists, common-prefix object markers, direct static object models,
   and ID-5 patrol paths;
-- sky object or scrolling plane, fog, clear/gradient colors, and vertical FOV;
+- directly resolvable sky objects or scrolling planes, fog, and clear/gradient
+  colors; records without a resolved authored eye/target use viewer framing;
 - sequence IDs `0x01..0x59` through the shared bank, CSeq, and synthesizer path.
 
 ### 7.3 Approximations and omissions
 
-Static drawing can render every segment without the visibility BSP. Initial
-music playback can be dry and structurally correct, but it will not reproduce
+Static drawing renders every segment without the visibility BSP. Music
+playback is dry and structurally correct, but it does not reproduce
 Rare's reverb, surround, low-pass, or distortion paths. Object behavior-specific
 transforms, behavior-selected models, skeletal deformation, animation commands,
 exact material-bit semantics, and non-patrol path commands remain omissions.

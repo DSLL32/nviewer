@@ -118,6 +118,7 @@ Implemented (spec under `docs/`):
 | Vigilante 8: 2nd Offense | `r49/vigilante8_2/` | static scenes, terrain collision and music |
 | Kirby 64: The Crystal Shards | `r49/kirby64/` | all 181 areas, including the Copy tutorial and six hidden/test areas |
 | Glover | `r49/glover/` | all 48 landscapes and 60 music tracks |
+| Jet Force Gemini | `r49/jfg/` | all 412 level records and 89 selectable music sequences |
 | Mario Kart 64 | `r49/mk64/` | archive course audit: `r49/mk64/archive_cut/` |
 | Mario Party (J) | `r49/mparty/` | |
 | Perfect Dark | `r49/pd/` | |
@@ -130,9 +131,7 @@ Implemented (spec under `docs/`):
 
 Research complete (spec under `docs/`, implementation pending):
 
-| Game | Research |
-|---|---|
-| Jet Force Gemini | `r49/jfg/` |
+None currently.
 
 Research in progress (spec unfinished or under review):
 
