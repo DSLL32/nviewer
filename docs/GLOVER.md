@@ -17,7 +17,7 @@
 | Sample encoding | VADPCM. |
 | Levels | 48 landscape records, including 30 world levels and non-gameplay scenes. |
 | Memory requirement | Base 4 MiB. |
-| Viewer support | Research specification; a viewer loader is not yet published. |
+| Viewer support | Implemented: 48 levels and 60 music tracks. |
 
 ### 1.2 ROM identification
 
@@ -1101,10 +1101,10 @@ prototype or non-USA ROM was examined.
 
 | module | use for Glover | changes |
 |---|---|---|
-| `displaylist.ts` `runDisplayList` | Object display lists (`ucode 'f3dex'`, `vertexScale 1`, `mirrorX false`, `cullBackByDefault true`, level lights). | Add `G_MODIFYVTX` (`B2`) point-ST handling and optional CI texture interpretation when TEXTLUT is on, regardless of `G_SETTILE`'s format field. |
+| `displaylist.ts` `runDisplayList` | Object display lists (`ucode 'f3dex'`, `vertexScale 1`, `mirrorX false`, `cullBackByDefault true`, level lights). | Uses existing `G_MODIFYVTX` (`B2`) point-ST handling and opt-in CI texture interpretation when TEXTLUT is on, regardless of `G_SETTILE`'s format field. |
 | `texture.ts` | tile and TLUT loads through the lists; `decodeRows` for face-list textures and backdrops | none |
 | `lzss.ts` | – | not directly: FLA2 needs its own decoder ([Compression formats](#24-compression-formats)) |
-| `music/libmus64.ts` | the libmus player, bank parser, song header, voice mixer | a revision switch for the Glover differences ([Sequence format and driver](#52-sequence-format-and-driver)); take `Reverb` (BIGROOM) from `music/libmus.ts`; neither module exports its player today, so both need refactoring |
+| `music/glover.ts` | Glover's libmus revision, bank parser, song interpreter, voice mixer and BIGROOM reverb | Standalone implementation preserving Glover's independent volume/pitch-bend timing and transpose semantics. |
 | `music/libultra.ts` | VADPCM (`prepareWave`), resampler | none (already used by `libmus64.ts`) |
 
 | file | contents |
@@ -1113,12 +1113,13 @@ prototype or non-USA ROM was examined.
 | `src/rom/glover/fs.ts` | hard-coded bank and chain tables ([ROM map and asset organization](#23-rom-map-and-asset-organization)–[Controller-record chain](#controller-record-chain)), level and world tables ([Level catalog](#31-level-catalog-and-identifiers)), CRC-32 name hash |
 | `src/rom/glover/banks.ts` | texture banks ([Textures and materials](#35-textures-and-materials)), object banks, node trees, display-list texture-id patching, face lists ([Object and model formats](#42-object-and-model-formats)) |
 | `src/rom/glover/landscape.ts` | the script walker with the opcode size table and the six variable-length handlers ([Level container](#32-level-container)) |
-| `src/rom/glover/glover.ts` | `Game`: levels ([Level catalog](#31-level-catalog-and-identifiers)), placement (actors, platforms, water, enemies, garibs), environment ([Environment](#37-environment-sky-fog-and-lighting)), collision layer ([Collision](#36-collision)) |
+| `src/rom/glover/level.ts` | Levels ([Level catalog](#31-level-catalog-and-identifiers)), placement (actors, platforms, water, enemies, garibs), environment ([Environment](#37-environment-sky-fog-and-lighting)), collision layer ([Collision](#36-collision)) |
+| `src/rom/glover/glover.ts` | ROM validation and `Game` adapter. |
 | `src/rom/music/glover.ts` | song table (60 ROM ranges or the switch at `0x801085B0`), names by use ([Music catalog](#54-music-catalog-and-loop-points)), `decodeMusic` |
 
 ### 7.2 Supported features
 
-The following mapping is proposed for a future loader; the game is not yet registered in nviewer.
+The viewer implements the following mapping for all 48 landscape records.
 
 | placement | source | show as |
 |---|---|---|
