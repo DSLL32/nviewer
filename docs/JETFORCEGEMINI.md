@@ -423,6 +423,22 @@ use assets `0x03/0x02`. The decoded texture header is `0x20` bytes:
 | `0x1E` | 1 | `u8` | `cmt` | RDP T clamp/mirror mode. |
 | `0x1F` | 1 | `u8` | `maskt` | RDP T mask exponent. |
 
+Texture payloads are stored in the word order expected by TMEM, not ordinary
+linear row order. Verified from the texture display-list builder, both the
+single-level and mipmapped paths load with `dxt = 0`; consequently the RDP does
+not perform its usual odd-line swap during the load. On every odd-numbered
+image row, RGBA32 exchanges the two eight-byte halves of each 16-byte group.
+All other formats exchange the two four-byte halves of each eight-byte group.
+Any incomplete group at the end of a row remains unchanged. An extractor must
+reverse this involutive transform for each frame and each mip level.
+
+Within one frame, mip images are packed consecutively from largest to smallest
+without per-level padding. The complete mip chain is rounded up to 16 bytes;
+successive animation frames begin at that aligned span. `frameBytes` contains
+this span when populated, while 531 ordinary/2D entries store zero and require
+it to be calculated. Exhaustive ROM validation gives
+`decodedSize = 0x20 + alignedFrameBytes * frameCount` for all 7,320 textures.
+
 Exhaustive decoded-header counts are:
 
 | Format value | N64 texel format | Textures |

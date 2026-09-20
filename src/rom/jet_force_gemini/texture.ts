@@ -2,19 +2,38 @@ import { decodeRows, ImFmt, ImSiz, Tlut } from '../texture';
 import type { BlendMode, Texture, WrapMode } from '../types';
 import { JfgArchive, view } from './fs';
 
-const FORMATS: { fmt: ImFmt; siz: ImSiz; name: string }[] = [
-  { fmt: ImFmt.RGBA, siz: ImSiz.B32, name: 'RGBA32' },
-  { fmt: ImFmt.RGBA, siz: ImSiz.B16, name: 'RGBA16' },
-  { fmt: ImFmt.I, siz: ImSiz.B8, name: 'I8' },
-  { fmt: ImFmt.I, siz: ImSiz.B4, name: 'I4' },
-  { fmt: ImFmt.IA, siz: ImSiz.B16, name: 'IA16' },
-  { fmt: ImFmt.IA, siz: ImSiz.B8, name: 'IA8' },
-  { fmt: ImFmt.IA, siz: ImSiz.B4, name: 'IA4' },
+const FORMATS: { fmt: ImFmt; siz: ImSiz; bits: number; name: string }[] = [
+  { fmt: ImFmt.RGBA, siz: ImSiz.B32, bits: 32, name: 'RGBA32' },
+  { fmt: ImFmt.RGBA, siz: ImSiz.B16, bits: 16, name: 'RGBA16' },
+  { fmt: ImFmt.I, siz: ImSiz.B8, bits: 8, name: 'I8' },
+  { fmt: ImFmt.I, siz: ImSiz.B4, bits: 4, name: 'I4' },
+  { fmt: ImFmt.IA, siz: ImSiz.B16, bits: 16, name: 'IA16' },
+  { fmt: ImFmt.IA, siz: ImSiz.B8, bits: 8, name: 'IA8' },
+  { fmt: ImFmt.IA, siz: ImSiz.B4, bits: 4, name: 'IA4' },
 ];
 
 function wrap(mode: number, forceClamp: boolean): WrapMode {
   if (forceClamp || (mode & 2)) return 'clamp';
   return mode & 1 ? 'mirror' : 'repeat';
+}
+
+// JFG loads every texture with dxt=0: the ROM pixels already have the N64
+// TMEM odd-line word swap applied. Restore ordinary image rows for the viewer.
+// RGBA32 swaps 8-byte halves of each 16-byte group; the other sizes swap
+// 4-byte halves of each 8-byte group. A short trailing group is untouched.
+function decodeBaseImage(data: Uint8Array, width: number, height: number, bits: number): Uint8Array {
+  const line = Math.ceil(width * bits / 8), bytes = line * height;
+  if (0x20 + bytes > data.length) throw new Error('Jet Force Gemini texture pixel data is truncated');
+  const source = data.subarray(0x20, 0x20 + bytes), result = source.slice();
+  const half = bits === 32 ? 8 : 4, stride = half * 2;
+  for (let y = 1; y < height; y += 2) {
+    const row = y * line;
+    for (let x = 0; x + stride <= line; x += stride) {
+      result.set(source.subarray(row + x + half, row + x + stride), row + x);
+      result.set(source.subarray(row + x, row + x + half), row + x + half);
+    }
+  }
+  return result;
 }
 
 export interface JfgTexture extends Texture {
@@ -30,7 +49,8 @@ export function decodeJfgTexture(archive: JfgArchive, id: number): JfgTexture {
   if (data.length < 0x20) throw new Error(`Jet Force Gemini texture 0x${id.toString(16)} has no decoded header`);
   const dv = view(data), width = data[0], height = data[1], format = FORMATS[data[2] & 15];
   if (!format || !width || !height) throw new Error(`Jet Force Gemini texture 0x${id.toString(16)} has invalid format or dimensions`);
-  const rgba = decodeRows(data, 0x20, format.fmt, format.siz, width, height, null, Tlut.None);
+  const texels = decodeBaseImage(data, width, height, format.bits);
+  const rgba = decodeRows(texels, 0, format.fmt, format.siz, width, height, null, Tlut.None);
   let zero = false, partial = false;
   for (let i = 3; i < rgba.length; i += 4) {
     zero ||= rgba[i] === 0;
