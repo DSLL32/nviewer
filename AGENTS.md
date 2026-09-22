@@ -135,7 +135,9 @@ None currently.
 
 Research in progress (spec unfinished or under review):
 
-None currently.
+| Game | Research |
+|---|---|
+| Kaminari no Gotoku Choukousoku Igo | `r49/kaminari_igo/` |
 
 Shared:
  - `r49/impl/`: per-agent check directories (`ge_core`, `pd_obj`, `zelda_mus`,
