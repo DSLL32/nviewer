@@ -131,13 +131,13 @@ Implemented (spec under `docs/`):
 
 Research complete (spec under `docs/`, implementation pending):
 
-None currently.
+| Game | Research | Other |
+|---|---|---|
+| Kaminari no Gotoku Choukousoku Igo | `r49/kaminari_igo/` | Music-player implementation may be added later; no 3D viewer planned. |
 
 Research in progress (spec unfinished or under review):
 
-| Game | Research |
-|---|---|
-| Kaminari no Gotoku Choukousoku Igo | `r49/kaminari_igo/` |
+None currently.
 
 Shared:
  - `r49/impl/`: per-agent check directories (`ge_core`, `pd_obj`, `zelda_mus`,

@@ -19,6 +19,7 @@ questions. Shared codecs are documented under [Compression](./compression/).
 - [Gex 64: Enter the Gecko](./GEX64.md)
 - [Glover](./GLOVER.md)
 - [GoldenEye 007](./GOLDENEYE.md)
+- [Kaminari no Gotoku: Choukousoku Igo](./KAMINARIIGO.md)
 - [Mario Kart 64](./MARIOKART64.md)
 - [Mario Party](./MARIOPARTY.md)
 - [Off Road Challenge](./OFFROADCHALLENGE.md)

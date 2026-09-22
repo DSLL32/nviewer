@@ -33,6 +33,7 @@ export default defineConfig({
           { text: 'Gex 64: Enter the Gecko', link: '/GEX64' },
           { text: 'Glover', link: '/GLOVER' },
           { text: 'GoldenEye 007', link: '/GOLDENEYE' },
+          { text: 'Kaminari no Gotoku: Choukousoku Igo', link: '/KAMINARIIGO' },
           { text: 'Mario Kart 64', link: '/MARIOKART64' },
           { text: 'Mario Party', link: '/MARIOPARTY' },
           { text: 'Off Road Challenge', link: '/OFFROADCHALLENGE' },
